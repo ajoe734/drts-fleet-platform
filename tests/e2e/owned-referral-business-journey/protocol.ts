@@ -930,7 +930,6 @@ export async function settleOriginalBookingOperation<T>(
 export class OriginalBookingOperation {
   private readonly controller = new AbortController();
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private action: Promise<void> | undefined;
   constructor(private readonly label: string) {}
 
   get signal(): AbortSignal {
@@ -960,26 +959,6 @@ export class OriginalBookingOperation {
       this.controller.abort(new JourneyFailure(`${this.label}-closed`));
   }
 
-  /**
-   * Track the one UI action that can emit this operation's browser POST. Its
-   * settlement (success or failure) is observed; nothing else is inferred.
-   */
-  uiAction(click: () => Promise<void>): () => Promise<void> {
-    return () => {
-      const action = new Promise<void>((resolve) => resolve(click()));
-      this.action = action.then(
-        () => undefined,
-        () => undefined,
-      );
-      return action;
-    };
-  }
-
-  /** Settles once the tracked UI action settled; immediately if none started. */
-  get actionSettled(): Promise<void> {
-    return this.action ?? Promise.resolve();
-  }
-
   /** Recheck immediately before the one real send, after every earlier await. */
   async send<T>(send: () => Promise<T>): Promise<T> {
     requireFact(this.open, `${this.label} within its operation budget`);
@@ -988,26 +967,29 @@ export class OriginalBookingOperation {
 }
 
 /**
- * End an operation's drains on every exit. A failed operation is closed first,
- * so its abandoned route/quote work neither holds the caller nor sends; its own
- * failure stays primary. A successful one drains within its armed budget.
+ * End an operation on every exit. A successful one drains (unroute and its
+ * observed quote work) within its armed budget, then closes.
  *
- * The drain removes the closed route guard (unroute). While the tracked UI
- * action is still pending it could still emit the first POST, so a failed
- * operation keeps its closed guard registered until that action settles (or the
- * page closes); the deferred drain stays observed and never holds the caller.
+ * A failed one is closed and its drain is never run: no UI-side signal proves
+ * the page can no longer emit that first POST (a settled click does not), so
+ * its closed route guard stays registered and aborts any late POST until the
+ * page itself closes and drops it. Abandoned quote work is already observed;
+ * the caller is not held and its own failure stays primary.
  */
 export async function closeOriginalBookingOperation(
   operation: OriginalBookingOperation,
   succeeded: boolean,
   drain: () => Promise<unknown>,
 ): Promise<void> {
-  if (!succeeded) operation.close();
-  const drained = operation.actionSettled.then(drain);
+  if (!succeeded) {
+    operation.close();
+    return;
+  }
   try {
-    await drainWithinOperationBudget(drained, operation.signal);
-  } catch (error) {
-    if (succeeded) throw error;
+    await drainWithinOperationBudget(
+      new Promise<unknown>((resolve) => resolve(drain())),
+      operation.signal,
+    );
   } finally {
     operation.close();
   }

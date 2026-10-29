@@ -1513,17 +1513,15 @@ test(journeyName, async ({ browser, request }) => {
         await finalizer.checkpoint("main-original-booking");
         mainBooking.arm(NATIVE_REQUEST_TIMEOUT_MS);
         await settleOriginalBookingOperation(
-          mainBooking.uiAction(() =>
-            page.locator('[data-drt-operation="referral-create"]').click(),
-          ),
+          () => page.locator('[data-drt-operation="referral-create"]').click(),
           bookingAck,
           mainBooking.signal,
           () => (routeStarted ? originalRouteFinished : undefined),
         );
         mainBookingSucceeded = true;
       } finally {
-        // Close on every exit, including an observation that failed before the
-        // route started: a later route invocation can no longer send.
+        // Close on every exit. A failed operation keeps its closed guard until
+        // the page closes, so a late first POST is aborted, never sent.
         await closeOriginalBookingOperation(
           mainBooking,
           mainBookingSucceeded,
@@ -3186,7 +3184,7 @@ test(journeyName, async ({ browser, request }) => {
           await page.route(url, handle);
           operation.arm(25_000, fail);
           await clickAndSettleOriginalBookingAck(
-            operation.uiAction(() => create.click()),
+            () => create.click(),
             settled,
             operation.signal,
           );
@@ -3209,7 +3207,8 @@ test(journeyName, async ({ browser, request }) => {
           };
         } finally {
           page.off("response", observeQuote);
-          // A setup failure before the 25s budget is armed closes at once.
+          // A failure (including setup before the 25s arm) closes at once and
+          // keeps its closed guard until the page closes; success unroutes.
           await closeOriginalBookingOperation(
             operation,
             succeeded,

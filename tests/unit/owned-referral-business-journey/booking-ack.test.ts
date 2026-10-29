@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import * as ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   BookingWriteJournal,
@@ -8,6 +11,10 @@ import {
   settleOriginalBookingOperation,
   OriginalBookingOperation,
   closeOriginalBookingOperation,
+  NATIVE_REQUEST_TIMEOUT_MS,
+  object,
+  requireFact,
+  text,
   observeOriginalBookingAck,
   settleRoutedOriginalBookingAck,
   originalBookingRouteFailure,
@@ -686,7 +693,7 @@ describe("original booking operation closes on every exit and never sends late",
         await closeOriginalBookingOperation(operation, succeeded, unroute);
       }
       expect(succeeded).toBe(false);
-      expect(unroute).toHaveBeenCalledTimes(1);
+      expect(unroute).not.toHaveBeenCalled();
       expect(operation.open).toBe(false);
       expect(vi.getTimerCount()).toBe(0);
       // A late UI POST reaching the still-registered route is refused.
@@ -704,37 +711,6 @@ describe("original booking operation closes on every exit and never sends late",
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("ends a supplemental setup failure before its budget is armed without waiting on quotes", async () => {
-    const quote = deferred<void>();
-    const operation = new OriginalBookingOperation(
-      "supplemental-original-booking",
-    );
-    const unroute = vi.fn(async () => undefined);
-    const unhandled = await collectUnhandled(async () => {
-      const setupFailure = new JourneyFailure("supplemental setup failed");
-      const succeeded = false;
-      const caller = (async () => {
-        try {
-          throw setupFailure; // e.g. toBeEnabled before the 25s arm
-        } finally {
-          await closeOriginalBookingOperation(
-            operation,
-            succeeded,
-            async () => {
-              await unroute();
-              await Promise.all([quote.promise]);
-            },
-          );
-        }
-      })();
-      await expect(caller).rejects.toBe(setupFailure);
-      expect(operation.open).toBe(false);
-      expect(unroute).toHaveBeenCalledTimes(1);
-      quote.reject(new Error("private late quote body"));
-    });
-    expect(unhandled).toEqual([]);
   });
 
   it("drains a successful operation within its armed budget and reports an abandoned drain", async () => {
@@ -780,202 +756,708 @@ describe("original booking operation closes on every exit and never sends late",
   });
 });
 
-describe("original booking route guard outlives a pending UI action", () => {
-  // Playwright-shaped page: the latest registered handler intercepts a browser
-  // POST; with none registered the request reaches the network unguarded.
-  function page() {
-    const handlers: ((route: FakeRoute) => Promise<void>)[] = [];
-    const counts = { network: 0, aborts: 0, sends: 0 };
-    type FakeRoute = { abort(): Promise<void>; fetch(): Promise<void> };
-    return {
-      counts,
-      handlers,
-      route(handler: (route: FakeRoute) => Promise<void>) {
-        handlers.push(handler);
+describe("actual main and supplemental booking callers keep a failed guard until page close", () => {
+  // The production caller code is executed from the actual spec source: the
+  // main route handler and its try/finally, and the entire bookExtraFromUI
+  // initializer. Only external Playwright page/route/expect/finalizer ports,
+  // the click, quote json and fetched server response are controlled here.
+  const specSource = ts.createSourceFile(
+    "owned-business.spec.ts",
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../e2e/owned-referral-business-journey/owned-business.spec.ts",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    ),
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  function findSpec<T extends ts.Node>(
+    test: (node: ts.Node) => node is T,
+    marker: string,
+  ): T {
+    const found: T[] = [];
+    const visit = (node: ts.Node) => {
+      if (test(node) && node.getText(specSource).includes(marker))
+        found.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(specSource);
+    // The innermost match is the exact production node.
+    const node = found.at(-1);
+    if (!node) throw new Error(`spec node not found: ${marker}`);
+    return node;
+  }
+  function compile<T>(code: string, bindings: Record<string, unknown>): T {
+    const { outputText } = ts.transpileModule(`const __actual = ${code};`, {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
       },
-      async unroute() {
-        handlers.length = 0;
+    });
+    const scope = new Proxy(bindings, {
+      has: (target, key) => typeof key === "string" && key in target,
+    });
+    // Sloppy-mode `with` resolves the caller's free names against `bindings`;
+    // anything not bound falls through to real globals (or throws).
+    return new Function(
+      "scope",
+      `with (scope) { ${outputText.replace(/^"use strict";/, "")} return __actual; }`,
+    )(scope) as T;
+  }
+  const mainRouteHandler = findSpec(
+    ts.isArrowFunction,
+    "booking:command-or-journal-rejected-before-send",
+  ).getText(specSource);
+  const mainCaller = `async () => { ${findSpec(
+    ts.isTryStatement,
+    'finalizer.checkpoint("main-original-booking")',
+  ).getText(specSource)} }`;
+  const bookExtraFromUI = findSpec(
+    ts.isArrowFunction,
+    "supplemental original booking ACK custody",
+  ).getText(specSource);
+
+  const origin = "https://referral.example.test";
+  const bookingUrl = `${origin}/api/referral/booking`;
+  const quoteUrl = `${origin}/api/referral/quote`;
+  const ENTRY = "yuhe-residence";
+  const SUBJECT = "referral-demo-yuhe-residence";
+  const pickupAddress = "合成上車地址";
+  const dropoffAddress = "合成下車地址";
+  const passengerName = "合成測試";
+  const phone = "0900000001";
+  const feeVersion = "fee-version-unit";
+  const feeHash = "c".repeat(64);
+  const turns = async () => {
+    for (let i = 0; i < 6; i += 1)
+      await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  type Handler = (route: unknown) => Promise<void>;
+  // Playwright-shaped page: the latest matching handler intercepts a request
+  // and does not fall back; with none, the request reaches the network.
+  function fakePage() {
+    const counts = {
+      network: 0,
+      aborts: 0,
+      continues: 0,
+      fetches: 0,
+      fulfills: 0,
+      unroutes: 0,
+      offs: 0,
+    };
+    let routes: { url: string; handler: Handler }[] = [];
+    const listeners: ((response: unknown) => void)[] = [];
+    let closed = false;
+    let responder: () => Promise<Buffer> = async () => {
+      throw new Error("no server response configured");
+    };
+    let clickImpl: () => Promise<void> = async () => undefined;
+    const failures: Record<string, Error | undefined> = {};
+    const page = {
+      route: async (url: string, handler: Handler) => {
+        routes.push({ url, handler });
       },
-      async browserPost() {
-        const handler = handlers.at(-1);
-        if (!handler) {
-          counts.network += 1;
-          return;
-        }
-        await handler({
-          abort: async () => {
-            counts.aborts += 1;
-          },
-          fetch: async () => {
-            counts.sends += 1;
-          },
+      unroute: async (url: string, handler?: Handler) => {
+        counts.unroutes += 1;
+        routes = routes.filter(
+          (r) => !(r.url === url && (!handler || r.handler === handler)),
+        );
+      },
+      on: (_event: string, listener: (response: unknown) => void) =>
+        listeners.push(listener),
+      off: (_event: string, listener: (response: unknown) => void) => {
+        counts.offs += 1;
+        listeners.splice(listeners.indexOf(listener), 1);
+      },
+      goto: async () => undefined,
+      getByRole: () => ({ check: async () => undefined }),
+      locator: (selector: string) => ({
+        fill: async () => undefined,
+        check: async () => undefined,
+        click: () =>
+          selector === '[data-drt-operation="referral-create"]'
+            ? clickImpl()
+            : Promise.resolve(),
+      }),
+    };
+    const expectPort = (subject: unknown) => {
+      void subject;
+      const check = (name: string) => async () => {
+        if (failures[name]) throw failures[name];
+      };
+      return {
+        not: { toBeChecked: check("not.toBeChecked") },
+        toBeChecked: check("toBeChecked"),
+        toBeDisabled: check("toBeDisabled"),
+        toBeEnabled: check("toBeEnabled"),
+      };
+    };
+    // One browser POST of the frozen UI command, as the click would emit it.
+    async function post(raw: string, key: string) {
+      if (closed) throw new Error("page closed");
+      const target = [...routes].reverse().find((r) => r.url === bookingUrl);
+      if (!target) {
+        counts.network += 1;
+        return;
+      }
+      const request = {
+        url: () => bookingUrl,
+        method: () => "POST",
+        postData: () => raw,
+        headers: () => ({ "idempotency-key": key }),
+      };
+      await target.handler({
+        request: () => request,
+        abort: async () => {
+          counts.aborts += 1;
+        },
+        continue: async () => {
+          counts.continues += 1;
+        },
+        fetch: async () => {
+          counts.fetches += 1;
+          const body = await responder();
+          return {
+            url: () => bookingUrl,
+            status: () => 200,
+            headers: () => ({ "x-drts-candidate-sha": runtime }),
+            body: async () => body,
+            dispose: async () => undefined,
+          };
+        },
+        fulfill: async () => {
+          counts.fulfills += 1;
+        },
+      });
+    }
+    function quoteResponse(json: Promise<unknown>) {
+      for (const listener of [...listeners])
+        listener({
+          url: () => quoteUrl,
+          status: () => 200,
+          headers: () => ({ "x-drts-candidate-sha": runtime }),
+          json: () => json,
+          request: () => ({
+            method: () => "POST",
+            postDataJSON: () => ({
+              entrySlug: ENTRY,
+              pickupAddress,
+              dropoffAddress,
+              vehicleType: "standard",
+            }),
+          }),
         });
+    }
+    return {
+      page,
+      counts,
+      failures,
+      expect: expectPort,
+      post,
+      quoteResponse,
+      routes: () => routes.length,
+      close: () => {
+        closed = true;
+        routes = [];
+      },
+      setResponder: (next: () => Promise<Buffer>) => {
+        responder = next;
+      },
+      setClick: (next: () => Promise<void>) => {
+        clickImpl = next;
       },
     };
   }
+  const command = (quoteId: string, key: string) =>
+    JSON.stringify({
+      entrySlug: ENTRY,
+      quoteId,
+      pickupAddress,
+      dropoffAddress,
+      vehicleType: "standard",
+      passengerName,
+      passengerPhone: phone,
+      idempotencyKey: key,
+      feeDisclosureVersion: feeVersion,
+      feeConfirmed: true,
+    });
+  const ack = (orderId: string, quoteId: string) =>
+    Buffer.from(
+      JSON.stringify({
+        ok: true,
+        data: {
+          orderId,
+          quote: { quoteId },
+          feeConfirmation: {
+            orderId,
+            quoteId,
+            disclosureVersion: feeVersion,
+            contentHash: feeHash,
+            feeConfirmedAt: "2026-10-29T00:00:00Z",
+          },
+        },
+      }),
+    );
+  const proposal = (quoteId: string) => ({
+    quoteId,
+    vehicleType: "standard",
+    feeDisclosureVersion: feeVersion,
+    feeContentHash: feeHash,
+    requestedScheduledAt: null,
+    timingMode: "immediate",
+    pickupAddress,
+    dropoffAddress,
+    fixedPrice: false,
+    isGuaranteed: false,
+  });
 
-  // The closed-guard part of the actual caller handlers: refuse when closed,
-  // otherwise one send through the operation's own pre-send recheck.
-  const guarded =
-    (operation: OriginalBookingOperation, quoteDrain?: Promise<unknown>) =>
-    async (route: { abort(): Promise<void>; fetch(): Promise<void> }) => {
-      if (!operation.open) return route.abort();
-      await quoteDrain;
-      if (!operation.open) return route.abort();
-      await operation.send(() => route.fetch());
+  function mainHarness() {
+    const p = fakePage();
+    const writes: string[] = [];
+    const evidence = new Evidence();
+    const bookingState: {
+      journal?: BookingWriteJournal;
+      quote?: Record<string, unknown>;
+      routeError?: unknown;
+    } = {};
+    let resolveOriginalResponse!: (response: BookingAckResponse) => void;
+    let rejectOriginalResponse!: (error: unknown) => void;
+    const originalResponse = new Promise<BookingAckResponse>((yes, no) => {
+      resolveOriginalResponse = yes;
+      rejectOriginalResponse = no;
+    });
+    void originalResponse.catch(() => undefined);
+    // Stands in for the native page.waitForResponse deadline.
+    const browserResponseDeadline = deferred<BookingAckResponse>();
+    let finishOriginalRoute!: () => void;
+    const originalRouteFinished = new Promise<void>((resolve) => {
+      finishOriginalRoute = resolve;
+    });
+    const bindings: Record<string, unknown> = {
+      orderId: undefined,
+      routeStarted: false,
+      mainBookingSucceeded: false,
     };
+    const bookingAck = observeOriginalBookingAck(
+      Promise.race([originalResponse, browserResponseDeadline.promise]),
+      () => ({
+        url: bookingUrl,
+        runtimeSha: runtime,
+        journal: bookingState.journal,
+        quote: bookingState.quote,
+      }),
+      (id) => {
+        bindings.orderId = id;
+      },
+      evidence,
+    );
+    void bookingAck.catch(() => undefined);
+    const quotesById = new Map([["quote-main", proposal("quote-main")]]);
+    const checkpoint = vi.fn(async () => undefined);
+    Object.assign(bindings, {
+      page: p.page,
+      expect: p.expect,
+      origins: { referral: origin },
+      finalizer: { checkpoint },
+      mainBooking: new OriginalBookingOperation("main-original-booking"),
+      NATIVE_REQUEST_TIMEOUT_MS,
+      settleOriginalBookingOperation,
+      closeOriginalBookingOperation,
+      bookingAck,
+      originalRouteFinished,
+      finishOriginalRoute,
+      resolveOriginalResponse,
+      rejectOriginalResponse,
+      observedQuoteTasks: [] as Promise<unknown>[],
+      quotesById,
+      bookingState,
+      text,
+      object,
+      requireFact,
+      BookingWriteJournal,
+      definition: "b".repeat(40),
+      runtime,
+      nonce: "synthetic-main",
+      ENTRY,
+      SUBJECT,
+      pickupAddress,
+      dropoffAddress,
+      passengerName,
+      phone,
+      DIRECTORY: "/synthetic",
+      persistPrivateJson: async (path: string) => {
+        writes.push(path);
+      },
+      settleRoutedOriginalBookingAck,
+      originalBookingRouteFailure,
+      evidence,
+    });
+    const handler = compile<Handler>(mainRouteHandler, bindings);
+    const caller = compile<() => Promise<void>>(mainCaller, bindings);
+    const raw = command("quote-main", "main-own-key");
+    return {
+      ...p,
+      bindings,
+      bookingState,
+      writes,
+      checkpoint,
+      browserResponseDeadline,
+      raw,
+      register: () => p.page.route(bookingUrl, handler),
+      postOnce: () => p.post(raw, "main-own-key"),
+      run: () => caller(),
+      operation: bindings.mainBooking as OriginalBookingOperation,
+    };
+  }
+  const timeoutError = () =>
+    Object.assign(new Error("private native URL"), { name: "TimeoutError" });
 
-  it("keeps the main closed guard registered until the late click settles", async () => {
-    const s = await setup();
-    const p = page();
-    const operation = new OriginalBookingOperation("main-original-booking");
-    p.route(guarded(operation));
-    const click = deferred<void>();
-    const timeout = new Error("private URL");
-    timeout.name = "TimeoutError";
-    let succeeded = false;
-    try {
-      await settleOriginalBookingOperation(
-        operation.uiAction(() => click.promise),
-        s.observe(Promise.reject(timeout)),
-        operation.signal,
-        () => undefined, // observation failed before the route started
-      );
-      succeeded = true;
-    } catch (error) {
-      expect((error as Error).message).toBe(
+  it.each(["POST while the click is pending", "POST after the click settled"])(
+    "main: an observation failed before the route started never lets a late first POST out (%s)",
+    async (order) => {
+      const h = mainHarness();
+      await h.register();
+      const click = deferred<void>();
+      h.setClick(() => click.promise);
+      h.browserResponseDeadline.reject(timeoutError());
+      await expect(h.run()).rejects.toThrow(
         "booking-response-wait:TimeoutError",
       );
-    } finally {
-      await closeOriginalBookingOperation(operation, succeeded, () =>
-        p.unroute(),
+      expect(h.operation.open).toBe(false);
+      expect(h.bindings.routeStarted).toBe(false);
+      if (order === "POST after the click settled") {
+        click.reject(new Error("private late click detail"));
+        await turns();
+      }
+      await h.postOnce();
+      if (order === "POST while the click is pending") {
+        click.resolve();
+        await turns();
+        await h.postOnce(); // still guarded after the click settled
+      }
+      expect(h.routes()).toBe(1);
+      expect(h.counts).toMatchObject({
+        network: 0,
+        fetches: 0,
+        unroutes: 0,
+      });
+      expect(h.counts.aborts).toBeGreaterThan(0);
+      expect(h.bookingState).toEqual({});
+      expect(h.writes).toEqual([]);
+      expect(h.bindings.orderId).toBeUndefined();
+      // Only the page's own close drops the closed guard.
+      h.close();
+      expect(h.routes()).toBe(0);
+    },
+  );
+
+  it("main: a route held in its quote drain is left at the 15s budget and resumes with no state", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const h = mainHarness();
+      await h.register();
+      const quote = deferred<unknown>();
+      (h.bindings.observedQuoteTasks as Promise<unknown>[]).push(quote.promise);
+      let route: Promise<void> | undefined;
+      h.setClick(async () => {
+        route = h.postOnce();
+      });
+      h.browserResponseDeadline.reject(timeoutError());
+      const outcome = h.run();
+      const rejected = expect(outcome).rejects.toThrow(
+        "booking-response-wait:TimeoutError",
       );
+      await turns();
+      // Route started: the caller drains it, but only within its budget.
+      expect(h.bindings.routeStarted).toBe(true);
+      vi.advanceTimersByTime(NATIVE_REQUEST_TIMEOUT_MS);
+      await rejected;
+      expect(h.operation.open).toBe(false);
+      quote.resolve(proposal("quote-main"));
+      await route;
+      expect(h.bookingState).toEqual({});
+      expect(h.writes).toEqual([]);
+      expect(h.counts).toMatchObject({ fetches: 0, network: 0, aborts: 1 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
     }
-    // Caller exited; the pending click still holds the closed guard.
-    expect(operation.open).toBe(false);
-    expect(p.handlers).toHaveLength(1);
-    // The late click now emits its first POST, then settles.
-    await p.browserPost();
-    click.resolve();
-    await operation.actionSettled;
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
-    expect(p.handlers).toHaveLength(0);
-    expect(s.claim).not.toHaveBeenCalled();
-    expect(s.journal.current?.state).toBe("ack_unknown");
   });
 
-  it("keeps the supplemental guard until a failed late click settles, with quotes pending", async () => {
-    const p = page();
-    const operation = new OriginalBookingOperation(
-      "supplemental-original-booking",
+  it("main: a normal click/ACK sends once, keeps the raw body/key and unroutes", async () => {
+    const h = mainHarness();
+    await h.register();
+    h.setResponder(async () => ack("order-main", "quote-main"));
+    h.setClick(async () => {
+      void h.postOnce();
+    });
+    await expect(h.run()).resolves.toBeUndefined();
+    expect(h.bindings.orderId).toBe("order-main");
+    expect(h.bookingState.journal?.current).toMatchObject({
+      state: "acknowledged",
+      orderId: "order-main",
+      body: h.raw,
+      idempotencyKey: "main-own-key",
+    });
+    expect(h.counts).toMatchObject({
+      fetches: 1,
+      fulfills: 1,
+      network: 0,
+      unroutes: 1,
+    });
+    expect(h.routes()).toBe(0);
+    expect(h.operation.open).toBe(false);
+  });
+
+  it("main: a failed click drains the genuine late ACK first, then refuses any second POST", async () => {
+    const h = mainHarness();
+    await h.register();
+    const server = deferred<Buffer>();
+    h.setResponder(() => server.promise);
+    h.setClick(async () => {
+      void h.postOnce();
+      throw new Error("private selector");
+    });
+    const outcome = h.run();
+    const rejected = expect(outcome).rejects.toThrow("booking-ui-click:Error");
+    await turns();
+    expect(h.counts.fetches).toBe(1);
+    server.resolve(ack("order-main", "quote-main"));
+    await rejected;
+    expect(h.bindings.orderId).toBe("order-main");
+    expect(h.bookingState.journal?.current).toMatchObject({
+      state: "acknowledged",
+      body: h.raw,
+      idempotencyKey: "main-own-key",
+    });
+    expect(h.routes()).toBe(1);
+    await h.postOnce();
+    expect(h.counts).toMatchObject({ fetches: 1, network: 0, aborts: 1 });
+  });
+
+  it.each([
+    ["setup", "toBeDisabled"],
+    ["finalizer checkpoint", "checkpoint"],
+  ])(
+    "main: a %s failure closes before any click and still guards a stray POST",
+    async (_label, port) => {
+      const h = mainHarness();
+      await h.register();
+      const failure = new JourneyFailure(`synthetic ${port} refusal`);
+      if (port === "checkpoint") h.checkpoint.mockRejectedValueOnce(failure);
+      else h.failures[port] = failure;
+      const click = vi.fn(async () => undefined);
+      h.setClick(click);
+      await expect(h.run()).rejects.toBe(failure);
+      expect(click).not.toHaveBeenCalled();
+      expect(h.operation.open).toBe(false);
+      await h.postOnce();
+      expect(h.counts).toMatchObject({ network: 0, fetches: 0, aborts: 1 });
+      expect(h.routes()).toBe(1);
+    },
+  );
+
+  function supplementalHarness() {
+    const p = fakePage();
+    const writes: string[] = [];
+    const extraBookings: Record<string, unknown>[] = [];
+    const controlledOrderIds: string[] = [];
+    const checkpoint = vi.fn(async () => undefined);
+    const bindings: Record<string, unknown> = {
+      extraBookings,
+      controlledOrderIds,
+      completedOrderId: "order-main",
+      assertNoForeignActive: () => undefined,
+      referral: async () => ({ data: {} }),
+      origins: { referral: origin },
+      ENTRY,
+      SUBJECT,
+      pickupAddress,
+      dropoffAddress,
+      passengerName,
+      phone,
+      runtime,
+      definition: "b".repeat(40),
+      nonce: "synthetic-extra",
+      feesReadback: { disclosureVersion: feeVersion, contentHash: feeHash },
+      supplementalArtifacts: {
+        bookingJournals: new Proxy(
+          {},
+          { get: (_t, name) => `/synthetic/${String(name)}-journal.json` },
+        ),
+      },
+      DIRECTORY: "/synthetic",
+      persistPrivateJson: async (path: string) => {
+        writes.push(path);
+      },
+      page: p.page,
+      expect: p.expect,
+      finalizer: { checkpoint },
+      object,
+      text,
+      requireFact,
+      OriginalBookingOperation,
+      closeOriginalBookingOperation,
+      clickAndSettleOriginalBookingAck,
+      originalBookingRouteFailure,
+      observeOriginalBookingAck,
+      settleRoutedOriginalBookingAck,
+      BookingWriteJournal,
+      evidence: new Evidence(),
+    };
+    const book = compile<(name: string) => Promise<Record<string, unknown>>>(
+      bookExtraFromUI,
+      bindings,
     );
-    const quote = deferred<void>();
-    p.route(guarded(operation, quote.promise));
-    const click = deferred<void>();
-    const settled = deferred<void>();
-    const unhandled = await collectUnhandled(async () => {
-      let succeeded = false;
-      const caller = (async () => {
-        try {
-          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-          try {
-            operation.arm(25_000, (failure) => settled.reject(failure));
-            const joined = clickAndSettleOriginalBookingAck(
-              operation.uiAction(() => click.promise),
-              settled.promise,
-              operation.signal,
-            );
-            vi.advanceTimersByTime(25_000);
-            await joined;
-          } finally {
-            vi.useRealTimers();
-          }
-          succeeded = true;
-        } finally {
-          await closeOriginalBookingOperation(
-            operation,
-            succeeded,
-            async () => {
-              await p.unroute();
-              await Promise.all([quote.promise]);
-            },
-          );
-        }
-      })();
-      await expect(caller).rejects.toThrow(
+    return {
+      ...p,
+      writes,
+      extraBookings,
+      controlledOrderIds,
+      checkpoint,
+      book,
+      raw: (quoteId: string, key: string) => command(quoteId, key),
+    };
+  }
+  const budgetClock = () =>
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+  it.each(["POST while the click is pending", "POST after the click failed"])(
+    "supplemental: an expired 25s operation never lets a late first POST out (%s)",
+    async (order) => {
+      budgetClock();
+      try {
+        const h = supplementalHarness();
+        const click = deferred<void>();
+        h.setClick(() => click.promise);
+        const outcome = h.book("reservation-1");
+        const rejected = expect(outcome).rejects.toThrow(
+          order === "POST after the click failed"
+            ? "booking-ui-click:Error"
+            : "supplemental-original-booking-timeout",
+        );
+        await turns();
+        if (order === "POST after the click failed")
+          click.reject(new Error("private late click detail"));
+        await turns();
+        vi.advanceTimersByTime(25_000);
+        await rejected;
+        expect(h.routes()).toBe(1);
+        await h.post(h.raw("quote-extra", "extra-key"), "extra-key");
+        click.resolve();
+        await turns();
+        await h.post(h.raw("quote-extra", "extra-key"), "extra-key");
+        expect(h.counts).toMatchObject({
+          network: 0,
+          fetches: 0,
+          aborts: 2,
+          unroutes: 0,
+          offs: 1,
+        });
+        expect(h.extraBookings).toEqual([
+          { name: "reservation-1", actions: [] },
+        ]);
+        expect(h.writes).toEqual([]);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("supplemental: a handler resumed from its quote drain after close changes no state", async () => {
+    budgetClock();
+    try {
+      const h = supplementalHarness();
+      const json = deferred<unknown>();
+      h.setClick(async () => {
+        h.quoteResponse(json.promise);
+        void h.post(h.raw("quote-extra", "extra-key"), "extra-key");
+      });
+      const outcome = h.book("reservation-1");
+      const rejected = expect(outcome).rejects.toThrow(
         "supplemental-original-booking-timeout",
       );
-      expect(p.handlers).toHaveLength(1);
-      await p.browserPost();
-      click.reject(new Error("private late click detail"));
-      await operation.actionSettled;
-      await new Promise((resolve) => setImmediate(resolve));
-      expect(p.handlers).toHaveLength(0);
-      quote.reject(new Error("private late quote body"));
-    });
-    expect(unhandled).toEqual([]);
-    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
-  });
-
-  it("does not resume owner state or persistence when closed during the quote drain", async () => {
-    const p = page();
-    const operation = new OriginalBookingOperation(
-      "supplemental-original-booking",
-    );
-    const quote = deferred<void>();
-    const writes: string[] = [];
-    const owner: { quote?: string; journal?: string } = {};
-    p.route(async (route) => {
-      if (!operation.open) return route.abort();
-      await Promise.all([quote.promise]);
-      if (!operation.open) return route.abort();
-      owner.quote = "quote-own";
-      owner.journal = "journal-own";
-      writes.push("quote.json");
-      await operation.send(() => route.fetch());
-    });
-    const post = p.browserPost();
-    await closeOriginalBookingOperation(operation, false, async () => {
-      await p.unroute();
-    });
-    quote.resolve();
-    await post;
-    expect(owner).toEqual({});
-    expect(writes).toEqual([]);
-    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
-  });
-
-  it("removes the guard at once when no UI action started, and after success", async () => {
-    const failed = page();
-    const early = new OriginalBookingOperation("supplemental-original-booking");
-    failed.route(guarded(early));
-    await closeOriginalBookingOperation(early, false, () => failed.unroute());
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(failed.handlers).toHaveLength(0);
-
-    const s = await setup();
-    const ok = page();
-    const operation = new OriginalBookingOperation("main-original-booking");
-    ok.route(guarded(operation));
-    let succeeded = false;
-    try {
-      await expect(
-        settleOriginalBookingOperation(
-          operation.uiAction(async () => ok.browserPost()),
-          s.observe(),
-          operation.signal,
-          () => Promise.resolve(),
-        ),
-      ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
-      succeeded = true;
+      await turns();
+      vi.advanceTimersByTime(25_000);
+      await rejected;
+      json.resolve({ data: proposal("quote-extra") });
+      await turns();
+      expect(h.extraBookings).toEqual([{ name: "reservation-1", actions: [] }]);
+      expect(h.writes).toEqual([]);
+      expect(h.counts).toMatchObject({ fetches: 0, network: 0, aborts: 1 });
     } finally {
-      await closeOriginalBookingOperation(operation, succeeded, () =>
-        ok.unroute(),
-      );
+      vi.useRealTimers();
     }
-    expect(ok.handlers).toHaveLength(0);
-    expect(ok.counts).toEqual({ network: 0, aborts: 0, sends: 1 });
+  });
+
+  it("supplemental: a later operation on the same page is not touched by an old closed guard", async () => {
+    budgetClock();
+    try {
+      const h = supplementalHarness();
+      const click = deferred<void>();
+      h.setClick(() => click.promise);
+      const failed = expect(h.book("reservation-1")).rejects.toThrow(
+        "supplemental-original-booking-timeout",
+      );
+      await turns();
+      vi.advanceTimersByTime(25_000);
+      await failed;
+      h.setResponder(async () => ack("order-extra", "quote-extra"));
+      h.setClick(async () => {
+        h.quoteResponse(Promise.resolve({ data: proposal("quote-extra") }));
+        void h.post(h.raw("quote-extra", "extra-key-2"), "extra-key-2");
+      });
+      const booked = await h.book("reservation-2");
+      expect(booked).toMatchObject({
+        name: "reservation-2",
+        orderId: "order-extra",
+        actions: ["booking"],
+      });
+      expect((booked.journal as BookingWriteJournal).current).toMatchObject({
+        state: "acknowledged",
+        body: h.raw("quote-extra", "extra-key-2"),
+        idempotencyKey: "extra-key-2",
+      });
+      expect(h.controlledOrderIds).toEqual(["order-extra"]);
+      // The successful operation unrouted its own handler; the old closed
+      // guard remains and was never invoked.
+      expect(h.counts).toMatchObject({ fetches: 1, aborts: 0, unroutes: 1 });
+      expect(h.routes()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supplemental: a setup failure before the 25s arm exits with pending quote json", async () => {
+    budgetClock();
+    try {
+      const h = supplementalHarness();
+      const failure = new JourneyFailure("synthetic toBeEnabled refusal");
+      h.failures.toBeEnabled = failure;
+      // A quote response observed during form filling never finishes.
+      h.page.locator = ((original) => (selector: string) => {
+        const locator = original(selector);
+        return {
+          ...locator,
+          fill: async () => {
+            h.quoteResponse(new Promise(() => undefined));
+            return undefined;
+          },
+        };
+      })(h.page.locator);
+      await expect(h.book("reservation-1")).rejects.toBe(failure);
+      expect(h.routes()).toBe(0);
+      expect(h.counts).toMatchObject({ offs: 1, unroutes: 0, network: 0 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
