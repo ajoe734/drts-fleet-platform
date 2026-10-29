@@ -1821,6 +1821,44 @@ class FleetRootTimeoutReadbackTests(unittest.TestCase):
             self.assertEqual(collect_fleet_root(port, {**ENV, field: value})["readFailureCode"], code)
             self.assertEqual(port.calls, [])
 
+    def test_exact_platform_reasons_do_not_rewrite_status_or_scan_messages(self):
+        text, reason, _statuses = REQUEST_REASONS[1]
+        for candidate, expected in [(text, reason), (text + " private-tail", "UNOBSERVED"),
+                                    ("body\n" + text, "UNOBSERVED")]:
+            row = fleet_root_request(200, trace=None, instance=None)
+            row["textPayload"] = candidate
+            row["jsonPayload"] = {"message": text, "body": text}
+            actual = collect_fleet_root(Port(success([row])))
+            self.assertEqual(actual["requests"][0]["requestPlatformReason"], expected)
+            self.assertEqual(actual["requests"][0]["status"], 200)
+            self.assertNotIn(text, json.dumps(actual))
+
+    def test_context_bad_trace_and_malformed_metadata_fail_closed(self):
+        for field, value, code in [("trace", "foreign", "INVALID_LOG_TRACE"),
+                                   ("resource", None, "INVALID_LOG_RESOURCE")]:
+            row = fleet_root_context()
+            row[field] = value
+            actual = collect_fleet_root(Port(success([fleet_root_request()]), success([row])))
+            self.assertEqual(actual["readFailureCode"], code)
+            self.assertEqual(actual["context"], [])
+        for metadata in [None, [], "GET /"]:
+            row = fleet_root_request()
+            row["httpRequest"] = metadata
+            actual = collect_fleet_root(Port(success([row])))
+            self.assertEqual(actual["readFailureCode"], "MISSING_REQUEST_METADATA")
+
+    def test_new_profile_adds_no_arbitrary_query_resource_or_window_cli(self):
+        for extra in [["--profile", "fleet-root-timeout"], ["--revision", "foreign"],
+                      ["--start", "2026-10-01T00:00:00Z"], ["--filter", "true"]]:
+            with self.subTest(extra=extra), \
+                    mock.patch("sys.argv", ["readback", "--output", "unused", *extra]), \
+                    mock.patch.object(MODULE, "collect_fleet_root_timeout") as collector, \
+                    redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MODULE.main_with_ops_dashboard_profile()
+                self.assertEqual(error.exception.code, 2)
+                collector.assert_not_called()
+
     def test_truncated_malformed_unavailable_and_full_pages_never_retry(self):
         failures = [
             (subprocess.CompletedProcess([], 0, "[truncated", ""), "MALFORMED_LOGGING_RESPONSE"),
