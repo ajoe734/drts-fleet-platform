@@ -228,7 +228,7 @@ export class R08Callcenter {
       task.callbackTaskId === this.state.callbackTaskId &&
         task.callId === this.state.callId &&
         task.linkedOrderId === this.state.orderId &&
-        task.linkedCaseNo === this.state.caseNo,
+        task.linkedCaseNo === (this.state.caseNo ?? null),
       "r08-same-callback-tuple",
     );
     return task;
@@ -241,7 +241,7 @@ export class R08Callcenter {
         call.recordingId === this.state.recordingId &&
         call.recordingState === "ready" &&
         call.linkedOrderId === this.state.orderId &&
-        call.linkedCaseNo === this.state.caseNo,
+        call.linkedCaseNo === (this.state.caseNo ?? null),
       "r08-same-call-recording-order-case",
     );
     this.assertCallback(call.callbackTask);
@@ -307,6 +307,13 @@ export class R08Callcenter {
           (body.relatedOrderId ?? this.state.orderId) === this.state.orderId,
         "r08-original-ui-intent",
       );
+      // The completed-order/index producer is the caller's responsibility.
+      // Read its actual canonical call immediately before forwarding, so an
+      // omitted relatedOrderId cannot silently use a different effective order.
+      const originalCall = this.assertCall(
+        this.checked(await this.ports.get(this.path())),
+      );
+      requireFact(originalCall.status === "active", "r08-original-active-call");
       this.state.command = {
         path: `${this.path()}/transfer-to-complaint`,
         rawBody,

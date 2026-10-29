@@ -80,7 +80,7 @@ function harness() {
     callbackTaskId: "SIM-callback",
     callId: "SIM-call",
     linkedOrderId: "SIM-order",
-    linkedCaseNo: "SIM-case",
+    linkedCaseNo: null,
     status: "pending",
   };
   const session: ObjectData = {
@@ -88,7 +88,7 @@ function harness() {
     recordingId: "SIM-index",
     recordingState: "ready",
     linkedOrderId: "SIM-order",
-    linkedCaseNo: "SIM-case",
+    linkedCaseNo: null,
     status: "active",
     callbackTask: callback,
   };
@@ -136,8 +136,12 @@ function harness() {
     postRaw: vi.fn(async (command) => {
       commands.push(clone(command));
       events.push(`POST ${command.path}`);
-      if (command.path === `${PATH}/transfer-to-complaint`)
+      if (command.path === `${PATH}/transfer-to-complaint`) {
+        // SIM server-side effect; orchestration checks the returned identities.
+        if (session.linkedCaseNo === null) session.linkedCaseNo = "SIM-case";
+        if (callback.linkedCaseNo === null) callback.linkedCaseNo = "SIM-case";
         return result({ session, complaintCase: complaint }, 201);
+      }
       if (command.path === `${BASE}/callcenter/callbacks/SIM-callback/cancel`) {
         callback.status = "cancelled";
         return result(callback, 201);
@@ -189,6 +193,8 @@ function harness() {
     request: () => request,
     fetch: vi.fn(async () => {
       events.push("UI forwarded");
+      session.linkedCaseNo = "SIM-case";
+      callback.linkedCaseNo = "SIM-case";
       return response;
     }),
     fulfill: vi.fn(async () => {
@@ -219,7 +225,7 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
   it("checkpoints raw command before forward and successful IDs before navigation; replays bytes once", async () => {
     const h = harness();
     await h.helper.capture(h.route);
-    expect(h.events.slice(0, 4)).toEqual([
+    expect(h.events.slice(1, 5)).toEqual([
       "checkpoint",
       "UI forwarded",
       "checkpoint",
@@ -276,6 +282,29 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
     expect(h.commands).toEqual([]);
   });
 
+  it.each(["omitted", "null"])(
+    "preserves %s relatedOrderId bytes and checks canonical effective order",
+    async (mode) => {
+      const h = harness();
+      const command = {
+        category: intent.category,
+        severity: intent.severity,
+        description: intent.description,
+        ...(mode === "null" ? { relatedOrderId: null } : {}),
+      };
+      const helper = new R08Callcenter(
+        { ...h.expected, intent: command },
+        h.ports,
+      );
+      const raw = JSON.stringify(command);
+      h.request.postData = () => raw;
+      await helper.capture(h.route);
+      await helper.replay();
+      expect(h.commands[0]!.rawBody).toBe(raw);
+      expect(helper.snapshot().replay).toBe("verified");
+    },
+  );
+
   it("rejects any explicit key, including an empty header", async () => {
     const h = harness();
     h.request.headers = () => ({
@@ -307,6 +336,24 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
       expect(h.route.fetch).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    "linked order",
+    "pending recording",
+    "existing case",
+    "callback order",
+    "closed call",
+  ])("rejects canonical producer %s drift before forwarding", async (fault) => {
+    const h = harness();
+    if (fault === "linked order") h.session.linkedOrderId = "SIM-other";
+    if (fault === "pending recording") h.session.recordingState = "pending";
+    if (fault === "existing case") h.session.linkedCaseNo = "SIM-other";
+    if (fault === "callback order") h.callback.linkedOrderId = "SIM-other";
+    if (fault === "closed call") h.session.status = "closed";
+    await expect(h.helper.capture(h.route)).rejects.toThrow();
+    expect(h.route.fetch).not.toHaveBeenCalled();
+    expect(h.commands).toEqual([]);
+  });
 
   it.each([
     "admin",
