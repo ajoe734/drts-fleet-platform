@@ -25,6 +25,8 @@ import {
   terminalizeOwnOrder,
   requireFact,
   type Origins,
+  type Role,
+  type CallOptions,
 } from "../../e2e/owned-referral-business-journey/protocol";
 
 const SHA = "a".repeat(40);
@@ -442,6 +444,217 @@ describe("owned hosted journey transport", () => {
   });
 });
 
+describe("complete canonical orders bounded native read", () => {
+  const ordinaryLimit = 1024 * 1024;
+  const ordersLimit = 8 * ordinaryLimit;
+  const canonicalPath = "/control-plane-proxy/orders";
+
+  function fullSource(bytes: number) {
+    const payload = {
+      data: {
+        items: [
+          { order_id: "synthetic-own", detail: "" },
+          { order_id: "synthetic-historical", state: "completed" },
+          { order_id: "synthetic-sibling-last", state: "cancelled" },
+        ],
+      },
+    };
+    payload.data.items[0]!.detail = "x".repeat(
+      bytes - Buffer.byteLength(JSON.stringify(payload)),
+    );
+    return JSON.stringify(payload);
+  }
+
+  // Only the external fetch response is synthetic. Exercise the real stream,
+  // NativeTransport reader, byte limit, JSON/camel conversion and envelope.
+  function streamResponse(
+    body: string,
+    headers: Record<string, string> = {},
+    status = 200,
+    readFailure?: Error,
+  ) {
+    const bytes = Buffer.from(body);
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (readFailure) return controller.error(readFailure);
+        if (offset === bytes.length) return controller.close();
+        controller.enqueue(bytes.subarray(offset, offset + 65536));
+        offset = Math.min(offset + 65536, bytes.length);
+      },
+    });
+    const reader = stream.getReader();
+    const cancel = vi.spyOn(reader, "cancel");
+    const release = vi.spyOn(reader, "releaseLock");
+    const getReader = vi.fn(() => reader);
+    const result = new Response(null, {
+      status,
+      headers: {
+        "content-type": "application/json",
+        "x-drts-candidate-sha": SHA,
+        ...headers,
+      },
+    });
+    Object.defineProperty(result, "body", { value: { getReader } });
+    return { result, cancel, release, getReader, stream };
+  }
+
+  it.each([
+    ["api", "/api/ordinary", ordinaryLimit],
+    ["ops", canonicalPath, ordinaryLimit + 78],
+    ["opsApi", "/api/orders", ordinaryLimit + 78],
+    ["ops", canonicalPath, ordersLimit],
+  ] as const)(
+    "reads every source row and byte for %s %s (%i bytes)",
+    async (role, path, size) => {
+      const { tx, fetcher } = setup();
+      tx.setSession(role, "synthetic-ops-session");
+      const source = fullSource(size);
+      const fixture = streamResponse(source, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      fetcher.mockResolvedValueOnce(fixture.result);
+      const result = await tx.call(role, path);
+      expect(Buffer.from(result.bytes).toString("utf8")).toBe(source);
+      expect(result.data).toEqual(camelWire(JSON.parse(source).data));
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(at(fetcher.mock.calls, 0)[1]).toMatchObject({
+        method: "GET",
+        redirect: "manual",
+        signal: expect.any(AbortSignal),
+      });
+      expect(fixture.getReader).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it.each<[Role, string, CallOptions, Record<string, string>?, number?]>([
+    ["admin", canonicalPath, {}],
+    ["api", canonicalPath, {}],
+    ["referral", canonicalPath, {}],
+    ["fleet", canonicalPath, {}],
+    ["driver", "/api/orders", {}],
+    ["publicApi", "/api/orders", {}],
+    ["referralApi", "/api/orders", {}],
+    ["opsApi", canonicalPath, {}],
+    ["ops", "/api/orders", {}],
+    ["api", "/api/orders", {}],
+    ["ops", canonicalPath, { method: "POST" }],
+    ["ops", canonicalPath, { method: "HEAD" }],
+    ["ops", canonicalPath, { body: { filter: "own" } }],
+    ["ops", `${canonicalPath}/`, {}],
+    ["ops", `${canonicalPath}/synthetic-own`, {}],
+    ["ops", `${canonicalPath}-other`, {}],
+    ["ops", "/control-plane-proxy/other/../orders", {}],
+    ["ops", `${canonicalPath}?order_ids=synthetic-own`, {}],
+    ["ops", `${canonicalPath}?`, {}],
+    ["opsApi", "/api/orders?limit=1", {}],
+    ["ops", "/control-plane-proxy/reports/daily-dispatch/preview", {}],
+    ["ops", canonicalPath, { raw: true }],
+    ["ops", canonicalPath, {}, { "content-type": "application/pdf" }],
+    ["ops", canonicalPath, {}, { "content-type": "text/plain" }],
+    ["ops", canonicalPath, {}, { "content-type": "application/octet-stream" }],
+    ["ops", canonicalPath, {}, {}, 403],
+  ])(
+    "retains the ordinary byte cap for %s %s %j %j %s",
+    async (role, path, options, headers, status) => {
+      const { tx, fetcher } = setup();
+      const fixture = streamResponse(
+        fullSource(ordinaryLimit + 1),
+        headers,
+        status,
+      );
+      fetcher.mockResolvedValueOnce(fixture.result);
+      await expect(tx.call(role, path, options)).rejects.toThrow(
+        "bounded response exceeded",
+      );
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it("rejects foreign/shadow origins and forged authority before fetching the full-list route", async () => {
+    const { tx, fetcher } = setup();
+    for (const url of [
+      `https://ops.example.test.foreign.test${canonicalPath}`,
+      `https://api.example.test${canonicalPath}`,
+      `https://user:secret@ops.example.test${canonicalPath}`,
+      `${origins.ops}${canonicalPath}#fragment`,
+    ]) {
+      await expect(tx.call("ops", url)).rejects.toThrow(
+        "role origin isolation",
+      );
+    }
+    for (const header of [
+      "authorization",
+      "x-serverless-authorization",
+      "x-drts-authorization",
+      "x-actor-id",
+      "x-roles",
+    ]) {
+      await expect(
+        tx.call("ops", canonicalPath, {
+          headers: { [header]: "synthetic-forged" },
+        }),
+      ).rejects.toThrow("caller cannot replace authority headers");
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["ops", "opsApi"] as const)(
+    "fails closed above the dedicated cap for %s without leaking source rows",
+    async (role) => {
+      const { tx, fetcher } = setup();
+      const fixture = streamResponse(fullSource(ordersLimit + 1));
+      fetcher.mockResolvedValueOnce(fixture.result);
+      const failure = await tx
+        .call(role, role === "ops" ? canonicalPath : "/api/orders")
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ stage: "bounded response exceeded" });
+      expect(JSON.stringify(failure)).not.toContain("synthetic-");
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it("preserves SHA/envelope failures and releases the reader after a stream error", async () => {
+    const { tx, fetcher } = setup();
+    for (const [body, headers, expected] of [
+      [
+        fullSource(ordinaryLimit + 1),
+        { "x-drts-candidate-sha": "b".repeat(40) },
+        "runtime SHA mismatch",
+      ],
+      [
+        JSON.stringify({ private: "x".repeat(ordinaryLimit) }),
+        {},
+        "response envelope",
+      ],
+      ["x".repeat(ordinaryLimit + 1), {}, "object response required"],
+    ] as const) {
+      const fixture = streamResponse(body, headers);
+      fetcher.mockResolvedValueOnce(fixture.result);
+      await expect(tx.call("ops", canonicalPath)).rejects.toThrow(expected);
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+    }
+    const error = new Error("synthetic stream failure");
+    const fixture = streamResponse("", {}, 200, error);
+    fetcher.mockResolvedValueOnce(fixture.result);
+    await expect(tx.call("ops", canonicalPath)).rejects.toBe(error);
+    expect(fixture.cancel).toHaveBeenCalledOnce();
+    expect(fixture.release).toHaveBeenCalledOnce();
+    expect(fixture.stream.locked).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+});
+
 describe("owned identity and actual evidence invariants", () => {
   it("stops before supply writes for an inherited fixed-subject active order", () => {
     expect(() =>
@@ -826,6 +1039,257 @@ describe("native fetch failure diagnostics", () => {
   });
 });
 
+describe("startup Ops HTML readiness deadline", () => {
+  // Drives the actual NativeTransport.call with only the external ports
+  // controlled: AbortSignal.timeout (chosen deadline), performance.now
+  // (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
+  async function runVirtual(
+    readyAtMs: number,
+    request: (tx: NativeTransport) => Promise<unknown>,
+    prepare: (tx: NativeTransport) => void = () => undefined,
+  ) {
+    const { tx, fetcher } = setup();
+    prepare(tx);
+    let now = 0;
+    let deadline = Number.POSITIVE_INFINITY;
+    let controller = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((ms) => {
+        deadline = ms;
+        controller = new AbortController();
+        return controller.signal;
+      });
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    fetcher.mockImplementation(async (_url, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      if (readyAtMs <= deadline) {
+        now = readyAtMs;
+        return new Response("<html>synthetic dashboard</html>", {
+          status: 200,
+          headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
+        });
+      }
+      now = deadline;
+      controller.abort(new DOMException("synthetic", "TimeoutError"));
+      throw new DOMException("synthetic", "TimeoutError");
+    });
+    try {
+      const outcome = await request(tx).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      return {
+        outcome,
+        chosen: timeout.mock.calls.map(([ms]) => ms),
+        fetcher,
+      };
+    } finally {
+      timeout.mockRestore();
+      clock.mockRestore();
+    }
+  }
+  const startup = (tx: NativeTransport) =>
+    tx.call("ops", "/dashboard", { raw: true, expected: [200] });
+
+  it("lets the exact pre-session startup Ops dashboard HTML 200 at 20s pass on the 30s readiness budget", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(20_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      value: expect.objectContaining({ status: 200, data: null }),
+    });
+    const [url, init] = at(fetcher.mock.calls, 0);
+    expect(url).toBe("https://ops.example.test/dashboard");
+    expect(init?.method).toBe("GET");
+    expect(init?.redirect).toBe("manual");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-drts-authorization")).toBeNull();
+    expect(headers.get("x-serverless-authorization")).toBe("Bearer cloud-ops");
+  });
+
+  it("still fails the exact startup probe once at 30s with the original timeout facts", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(31_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const failure = (outcome as { error: unknown }).error;
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    expect((failure as JourneyFailure).transportFacts).toEqual(
+      expect.objectContaining({
+        nativeFailureClass: "TimeoutError",
+        requestAborted: true,
+        requestDurationMs: 30_000,
+        requestMethod: "GET",
+      }),
+    );
+  });
+
+  it("keeps a fast startup positive to a single 200 fetch", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(5_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      value: expect.objectContaining({ status: 200 }),
+    });
+  });
+
+  it("does not turn a startup 200 with the wrong runtime SHA into readiness", async () => {
+    const { tx, fetcher } = setup();
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      fetcher.mockImplementationOnce(
+        async () =>
+          new Response("<html></html>", {
+            status: 200,
+            headers: { "x-drts-candidate-sha": "b".repeat(40) },
+          }),
+      );
+      await expect(startup(tx)).rejects.toThrow("ops:runtime SHA mismatch");
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(30_000);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("does not turn a startup HTTP failure into readiness", async () => {
+    const { tx, fetcher } = setup();
+    fetcher.mockImplementationOnce(
+      async () =>
+        new Response("unavailable", {
+          status: 503,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+    );
+    await expect(startup(tx)).rejects.toMatchObject({
+      stage: "ops:request",
+      status: 503,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the default byte bound on the startup HTML", async () => {
+    const { tx, fetcher } = setup();
+    fetcher.mockImplementationOnce(
+      async () =>
+        new Response(new Uint8Array(1024 * 1024 + 1), {
+          status: 200,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+    );
+    await expect(startup(tx)).rejects.toThrow("bounded response exceeded");
+  });
+
+  it.each([
+    [
+      "authenticated Ops dashboard reread",
+      (tx: NativeTransport) => startup(tx),
+      (tx: NativeTransport) => tx.setSession("ops", "synthetic-ops-session"),
+    ],
+    [
+      "Ops business POST",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/control-plane-proxy/auth/token", {
+          method: "POST",
+          body: {},
+        }),
+    ],
+    [
+      "Ops dashboard POST",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", {
+          method: "POST",
+          raw: true,
+          expected: [200],
+        }),
+    ],
+    [
+      "Ops dashboard GET with a body",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", {
+          body: {},
+          raw: true,
+          expected: [200],
+        }),
+    ],
+    [
+      "Ops dashboard with a query",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard?x=1", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops dashboard trailing slash alias",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard/", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops root",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops dashboard not raw",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { expected: [200] }),
+    ],
+    [
+      "Ops dashboard raw false",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { raw: false, expected: [200] }),
+    ],
+    [
+      "Ops dashboard default expected statuses",
+      (tx: NativeTransport) => tx.call("ops", "/dashboard", { raw: true }),
+    ],
+    [
+      "Ops dashboard widened expected statuses",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { raw: true, expected: [200, 503] }),
+    ],
+    [
+      "Admin dashboard",
+      (tx: NativeTransport) =>
+        tx.call("admin", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "Fleet dashboard",
+      (tx: NativeTransport) =>
+        tx.call("fleet", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "Referral dashboard",
+      (tx: NativeTransport) =>
+        tx.call("referral", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "opsApi dashboard",
+      (tx: NativeTransport) =>
+        tx.call("opsApi", "/dashboard", { raw: true, expected: [200] }),
+    ],
+  ] as const)(
+    "keeps the original 15s deadline for %s: a 20s response times out once",
+    async (_name, request, prepare?: (tx: NativeTransport) => void) => {
+      const { outcome, chosen, fetcher } = await runVirtual(
+        20_000,
+        request,
+        prepare,
+      );
+      expect(chosen).toEqual([15_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const failure = (outcome as { error: unknown }).error;
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      expect((failure as JourneyFailure).transportFacts).toEqual(
+        expect.objectContaining({
+          nativeFailureClass: "TimeoutError",
+          requestAborted: true,
+          requestDurationMs: 15_000,
+        }),
+      );
+    },
+  );
+});
+
 // Reads the real production classifier straight from the actual e2e consumer
 // source (the same AST-extraction technique already used by
 // tests/unit/operational-browser-manifest.test.ts for the same function), so
@@ -833,9 +1297,10 @@ describe("native fetch failure diagnostics", () => {
 // a second reimplementation. That function is not exported/importable here:
 // the e2e spec file registers a Playwright test() at module load, which must
 // not run under vitest.
-function actualClosedPdfFailureFacts(): (
-  error: unknown,
-) => { nativeFailureClass: string; nativeCauseCode: string } {
+function actualClosedPdfFailureFacts(): (error: unknown) => {
+  nativeFailureClass: string;
+  nativeCauseCode: string;
+} {
   const filename = path.join(
     process.cwd(),
     "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
@@ -874,9 +1339,10 @@ function actualHistoryPhase(): (
   evidence: Evidence,
   completedOrderId: string,
   caseNo: string,
-  closedPdfFailureFacts: (
-    error: unknown,
-  ) => { nativeFailureClass: string; nativeCauseCode: string },
+  closedPdfFailureFacts: (error: unknown) => {
+    nativeFailureClass: string;
+    nativeCauseCode: string;
+  },
 ) => <T>(stage: string, action: () => Promise<T>) => Promise<T> {
   const filename = path.join(
     process.cwd(),
@@ -945,9 +1411,7 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     const native = new TypeError(privateValue);
     native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
     await expect(
-      historyPhase("browser-history-restore-goto", () =>
-        Promise.resolve("ok"),
-      ),
+      historyPhase("browser-history-restore-goto", () => Promise.resolve("ok")),
     ).resolves.toBe("ok");
     await expect(
       historyPhase("browser-history-restore-assert", () => {

@@ -185,8 +185,42 @@ export function parsePreexpiryCredentialFamily(family: string) {
     days: Number(match[2]),
   };
 }
+export function parsePreexpiryRecordFamily(family: string) {
+  const match =
+    /^preexpiry:(driver_license|professional_driver_license|taxi_driver_registration|insurance_policy|vehicle_contract):(30|7)$/.exec(
+      family,
+    );
+  if (!match) return null;
+  const credential = match[1]!;
+  const days = Number(match[2]) as 30 | 7;
+  if (credential === "insurance_policy") {
+    return {
+      kind: "policy" as const,
+      credential,
+      field: "endAt" as const,
+      days,
+    };
+  }
+  if (credential === "vehicle_contract") {
+    return {
+      kind: "contract" as const,
+      credential,
+      field: "endAt" as const,
+      days,
+    };
+  }
+  return {
+    kind: "driver" as const,
+    credential,
+    field:
+      PREEXPIRY_CREDENTIAL_FIELDS[
+        credential as keyof typeof PREEXPIRY_CREDENTIAL_FIELDS
+      ],
+    days,
+  };
+}
 
-export type ExpiryEntityType = "driver" | "policy";
+export type ExpiryEntityType = "driver" | "policy" | "contract";
 export type ExpiryEventStatus =
   | "pending"
   | "leased"
@@ -241,6 +275,7 @@ export type RegistryExpiryDeliveryIntentRow = {
 
 export type RegistryExpiryEventWithIntent = RegistryExpiryEventRow & {
   intent: RegistryExpiryDeliveryIntentRow | null;
+  intents?: RegistryExpiryDeliveryIntentRow[];
 };
 
 export type InsertExpiryEventParams = {
@@ -284,11 +319,350 @@ export class RegulatoryRegistryRepository {
     string,
     RegistryExpiryDeliveryIntentRow
   >();
+  private readonly inMemoryPartnerContacts = new Map<string, string[]>();
+  private extendedExpirySqlSupported = true;
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  supportsExtendedExpirySql() {
+    return this.extendedExpirySqlSupported;
+  }
+
+  private withLazyPromise<T extends object>(
+    snapshot: T,
+    loader: () => Promise<T>,
+  ): Promise<T> & T {
+    let promise: Promise<T> | undefined;
+    const getPromise = () => {
+      if (!promise) {
+        promise = loader();
+      }
+      return promise;
+    };
+    return Object.defineProperties(snapshot, {
+      then: {
+        value: <TResult1 = T, TResult2 = never>(
+          onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
+        ) => getPromise().then(onfulfilled, onrejected),
+      },
+      catch: {
+        value: <TResult = never>(
+          onrejected?:
+            | ((reason: unknown) => TResult | PromiseLike<TResult>)
+            | null,
+        ) => getPromise().catch(onrejected),
+      },
+      finally: {
+        value: (onfinally?: (() => void) | null) =>
+          getPromise().finally(onfinally),
+      },
+    }) as Promise<T> & T;
+  }
+
+  private async persistFleetPartnerContactsInDb(
+    partnerId: string,
+    emails: readonly string[],
+  ): Promise<boolean> {
+    if (!this.isEnabled() || !this.extendedExpirySqlSupported) return false;
+    if (emails.length === 0) {
+      const cleared = await this.databaseService!.query<{
+        partner_id: string;
+      }>(
+        `/* partner-contact-upsert */
+         WITH cleared_fleet_partner AS (
+           UPDATE admin.phase1_fleet_partners
+           SET record = (record - 'contactEmails') - 'contactEmail',
+               updated_at = now()
+           WHERE fleet_partner_id = $1
+           RETURNING fleet_partner_id
+         ),
+         cleared_contract_partner AS (
+           UPDATE reg.phase1_registry_contracts
+           SET record = (record - 'partnerContactEmails') - 'partnerContactEmail',
+               updated_at = now()
+           WHERE record->>'partnerId' = $1
+           RETURNING contract_id
+         ),
+         cleared_core_partner AS (
+           UPDATE core.partners
+           SET contact_email = NULL,
+               metadata = COALESCE(metadata, '{}'::jsonb) - 'contactEmails',
+               updated_at = now()
+           WHERE partner_id::text = $1 OR partner_code = $1
+           RETURNING partner_id::text AS partner_id
+         )
+         SELECT partner_id FROM cleared_core_partner
+         UNION ALL
+         SELECT fleet_partner_id AS partner_id FROM cleared_fleet_partner
+         UNION ALL
+         SELECT contract_id AS partner_id FROM cleared_contract_partner`,
+        [partnerId],
+      );
+      return (cleared.rowCount ?? cleared.rows.length) > 0;
+    }
+    const primaryEmail = emails[0]!;
+    const emailsJson = JSON.stringify(emails);
+    const updated = await this.databaseService!.query<{
+      partner_id: string;
+    }>(
+      `/* partner-contact-upsert */
+       WITH updated_fleet_partner AS (
+         UPDATE admin.phase1_fleet_partners
+         SET record = jsonb_set(
+               jsonb_set(record, '{contactEmails}', $3::jsonb, true),
+               '{contactEmail}',
+               to_jsonb($2::text),
+               true
+             ),
+             updated_at = now()
+         WHERE fleet_partner_id = $1
+         RETURNING fleet_partner_id
+       ),
+       updated_contract_partner AS (
+         UPDATE reg.phase1_registry_contracts
+         SET record = jsonb_set(
+               jsonb_set(record, '{partnerContactEmails}', $3::jsonb, true),
+               '{partnerContactEmail}',
+               to_jsonb($2::text),
+               true
+             ),
+             updated_at = now()
+         WHERE record->>'partnerId' = $1
+         RETURNING contract_id
+       ),
+       updated_core_partner AS (
+         UPDATE core.partners
+         SET contact_email = $2,
+             metadata = jsonb_set(
+               COALESCE(metadata, '{}'::jsonb),
+               '{contactEmails}',
+               $3::jsonb,
+               true
+             ),
+             updated_at = now()
+         WHERE partner_id::text = $1 OR partner_code = $1
+         RETURNING partner_id::text AS partner_id
+       )
+       SELECT partner_id FROM updated_core_partner
+       UNION ALL
+       SELECT fleet_partner_id AS partner_id FROM updated_fleet_partner
+       UNION ALL
+       SELECT contract_id AS partner_id FROM updated_contract_partner`,
+      [partnerId, primaryEmail, emailsJson],
+    );
+    return (updated.rowCount ?? updated.rows.length) > 0;
+  }
+
+  setFleetPartnerContacts(
+    partnerId: string,
+    emails: readonly string[] | string,
+  ): Promise<string[]> & string[] {
+    const normalized = partnerId.trim();
+    if (!normalized) {
+      return this.withLazyPromise([], async () => []);
+    }
+    const list =
+      typeof emails === "string" ? emails.split(/[,;\s]+/) : emails;
+    const cleaned = [
+      ...new Set(list.map((e) => e.trim()).filter(Boolean)),
+    ];
+    const previousInMemory = this.inMemoryPartnerContacts.has(normalized)
+      ? [...(this.inMemoryPartnerContacts.get(normalized) ?? [])]
+      : undefined;
+    const restorePreviousInMemory = () => {
+      if (previousInMemory !== undefined) {
+        this.inMemoryPartnerContacts.set(normalized, [...previousInMemory]);
+      } else {
+        this.inMemoryPartnerContacts.delete(normalized);
+      }
+    };
+    const commitInMemory = () => {
+      if (cleaned.length === 0) {
+        this.inMemoryPartnerContacts.delete(normalized);
+      } else {
+        this.inMemoryPartnerContacts.set(normalized, [...cleaned]);
+      }
+    };
+    const snapshot = [...cleaned];
+    if (this.isEnabled() && this.extendedExpirySqlSupported) {
+      return this.withLazyPromise(snapshot, async () => {
+        try {
+          const persisted = await this.persistFleetPartnerContactsInDb(
+            normalized,
+            cleaned,
+          );
+          if (!persisted && cleaned.length > 0) {
+            this.inMemoryPartnerContacts.delete(normalized);
+            return [];
+          }
+          commitInMemory();
+          return [...cleaned];
+        } catch (error) {
+          restorePreviousInMemory();
+          throw error;
+        }
+      });
+    }
+    commitInMemory();
+    return this.withLazyPromise(snapshot, async () => [...cleaned]);
+  }
+
+  getFleetPartnerContacts(partnerId: string): Promise<string[]> & string[] {
+    const normalized = partnerId.trim();
+    const inMemory = [...(this.inMemoryPartnerContacts.get(normalized) ?? [])];
+    if (this.isEnabled() && this.extendedExpirySqlSupported) {
+      return this.withLazyPromise(inMemory, () =>
+        this.findFleetPartnerContactEmails([normalized]),
+      );
+    }
+    return this.withLazyPromise(inMemory, async () => [...inMemory]);
+  }
+
+  async findFleetPartnerContactEmails(
+    partnerIds: readonly string[],
+    client?: PoolClient,
+  ): Promise<string[]> {
+    const normalizedIds = [
+      ...new Set(partnerIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+    if (normalizedIds.length === 0) return [];
+    const results: string[] = [];
+    for (const id of normalizedIds) {
+      results.push(...(this.inMemoryPartnerContacts.get(id) ?? []));
+    }
+    if (this.isEnabled() && this.extendedExpirySqlSupported) {
+      const executor = this.getExpiryExecutor(client);
+      const dbResult = await executor.query<{
+        email: string | null;
+      }>(
+        `/* partner-contact-lookup */
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(metadata->'contactEmails') = 'array' THEN metadata->'contactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM core.partners
+         WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
+           AND status <> 'terminated'
+         UNION ALL
+         SELECT contact_email AS email
+         FROM core.partners
+         WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
+           AND status <> 'terminated'
+           AND contact_email IS NOT NULL
+         UNION ALL
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(record->'contactEmails') = 'array' THEN record->'contactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM admin.phase1_fleet_partners
+         WHERE fleet_partner_id = ANY($1::text[])
+           AND COALESCE(record->>'status', '') <> 'terminated'
+         UNION ALL
+         SELECT record->>'contactEmail' AS email
+         FROM admin.phase1_fleet_partners
+         WHERE fleet_partner_id = ANY($1::text[])
+           AND COALESCE(record->>'status', '') <> 'terminated'
+           AND record->>'contactEmail' IS NOT NULL
+         UNION ALL
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(record->'partnerContactEmails') = 'array' THEN record->'partnerContactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM reg.phase1_registry_contracts
+         WHERE record->>'partnerId' = ANY($1::text[])
+           AND COALESCE(record->>'status', status) <> 'terminated'
+         UNION ALL
+         SELECT record->>'partnerContactEmail' AS email
+         FROM reg.phase1_registry_contracts
+         WHERE record->>'partnerId' = ANY($1::text[])
+           AND COALESCE(record->>'status', status) <> 'terminated'
+           AND record->>'partnerContactEmail' IS NOT NULL
+         UNION ALL
+         SELECT COALESCE(p.email_normalized, p.record->>'email') AS email
+         FROM iam.identity_memberships m
+         JOIN iam.identity_principals p ON p.principal_id = m.principal_id
+         WHERE m.partner_id = ANY($1::text[])
+           AND m.membership_status = 'active'
+           AND p.account_status = 'active'
+           AND COALESCE(p.email_normalized, p.record->>'email') IS NOT NULL`,
+        [normalizedIds],
+      );
+      for (const row of dbResult.rows) {
+        if (typeof row.email === "string" && row.email.trim()) {
+          results.push(row.email.trim());
+        }
+      }
+    }
+    return [...new Set(results)];
+  }
+
+  async findVehiclePartnerIds(
+    vehicleIds: readonly string[],
+    client?: PoolClient,
+  ): Promise<Map<string, string[]>> {
+    const normalized = [
+      ...new Set(vehicleIds.map((v) => v.trim()).filter(Boolean)),
+    ];
+    const map = new Map<string, string[]>();
+    if (
+      normalized.length === 0 ||
+      !this.isEnabled() ||
+      !this.extendedExpirySqlSupported
+    ) {
+      return map;
+    }
+    const executor = this.getExpiryExecutor(client);
+    const result = await executor.query<{
+      vehicle_id: string | null;
+      partner_id: string | null;
+    }>(
+      `/* vehicle-partner-lookup */
+       SELECT c.vehicle_id AS vehicle_id, c.record->>'partnerId' AS partner_id
+       FROM reg.phase1_registry_contracts c
+       WHERE c.vehicle_id = ANY($1::text[])
+         AND COALESCE(c.record->>'status', c.status) <> 'terminated'
+         AND c.record->>'partnerId' IS NOT NULL
+       UNION ALL
+       SELECT vc.vehicle_id::text AS vehicle_id, vc.partner_id::text AS partner_id
+       FROM reg.vehicle_contracts vc
+       WHERE vc.vehicle_id::text = ANY($1::text[])
+         AND vc.status <> 'terminated'
+       UNION ALL
+       SELECT v.vehicle_id::text AS vehicle_id, v.owner_partner_id::text AS partner_id
+       FROM reg.vehicles v
+       WHERE v.vehicle_id::text = ANY($1::text[])
+         AND v.owner_partner_id IS NOT NULL
+       UNION ALL
+       SELECT v.vehicle_id::text AS vehicle_id, v.dispatch_partner_id::text AS partner_id
+       FROM reg.vehicles v
+       WHERE v.vehicle_id::text = ANY($1::text[])
+         AND v.dispatch_partner_id IS NOT NULL`,
+      [normalized],
+    );
+    for (const row of result.rows) {
+      const vId = row.vehicle_id?.trim();
+      const pId = row.partner_id?.trim();
+      if (!vId || !pId) continue;
+      const list = map.get(vId) ?? [];
+      if (!list.includes(pId)) {
+        list.push(pId);
+      }
+      map.set(vId, list);
+    }
+    return map;
   }
 
   async loadDriverMatchingSuppressions(
@@ -424,11 +798,13 @@ export class RegulatoryRegistryRepository {
 
   async findDriverPublicRegistrationCredential(
     driverId: string,
+    executor: RegulatoryRegistryQueryExecutor | undefined = this.databaseService,
+    lock = false,
   ): Promise<DriverPublicRegistrationCredential | null> {
-    if (!this.isEnabled()) return null;
+    if (!this.isEnabled() || !executor) return null;
     const result =
-      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
-        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+      await executor.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
         [driverId],
       );
     return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
@@ -443,6 +819,48 @@ export class RegulatoryRegistryRepository {
       [authorizationId],
     );
     return result.rows[0]?.operator_id ?? null;
+  }
+
+  async findFleetPartnerOperatorMappings(): Promise<
+    {
+      fleetPartnerId: string;
+      multiTaxiOperatorIds: string[];
+    }[]
+  > {
+    if (!this.isEnabled()) return [];
+    try {
+      const result = await this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_fleet_partners`,
+      );
+      return result.rows
+        .map((row) =>
+          this.parseRecord<{
+            fleetPartnerId?: string;
+            multiTaxiOperatorIds?: string[];
+          }>(row.record, "admin.phase1_fleet_partners"),
+        )
+        .filter(
+          (
+            record,
+          ): record is {
+            fleetPartnerId: string;
+            multiTaxiOperatorIds?: string[];
+          } =>
+            typeof record.fleetPartnerId === "string" &&
+            record.fleetPartnerId.trim().length > 0,
+        )
+        .map((record) => ({
+          fleetPartnerId: record.fleetPartnerId.trim(),
+          multiTaxiOperatorIds: Array.isArray(record.multiTaxiOperatorIds)
+            ? record.multiTaxiOperatorIds
+                .filter((id): id is string => typeof id === "string")
+                .map((id) => id.trim())
+                .filter((id) => id.length > 0)
+            : [],
+        }));
+    } catch {
+      return [];
+    }
   }
 
   async ensureLiveMapTestDriver() {
@@ -897,19 +1315,22 @@ export class RegulatoryRegistryRepository {
             INSERT INTO reg.phase1_registry_exclusivities (
               vehicle_id,
               review_status,
+              exclusive_operator_id,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4::jsonb
+              $1, $2, $3, $4, $5::jsonb
             )
             ON CONFLICT (vehicle_id) DO UPDATE SET
               review_status = EXCLUDED.review_status,
+              exclusive_operator_id = EXCLUDED.exclusive_operator_id,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
           `,
           [
             exclusivity.vehicleId,
             exclusivity.reviewStatus,
+            exclusivity.exclusiveOperatorId ?? null,
             exclusivity.updatedAt,
             JSON.stringify(exclusivity),
           ],
@@ -1596,7 +2017,7 @@ export class RegulatoryRegistryRepository {
   }
 
   private getExpiryExecutor(
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): RegulatoryRegistryQueryExecutor {
     if (client) {
       return {
@@ -1604,7 +2025,10 @@ export class RegulatoryRegistryRepository {
           text: string,
           values?: readonly unknown[],
         ): Promise<{ rows: T[] }> => {
-          const res = await client.query(text, (values ?? []) as any[]);
+          const res = await (client as PoolClient).query(
+            text,
+            (values ?? []) as any[],
+          );
           return { rows: res.rows as T[] };
         },
       };
@@ -1686,7 +2110,7 @@ export class RegulatoryRegistryRepository {
    * read only its source records through that same dedicated executor. */
   async readVehicleCommandState(
     vehicleId: string,
-    client: PoolClient,
+    client: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<RegulatoryVehicleCommandState | null> {
     const executor = this.getExpiryExecutor(client);
     const vehicles = await executor.query<JsonRecordRow>(
@@ -1793,21 +2217,49 @@ export class RegulatoryRegistryRepository {
     return null;
   }
 
+  async lockContract(
+    contractId: string,
+    client?: PoolClient,
+  ): Promise<VehicleContractRecord | null> {
+    if (this.isEnabled()) {
+      const executor = this.getExpiryExecutor(client);
+      const result = await executor.query<{ record: VehicleContractRecord }>(
+        `SELECT record FROM reg.phase1_registry_contracts WHERE contract_id = $1 ${client ? "FOR UPDATE" : ""}`,
+        [contractId],
+      );
+      return result.rows[0]?.record ?? null;
+    }
+    return null;
+  }
+
   /** One finite keyset interval; no scheduler/checkpoint or source mutation. */
   async getExpiryScanUpperBounds(): Promise<{
     driverId: string | null;
     policyId: string | null;
+    preexpiryPolicyId: string | null;
+    preexpiryContractId: string | null;
   }> {
     const result = await this.databaseService!.query<{
       driver_id: string | null;
       policy_id: string | null;
+      preexpiry_policy_id?: string | null;
+      preexpiry_contract_id?: string | null;
     }>(
       `SELECT (SELECT MAX(driver_id) FROM reg.phase1_registry_drivers) AS driver_id,
-              (SELECT MAX(policy_id) FROM reg.phase1_registry_policies) AS policy_id`,
+              (SELECT MAX(policy_id) FROM reg.phase1_registry_policies) AS policy_id,
+              (SELECT MAX(policy_id) FROM reg.phase1_registry_policies) AS preexpiry_policy_id,
+              (SELECT MAX(contract_id) FROM reg.phase1_registry_contracts) AS preexpiry_contract_id`,
+    );
+    const row = result.rows[0];
+    this.extendedExpirySqlSupported = Boolean(
+      row &&
+        ("preexpiry_policy_id" in row || "preexpiry_contract_id" in row),
     );
     return {
-      driverId: result.rows[0]?.driver_id ?? null,
-      policyId: result.rows[0]?.policy_id ?? null,
+      driverId: row?.driver_id ?? null,
+      policyId: row?.policy_id ?? null,
+      preexpiryPolicyId: row?.preexpiry_policy_id ?? null,
+      preexpiryContractId: row?.preexpiry_contract_id ?? null,
     };
   }
 
@@ -1833,6 +2285,56 @@ export class RegulatoryRegistryRepository {
        ) AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
          AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
        ORDER BY d.driver_id ASC LIMIT $2`,
+      [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
+    );
+    return result.rows.map((r) => r.record);
+  }
+
+  async scanPreexpiryPolicies(
+    asOf: string,
+    limit: number,
+    range: { afterId?: string; throughId?: string },
+  ): Promise<InsurancePolicyRecord[]> {
+    const cutoff = new Date(Date.parse(asOf) + 30 * 86400000).toISOString();
+    const result = await this.databaseService!.query<{
+      record: InsurancePolicyRecord;
+    }>(
+      `/* preexpiry-policy-source */ SELECT p.record FROM reg.phase1_registry_policies p
+       WHERE (
+         (COALESCE(p.record->>'status', p.status) <> 'cancelled'
+          AND (p.record->>'endAt')::timestamptz > $1
+          AND (p.record->>'endAt')::timestamptz <= $5)
+         OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='policy'
+           AND e.entity_id=p.policy_id AND e.credential_type LIKE 'preexpiry:insurance_policy:%'
+           AND e.status IN ('pending','leased','completed'))
+       ) AND ($3::varchar IS NULL OR p.policy_id > $3::varchar)
+         AND ($4::varchar IS NULL OR p.policy_id <= $4::varchar)
+       ORDER BY p.policy_id ASC LIMIT $2`,
+      [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
+    );
+    return result.rows.map((r) => r.record);
+  }
+
+  async scanPreexpiryContracts(
+    asOf: string,
+    limit: number,
+    range: { afterId?: string; throughId?: string },
+  ): Promise<VehicleContractRecord[]> {
+    const cutoff = new Date(Date.parse(asOf) + 30 * 86400000).toISOString();
+    const result = await this.databaseService!.query<{
+      record: VehicleContractRecord;
+    }>(
+      `/* preexpiry-contract-source */ SELECT c.record FROM reg.phase1_registry_contracts c
+       WHERE (
+         (COALESCE(c.record->>'status', c.status) <> 'terminated'
+          AND (c.record->>'endAt')::timestamptz > $1
+          AND (c.record->>'endAt')::timestamptz <= $5)
+         OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='policy'
+           AND e.entity_id=c.contract_id AND e.credential_type LIKE 'preexpiry:vehicle_contract:%'
+           AND e.status IN ('pending','leased','completed'))
+       ) AND ($3::varchar IS NULL OR c.contract_id > $3::varchar)
+         AND ($4::varchar IS NULL OR c.contract_id <= $4::varchar)
+       ORDER BY c.contract_id ASC LIMIT $2`,
       [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
     );
     return result.rows.map((r) => r.record);
@@ -1884,6 +2386,7 @@ export class RegulatoryRegistryRepository {
           SELECT record
           FROM reg.phase1_registry_policies
           WHERE status != 'cancelled'
+            AND record->>'supersededByPolicyId' IS NULL
             AND (record->>'startAt' IS NULL OR (record->>'startAt')::timestamptz <= $1)
             AND (record->>'endAt' IS NOT NULL AND (record->>'endAt')::timestamptz < $1)
             AND ($3::varchar IS NULL OR policy_id > $3::varchar)
@@ -1921,7 +2424,7 @@ export class RegulatoryRegistryRepository {
     entityType: ExpiryEntityType,
     entityId: string,
     credentialType?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<RegistryExpiryEventRow[]> {
     if (this.isEnabled()) {
       const executor = this.getExpiryExecutor(client);
@@ -2006,7 +2509,7 @@ export class RegulatoryRegistryRepository {
   async supersedeExpiryEvents(
     eventIds: string[],
     supersededByEventId?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<void> {
     if (eventIds.length === 0) return;
     if (this.isEnabled()) {
@@ -2057,7 +2560,7 @@ export class RegulatoryRegistryRepository {
     entityId: string,
     credentialType: string,
     supersededByEventId?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<number> {
     if (!this.isEnabled()) {
       const active = Array.from(this.inMemoryExpiryEvents.values()).filter(
@@ -2269,6 +2772,7 @@ export class RegulatoryRegistryRepository {
   async recordExpiryDeliveryOutcome(
     intent: RegistryExpiryDeliveryIntentRow,
     update: Omit<UpdateDeliveryIntentParams, "intentId">,
+    asOfMs: number = Date.now(),
   ): Promise<RegistryExpiryDeliveryIntentRow | null> {
     return this.withTransaction(async (client) => {
       const snapshot = await this.getExpiryEventById(intent.event_id, client);
@@ -2277,8 +2781,10 @@ export class RegulatoryRegistryRepository {
         snapshot.source_expiry_at instanceof Date
           ? snapshot.source_expiry_at.getTime()
           : Date.parse(snapshot.source_expiry_at ?? "");
+      let current: RegistryExpiryEventWithIntent | null = snapshot;
       if (this.isEnabled()) {
         let changed = false;
+        const preexpiry = parsePreexpiryRecordFamily(snapshot.credential_type);
         if (snapshot.entity_type === "driver") {
           const source = await this.lockDriver(snapshot.entity_id, client);
           const reminder = parsePreexpiryCredentialFamily(
@@ -2304,19 +2810,34 @@ export class RegulatoryRegistryRepository {
               Date.parse(source[field] ?? "") !== sourceExpiryMs ||
               (reminder !== null &&
                 (source.lifecycleStatus !== "active" ||
-                  sourceExpiryMs <= Date.now()));
+                  sourceExpiryMs <= asOfMs));
+        } else if (
+          snapshot.credential_type === "vehicle_contract" ||
+          preexpiry?.credential === "vehicle_contract"
+        ) {
+          const source = await this.lockContract(snapshot.entity_id, client);
+          changed =
+            !source ||
+            source.status === "terminated" ||
+            Boolean(source.supersededByContractId) ||
+            Date.parse(source.endAt) !== sourceExpiryMs ||
+            (preexpiry !== null &&
+              (source.status !== "active" || sourceExpiryMs <= asOfMs));
         } else {
           const source = await this.lockPolicy(snapshot.entity_id, client);
           changed =
             !source ||
             source.status === "cancelled" ||
-            Date.parse(source.endAt) !== sourceExpiryMs;
+            Boolean(source.supersededByPolicyId) ||
+            Date.parse(source.endAt) !== sourceExpiryMs ||
+            (preexpiry !== null &&
+              (source.status !== "active" || sourceExpiryMs <= asOfMs));
         }
         await client.query(
           "SELECT event_id FROM reg.phase1_registry_expiry_events WHERE event_id = $1::uuid FOR UPDATE",
           [intent.event_id],
         );
-        const current = await this.getExpiryEventById(intent.event_id, client);
+        current = await this.getExpiryEventById(intent.event_id, client);
         if (changed && current?.status !== "superseded")
           await this.supersedeExpiryEvents(
             [intent.event_id],
@@ -2328,12 +2849,23 @@ export class RegulatoryRegistryRepository {
         { ...update, intentId: intent.intent_id },
         client,
       );
-      if (update.deliveryStatus === "enqueued")
-        await this.updateExpiryEventStatus(
-          intent.event_id,
-          "completed",
-          client,
+      if (update.deliveryStatus === "enqueued") {
+        const siblingIntents = current?.intents ?? [];
+        const allSiblingsDone = siblingIntents.every(
+          (i) =>
+            i.intent_id === intent.intent_id ||
+            i.delivery_status === "enqueued" ||
+            i.delivery_status === "sent" ||
+            i.delivery_status === "superseded",
         );
+        if (allSiblingsDone) {
+          await this.updateExpiryEventStatus(
+            intent.event_id,
+            "completed",
+            client,
+          );
+        }
+      }
       return result;
     });
   }
@@ -2414,7 +2946,8 @@ export class RegulatoryRegistryRepository {
         params,
       );
 
-      return result.rows.map((row: any) => {
+      const grouped = new Map<string, RegistryExpiryEventWithIntent>();
+      for (const row of result.rows as any[]) {
         const {
           intent_id,
           intent_scope,
@@ -2453,8 +2986,23 @@ export class RegulatoryRegistryRepository {
             }
           : null;
 
-        return { ...eventFields, intent };
-      });
+        const existing = grouped.get(eventFields.event_id);
+        if (!existing) {
+          grouped.set(eventFields.event_id, {
+            ...eventFields,
+            intent,
+            intents: intent ? [intent] : [],
+          });
+        } else if (intent) {
+          existing.intents ??= [];
+          if (!existing.intents.some((i) => i.intent_id === intent.intent_id)) {
+            existing.intents.push(intent);
+          }
+          existing.intent ??= intent;
+        }
+      }
+
+      return Array.from(grouped.values());
     }
 
     const events = Array.from(this.inMemoryExpiryEvents.values()).filter(
@@ -2468,11 +3016,10 @@ export class RegulatoryRegistryRepository {
     );
 
     return events.slice(0, filter?.limit ?? 100).map((e) => {
-      const intent =
-        Array.from(this.inMemoryDeliveryIntents.values()).find(
-          (i) => i.event_id === e.event_id,
-        ) ?? null;
-      return { ...e, intent };
+      const intents = Array.from(this.inMemoryDeliveryIntents.values()).filter(
+        (i) => i.event_id === e.event_id,
+      );
+      return { ...e, intent: intents[0] ?? null, intents };
     });
   }
 
@@ -2556,32 +3103,33 @@ export class RegulatoryRegistryRepository {
           FROM reg.phase1_registry_expiry_events e
           LEFT JOIN reg.phase1_registry_expiry_delivery_intents i ON e.event_id = i.event_id
           WHERE e.event_id = $1
-          LIMIT 1
         `,
         [eventId],
       );
       if (result.rows.length === 0) return null;
-      const row = result.rows[0];
-      const {
-        intent_id,
-        intent_scope,
-        idempotency_key,
-        tenant_id,
-        recipient_email,
-        from_email,
-        subject,
-        body,
-        delivery_status,
-        outbox_delivery_id,
-        intent_last_error,
-        enqueued_at,
-        intent_created_at,
-        intent_updated_at,
-        ...eventFields
-      } = row;
-
-      const intent: RegistryExpiryDeliveryIntentRow | null = intent_id
-        ? {
+      let eventBase: Omit<RegistryExpiryEventWithIntent, "intent" | "intents"> | null = null;
+      const intents: RegistryExpiryDeliveryIntentRow[] = [];
+      for (const row of result.rows) {
+        const {
+          intent_id,
+          intent_scope,
+          idempotency_key,
+          tenant_id,
+          recipient_email,
+          from_email,
+          subject,
+          body,
+          delivery_status,
+          outbox_delivery_id,
+          intent_last_error,
+          enqueued_at,
+          intent_created_at,
+          intent_updated_at,
+          ...eventFields
+        } = row;
+        eventBase ??= eventFields;
+        if (intent_id && !intents.some((i) => i.intent_id === intent_id)) {
+          intents.push({
             intent_id,
             event_id: eventFields.event_id,
             scope: intent_scope ?? eventFields.scope,
@@ -2597,18 +3145,23 @@ export class RegulatoryRegistryRepository {
             enqueued_at,
             created_at: intent_created_at ?? eventFields.created_at,
             updated_at: intent_updated_at ?? eventFields.updated_at,
-          }
-        : null;
+          });
+        }
+      }
 
-      return { ...eventFields, intent };
+      if (!eventBase) return null;
+      return {
+        ...eventBase,
+        intent: intents[0] ?? null,
+        intents,
+      };
     }
 
     const e = this.inMemoryExpiryEvents.get(eventId);
     if (!e) return null;
-    const intent =
-      Array.from(this.inMemoryDeliveryIntents.values()).find(
-        (i) => i.event_id === e.event_id,
-      ) ?? null;
-    return { ...e, intent };
+    const intents = Array.from(this.inMemoryDeliveryIntents.values()).filter(
+      (i) => i.event_id === e.event_id,
+    );
+    return { ...e, intent: intents[0] ?? null, intents };
   }
 }

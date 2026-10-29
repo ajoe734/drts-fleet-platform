@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   uploadOperationalDocument,
+  prepareOperationalReferralHandoff,
+  observeOperationalReferralZeroOrders,
   runSetup,
   runOperationalDocumentAcceptance,
   operationalRequestHeaders,
@@ -27,13 +29,22 @@ import {
   type Route,
 } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import journeysData from "../e2e/fixtures/operational-browser-journeys.json";
 import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
+import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { SupplyDocumentService } from "../../apps/api/src/modules/fleet-partner/supply-document.service";
 import { SupplySubmissionService } from "../../apps/api/src/modules/fleet-partner/supply-submission.service";
 import { SupplySubmissionRepository } from "../../apps/api/src/modules/fleet-partner/supply-submission.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { fleetStorageFixture } from "./helpers/fleet-document-fixture";
+
+const { Reflector } = createRequire(
+  new URL("../../apps/api/package.json", import.meta.url),
+)("@nestjs/core");
 
 function checkActualPdf(bytes: Buffer) {
   const text = bytes.toString("ascii");
@@ -155,6 +166,7 @@ export class MockServer {
   }> = [];
   records: any[] = [];
   documents: any[] = [];
+  confirmedDocuments: any[] = [];
   revision = 1;
   active: any = null;
   bytes: Buffer | null = null;
@@ -210,6 +222,10 @@ export class MockServer {
     confirmWrongDocType: false,
     confirmWrongId: false,
     confirmMissingCandidateSha: false,
+
+    canonicalDocumentMissing: false,
+    canonicalWrongKey: false,
+    canonicalWrongHash: false,
 
     readbackAbsent: false,
     readbackWrongMime: false,
@@ -298,6 +314,17 @@ export class MockServer {
                 fleet_partner_id: this.fleet,
                 revision_no: this.revision,
               },
+              documents: this.mutations.canonicalDocumentMissing
+                ? []
+                : this.confirmedDocuments.map((doc) => ({
+                    ...doc,
+                    ...(this.mutations.canonicalWrongKey
+                      ? { file_object_key: "wrong-key" }
+                      : {}),
+                    ...(this.mutations.canonicalWrongHash
+                      ? { checksum_sha256: "wrong-hash" }
+                      : {}),
+                  })),
             },
           },
           200,
@@ -437,6 +464,16 @@ export class MockServer {
         }
 
         this.revision++;
+        this.confirmedDocuments.push({
+          document_id: this.active?.documentId || "doc-1",
+          submission_id: "sub-setup-123",
+          fleet_partner_id: this.fleet,
+          document_type: this.active?.documentType,
+          file_object_key: this.active?.objectKey,
+          checksum_sha256: this.hash,
+          file_size: this.bytes!.length,
+          content_type: "application/pdf",
+        });
         return jsonResponse(
           {
             data: {
@@ -653,19 +690,23 @@ describe("uploadOperationalDocument", () => {
       headers,
     );
     expect(result.documentId).toBe("doc-1");
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
     expect(server.calls.map((c) => c.method)).toEqual([
       "GET",
       "POST",
       "PUT",
       "POST",
       "GET",
+      "GET",
     ]);
     expect(server.calls[2]?.bytes).toBeDefined();
     expect(server.calls[2]?.bytes?.length).toBe(327);
+    // Post-confirm canonical submission readback precedes the download.
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(result.canonicalReadbackStatus).toBe(200);
   });
 
-  it("carries separate Fleet application proof through all five validated document hops", async () => {
+  it("carries separate Fleet application proof through all six validated document hops", async () => {
     server.expectedApplicationAuth = "Bearer existing-partner-session-dummy";
     const result = await uploadOperationalDocument(
       mockRequest,
@@ -682,6 +723,7 @@ describe("uploadOperationalDocument", () => {
       "POST",
       "PUT",
       "POST",
+      "GET",
       "GET",
     ]);
     for (const call of server.calls) {
@@ -904,7 +946,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: (null|"")/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects oversized response exceeding 1MB", async () => {
@@ -920,7 +962,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects multi-chunk response cumulatively exceeding 1MB and observes reader cancel", async () => {
@@ -938,7 +980,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
     expect(server.readerCancelObserved).toBe(true);
     expect(server.readbackChunksRead).toBe(2);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("accepts exact 1MiB payload through byte guard before readback checksum validation", async () => {
@@ -956,7 +998,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(
       /4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784/,
     );
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects exact 1MiB plus 1 byte payload at byte guard", async () => {
@@ -972,7 +1014,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects strict MIME gap on readback", async () => {
@@ -988,7 +1030,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: "image\/png"/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects corrupt readback content with checksum mismatch", async () => {
@@ -1006,7 +1048,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(
       /4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784/,
     );
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects absent download readback with 404", async () => {
@@ -1022,7 +1064,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: 404/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE and verifies identical payload across attempts", async () => {
@@ -1042,7 +1084,7 @@ describe("uploadOperationalDocument", () => {
     }
     const result = await promise;
     expect(result.documentId).toBe("doc-1");
-    expect(server.calls.length).toBe(8);
+    expect(server.calls.length).toBe(9);
     const putCalls = server.calls.filter((c) => c.method === "PUT");
     expect(putCalls.length).toBe(4);
     for (const call of putCalls) {
@@ -1088,7 +1130,7 @@ describe("uploadOperationalDocument", () => {
       "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
     );
 
-    expect(server.calls.length).toBe(25);
+    expect(server.calls.length).toBe(26);
     const putCalls = server.calls.filter((c) => c.method === "PUT");
     expect(putCalls.length).toBe(21);
     for (const call of putCalls) {
@@ -1206,12 +1248,13 @@ describe("uploadOperationalDocument", () => {
     expect(server.downloadReaderStarted).toBe(true);
     expect(server.downloadReaderAborted).toBe(true);
     expect(server.downloadPassedSignal).toBeTruthy();
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
     expect(server.calls.map((c) => c.method)).toEqual([
       "GET",
       "POST",
       "PUT",
       "POST",
+      "GET",
       "GET",
     ]);
   });
@@ -1444,6 +1487,60 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(/Received: "wrong-key"/);
     expect(server.calls.length).toBe(4);
   });
+
+  it("rejects when canonical submission readback omits the confirmed document", async () => {
+    server.mutations.canonicalDocumentMissing = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: undefined/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
+
+  it("rejects when canonical submission readback returns a different file_object_key", async () => {
+    server.mutations.canonicalWrongKey = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: "wrong-key"/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
+
+  it("rejects when canonical submission readback returns a different checksum", async () => {
+    server.mutations.canonicalWrongHash = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: "wrong-hash"/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
 });
 
 describe("runSetup execution with actual manifest", () => {
@@ -1542,23 +1639,23 @@ describe("runSetup execution with actual manifest", () => {
 
     // Call order validation:
     // Call 0: generic driver submission creation (native, without Playwright trace)
-    // Calls 1..5: document upload 1 (authority GET, intent POST, PUT, confirm POST, download GET) (raw-fetch)
-    // Call 6: generic submission readback (native, without Playwright trace)
-    // Calls 7..11: document upload 2 (authority GET, intent POST, PUT, confirm POST, download GET) (raw-fetch)
-    expect(server.calls.length).toBe(12);
+    // Calls 1..6: document upload 1 (authority GET, intent POST, PUT, confirm POST, canonical GET, download GET) (raw-fetch)
+    // Call 7: generic submission readback (native, without Playwright trace)
+    // Calls 8..13: document upload 2 (authority GET, intent POST, PUT, confirm POST, canonical GET, download GET) (raw-fetch)
+    expect(server.calls.length).toBe(14);
     expect(server.calls[0]?.ioBoundary).toBe("raw-fetch");
     expect(server.calls[0]?.pathname).toBe(
       "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
     );
-    expect(server.calls[6]?.ioBoundary).toBe("raw-fetch");
-    expect(server.calls[6]?.pathname).toBe(
+    expect(server.calls[7]?.ioBoundary).toBe("raw-fetch");
+    expect(server.calls[7]?.pathname).toBe(
       "/control-plane-proxy/fleet-partner/supply-submissions/sub-setup-123",
     );
-    const docCalls1 = server.calls.slice(1, 6);
+    const docCalls1 = server.calls.slice(1, 7);
     for (const c of docCalls1) {
       expect(c.ioBoundary).toBe("raw-fetch");
     }
-    const docCalls2 = server.calls.slice(7, 12);
+    const docCalls2 = server.calls.slice(8, 14);
     for (const c of docCalls2) {
       expect(c.ioBoundary).toBe("raw-fetch");
     }
@@ -1969,29 +2066,92 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
   let maskOutput: string[];
   let revokedKey: boolean;
   let revokedEntry: boolean;
+  const declaredScopes = ["billing:read", "partner:read", "partner:write"];
+  const issuedScopes = () =>
+    (calls.find((c) => c.path.endsWith("/credentials/issue"))?.body
+      .scopes as string[]) ?? ["billing:read"];
   const credential = () => ({
     keyId: "own-key-dummy",
-    entrySlug: entry.entrySlug,
+    entrySlug:
+      fault === "receipt-foreign-entry" ? "foreign-entry" : entry.entrySlug,
     realm: "partner",
+    ownerRef:
+      fault === "receipt-foreign-owner" ? "foreign-owner" : entry.entrySlug,
+    ownerType: "operational_acceptance",
     resourceScope: `partner_entry:${String(entry.entrySlug)}`,
-    scopes: ["billing:read"],
-    status: revokedKey ? "revoked" : "active",
-    revokedAt: revokedKey ? "2026-10-19T00:00:00Z" : null,
+    scopes:
+      fault === "receipt-missing"
+        ? null
+        : fault === "receipt-read-only"
+          ? ["billing:read"]
+          : fault === "receipt-extra"
+            ? [...issuedScopes(), "billing:write"]
+            : issuedScopes(),
+    expiresAt:
+      fault === "receipt-expiry"
+        ? "2000-01-01T00:00:00.000Z"
+        : calls.find((c) => c.path.endsWith("/credentials/issue"))?.body
+            .expiresAt,
+    status: revokedKey || fault === "receipt-revoked" ? "revoked" : "active",
+    revokedAt:
+      revokedKey || fault === "receipt-revoked" ? "2026-10-19T00:00:00Z" : null,
   });
+  const directScopes = [
+    "billing:read",
+    "fleet:read",
+    "fleet:finance:read",
+    "fleet:supply:write",
+  ];
+  const providedScopeSets: Record<string, string[]> = {
+    "provided-direct": directScopes,
+    "provided-direct-inactive": directScopes,
+    "provided-direct-foreign-tenant": directScopes,
+    "provided-direct-foreign-fleet": directScopes,
+    "provided-direct-revoked": directScopes,
+    "provided-mixed": ["billing:read", "partner:read", "fleet:supply:write"],
+    "provided-direct-read-only": directScopes.slice(0, 3),
+    "provided-direct-write-only": ["billing:read", "fleet:supply:write"],
+    "provided-finance-only": [
+      "billing:read",
+      "fleet:finance:read",
+      "fleet:supply:write",
+    ],
+    "provided-mixed-without-legacy-read": [
+      "billing:read",
+      "fleet:read",
+      "fleet:finance:read",
+      "partner:write",
+    ],
+    "provided-read-only": ["billing:read", "partner:read"],
+  };
   const identity = () => ({
+    authMode: "jwt_bearer",
     realm: fault === "wrong-role" ? "tenant" : "partner",
     actorType: "partner_api_key",
     actorId: fault === "wrong-key" ? "foreign-key-dummy" : "own-key-dummy",
     principalId: "own-key-dummy",
     partnerId:
-      fault === "wrong-fleet"
+      fault === "wrong-fleet" || fault === "provided-direct-foreign-fleet"
         ? "foreign-fleet-dummy"
         : configuration.fleetPartnerId,
-    partnerEntrySlug: entry.entrySlug,
-    tenantId: configuration.tenantId,
-    partnerProgramId: entry.programId,
+    partnerEntrySlug:
+      fault === "foreign-entry" ? "foreign-entry" : entry.entrySlug,
+    tenantId:
+      fault === "foreign-tenant" || fault === "provided-direct-foreign-tenant"
+        ? "foreign-tenant"
+        : configuration.tenantId,
+    partnerProgramId:
+      fault === "foreign-program" ? "foreign-program" : entry.programId,
     sessionId: "own-session-dummy",
-    scopes: ["billing:read"],
+    scopes:
+      providedScopeSets[fault] ??
+      (fault === "session-read-only"
+        ? ["billing:read"]
+        : fault === "session-extra"
+          ? [...issuedScopes(), "billing:write"]
+          : calls.some((c) => c.path.endsWith("/credentials/issue"))
+            ? issuedScopes()
+            : declaredScopes),
   });
   const reply = (data: unknown, status = 200) =>
     new Response(JSON.stringify(deepToSnakeCase({ data })), {
@@ -2245,7 +2405,20 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
             `Bearer ${process.env.DRTS_OPERATIONAL_FLEET_SESSION_TOKEN || token}`,
           );
           if (fault === "session-denied") return reply({ error: token }, 401);
-          return reply({ active: true, identity: identity() });
+          if (
+            fault === "session-revoked" ||
+            fault === "provided-direct-revoked"
+          )
+            return authError("SESSION_REVOKED", 401);
+          return reply({
+            active:
+              fault !== "session-inactive" &&
+              fault !== "provided-direct-inactive",
+            identity:
+              fault === "session-echo-actor"
+                ? { ...identity(), actorId: "other-key" }
+                : identity(),
+          });
         }
         if (
           url.pathname === "/api/auth/sessions/revoke" &&
@@ -2304,7 +2477,66 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       "bootstrap-session",
       "session",
     ]);
-    expect(businessCalls()[2]?.body.scopes).toEqual(["billing:read"]);
+    expect(businessCalls()[2]?.body.scopes).toEqual(declaredScopes);
+    const expiry = Date.parse(String(businessCalls()[2]?.body.expiresAt));
+    expect(expiry - Date.now()).toBeGreaterThan(0);
+    expect(expiry - Date.now()).toBeLessThanOrEqual(60 * 60_000);
+    const guard = new BootstrapAuthGuard({} as any) as any;
+    const route = "/api/fleet-partner/supply-submissions/drivers";
+    const policy = resolveRouteAuthPolicy("POST", route)!;
+    expect(policy.requiredScopes).toEqual(["fleet:supply:write"]);
+    const principal = { ...identity(), membershipId: null, roles: [] };
+    const req = { method: "POST", originalUrl: route, headers: {} };
+    const result = (subject: any, required: string[], request: any) => {
+      try {
+        guard.assertScopesAllowed(subject, required, request);
+        return "allowed";
+      } catch (error) {
+        return { status: (error as any).status, code: (error as any).code };
+      }
+    };
+    expect(
+      result(
+        { ...principal, scopes: ["billing:read"] },
+        policy.requiredScopes,
+        req,
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    expect(result(principal, policy.requiredScopes, req)).toBe("allowed");
+    for (const scopes of [
+      ["billing:read", "partner:read"],
+      ["billing:read", "partner:write"],
+    ])
+      expect(
+        result({ ...principal, scopes }, policy.requiredScopes, req),
+      ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    expect(
+      result(principal, policy.requiredScopes, {
+        ...req,
+        headers: { "x-fleet-partner-id": "foreign-fleet" },
+      }),
+    ).toEqual({ status: 403, code: "FLEET_SCOPE_DENIED" });
+    expect(
+      result(
+        {
+          ...principal,
+          actorType: "partner_user",
+          membershipId: "finance-member",
+          roles: ["fleet_partner_finance"],
+          scopes: ["fleet:finance:read"],
+        },
+        policy.requiredScopes,
+        req,
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    const finance = "/api/fleet-partner/statements/test/dispute";
+    expect(
+      result(
+        principal,
+        resolveRouteAuthPolicy("POST", finance)!.requiredScopes,
+        { ...req, originalUrl: finance },
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
     expect(
       operationalRequestHeaders(
         "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
@@ -2595,6 +2827,181 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     expect(maskOutput).toEqual(["::add-mask::provided-session-dummy\n"]);
   });
 
+  it.each(["provided-direct", "provided-mixed"])(
+    "accepts a backend-authorized %s provided own Fleet session without minting or revoking anything",
+    async (variant) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = variant;
+      const principal = { ...identity(), membershipId: null, roles: [] };
+      const guard = new BootstrapAuthGuard({} as any) as any;
+      for (const [method, route] of [
+        ["GET", "/api/fleet-partner/dashboard"],
+        ["GET", "/api/fleet-partner/supply-submissions"],
+        ["POST", "/api/fleet-partner/supply-submissions/drivers"],
+      ] as const) {
+        const policy = resolveRouteAuthPolicy(method, route)!;
+        expect(policy).toBeTruthy();
+        expect(() =>
+          guard.assertScopesAllowed(principal, policy.requiredScopes, {
+            method,
+            originalUrl: route,
+            headers: {},
+          }),
+        ).not.toThrow();
+      }
+      prepared = await prepareOperationalFleetSession(configuration);
+      expect(prepared.metadata.source).toBe("provided-session");
+      await prepared.cleanup();
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+      expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
+      expect(maskOutput).toEqual(["::add-mask::provided-session-dummy\n"]);
+    },
+  );
+
+  it.each([
+    "provided-direct-read-only",
+    "provided-direct-write-only",
+    "provided-finance-only",
+    "provided-mixed-without-legacy-read",
+    "provided-direct-inactive",
+    "provided-direct-foreign-tenant",
+    "provided-direct-foreign-fleet",
+    "provided-direct-revoked",
+  ])(
+    "rejects insufficient %s provided session without any mutation",
+    async (variant) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = variant;
+      if (
+        ![
+          "provided-direct-inactive",
+          "provided-direct-foreign-tenant",
+          "provided-direct-foreign-fleet",
+          "provided-direct-revoked",
+        ].includes(variant)
+      ) {
+        const route =
+          variant === "provided-direct-write-only" ||
+          variant === "provided-finance-only"
+            ? "/api/fleet-partner/dashboard"
+            : "/api/fleet-partner/supply-submissions/drivers";
+        const method = route.endsWith("/drivers") ? "POST" : "GET";
+        const guard = new BootstrapAuthGuard({} as any) as any;
+        const policy = resolveRouteAuthPolicy(method, route)!;
+        expect(() =>
+          guard.assertScopesAllowed(
+            { ...identity(), membershipId: null, roles: [] },
+            policy.requiredScopes,
+            { method, originalUrl: route, headers: {} },
+          ),
+        ).toThrow();
+      }
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(
+        variant === "provided-direct-revoked"
+          ? /provided session failed \(HTTP 401 code SESSION_REVOKED\)/
+          : /verified session/,
+      );
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+      expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
+    },
+  );
+
+  it("rejects a real provided read-only session before any mutation without minting or revoking it", async () => {
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+      "provided-session-dummy",
+    );
+    fault = "provided-read-only";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /verified session/,
+    );
+    expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+    expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
+  });
+
+  it.each([
+    "receipt-missing",
+    "receipt-read-only",
+    "receipt-extra",
+    "receipt-expiry",
+    "receipt-foreign-owner",
+    "receipt-revoked",
+  ])(
+    "rejects %s after normal first-key issuance and cleans owned resources",
+    async (failure) => {
+      fault = failure;
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/first key receipt/);
+      expect(revokedKey && revokedEntry && adminRevoked).toBe(true);
+      expect(calls.some((c) => c.path.endsWith("bootstrap-session"))).toBe(
+        false,
+      );
+    },
+  );
+
+  it("does not revoke a key whose issue receipt names a foreign Entry", async () => {
+    fault = "receipt-foreign-entry";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /first key receipt/,
+    );
+    expect(revokedKey).toBe(false);
+    expect(revokedEntry && adminRevoked).toBe(true);
+    expect(
+      calls.some((c) => c.path.includes("foreign-entry/credentials")),
+    ).toBe(false);
+  });
+
+  it.each([
+    "session-read-only",
+    "session-extra",
+    "foreign-entry",
+    "foreign-tenant",
+    "foreign-program",
+    "session-inactive",
+    "session-echo-actor",
+  ])(
+    "rejects %s bootstrap identity without leaking secrets, cleans own resources",
+    async (failure) => {
+      fault = failure;
+      const error = await prepareOperationalFleetSession(configuration).catch(
+        (e: unknown) => e,
+      );
+      expect(String(error)).toMatch(/session/);
+      expect(String(error)).not.toContain(plaintextKey);
+      expect(String(error)).not.toContain(token);
+      expect(revokedKey && revokedEntry && adminRevoked).toBe(true);
+    },
+  );
+
+  it.each([
+    "foreign-tenant",
+    "wrong-fleet",
+    "session-inactive",
+    "session-revoked",
+  ])(
+    "rejects %s supplied session without minting or revoking other resources",
+    async (failure) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = failure;
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/provided session|verified session/);
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+    },
+  );
+
   it("does not mint a substitute after a provided session is denied", async () => {
     vi.stubEnv(
       "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
@@ -2802,6 +3209,10 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       string,
       { bytes: Buffer; contentType: string; documentType: string }
     >();
+    const confirmedSupplyDocuments = new Map<
+      string,
+      Array<Record<string, unknown>>
+    >();
 
     global.fetch = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2821,6 +3232,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 submission_type: "vehicle_onboarding",
                 revision_no: 1,
               },
+              documents: confirmedSupplyDocuments.get("sub-veh-001") ?? [],
             },
           });
         }
@@ -2837,6 +3249,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 submission_type: "driver_onboarding",
                 revision_no: 1,
               },
+              documents: confirmedSupplyDocuments.get("sub-drv-001") ?? [],
             },
           });
         }
@@ -2882,6 +3295,23 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
           const stored = uploadedObjects.get(body.objectKey)!;
           const docId = `doc-${body.documentType}`;
           uploadedObjects.set(`${subId}:${docId}`, stored);
+          confirmedSupplyDocuments.set(subId, [
+            ...(confirmedSupplyDocuments.get(subId) ?? []).filter(
+              (item) => item.document_id !== docId,
+            ),
+            {
+              document_id: docId,
+              submission_id: subId,
+              fleet_partner_id: "fleet-demo-001",
+              document_type: body.documentType,
+              file_object_key: body.objectKey,
+              checksum_sha256: createHash("sha256")
+                .update(stored.bytes)
+                .digest("hex"),
+              file_size: stored.bytes.length,
+              content_type: stored.contentType,
+            },
+          ]);
           return jsonResponse({
             data: {
               document_id: docId,
@@ -2979,6 +3409,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         { Authorization: "Bearer tok" },
       );
       expect(ev.confirmDocumentType).toBe(spec.documentType);
+      expect(ev.canonicalReadbackStatus).toBe(200);
       expect(ev.readbackContentType).toBe(spec.contentType);
       expect(ev.readbackSha256).toBe(ev.sha256);
       const reviewerSupplyReadback =
@@ -4284,5 +4715,548 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
       ),
     ).rejects.toThrow(/requires a verified backend session token/);
+  });
+});
+
+// External HTTP ports only are simulated. These execute the real issuer and
+// Ops evidence helpers; no browser, server, JWT issuer or database is started.
+describe("original referral first-visit issuer and canonical zero-order evidence", () => {
+  const sha = "a".repeat(40);
+  const origin = "https://api.example.invalid";
+  const entry = {
+    entry_slug: "yuhe-residence",
+    entry_host: "host.example.invalid",
+    tenant_id: "tenant-RAM",
+    partner_id: "partner-RAM",
+    program_id: "program-RAM",
+  };
+  const issued = {
+    handoff_id: "ref_handoff_00000000-0000-4000-8000-000000000001",
+    artifact: "x".repeat(32),
+    token_type: "SingleUse",
+    expires_in: "120s",
+    expires_at: "2099-01-01T00:00:00Z",
+    partner_entry_slug: entry.entry_slug,
+    entry_host: entry.entry_host,
+    drts_passenger_id: "passenger-RAM",
+    consent_required: true,
+    consent_bundle_version: null,
+  };
+  const subject = {
+    drtsPassengerId: issued.drts_passenger_id,
+    tenantId: entry.tenant_id,
+    partnerId: entry.partner_id,
+    partnerProgramId: entry.program_id,
+    entrySlug: entry.entry_slug,
+    entryHost: entry.entry_host,
+  };
+  const row = {
+    order_id: "private-unrelated-order",
+    passenger: { passenger_id: "other-person", name: "private-name" },
+    tenant_id: entry.tenant_id,
+    partner_id: entry.partner_id,
+    partner_program_id: entry.program_id,
+    partner_entry_slug: entry.entry_slug,
+  };
+  beforeEach(() => {
+    vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
+    vi.stubEnv("DRTS_DEV_API_BASE_URL", origin);
+    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "WIF-RAM");
+    vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "OPS-RAM");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  function ports(
+    change: {
+      entry?: unknown;
+      issued?: unknown;
+      issueStatus?: number;
+      orders?: unknown;
+      orderStatus?: number;
+      orderSha?: string;
+      sessionStatus?: number;
+      sessionSha?: string;
+      identity?: Record<string, unknown>;
+    } = {},
+  ) {
+    const calls: Array<{ path: string; options: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, options: RequestInit) => {
+        const url = new URL(input);
+        expect(url.origin).toBe(origin);
+        expect(options.redirect).toBe("manual");
+        calls.push({ path: url.pathname, options });
+        const reply = (data: unknown, status = 200, candidate = sha) =>
+          new Response(JSON.stringify({ data }), {
+            status,
+            headers: {
+              "x-drts-candidate-sha": candidate,
+              "content-type": "application/json",
+            },
+          });
+        if (url.pathname === "/api/partner/entries/yuhe-residence")
+          return reply(change.entry ?? entry);
+        if (url.pathname === "/api/partner/ingress/referral-embed-handoff")
+          return reply(change.issued ?? issued, change.issueStatus ?? 201);
+        if (url.pathname === "/api/auth/session")
+          return reply(
+            {
+              active: true,
+              identity: {
+                realm: "ops",
+                actor_type: "ops_user",
+                actor_id: "ops-RAM",
+                roles: ["ops_user"],
+                scopes: ["owned:read"],
+                ...change.identity,
+              },
+            },
+            change.sessionStatus,
+            change.sessionSha,
+          );
+        if (url.pathname === "/api/orders")
+          return reply(
+            change.orders ?? { items: [row] },
+            change.orderStatus,
+            change.orderSha,
+          );
+        throw new Error("unexpected external port");
+      }),
+    );
+    return calls;
+  }
+  it("uses one fresh synthetic issuer subject, separate WIF/issuer proof, and independently verified Ops before/after counts", async () => {
+    const calls = ports();
+    const first = await prepareOperationalReferralHandoff(
+      entry.entry_slug,
+      entry.entry_host,
+    );
+    await prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host);
+    expect(first.subject).toEqual(subject);
+    const issueCalls = calls.filter((call) => call.path.endsWith("handoff"));
+    const commands = issueCalls.map((call) =>
+      JSON.parse(String(call.options.body)),
+    );
+    expect(commands[0]).toEqual({
+      entrySlug: entry.entry_slug,
+      entryHost: entry.entry_host,
+      partnerUserRef: expect.stringMatching(
+        /^operational-refusal-[0-9a-f-]{36}$/,
+      ),
+      consentBundle: null,
+    });
+    expect(commands[0].partnerUserRef).not.toBe(commands[1].partnerUserRef);
+    for (const call of calls.filter((call) =>
+      call.path.includes("/entries/"),
+    )) {
+      expect(call.options.headers).toEqual({});
+    }
+    expect(issueCalls[0]!.options.headers).toEqual({
+      "content-type": "application/json",
+      "x-drts-google-id-token": "WIF-RAM",
+    });
+    const before = await observeOperationalReferralZeroOrders(
+      first.subject,
+      "before-refusal",
+    );
+    const after = await observeOperationalReferralZeroOrders(
+      first.subject,
+      "after-refusal",
+    );
+    expect(before.subjectKey).toBe(after.subjectKey);
+    expect(before).toMatchObject({
+      count: 0,
+      status: 200,
+      sessionStatus: 200,
+      durableSourceProof: "pending-original-deployment-record",
+    });
+    expect(calls.slice(-4).map(({ path }) => path)).toEqual([
+      "/api/auth/session",
+      "/api/orders",
+      "/api/auth/session",
+      "/api/orders",
+    ]);
+    for (const { options } of calls.slice(-4)) {
+      expect(options.headers).toEqual({
+        Authorization: "Bearer WIF-RAM",
+        "x-drts-authorization": "Bearer OPS-RAM",
+      });
+      expect(options.method).toBe("GET");
+    }
+    expect(JSON.stringify([before, after])).not.toMatch(
+      /RAM|private|other-person|WIF|OPS/,
+    );
+  });
+  it.each([
+    "http://api.example.invalid",
+    "https://user:private@api.example.invalid",
+    "https://api.example.invalid/#private",
+  ])(
+    "rejects an unsafe issuer target before transporting proof: %s",
+    async (target) => {
+      const calls = ports();
+      vi.stubEnv("DRTS_DEV_API_BASE_URL", target);
+      await expect(
+        prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+      ).rejects.toThrow("Invalid referral issuer target");
+      expect(calls).toHaveLength(0);
+    },
+  );
+  it("isolates named WIF from other API consumers and rejects using it as an Ops session", async () => {
+    ports();
+    expect(operationalRequestHeaders("DRTS_DEV_API_BASE_URL", origin)).toEqual(
+      {},
+    );
+    expect(
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        origin,
+      ),
+    ).toEqual({ Authorization: "Bearer OPS-RAM" });
+    expect(() =>
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        "https://other.example.invalid",
+        {},
+        "WIF-RAM",
+      ),
+    ).toThrow("exact credential-free origin");
+    expect(() =>
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        origin,
+        { "x-roles": "ops_user" },
+        "WIF-RAM",
+      ),
+    ).toThrow("Spoofed identity header");
+    vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "WIF-RAM");
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "before-refusal"),
+    ).rejects.toThrow("must be distinct from Cloud Run invocation proof");
+  });
+  it.each(["entry", "issuer"] as const)(
+    "passes the actual %s open-route guard without treating WIF as an application JWT",
+    async (boundary) => {
+      // Even if a caller's environment has generic API WIF, neither open
+      // route may feed it into application Bearer verification.
+      vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "WIF-RAM");
+      ports();
+      const externalFetch = globalThis.fetch;
+      const guard = new BootstrapAuthGuard(
+        new Reflector(),
+        new JwtAuthService(),
+      );
+      const rejections: Array<{ status: number; code: string }> = [];
+      let guardedCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        async (input: string | URL, options: RequestInit) => {
+          const url = new URL(input);
+          const isIssuer = url.pathname.endsWith("handoff");
+          if ((boundary === "issuer") === isIssuer) {
+            guardedCalls++;
+            const request = {
+              method: options.method,
+              url: url.pathname,
+              headers: Object.fromEntries(
+                new Headers(options.headers).entries(),
+              ),
+            };
+            try {
+              await guard.canActivate({
+                switchToHttp: () => ({ getRequest: () => request }),
+                getClass: () => TenantPartnerController,
+                getHandler: () =>
+                  isIssuer
+                    ? TenantPartnerController.prototype
+                        .issueReferralEmbedHandoffArtifact
+                    : TenantPartnerController.prototype.getPartnerEntry,
+              } as never);
+            } catch (error) {
+              const rejection = error as { getStatus(): number; code: string };
+              rejections.push({
+                status: rejection.getStatus(),
+                code: rejection.code,
+              });
+              return new Response(
+                JSON.stringify({ error: { code: rejection.code } }),
+                { status: rejection.getStatus() },
+              );
+            }
+          }
+          return externalFetch(input, options);
+        },
+      );
+      let completed = false;
+      try {
+        await prepareOperationalReferralHandoff(
+          entry.entry_slug,
+          entry.entry_host,
+        );
+        completed = true;
+      } catch {
+        // Keep only the real guard's safe status/code as the red/green diagnosis.
+      }
+      expect(rejections).toEqual([]);
+      expect(guardedCalls).toBe(1);
+      expect(completed).toBe(true);
+    },
+  );
+  it.each(["before-refusal", "after-refusal"] as const)(
+    "accepts unrelated phone rows with absent/undefined passenger IDs during %s",
+    async (phase) => {
+      ports({
+        orders: {
+          items: [
+            { ...row, partner_entry_slug: null, passenger: {} },
+            {
+              ...row,
+              partner_entry_slug: null,
+              passenger: { passenger_id: undefined },
+            },
+          ],
+        },
+      });
+      expect(
+        await observeOperationalReferralZeroOrders(subject, phase),
+      ).toMatchObject({ count: 0, phase });
+    },
+  );
+  it("rejects a controlled-subject order after an unrelated phone row", async () => {
+    ports({
+      orders: {
+        items: [
+          { ...row, partner_entry_slug: null, passenger: {} },
+          {
+            ...row,
+            tenant_id: "other",
+            passenger: { passenger_id: subject.drtsPassengerId },
+          },
+        ],
+      },
+    });
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "after-refusal"),
+    ).rejects.toThrow("Referral controlled subject has canonical orders");
+  });
+  // resolveTenantPassengerProfile explicitly returns passengerId:null for
+  // bookings without a master passenger. _executeCreateTenantBooking can
+  // independently retain a partner entry; the canonical wire preserves null.
+  it.each([
+    [entry.entry_slug, "before-refusal"],
+    [entry.entry_slug, "after-refusal"],
+    [null, "before-refusal"],
+    [null, "after-refusal"],
+  ] as const)(
+    "accepts an unrelated explicit-null passenger with entry %s during %s",
+    async (partnerEntrySlug, phase) => {
+      const calls = ports({
+        orders: {
+          items: [
+            row,
+            {
+              ...row,
+              partner_entry_slug: partnerEntrySlug,
+              passenger: { passenger_id: null, name: "private-name" },
+            },
+          ],
+        },
+      });
+      const result = await observeOperationalReferralZeroOrders(subject, phase);
+      expect(result).toMatchObject({ count: 0, phase, status: 200 });
+      expect(calls.map(({ path }) => path)).toEqual([
+        "/api/auth/session",
+        "/api/orders",
+      ]);
+      expect(JSON.stringify(result)).not.toMatch(/private|RAM|other-person/);
+    },
+  );
+  it.each([entry.entry_slug, null])(
+    "rejects missing/undefined/invalid passenger IDs with entry %s",
+    async (partnerEntrySlug) => {
+      for (const passenger of [
+        ...(partnerEntrySlug === null ? [] : [{}, { passenger_id: undefined }]),
+        { passenger_id: "" },
+        { passenger_id: " " },
+        { passenger_id: 0 },
+        { passenger_id: false },
+        { passenger_id: {} },
+        { passenger_id: [] },
+      ]) {
+        ports({
+          orders: {
+            items: [
+              { ...row, partner_entry_slug: partnerEntrySlug, passenger },
+            ],
+          },
+        });
+        await expect(
+          observeOperationalReferralZeroOrders(subject, "before-refusal"),
+        ).rejects.toThrow("Referral canonical orders row malformed");
+      }
+    },
+  );
+  it("still rejects a controlled-subject order after an unrelated explicit-null passenger", async () => {
+    ports({
+      orders: {
+        items: [
+          { ...row, passenger: { passenger_id: null } },
+          {
+            ...row,
+            tenant_id: "other",
+            partner_entry_slug: "other",
+            passenger: { passenger_id: subject.drtsPassengerId },
+          },
+        ],
+      },
+    });
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "after-refusal"),
+    ).rejects.toThrow("Referral controlled subject has canonical orders");
+  });
+  it("retains only a safe issuer 403 status and rejects invalid JSON without payload leakage", async () => {
+    ports({ issueStatus: 403 });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow(
+      /^Referral evidence POST \/api\/partner\/ingress\/referral-embed-handoff failed: HTTP 403$/,
+    );
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response("private-not-json", {
+          headers: { "x-drts-candidate-sha": sha },
+        }),
+    );
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow(
+      /^Referral evidence GET \/api\/partner\/entries\/yuhe-residence failed: invalid envelope or JSON$/,
+    );
+  });
+  it("rejects an issuer HTTP 200 in place of the formal Nest 201", async () => {
+    ports({ issueStatus: 200 });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("HTTP 200");
+  });
+  it.each([
+    ["missing passenger", { drts_passenger_id: undefined }],
+    ["missing handoff", { handoff_id: undefined }],
+    ["wrong entry", { partner_entry_slug: "other" }],
+    ["wrong host", { entry_host: "other" }],
+    ["active consent", { consent_required: false }],
+    ["bundle", { consent_bundle_version: "unsafe" }],
+    ["missing artifact", { artifact: undefined }],
+    ["expired", { expires_at: "2000-01-01" }],
+    ["wrong type", { token_type: "Bearer" }],
+  ])("rejects issuer %s", async (_label, fields) => {
+    ports({ issued: { ...issued, ...fields } });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("issuance contract invalid");
+  });
+  it.each([
+    { tenant_id: undefined },
+    { partner_id: undefined },
+    { program_id: undefined },
+    { entry_slug: "other" },
+    { entry_host: "other" },
+  ])("rejects missing/changed canonical entry binding %j", async (fields) => {
+    const calls = ports({ entry: { ...entry, ...fields } });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("entry binding invalid");
+    expect(calls).toHaveLength(1);
+  });
+  it.each([
+    {
+      label: "nonzero",
+      orders: {
+        items: [
+          { ...row, passenger: { passenger_id: subject.drtsPassengerId } },
+        ],
+      },
+    },
+    {
+      label: "wrong-scope subject order",
+      orders: {
+        items: [
+          {
+            ...row,
+            tenant_id: "other",
+            partner_entry_slug: "other",
+            passenger: { passenger_id: subject.drtsPassengerId },
+          },
+        ],
+      },
+    },
+    { label: "missing list", orders: {} },
+    { label: "null list", orders: { items: null } },
+    { label: "partial", orders: { items: [], page_info: { total_items: 2 } } },
+    { label: "malformed row", orders: { items: [null] } },
+    {
+      label: "missing row owner",
+      orders: { items: [{ ...row, passenger: {} }] },
+    },
+    {
+      label: "missing tenant",
+      orders: { items: [{ ...row, tenant_id: undefined }] },
+    },
+    { label: "orders non-200", orderStatus: 403 },
+    { label: "orders partial HTTP", orderStatus: 206 },
+    { label: "orders redirect", orderStatus: 307 },
+    { label: "orders wrong SHA", orderSha: "b".repeat(40) },
+    { label: "session rejected", sessionStatus: 401 },
+    { label: "session wrong SHA", sessionSha: "b".repeat(40) },
+    { label: "missing owned:read", identity: { scopes: ["owned:write"] } },
+    {
+      label: "wrong role",
+      identity: { realm: "driver", actor_type: "driver", roles: ["driver"] },
+    },
+  ])("fails closed on canonical $label", async (change) => {
+    ports(change);
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "before-refusal"),
+    ).rejects.toThrow();
+  });
+  it("rejects missing credentials, invalid candidate and absent issued subject without exposing transport data", async () => {
+    ports();
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "");
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("WIF");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "WIF-RAM");
+    vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "");
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "after-refusal"),
+    ).rejects.toThrow("requires a verified backend session");
+    vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "OPS-RAM");
+    vi.stubEnv("DRTS_CANDIDATE_SHA", "");
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("immutable candidate");
+    vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
+    await expect(
+      observeOperationalReferralZeroOrders(
+        { ...subject, drtsPassengerId: "" },
+        "after-refusal",
+      ),
+    ).rejects.toThrow("subject binding missing");
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("secret artifact WIF-RAM private-name");
+    });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow(
+      /^Referral evidence GET \/api\/partner\/entries\/yuhe-residence failed: transport or JSON unavailable$/,
+    );
   });
 });

@@ -20,7 +20,10 @@ export type EvidenceAccessIdentity = Pick<
   "actorType" | "actorId" | "realm" | "scopes" | "tenantId"
 > &
   Partial<
-    Pick<IdentityContext, "partnerId" | "partnerProgramId" | "partnerEntrySlug">
+    Pick<
+      IdentityContext,
+      "partnerId" | "partnerProgramId" | "partnerEntrySlug" | "agencyId"
+    >
   >;
 
 const DEFAULT_LEGAL_HOLD_NOTES = [
@@ -140,6 +143,14 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         actorTypes: ["tenant_admin"],
         requiredScopes: ["reports:read"],
         tenantScoped: true,
+      },
+      // BUREAU-R13 §4.1: agency exporters reach only their own multi-taxi
+      // trip-record export jobs; ownership is enforced in reporting-filing.
+      {
+        realms: ["agency"],
+        actorTypes: ["agency_user"],
+        requiredScopes: ["agency:trip_records:export"],
+        tenantScoped: false,
       },
     ],
     maskingRules: [
@@ -800,7 +811,8 @@ function matchesRule(
   if (
     identity.scopes.length === 0 &&
     identity.actorType !== "partner_api_key" &&
-    identity.actorType !== "partner_user"
+    identity.actorType !== "partner_user" &&
+    identity.actorType !== "agency_user"
   ) {
     return true;
   }

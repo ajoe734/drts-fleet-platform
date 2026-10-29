@@ -199,6 +199,27 @@ export class CallcenterService implements OnModuleInit {
     });
   }
 
+  announceAgentIdentityForWrite(
+    callId: string,
+    command: AnnounceCallAgentIdentityCommand,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.announceAgentIdentity(callId, command, requestId, write),
+    );
+  }
+
+  quoteEtaForWrite(
+    callId: string,
+    command: QuoteCallEtaCommand,
+    requestId?: string,
+  ) {
+    this.assertPositiveEta(command.etaMinutes);
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.quoteEta(callId, command, requestId, write),
+    );
+  }
+
   attachRecordingCallbackForWrite(
     callId: string,
     command: AttachCallRecordingCommand,
@@ -669,30 +690,43 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     command: AnnounceCallAgentIdentityCommand,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     const announcedAt = command.announcedAt ?? new Date().toISOString();
     session.agentId = command.agentId?.trim() || session.agentId;
     session.agentIdentityAnnounced = true;
     session.agentIdentityAnnouncedAt = announcedAt;
-    this.persistSessions([session], "announce_agent_identity");
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "announce_agent_identity",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          agentId: session.agentId,
-          agentIdentityAnnouncedAt: announcedAt,
+    const audit = () =>
+      this.recordAudit(
+        {
+          actorId: session.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "announce_agent_identity",
+          resourceType: "call_session",
+          resourceId: session.callId,
+          newValuesSummary: {
+            agentId: session.agentId,
+            agentIdentityAnnouncedAt: announcedAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+
+    if (write)
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "announce_agent_identity",
+        audit,
+        () => undefined,
+      );
+    this.persistSessions([session], "announce_agent_identity");
+    audit();
 
     return this.cloneSession(session);
   }
@@ -741,30 +775,47 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  quoteEta(callId: string, command: QuoteCallEtaCommand, requestId?: string) {
+  quoteEta(
+    callId: string,
+    command: QuoteCallEtaCommand,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
     this.assertPositiveEta(command.etaMinutes);
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.lastEtaQuotedMinutes = command.etaMinutes;
     session.lastEtaQuotedAt = command.quotedAt ?? new Date().toISOString();
-    this.persistSessions([session], "quote_call_eta");
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "quote_call_eta",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          linkedOrderId: session.linkedOrderId,
-          etaMinutes: session.lastEtaQuotedMinutes,
-          quotedAt: session.lastEtaQuotedAt,
+    const audit = () =>
+      this.recordAudit(
+        {
+          actorId: session.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "quote_call_eta",
+          resourceType: "call_session",
+          resourceId: session.callId,
+          newValuesSummary: {
+            linkedOrderId: session.linkedOrderId,
+            etaMinutes: session.lastEtaQuotedMinutes,
+            quotedAt: session.lastEtaQuotedAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+
+    if (write)
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "quote_call_eta",
+        audit,
+        () => undefined,
+      );
+    this.persistSessions([session], "quote_call_eta");
+    audit();
 
     return this.cloneSession(session);
   }
@@ -1735,7 +1786,12 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  linkCaseToCallSession(callId: string, caseNo: string, requestId?: string) {
+  linkCaseToCallSession(
+    callId: string,
+    caseNo: string,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ): CallSessionRecord | Promise<CallSessionRecord> {
     const nextCaseNo = caseNo.trim();
     if (!nextCaseNo) {
       throw new ApiRequestError(
@@ -1745,7 +1801,26 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
-    const session = this.requireSession(callId);
+    if (write) {
+      return this.applyCaseLinkToSession(callId, nextCaseNo, requestId, write);
+    }
+    if (!this.callcenterRepository?.isEnabled()) {
+      this.requireSession(callId);
+    }
+    return this.runPhoneSessionWrite(callId, (activeWrite) =>
+      this.applyCaseLinkToSession(callId, nextCaseNo, requestId, activeWrite),
+    );
+  }
+
+  private applyCaseLinkToSession(
+    callId: string,
+    nextCaseNo: string,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ): CallSessionRecord | Promise<CallSessionRecord> {
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.linkedCaseNo = nextCaseNo;
     if (session.callbackTask) {
       session.callbackTask = {
@@ -1754,25 +1829,30 @@ export class CallcenterService implements OnModuleInit {
         updatedAt: new Date().toISOString(),
       };
     }
-    this.persistSessions([session], "link_call_case");
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "link_call_case",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          linkedCaseNo: session.linkedCaseNo,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "link_call_case",
+      () => {
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "link_call_case",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              linkedCaseNo: session.linkedCaseNo,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => undefined,
     );
-
-    return this.cloneSession(session);
   }
 
   recordIncidentTransfer(

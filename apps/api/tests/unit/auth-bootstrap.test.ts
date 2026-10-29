@@ -407,20 +407,40 @@ describe("bootstrap auth extraction", () => {
   });
 
   it.each([
-    ["/api/fleet-partner/dashboard", "fleet-partner:dashboard:GET"],
-    ["/api/fleet-partner/drivers", "fleet-partner:drivers:GET"],
-    ["/api/fleet-partner/vehicles", "fleet-partner:vehicles:GET"],
-    ["/api/fleet-partner/trips", "fleet-partner:trips:GET"],
-    ["/api/fleet-partner/statements", "fleet-partner:statements:GET"],
-    ["/api/fleet-partner/quality-metrics", "fleet-partner:quality-metrics:GET"],
+    [
+      "/api/fleet-partner/dashboard",
+      "fleet-partner:dashboard:GET",
+      ["fleet:read", "fleet:finance:read"],
+    ],
+    ["/api/fleet-partner/drivers", "fleet-partner:drivers:GET", ["fleet:read"]],
+    [
+      "/api/fleet-partner/vehicles",
+      "fleet-partner:vehicles:GET",
+      ["fleet:read"],
+    ],
+    [
+      "/api/fleet-partner/trips",
+      "fleet-partner:trips:GET",
+      ["fleet:read", "fleet:finance:read"],
+    ],
+    [
+      "/api/fleet-partner/statements",
+      "fleet-partner:statements:GET",
+      ["fleet:finance:read"],
+    ],
+    [
+      "/api/fleet-partner/quality-metrics",
+      "fleet-partner:quality-metrics:GET",
+      ["fleet:read", "fleet:finance:read"],
+    ],
   ])(
-    "protects fleet partner portal route %s with partner realm access",
-    (path, routeKey) => {
+    "protects fleet partner portal route %s with only its own Fleet capabilities",
+    (path, routeKey, requiredScopes) => {
       const policy = resolveRouteAuthPolicy("GET", path);
 
       expect(policy).toEqual({
         routeKey,
-        requiredScopes: ["billing:read"],
+        requiredScopes,
         allowedRealms: ["system", "partner"],
         description: "Fleet partner self-service access",
       });

@@ -85,6 +85,7 @@ export function P5Phone({
 }) {
   return (
     <div
+      className="pax-device"
       style={{
         width: 390,
         height: 844,
@@ -99,6 +100,7 @@ export function P5Phone({
       }}
     >
       <div
+        className="pax-statusbar"
         style={{
           height: 40,
           background: P5.brandDark,

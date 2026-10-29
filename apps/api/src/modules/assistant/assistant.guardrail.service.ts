@@ -114,6 +114,11 @@ const DEFAULT_RATE_LIMITS: AssistantRateLimitProfiles = {
     message_stream: { limit: 0, windowMs: 60_000 },
     tool_invoke: { limit: 0, windowMs: 60_000 },
   },
+  agency: {
+    conversation_create: { limit: 0, windowMs: 60_000 },
+    message_stream: { limit: 0, windowMs: 60_000 },
+    tool_invoke: { limit: 0, windowMs: 60_000 },
+  },
 };
 
 @Injectable()

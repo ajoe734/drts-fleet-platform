@@ -10,13 +10,14 @@
 import { ApiClientError } from "@drts/api-client";
 import type {
   CrossAppResourceLink,
+  DispatchExclusivityRecord,
   DriverRegistryRecord,
   EmptyReason,
   ResourceActionDescriptor,
   VehicleRegistryRecord,
 } from "@drts/contracts";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
-import { t as translateKey, type Locale } from "@/lib/translations";
+import { formatPlatformCodeLabel } from "../../lib/localized-labels";
+import { t as translateKey, type Locale } from "../../lib/translations";
 
 export type GovernedVehicleRecord = VehicleRegistryRecord &
   Record<string, unknown> & {
@@ -253,5 +254,28 @@ export function describeActionFailure(
         : error.apiMessage || error.message,
     reasons,
     traceId: error.traceId ?? null,
+  };
+}
+
+export function describeExclusivityOperatorBinding(
+  exclusivity: Pick<
+    DispatchExclusivityRecord,
+    "exclusiveOperatorId" | "exclusiveProviderName"
+  >,
+): {
+  operatorId: string | null;
+  providerName: string;
+  bound: boolean;
+  displayLabel: string;
+} {
+  const operatorId = exclusivity.exclusiveOperatorId?.trim() || null;
+  const providerName = exclusivity.exclusiveProviderName?.trim() || "—";
+  return {
+    operatorId,
+    providerName,
+    bound: Boolean(operatorId),
+    displayLabel: operatorId
+      ? `${providerName} (${operatorId})`
+      : `${providerName} (exclusivity_operator_unbound)`,
   };
 }

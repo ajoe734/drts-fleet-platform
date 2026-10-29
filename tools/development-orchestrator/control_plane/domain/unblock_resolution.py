@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .dispatch_policy import acceptance_review_snapshot
+
 
 def _timestamp(value: Any) -> datetime | None:
     try:
@@ -40,3 +42,36 @@ def parent_resume_blocker(
         if blocked_at is not None and (completed_at is None or blocked_at > completed_at):
             return "parent has an open blocker newer than the completed helper"
     return None
+
+
+# Explicit Supervisor-only resume basis for an already reviewed, same-SHA green
+# and merged task that was blocked before its acceptance phase. Distinct from
+# chair_policy.CANDIDATE_CI_RECOVERED: nothing is re-reviewed or re-merged.
+MERGED_RUNTIME_ACCEPTANCE_READY = "merged_runtime_acceptance_ready"
+
+
+def merged_acceptance_resume_identity(task: dict[str, Any]) -> dict[str, Any] | None:
+    """Frozen identity a blocked task must keep to re-enter its acceptance phase.
+
+    Reuses the acceptance-review snapshot rules (independent reviewer, same-SHA
+    review and successful CI, full merge SHA) as if the task had reached
+    acceptance normally. None means the task has no merged-acceptance route.
+    """
+    if task.get("status") != "blocked":
+        return None
+    snapshot = acceptance_review_snapshot({**task, "status": "acceptance"})
+    if snapshot is None:
+        return None
+    required = task.get("required_acceptance")
+    evidence = task.get("acceptance_evidence") or {}
+    if not isinstance(required, list) or not required or not isinstance(evidence, dict):
+        return None
+    return {
+        **snapshot,
+        "owner": task["owner"],
+        "candidate_branch": task.get("candidate_branch"),
+        "ci_sha": task["ci_sha"],
+        "ci_status": task["ci_status"],
+        "required_acceptance": list(required),
+        "recorded_acceptance": sorted(str(key) for key in evidence),
+    }

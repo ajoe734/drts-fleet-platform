@@ -591,7 +591,50 @@ export function extractAuthenticatedUserEmail(
   );
 }
 
-export function stripControlPlaneAuthQueryParams(targetUrl: URL) {
+// Only these existing report operations interpret tenantId as a business filter.
+// Without a method context (or for any other route), it remains an auth-spoof
+// parameter and is stripped along with the other identity selectors.
+const REPORT_TENANT_QUERY_OPERATIONS = new Set([
+  "GET /api/reports/daily-dispatch-records",
+  "GET /api/reports/referral-monthly-ratings",
+  "GET /api/reports/referral-monthly-ratings/governance",
+  "POST /api/reports/referral-monthly-ratings/governance/evaluate",
+]);
+
+export function stripControlPlaneAuthQueryParams(
+  targetUrl: URL,
+  method?: string,
+  body?: unknown,
+) {
+  const tenantValues = targetUrl.searchParams.getAll("tenantId");
+  const operation = `${method} ${targetUrl.pathname}`;
+  const allowedReport = REPORT_TENANT_QUERY_OPERATIONS.has(operation);
+  const preserveBusinessTenant =
+    allowedReport &&
+    tenantValues.length === 1 &&
+    Boolean(tenantValues[0]?.trim());
+  // The evaluate controller merges body over query before interpreting tenantId.
+  // A valid camel-case body selector therefore supersedes even an invalid query
+  // selector; otherwise a supplied invalid selector must not become "omitted".
+  const bodyOverridesTenant =
+    operation ===
+      "POST /api/reports/referral-monthly-ratings/governance/evaluate" &&
+    body !== null &&
+    typeof body === "object" &&
+    (typeof ("tenantId" in body ? body.tenantId : undefined) === "string"
+      ? Boolean((body as { tenantId: string }).tenantId.trim())
+      : typeof ("tenant_id" in body ? body.tenant_id : undefined) ===
+          "string" &&
+        Boolean((body as { tenant_id: string }).tenant_id.trim()) &&
+        ("tenantId" in body || tenantValues.length > 1));
+  if (
+    allowedReport &&
+    tenantValues.length > 0 &&
+    !preserveBusinessTenant &&
+    !bodyOverridesTenant
+  ) {
+    throw new Error("Invalid report tenantId filter.");
+  }
   for (const key of [
     "actorType",
     "actorId",
@@ -603,7 +646,9 @@ export function stripControlPlaneAuthQueryParams(targetUrl: URL) {
     "authMode",
     "requestId",
   ]) {
-    targetUrl.searchParams.delete(key);
+    if (key !== "tenantId" || !preserveBusinessTenant) {
+      targetUrl.searchParams.delete(key);
+    }
   }
 }
 

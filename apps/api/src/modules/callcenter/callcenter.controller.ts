@@ -90,13 +90,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/announce-identity")
-  announceAgentIdentity(
+  async announceAgentIdentity(
     @Param("callId") callId: string,
     @Body() command: AnnounceCallAgentIdentityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.announceAgentIdentity(callId, command, requestId),
+      await this.callcenterService.announceAgentIdentityForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -118,13 +122,13 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/eta")
-  quoteCallEta(
+  async quoteCallEta(
     @Param("callId") callId: string,
     @Body() command: QuoteCallEtaCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.quoteEta(callId, command, requestId),
+      await this.callcenterService.quoteEtaForWrite(callId, command, requestId),
       requestId,
     );
   }
@@ -282,7 +286,7 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    const session = this.callcenterService.getCallSession(callId);
+    const session = await this.callcenterService.getCallSessionForRead(callId);
     // A real caller that resends the same transfer-to-complaint command
     // (e.g. after a call timeout) must have its retry recognized across an
     // API restart or a different replica, not only within this process's
@@ -322,7 +326,7 @@ export class CallcenterController {
 
     return toApiSuccessEnvelope(
       {
-        session: this.callcenterService.linkCaseToCallSession(
+        session: await this.callcenterService.linkCaseToCallSession(
           callId,
           complaintCase.caseNo,
           requestId,
