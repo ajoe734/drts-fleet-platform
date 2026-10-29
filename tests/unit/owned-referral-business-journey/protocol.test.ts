@@ -1049,56 +1049,54 @@ describe("native fetch failure diagnostics", () => {
   });
 });
 
-describe("startup Ops HTML readiness deadline", () => {
-  // Drives the actual NativeTransport.call with only the external ports
-  // controlled: AbortSignal.timeout (chosen deadline), performance.now
-  // (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
-  async function runVirtual(
-    readyAtMs: number,
-    request: (tx: NativeTransport) => Promise<unknown>,
-    prepare: (tx: NativeTransport) => void = () => undefined,
-  ) {
-    const { tx, fetcher } = setup();
-    prepare(tx);
-    let now = 0;
-    let deadline = Number.POSITIVE_INFINITY;
-    let controller = new AbortController();
-    const timeout = vi
-      .spyOn(AbortSignal, "timeout")
-      .mockImplementation((ms) => {
-        deadline = ms;
-        controller = new AbortController();
-        return controller.signal;
+// Drives the actual NativeTransport.call with only the external ports
+// controlled: AbortSignal.timeout (chosen deadline), performance.now
+// (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
+async function runVirtual(
+  readyAtMs: number,
+  request: (tx: NativeTransport) => Promise<unknown>,
+  prepare: (tx: NativeTransport) => void = () => undefined,
+) {
+  const { tx, fetcher } = setup();
+  prepare(tx);
+  let now = 0;
+  let deadline = Number.POSITIVE_INFINITY;
+  let controller = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    deadline = ms;
+    controller = new AbortController();
+    return controller.signal;
+  });
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  fetcher.mockImplementation(async (_url, options) => {
+    expect(options?.signal).toBe(controller.signal);
+    if (readyAtMs <= deadline) {
+      now = readyAtMs;
+      return new Response("<html>synthetic dashboard</html>", {
+        status: 200,
+        headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
       });
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
-    fetcher.mockImplementation(async (_url, options) => {
-      expect(options?.signal).toBe(controller.signal);
-      if (readyAtMs <= deadline) {
-        now = readyAtMs;
-        return new Response("<html>synthetic dashboard</html>", {
-          status: 200,
-          headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
-        });
-      }
-      now = deadline;
-      controller.abort(new DOMException("synthetic", "TimeoutError"));
-      throw new DOMException("synthetic", "TimeoutError");
-    });
-    try {
-      const outcome = await request(tx).then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-      return {
-        outcome,
-        chosen: timeout.mock.calls.map(([ms]) => ms),
-        fetcher,
-      };
-    } finally {
-      timeout.mockRestore();
-      clock.mockRestore();
     }
+    now = deadline;
+    controller.abort(new DOMException("synthetic", "TimeoutError"));
+    throw new DOMException("synthetic", "TimeoutError");
+  });
+  try {
+    const outcome = await request(tx).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    return {
+      outcome,
+      chosen: timeout.mock.calls.map(([ms]) => ms),
+      fetcher,
+    };
+  } finally {
+    timeout.mockRestore();
+    clock.mockRestore();
   }
+}
+describe("startup Ops HTML readiness deadline", () => {
   const startup = (tx: NativeTransport) =>
     tx.call("ops", "/dashboard", { raw: true, expected: [200] });
 
@@ -1296,6 +1294,299 @@ describe("startup Ops HTML readiness deadline", () => {
           requestDurationMs: 15_000,
         }),
       );
+    },
+  );
+});
+
+// Execute the original two adjacent statements rather than importing a spec
+// that registers Playwright tests. Only the session producer is an external
+// port; the original call expression and NativeTransport execute unchanged.
+function actualFleetReadiness(
+  tx: NativeTransport,
+  sessionProducer: () => Promise<unknown> = async () => ({ verified: true }),
+) {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === "tx.call" &&
+      node.arguments[0]?.getText(source) === '"fleet"' &&
+      node.arguments[1]?.getText(source) === '"/"'
+    )
+      calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  expect(calls).toHaveLength(1);
+  const call = at(calls, 0);
+  const statement = call.parent.parent;
+  requireFact(ts.isExpressionStatement(statement), "original Fleet statement");
+  const block = statement.parent;
+  requireFact(ts.isBlock(block), "original Fleet setup block");
+  const index = block.statements.indexOf(statement);
+  const producer = at(block.statements, index - 1);
+  expect(producer.getText(source)).toContain(
+    "fleet = await prepareOperationalFleetSession(",
+  );
+  const supply = block.statements.findIndex((node) =>
+    node.getText(source).startsWith("const provisionSupply ="),
+  );
+  expect(supply).toBeGreaterThan(index);
+  // No second marker, business call, or alternate consumer is authorized.
+  expect(
+    source.text.match(/purpose: "own-fleet-pre-supply-html-readiness"/g),
+  ).toHaveLength(1);
+  const { outputText } = ts.transpileModule(
+    `async function probe() { let fleet; ${producer.getText(source)} return await ${call.getText(source)}; }`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  );
+  const prepare = vi.fn(async (configuration: unknown) => {
+    expect(configuration).toEqual({
+      fleetPartnerId: "synthetic-own-fleet",
+      tenantId: "synthetic-own-tenant",
+    });
+    return await sessionProducer();
+  });
+  return new Function(
+    "tx",
+    "prepareOperationalFleetSession",
+    "FLEET",
+    "TENANT",
+    `${outputText} return probe();`,
+  )(
+    tx,
+    prepare,
+    "synthetic-own-fleet",
+    "synthetic-own-tenant",
+  ) as Promise<unknown>;
+}
+
+describe("original own Fleet pre-supply HTML readiness deadline", () => {
+  const purpose = "own-fleet-pre-supply-html-readiness" as const;
+  const marked: CallOptions = { raw: true, expected: [200], purpose };
+
+  it.each([5_000, 16_093])(
+    "original Fleet consumer accepts the single HTML 200 at %ims after its own session producer",
+    async (readyAt) => {
+      const { outcome, chosen, fetcher } = await runVirtual(
+        readyAt,
+        actualFleetReadiness,
+      );
+      expect(outcome).toEqual({
+        value: expect.objectContaining({ status: 200, data: null }),
+      });
+      expect(chosen).toEqual([30_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const [url, init] = at(fetcher.mock.calls, 0);
+      expect(url).toBe("https://fleet.example.test/");
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("manual");
+      expect(init?.body).toBeUndefined();
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-drts-authorization")).toBe("Bearer genuine-fleet");
+      expect(headers.get("x-serverless-authorization")).toBe(
+        "Bearer cloud-fleet",
+      );
+      expect(headers.get("purpose")).toBeNull();
+    },
+  );
+
+  it("requires the original session producer to succeed before any root fetch", async () => {
+    const { tx, fetcher, fleetHeaders } = setup();
+    await expect(
+      actualFleetReadiness(tx, async () => {
+        throw new Error("synthetic session rejection");
+      }),
+    ).rejects.toThrow("synthetic session rejection");
+    expect(fleetHeaders).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("requires the normal Fleet authority helper even with the readiness purpose", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const tx = new NativeTransport(origins, SHA, {}, fetcher);
+    await expect(actualFleetReadiness(tx)).rejects.toThrow(
+      "normal Fleet helper required",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("also accepts explicit GET with the same bounded readiness behavior", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(16_093, (tx) =>
+      tx.call("fleet", "/", { ...marked, method: "GET" }),
+    );
+    expect(outcome).toMatchObject({ value: { status: 200 } });
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the original Fleet consumer once at 30s with closed transport facts", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(
+      30_001,
+      actualFleetReadiness,
+    );
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({
+      error: {
+        stage: "fleet:transport",
+        transportFacts: {
+          nativeFailureClass: "TimeoutError",
+          nativeCauseCode: "UNKNOWN",
+          requestAborted: true,
+          requestDurationMs: 30_000,
+          requestMethod: "GET",
+          requestRoute: "/",
+        },
+      },
+    });
+  });
+
+  it.each<[string, Role, string, CallOptions]>([
+    ["plain root", "fleet", "/", { raw: true, expected: [200] }],
+    ["default options", "fleet", "/", {}],
+    [
+      "wrong purpose",
+      "fleet",
+      "/",
+      { ...marked, purpose: "unrecognized" } as unknown as CallOptions,
+    ],
+    ...["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map(
+      (method): [string, Role, string, CallOptions] => [
+        `${method} root`,
+        "fleet",
+        "/",
+        { ...marked, method },
+      ],
+    ),
+    ["GET body", "fleet", "/", { ...marked, body: {} }],
+    ["null body", "fleet", "/", { ...marked, body: null }],
+    ["lowercase method", "fleet", "/", { ...marked, method: "get" }],
+    ["query", "fleet", "/?x=1", marked],
+    ["normalized alias", "fleet", "/./", marked],
+    ["absolute URL", "fleet", "https://fleet.example.test/", marked],
+    ["other route", "fleet", "/dashboard", marked],
+    ["not raw", "fleet", "/", { purpose, expected: [200] }],
+    ["raw false", "fleet", "/", { ...marked, raw: false }],
+    ["default statuses", "fleet", "/", { purpose, raw: true }],
+    ["widened statuses", "fleet", "/", { ...marked, expected: [200, 503] }],
+    ["wrong status", "fleet", "/", { ...marked, expected: [201] }],
+    ["empty statuses", "fleet", "/", { ...marked, expected: [] }],
+    ["duplicate statuses", "fleet", "/", { ...marked, expected: [200, 200] }],
+    ...(
+      [
+        "admin",
+        "ops",
+        "api",
+        "opsApi",
+        "referral",
+        "referralApi",
+        "publicApi",
+        "driver",
+      ] as Role[]
+    ).map((role): [string, Role, string, CallOptions] => [
+      role,
+      role,
+      "/",
+      marked,
+    ]),
+    [
+      "business write",
+      "fleet",
+      "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+      { ...marked, method: "POST", body: {} },
+    ],
+    [
+      "unmarked business write",
+      "fleet",
+      "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+      { method: "POST", body: {} },
+    ],
+  ])(
+    "keeps 15s for %s at the same 16093ms server response",
+    async (_name, role, route, options) => {
+      const { outcome, chosen, fetcher } = await runVirtual(16_093, (tx) =>
+        tx.call(role, route, options),
+      );
+      expect(chosen).toEqual([15_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(outcome).toMatchObject({
+        error: {
+          transportFacts: {
+            nativeFailureClass: "TimeoutError",
+            requestAborted: true,
+            requestDurationMs: 15_000,
+          },
+        },
+      });
+    },
+  );
+
+  it.each([
+    [
+      "HTTP 503",
+      () =>
+        new Response("unavailable", {
+          status: 503,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      "fleet:request",
+    ],
+    [
+      "wrong SHA",
+      () =>
+        new Response("<html/>", {
+          headers: { "x-drts-candidate-sha": "b".repeat(40) },
+        }),
+      "fleet:runtime SHA mismatch",
+    ],
+    [
+      "oversize",
+      () =>
+        new Response(new Uint8Array(1024 * 1024 + 1), {
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      "bounded response exceeded",
+    ],
+  ] as const)(
+    "still rejects %s without retry",
+    async (_name, reply, message) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockImplementationOnce(async () => reply());
+      await expect(actualFleetReadiness(tx)).rejects.toThrow(message);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    [
+      "spoofed authority",
+      "/",
+      { ...marked, headers: { "x-drts-authorization": "Bearer spoof" } },
+      "caller cannot replace authority",
+    ],
+    [
+      "foreign origin",
+      "https://foreign.example.test/",
+      marked,
+      "role origin isolation",
+    ],
+  ] as const)(
+    "rejects %s before fetch",
+    async (_name, route, options, message) => {
+      const { tx, fetcher } = setup();
+      await expect(tx.call("fleet", route, options)).rejects.toThrow(message);
+      expect(fetcher).not.toHaveBeenCalled();
     },
   );
 });
