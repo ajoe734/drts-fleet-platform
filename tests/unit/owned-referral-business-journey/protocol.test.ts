@@ -14,6 +14,8 @@ import {
   consumeNativeReceiptPdfDownload,
   captureOriginalUiCancellation,
   waitForOriginalCancellationTerminalUI,
+  originalCancellationResponseFacts,
+  originalCancellationTerminalFacts,
   validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
@@ -30,7 +32,12 @@ import {
   type Origins,
   type Role,
   type CallOptions,
+  object,
+  text,
+  type ObjectData,
 } from "../../e2e/owned-referral-business-journey/protocol";
+import { resolveActiveTripScreenOrder } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
+import type { runFourStageOwnedCancellations } from "../../e2e/owned-referral-business-journey/four-stage-cancellations";
 
 const SHA = "a".repeat(40);
 const origins: Origins = {
@@ -1709,7 +1716,11 @@ function nativeCancellationPage(initialURL: string, loadStates: string[]) {
   const connection = new NativeConnection(nodePlatform);
   connection.onmessage = ({ id, method }) => {
     // Only bookkeeping/timeout configuration may leave the actual waiter.
-    if (!["waitForEventInfo", "setDefaultNavigationTimeoutNoReply"].includes(method))
+    if (
+      !["waitForEventInfo", "setDefaultNavigationTimeoutNoReply"].includes(
+        method,
+      )
+    )
       throw new Error(`Unexpected native command: ${method}`);
     queueMicrotask(() => connection.dispatch({ id, result: {} }));
   };
@@ -1727,14 +1738,18 @@ function nativeCancellationPage(initialURL: string, loadStates: string[]) {
     mainFrame: frame._channel,
     isClosed: false,
   });
+  // The old caller uses this default; the fixed consumer retains its explicit
+  // production 30s budget. A short native default keeps baseline probes bounded.
+  page.setDefaultNavigationTimeout(100);
   const event = (method: string, params: object) =>
     connection.dispatch({ guid: "frame", method, params });
   return {
     page,
     event,
     close: () => connection.close(),
-    version: (localRequire(path.join(core, "package.json")) as { version: string })
-      .version,
+    version: (
+      localRequire(path.join(core, "package.json")) as { version: string }
+    ).version,
   };
 }
 
@@ -1764,12 +1779,20 @@ describe("original cancellation terminal UI native navigation boundary", () => {
     "accepts %s at DOM readiness only after the real rendered assertion",
     async (timing) => {
       const f = nativeCancellationPage(
-        timing === "already-navigated" ? ownURL : ownURL.replace("cancelled", "trip"),
-        timing === "already-navigated" ? ["commit", "domcontentloaded"] : ["commit"],
+        timing === "already-navigated"
+          ? ownURL
+          : ownURL.replace("cancelled", "trip"),
+        timing === "already-navigated"
+          ? ["commit", "domcontentloaded"]
+          : ["commit"],
       );
       try {
         const rendered = vi.fn(async () => undefined);
-        const pending = waitForOriginalCancellationTerminalUI(f.page, "own", rendered);
+        const pending = waitForOriginalCancellationTerminalUI(
+          f.page,
+          "own",
+          rendered,
+        );
         if (timing === "navigation-after-wait") {
           f.event("navigated", { url: ownURL, name: "", newDocument: {} });
           f.event("loadstate", { add: "domcontentloaded" });
@@ -1781,7 +1804,165 @@ describe("original cancellation terminal UI native navigation boundary", () => {
       }
     },
   );
+
+  it.each([
+    [
+      "wrong selected order",
+      ownURL.replace("orderId=own", "orderId=other"),
+      ["commit", "domcontentloaded", "load"],
+    ],
+    [
+      "trip URL despite cancelled API",
+      ownURL.replace("cancelled", "trip"),
+      ["commit", "domcontentloaded", "load"],
+    ],
+    ["commit without document readiness", ownURL, ["commit"]],
+  ])(
+    "rejects %s with the native bounded timeout before checking DOM",
+    async (_name, url, states) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const f = nativeCancellationPage(url as string, states as string[]);
+      try {
+        const rendered = vi.fn(async () => undefined);
+        const pending = waitForOriginalCancellationTerminalUI(
+          f.page,
+          "own",
+          rendered,
+        );
+        const assertion = expect(pending).rejects.toMatchObject({
+          name: "TimeoutError",
+        });
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(rendered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        await assertion;
+        expect(rendered).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("propagates a real navigation error instead of accepting API success", async () => {
+    const f = nativeCancellationPage(ownURL.replace("cancelled", "trip"), [
+      "commit",
+    ]);
+    try {
+      const rendered = vi.fn(async () => undefined);
+      const pending = waitForOriginalCancellationTerminalUI(
+        f.page,
+        "own",
+        rendered,
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        "controlled navigation failure",
+      );
+      f.event("navigated", {
+        url: ownURL,
+        name: "",
+        error: "controlled navigation failure",
+      });
+      await assertion;
+      expect(rendered).not.toHaveBeenCalled();
+    } finally {
+      f.close();
+    }
+  });
+
+  it("keeps a rendered outcome failure and rejects a later selected-order redirect", async () => {
+    const f = nativeCancellationPage(ownURL, ["commit", "domcontentloaded"]);
+    try {
+      const missingDOM = new Error("controlled cancelled DOM absent");
+      await expect(
+        waitForOriginalCancellationTerminalUI(f.page, "own", async () => {
+          throw missingDOM;
+        }),
+      ).rejects.toBe(missingDOM);
+      await expect(
+        waitForOriginalCancellationTerminalUI(f.page, "own", async () => {
+          f.event("navigated", {
+            url: ownURL.replace("orderId=own", "orderId=other"),
+            name: "",
+          });
+        }),
+      ).rejects.toThrow(
+        "rendered cancellation retains exact selected-order URL",
+      );
+    } finally {
+      f.close();
+    }
+  });
+
+  it("projects URL/DOM facts without retaining URL credentials, tokens or arbitrary destinations", () => {
+    const privateValue = "synthetic-private-value";
+    const facts = originalCancellationTerminalFacts(
+      `https://user:${privateValue}@other.example.test/private/${privateValue}?screen=${privateValue}&orderId=other&token=${privateValue}`,
+      { tripURL: ownURL, orderId: "own" },
+      { cancelledVisible: false, ownRouteVisible: null },
+      "failed",
+    );
+    expect(facts).toEqual({
+      phase: "failed",
+      sameOrigin: false,
+      samePath: false,
+      sameOrder: false,
+      screen: "OTHER",
+      cancelledVisible: false,
+      ownRouteVisible: null,
+    });
+    expect(JSON.stringify(facts)).not.toContain(privateValue);
+  });
 });
+
+type ActualCancellationCaller = Parameters<
+  typeof runFourStageOwnedCancellations
+>[0]["cancelFromActualUI"];
+
+/** Execute the real original caller closure, not a second implementation of
+ * its click/capture/wait/catch sequence. Only HTTP/DOM/action ports are supplied.
+ */
+function actualCancellationCaller(
+  bindings: ObjectData,
+): ActualCancellationCaller {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let caller: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(source) === "cancelFromActualUI"
+    )
+      caller = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  const windowReader = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "readCancellationWindowSnapshot",
+  );
+  requireFact(
+    caller && windowReader,
+    "actual cancellation caller and window reader required",
+  );
+  const { outputText } = ts.transpileModule(
+    `${windowReader.getText(source)}\nconst caller = ${caller.getText(source)};`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  );
+  return new Function(
+    ...Object.keys(bindings),
+    `${outputText}\nreturn caller;`,
+  )(...Object.values(bindings)) as ActualCancellationCaller;
+}
 
 describe("original UI cancellation response capture before navigation release", () => {
   const expected = {
@@ -1861,6 +2042,138 @@ describe("original UI cancellation response capture before navigation release", 
     };
   }
 
+  it.each([true, false])(
+    "runs the actual C1 caller with native navigation and rendered outcome=%s",
+    async (hasOutcome) => {
+      const f = fixture();
+      const tripURL = `https://referral.example.test/embed/entry?screen=trip&orderId=${expected.orderId}`;
+      const native = nativeCancellationPage(tripURL, ["commit"]);
+      const checkpoints: Parameters<
+        Parameters<ActualCancellationCaller>[2]
+      >[0][] = [];
+      let observe:
+        | ((
+            route: typeof f.route & { abort(): Promise<void> },
+          ) => Promise<void>)
+        | undefined;
+      const route = { ...f.route, abort: vi.fn(async () => undefined) };
+      const button = {
+        click: vi.fn(async () => {
+          requireFact(observe, "original route armed before click");
+          await observe(route);
+        }),
+        isDisabled: async () => false,
+      };
+      const locator = (visible: () => boolean) => ({
+        first() {
+          return this;
+        },
+        isVisible: async () => visible(),
+      });
+      const ownRoute = locator(() => hasOutcome),
+        heading = locator(() => hasOutcome);
+      const unroute = vi.fn(async () => undefined);
+      const evidence = new Evidence();
+      f.route.fulfill.mockImplementation(async () => {
+        native.event("navigated", {
+          url: tripURL.replace("screen=trip", "screen=cancelled"),
+          name: "",
+          newDocument: {},
+        });
+        native.event("loadstate", { add: "domcontentloaded" });
+        // Intentionally no load: this is the real native boundary regression.
+      });
+      const caller = actualCancellationCaller({
+        page: {
+          url: () => native.page.url(),
+          waitForURL: native.page.waitForURL.bind(native.page),
+          locator: () => button,
+          getByText: (value: string) =>
+            value === "行程已取消"
+              ? heading
+              : value === "甲地 → 乙地"
+                ? ownRoute
+                : locator(() => true),
+          route: async (_url: string, handler: typeof observe) => {
+            observe = handler;
+          },
+          unroute,
+        },
+        // Controlled DOM assertion boundary only; no wait/navigation logic is mocked.
+        expect: (value: typeof heading | typeof button) => ({
+          toBeEnabled: async () =>
+            expect(await button.isDisabled()).toBe(false),
+          toBeVisible: async () =>
+            expect(await (value as typeof heading).isVisible()).toBe(true),
+        }),
+        referral: async () => ({
+          data: {
+            active: true,
+            trip: {
+              orderId: expected.orderId,
+              orderNo: "O-original-own",
+              pickupAddress: "甲地",
+              dropoffAddress: "乙地",
+            },
+          },
+        }),
+        resolveActiveTripScreenOrder,
+        object,
+        text,
+        requireFact,
+        JourneyFailure,
+        evidence,
+        origins,
+        runtime: SHA,
+        nonce: "controlled",
+        closedPdfFailureFacts: actualClosedPdfFailureFacts(),
+        captureOriginalUiCancellation,
+        originalCancellationResponseFacts,
+        originalCancellationTerminalFacts,
+        waitForOriginalCancellationTerminalUI,
+      });
+      try {
+        const pending = caller(expected.orderId, false, async (observation) => {
+          checkpoints.push(structuredClone(observation));
+        });
+        if (hasOutcome) {
+          await expect(pending).resolves.toMatchObject({
+            status: 200,
+            command: f.command,
+            requestSource: "actual-ui",
+          });
+        } else {
+          await expect(pending).rejects.toBeInstanceOf(Error);
+        }
+        expect(checkpoints[0]).toMatchObject({
+          response: {
+            status: 200,
+            runtimeSha: SHA,
+            command: f.command,
+            responseSha256: hash(f.bytes),
+          },
+        });
+        expect(checkpoints.at(-1)?.terminal).toMatchObject({
+          phase: hasOutcome ? "rendered" : "failed",
+          sameOrder: true,
+          screen: "cancelled",
+          cancelledVisible: hasOutcome,
+          ownRouteVisible: hasOutcome,
+        });
+        expect(f.route.fetch).toHaveBeenCalledOnce();
+        expect(f.route.fulfill).toHaveBeenCalledOnce();
+        expect(button.click).toHaveBeenCalledOnce();
+        expect(unroute).toHaveBeenCalledOnce();
+        expect(route.abort).not.toHaveBeenCalled();
+        expect(
+          evidence.events.filter((event) => event.result === "failed"),
+        ).toHaveLength(hasOutcome ? 0 : 2);
+      } finally {
+        native.close();
+      }
+    },
+  );
+
   it("reads the one original POST bytes, headers and command before unchanged fulfill", async () => {
     const f = fixture();
     const snapshot = await captureOriginalUiCancellation(f.route, expected);
@@ -1883,6 +2196,39 @@ describe("original UI cancellation response capture before navigation release", 
     );
     expect(JSON.parse(Buffer.from(snapshot.bytes).toString("utf8"))).toEqual(
       f.payload,
+    );
+  });
+
+  it("retains exact original command/status/runtime and byte hashes without exporting payload or headers", async () => {
+    const f = fixture();
+    const captured = await captureOriginalUiCancellation(f.route, expected);
+    captured.headers.set("set-cookie", "synthetic-private-value");
+    captured.payload.privateValue = "synthetic-private-value";
+    const facts = originalCancellationResponseFacts(captured, expected);
+    expect(facts).toEqual({
+      orderId: expected.orderId,
+      requestMethod: "POST",
+      command: f.command,
+      commandSha256: hash(Buffer.from(JSON.stringify(f.command))),
+      status: 200,
+      runtimeSha: SHA,
+      responseBytes: f.bytes.length,
+      responseSha256: hash(f.bytes),
+      envelopeOk: true,
+      responseOrderMatches: true,
+      responseCancelled: true,
+      refusal: null,
+    });
+    expect(JSON.stringify(facts)).not.toContain("synthetic-private-value");
+    expect(() =>
+      originalCancellationResponseFacts(captured, {
+        ...expected,
+        runtime: "b".repeat(40),
+      }),
+    ).toThrow("runtime binding");
+    captured.command.privateValue = "synthetic-private-value";
+    expect(() => originalCancellationResponseFacts(captured, expected)).toThrow(
+      "bounded original UI cancellation command",
     );
   });
 
@@ -1929,6 +2275,15 @@ describe("original UI cancellation response capture before navigation release", 
     expect(snapshot.status).toBe(409);
     expect(snapshot.data).toEqual(payload);
     expect(snapshot.bytes).toBe(f.bytes);
+    expect(originalCancellationResponseFacts(snapshot, expected)).toMatchObject(
+      {
+        status: 409,
+        envelopeOk: false,
+        responseCancelled: false,
+        responseOrderMatches: false,
+        refusal: "ORDER_NOT_CANCELABLE",
+      },
+    );
     expect(f.route.fetch).toHaveBeenCalledTimes(1);
     expect(f.route.fulfill).toHaveBeenCalledTimes(1);
   });

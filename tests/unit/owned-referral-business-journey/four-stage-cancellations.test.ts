@@ -15,6 +15,8 @@ import {
   JourneyFailure,
   hash,
   object,
+  originalCancellationResponseFacts,
+  originalCancellationTerminalFacts,
   requireFact,
   type CallOptions,
   type CallResult,
@@ -402,6 +404,88 @@ async function fixture(options: Options = {}) {
 }
 
 describe("whole four-stage consumer on original separate Admin/Ops/Driver/Referral ports", () => {
+  it("retains the original UI ACK and canonical readback when its following terminal UI wait fails", async () => {
+    const f = await fixture();
+    const cancel = f.ports.cancelFromActualUI;
+    const timeout = new Error("controlled original terminal UI timeout");
+    timeout.name = "TimeoutError";
+    let persistedBeforeFailure = false;
+    f.ports.cancelFromActualUI = async (id, expectedRefusal, checkpoint) => {
+      const response = await cancel(id, expectedRefusal, checkpoint);
+      const responseFacts = originalCancellationResponseFacts(
+        { ...response, payload: { ok: true, data: response.data } },
+        { orderId: id, runtime: f.ports.runtimeSha },
+      );
+      // An older consumer has no checkpoint; it must still fail on the same UI
+      // error so old/new comparison measures lost evidence, not a fixture error.
+      if (checkpoint) {
+        await checkpoint({ response: responseFacts });
+        const retained = await f.facts("unassigned");
+        persistedBeforeFailure =
+          retained.originalUiCancellation.response.responseSha256 ===
+            hash(response.bytes) &&
+          retained.cancelConsumerReadback.order.status === "cancelled";
+        await checkpoint({
+          response: responseFacts,
+          terminal: originalCancellationTerminalFacts(
+            `https://referral.example.test/embed/entry?screen=cancelled&orderId=${id}`,
+            {
+              tripURL: "https://referral.example.test/embed/entry?screen=trip",
+              orderId: id,
+            },
+            { cancelledVisible: true, ownRouteVisible: true },
+            "failed",
+          ),
+        });
+      }
+      throw timeout;
+    };
+    await expect(f.run()).rejects.toBe(timeout);
+    expect(f.results[0]).toMatchObject({
+      result: "failed",
+      actualHttpStatus: 200,
+      recovery: "already-terminal",
+      journalState: "acknowledged",
+    });
+    expect(persistedBeforeFailure).toBe(true);
+    const facts = await f.facts("unassigned");
+    expect(facts.originalUiCancellation).toMatchObject({
+      response: {
+        status: 200,
+        runtimeSha: f.ports.runtimeSha,
+        responseCancelled: true,
+      },
+      terminal: {
+        phase: "failed",
+        screen: "cancelled",
+        sameOrder: true,
+        cancelledVisible: true,
+      },
+    });
+    expect(facts.cancelConsumerReadback.order).toMatchObject({
+      orderId: f.results[0]!.orderId,
+      status: "cancelled",
+    });
+    expect(facts.cleanupOrderReadback).toMatchObject({
+      orderId: f.results[0]!.orderId,
+      status: "cancelled",
+    });
+    expect(f.bookingCommands).toHaveLength(1);
+    expect(
+      f.events.filter((event) => event.rail === "controlled-UI"),
+    ).toHaveLength(1);
+    expect(
+      f.events.filter((event) =>
+        event.path.startsWith("/api/referral/cancel/"),
+      ),
+    ).toHaveLength(0);
+    expect(f.results.slice(1).map((row) => row.result)).toEqual([
+      "unexecuted",
+      "unexecuted",
+      "unexecuted",
+    ]);
+  });
+
   it("completes all four same-subject observations with Admin supply and Ops business calls", async () => {
     const f = await fixture();
     await f.run();

@@ -262,9 +262,105 @@ export async function captureOriginalUiCancellation<
   return captured;
 }
 
-/** Keep navigation readiness separate from the actual rendered outcome. */
+export type OriginalCancellationResponseFacts = {
+  orderId: string;
+  requestMethod: "POST";
+  command: { idempotencyKey: string };
+  commandSha256: string;
+  status: number;
+  runtimeSha: string;
+  responseBytes: number;
+  responseSha256: string;
+  envelopeOk: boolean;
+  responseOrderMatches: boolean;
+  responseCancelled: boolean;
+  refusal: "ORDER_NOT_CANCELABLE" | "OTHER" | null;
+};
+
+/** Project only the original product command and bounded response facts. Raw
+ * headers, payload strings, URLs and exception messages never enter artifacts.
+ */
+export function originalCancellationResponseFacts(
+  captured: CallResult & { command: ObjectData; payload: ObjectData },
+  expected: { orderId: string; runtime: string },
+): OriginalCancellationResponseFacts {
+  const key = captured.command.idempotencyKey;
+  requireFact(
+    typeof key === "string" &&
+      key.length > 0 &&
+      key.length <= 255 &&
+      Object.keys(captured.command).length === 1,
+    "bounded original UI cancellation command",
+  );
+  const data = captured.status === 200 ? object(captured.data) : null;
+  const code = captured.payload.error
+    ? object(captured.payload.error).code
+    : null;
+  requireFact(
+    captured.headers.get("x-drts-candidate-sha") === expected.runtime,
+    "retained original cancellation runtime binding",
+  );
+  return {
+    orderId: expected.orderId,
+    requestMethod: "POST",
+    command: { idempotencyKey: key },
+    commandSha256: hash(Buffer.from(JSON.stringify(captured.command))),
+    status: captured.status,
+    runtimeSha: expected.runtime,
+    responseBytes: captured.bytes.length,
+    responseSha256: hash(captured.bytes),
+    envelopeOk: captured.payload.ok === true,
+    responseOrderMatches: data?.orderId === expected.orderId,
+    responseCancelled: data?.status === "cancelled",
+    refusal:
+      code === null ? null : code === "ORDER_NOT_CANCELABLE" ? code : "OTHER",
+  };
+}
+
+export type OriginalCancellationTerminalFacts = {
+  phase: "before-wait" | "url-ready" | "rendered" | "failed";
+  sameOrigin: boolean;
+  samePath: boolean;
+  sameOrder: boolean;
+  screen: "cancelled" | "trip" | "OTHER";
+  cancelledVisible: boolean | null;
+  ownRouteVisible: boolean | null;
+};
+
+export type OriginalCancellationCheckpoint = {
+  response: OriginalCancellationResponseFacts;
+  terminal?: OriginalCancellationTerminalFacts;
+};
+
+export function originalCancellationTerminalFacts(
+  actualURL: string,
+  expected: { tripURL: string; orderId: string },
+  dom: Pick<
+    OriginalCancellationTerminalFacts,
+    "cancelledVisible" | "ownRouteVisible"
+  >,
+  phase: OriginalCancellationTerminalFacts["phase"],
+): OriginalCancellationTerminalFacts {
+  const actual = new URL(actualURL),
+    trip = new URL(expected.tripURL);
+  const screen = actual.searchParams.get("screen");
+  return {
+    phase,
+    sameOrigin: actual.origin === trip.origin,
+    samePath: actual.pathname === trip.pathname,
+    sameOrder: actual.searchParams.get("orderId") === expected.orderId,
+    screen: screen === "cancelled" || screen === "trip" ? screen : "OTHER",
+    cancelledVisible: dom.cancelledVisible,
+    ownRouteVisible: dom.ownRouteVisible,
+  };
+}
+
+/** DOMContentLoaded is native document readiness, not the unrelated full load
+ * event. The selected-order URL and independent rendered outcome both remain
+ * mandatory; neither an API ACK nor a navigation commit is a UI PASS.
+ */
 export async function waitForOriginalCancellationTerminalUI(
-  page: Pick<Page, "waitForURL">,
+  page: Pick<Page, "waitForURL" | "url">,
   orderId: string,
   assertRendered: () => Promise<void>,
 ): Promise<void> {
@@ -272,8 +368,15 @@ export async function waitForOriginalCancellationTerminalUI(
     (url) =>
       url.searchParams.get("screen") === "cancelled" &&
       url.searchParams.get("orderId") === orderId,
+    { waitUntil: "domcontentloaded", timeout: 30_000 },
   );
   await assertRendered();
+  const url = new URL(page.url());
+  requireFact(
+    url.searchParams.get("screen") === "cancelled" &&
+      url.searchParams.get("orderId") === orderId,
+    "rendered cancellation retains exact selected-order URL",
+  );
 }
 
 export function object(value: unknown): ObjectData {
