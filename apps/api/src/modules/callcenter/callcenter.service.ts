@@ -748,12 +748,13 @@ export class CallcenterService implements OnModuleInit {
     if (session.linkedOrderId && !session.recordingId) {
       this.syncRecordingFlagsWithoutAttachment(session);
     }
+    if (write) this.enqueueFinalizeRecordingWorkItem(session, write);
     return this.finishPhoneSessionMutation(
       session,
       write,
       "close_call_session",
       () => {
-        this.enqueueFinalizeRecordingWorkItem(session);
+        if (!write) this.enqueueFinalizeRecordingWorkItem(session);
         this.recordAudit(
           {
             actorId: session.agentId,
@@ -1052,6 +1053,7 @@ export class CallcenterService implements OnModuleInit {
     this.addFlag(session, "recording_pending_callback");
     this.addFlag(session, "recording_pending");
 
+    if (write) this.enqueueFinalizeRecordingWorkItem(session, write);
     return this.finishPhoneSessionMutation(
       session,
       write,
@@ -1074,7 +1076,7 @@ export class CallcenterService implements OnModuleInit {
           requestId,
         );
 
-        this.enqueueFinalizeRecordingWorkItem(session);
+        if (!write) this.enqueueFinalizeRecordingWorkItem(session);
       },
       () => this.notifyRecordingStateChange(session, requestId, write),
     );
@@ -1497,7 +1499,9 @@ export class CallcenterService implements OnModuleInit {
 
     const now = new Date().toISOString();
     const newStatus =
-      command.outcome === "succeeded" || command.outcome === "answered"
+      command.outcome === "succeeded" ||
+      command.outcome === "answered" ||
+      command.outcome === "connected"
         ? "in_progress"
         : "pending";
     const currentAttemptCount = (session.callbackTask.attemptCount ?? 0) + 1;
@@ -1920,25 +1924,39 @@ export class CallcenterService implements OnModuleInit {
     });
   }
 
-  private enqueueFinalizeRecordingWorkItem(session: CallSessionRecord) {
+  private enqueueFinalizeRecordingWorkItem(
+    session: CallSessionRecord,
+    write?: PhoneSessionWrite,
+  ) {
     if (!this.callcenterRepository?.isEnabled()) {
       return;
     }
 
-    void this.callcenterRepository
-      .enqueueFinalizeRecording({
-        callId: session.callId,
-        brandId: null,
-        recordingId: session.recordingId,
-        linkedOrderId: session.linkedOrderId,
-        endedAt: session.endedAt,
-      })
-      .catch((error: unknown) => {
-        this.callcenterRepository!.reportPersistenceFailure(
-          error,
-          "enqueue_finalize_recording",
-        );
+    const enqueue = () =>
+      this.callcenterRepository!.enqueueFinalizeRecording(
+        {
+          callId: session.callId,
+          brandId: null,
+          recordingId: session.recordingId,
+          linkedOrderId: session.linkedOrderId,
+          endedAt: session.endedAt,
+        },
+        write?.executor,
+      );
+    if (write) {
+      // The original transaction awaits notify before COMMIT. A recorder job
+      // must survive with the pending/closed session, before its success ACK.
+      write.notify.push(async () => {
+        await enqueue();
       });
+      return;
+    }
+    void enqueue().catch((error: unknown) => {
+      this.callcenterRepository!.reportPersistenceFailure(
+        error,
+        "enqueue_finalize_recording",
+      );
+    });
   }
 
   async recoverPendingRecordingCalls(): Promise<{
