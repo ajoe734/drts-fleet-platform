@@ -45,6 +45,15 @@ export function CaseReplyComposer({
   const [attachments, setAttachments] =
     useState<FleetCaseAttachmentRecord[]>(initialAttachments);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sentContent, setSentContent] = useState<string | null>(null);
+  const pendingReply = useRef<{
+    caseId: string;
+    body: {
+      content: string;
+      idempotencyKey: string;
+      attachmentIds: string[];
+    };
+  } | null>(null);
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -94,6 +103,8 @@ export function CaseReplyComposer({
     setAttachments(initialAttachments);
     setContent("");
     setReplyState("idle");
+    pendingReply.current = null;
+    setSentContent(null);
     setErrorMessage(null);
     setDownloadNotice(null);
   }
@@ -313,15 +324,28 @@ export function CaseReplyComposer({
   };
 
   const handleSubmit = async () => {
-    if (!content.trim() || !editableRef.current) return;
+    if (!editableRef.current || (!pendingReply.current && !content.trim()))
+      return;
     const targetCaseId = caseDetail.id;
     const startComposerEpoch = composerEpoch.current;
+    // A failed response may follow a committed reply. Keep that operation's
+    // exact payload until its retry receives an acknowledgement.
+    const intent = pendingReply.current ?? {
+      caseId: targetCaseId,
+      body: {
+        content: content.trim(),
+        idempotencyKey: `idem-${targetCaseId}-${crypto.randomUUID()}`,
+        attachmentIds: attachments
+          .filter((attachment) => attachment.state === "done")
+          .map((attachment) => attachment.attachmentId),
+      },
+    };
+    pendingReply.current = intent;
     setReplyState("submitting");
     setErrorMessage(null);
 
     startTransition(async () => {
       try {
-        const idempotencyKey = `idem-${targetCaseId}-${Date.now()}`;
         const res = await fetch(
           `/control-plane-proxy/fleet-partner/cases/${targetCaseId}/reply`,
           {
@@ -331,16 +355,10 @@ export function CaseReplyComposer({
               headers: {
                 "Content-Type": "application/json",
                 "x-fleet-partner-id": caseDetail.fleetPartnerId,
-                "idempotency-key": idempotencyKey,
+                "idempotency-key": intent.body.idempotencyKey,
               },
             }),
-            body: JSON.stringify({
-              content: content.trim(),
-              idempotencyKey,
-              attachmentIds: attachments
-                .filter((a) => a.state === "done")
-                .map((a) => a.attachmentId),
-            }),
+            body: JSON.stringify(intent.body),
           },
         );
         if (
@@ -358,10 +376,13 @@ export function CaseReplyComposer({
           return;
         }
 
+        pendingReply.current = null;
+        setSentContent(intent.body.content);
         setReplyState("sent");
         router.refresh();
       } catch (err) {
         if (
+          pendingReply.current !== intent ||
           !mountedRef.current ||
           activeCaseIdRef.current !== targetCaseId ||
           composerEpoch.current !== startComposerEpoch
@@ -401,29 +422,6 @@ export function CaseReplyComposer({
             title={"已結案 · CASE_CLOSED_NO_REPLY"}
             body="closed 案件不得再回覆。如需追加說明，請聯繫 Ops 申請 reopen；reopen 後才會重新開放回覆與附件上傳。"
           />
-          <div
-            style={{
-              marginTop: 12,
-              fontSize: 11.5,
-              fontWeight: 600,
-              color: theme.textMuted,
-              marginBottom: 6,
-            }}
-          >
-            {"已送出回覆（唯讀）"}
-          </div>
-          <div
-            style={{
-              fontSize: 12.5,
-              color: theme.text,
-              padding: "8px 10px",
-              background: theme.surfaceLo,
-              borderRadius: 7,
-              marginBottom: 10,
-            }}
-          >
-            {"已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
-          </div>
         </div>
       ) : isUnattributed ? (
         <CanvasBanner
@@ -469,9 +467,19 @@ export function CaseReplyComposer({
               marginBottom: 10,
             }}
           >
-            {content ||
-              "已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
+            {sentContent}
           </div>
+          <CanvasBtn
+            theme={theme}
+            size="xs"
+            onClick={() => {
+              setContent("");
+              setSentContent(null);
+              setReplyState("idle");
+            }}
+          >
+            補充回覆
+          </CanvasBtn>
         </div>
       ) : (
         <div style={{ marginBottom: 12 }}>
