@@ -4882,9 +4882,12 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                       f"candidate_branch={self.task['candidate_branch']} owner={self.task['owner']} "
                       f"reviewer={self.task['reviewer']} "
                       f"required_acceptance={'|'.join(self.task['required_acceptance'])} depends_on=- "
-                      f"blocker_fingerprint={action['blocker_fingerprint']}", message)
+                      f"blocker_fingerprint={action['blocker_fingerprint']} open_blockers=1", message)
         self.assertIn("resume_basis=merged_runtime_acceptance_ready", message)
         self.assertNotIn("ci_recovery=eligible candidate_sha=", message)
+        # The hard-rule prose names open_blockers=1 as the case requiring the
+        # Chair to confirm the blocker is the sole remaining one.
+        self.assertIn("若 `open_blockers=1`，你必須實際確認那一個 open blocker 是唯一剩餘阻礙", message)
 
         # Protected controls first: each stale/forged/malformed decision leaves no residue.
         before = self.path.read_bytes()
@@ -5057,6 +5060,182 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                     self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(
                         self.config, self.task["id"], "stale Chair decision"))
                 wake.assert_not_called()
+                self.assert_untouched(before)
+
+    def zero_open_board(self) -> dict:
+        """The original blocker kept as resolved history; an unrelated sibling keeps its open blocker."""
+        import copy
+        board = copy.deepcopy(self.board)
+        board["blockers"][0].update(status="resolved", resolved_at="2026-10-28T00:00:00Z")
+        board["blockers"].append({"task_id": "SIBLING-TASK", "owner": "Codex", "waiting_for": "Claude",
+                                  "status": "open", "message": "Unrelated sibling blocker",
+                                  "created_at": "2026-10-27T02:00:00Z"})
+        return board
+
+    def test_existing_zero_open_merged_chair_resume_preserves_frozen_snapshot_and_one_open_controls(self) -> None:
+        import copy
+        import github_bus
+        from test_ai_status import EMPTY_OPEN_BLOCKER_FINGERPRINT
+
+        zero = self.zero_open_board()
+        self.path.write_text(json.dumps(zero)); before = self.path.read_bytes()
+        context = supervisor.merged_acceptance_resume_context(zero, zero["tasks"][0])
+        self.assertIsNotNone(context)
+        self.assertEqual(context["blocker_fingerprint"], EMPTY_OPEN_BLOCKER_FINGERPRINT)
+        # The unmerged CI-recovery route keeps its exactly-one contract.
+        ci_task = {key: value for key, value in self.task.items() if key not in ("reviewed_sha", "merge_sha")}
+        ci_task.update(ci_status="success", pr_url="https://github.com/acme/fleet/pull/31",
+                       candidate_review_handoff={k: self.task[k] for k in (
+                           "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")})
+        self.assertIsNotNone(supervisor.candidate_ci_recovery_context(self.board, ci_task))
+        self.assertIsNone(supervisor.candidate_ci_recovery_context(zero, ci_task))
+        # The prompt shows the same nine observations, with the exact empty-set fingerprint.
+        message = supervisor.build_chair_review_message(
+            self.config, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=zero)
+        self.assertIn(f"merged_acceptance=eligible candidate_sha={self.task['candidate_sha']} ", message)
+        self.assertIn(f"blocker_fingerprint={EMPTY_OPEN_BLOCKER_FINGERPRINT} open_blockers=0", message)
+        # The hard-rule prose must not tell the Chair this zero-open row needs
+        # a blocker to confirm: the eligible row and its own instructions must
+        # not contradict (reopen finding F1). Covers the actual generated
+        # text, not just the eligibility/fingerprint context dict.
+        self.assertNotIn("剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge", message)
+        self.assertIn("若 `open_blockers=0`，代表這個已 merge 的任務目前沒有任何 open blocker", message)
+        self.assertIn("不需要、也不要去確認或捏造一個不存在的 blocker", message)
+        action = self.chair_action(zero)
+        self.assertEqual(action["blocker_fingerprint"], EMPTY_OPEN_BLOCKER_FINGERPRINT)
+
+        # Stale zero/one observations and absent/blank/forged fingerprints leave no residue.
+        one_action = self.chair_action(self.board)
+        stale = {
+            "one_open_observed_now_zero": one_action,
+            "blank_fingerprint": {**action, "blocker_fingerprint": ""},
+            "forged_fingerprint": {**action, "blocker_fingerprint": "0" * 64},
+            "absent_fingerprint": {k: v for k, v in action.items() if k != "blocker_fingerprint"},
+            "stale_merge_sha": {**action, "merge_sha": "e" * 40},
+            "stale_owner": {**action, "owner": "Gemini"},
+        }
+        for kind, drifted in stale.items():
+            with self.subTest(kind=kind):
+                _, changed = self.run_native_chair_review(self.chair_payload(drifted))
+                self.assertFalse(changed)
+                self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, drifted))
+                self.assert_untouched(before)
+        # Zero observed, then one open blocker appears before the board write.
+        one_now = copy.deepcopy(self.board)
+        self.path.write_text(json.dumps(one_now)); one_before = self.path.read_bytes()
+        _, changed = self.run_native_chair_review(self.chair_payload(action))
+        self.assertFalse(changed)
+        self.assert_untouched(one_before)
+        # Zero-to-one and one-to-zero between the Chair-bound check and the gateway's re-read.
+        real_load = supervisor.load_status
+        for kind, (start, swapped, decision) in {
+            "zero_to_one_at_gateway_reread": (zero, self.board, action),
+            "one_to_zero_at_gateway_reread": (self.board, zero, one_action),
+        }.items():
+            with self.subTest(kind=kind):
+                self.path.write_text(json.dumps(start))
+                calls = []
+
+                def load_then_swap(config, swapped=swapped):
+                    calls.append(1)
+                    if len(calls) == 2:
+                        self.path.write_text(json.dumps(swapped))
+                    return real_load(config)
+
+                with mock.patch.object(supervisor, "load_status", side_effect=load_then_swap):
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, decision))
+                self.assertEqual(len(calls), 2)
+                self.assert_untouched(json.dumps(swapped).encode())
+        # Zero-to-one at the board's own locked reread: the gateway's observation goes stale under lock.
+        self.path.write_bytes(before)
+        real_run = supervisor.run_task_board_command
+
+        def add_blocker_then_run(config, command, args, environ):
+            board = json.loads(self.path.read_text())
+            board["blockers"].append({**self.board["blockers"][0], "message": "Added under lock"})
+            self.path.write_text(json.dumps(board))
+            return real_run(config, command, args, environ=environ)
+
+        with mock.patch.object(supervisor, "run_task_board_command", side_effect=add_blocker_then_run):
+            self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+        locked_board = json.loads(self.path.read_text())
+        self.assertEqual(locked_board["tasks"][0]["status"], "blocked")
+        self.assertFalse(self.runtime_log.exists())
+        self.assertFalse(self.board_log.exists())
+
+        # The fresh zero-open decision reaches the same gateway and its locked transition.
+        self.path.write_bytes(before)
+        gateway = supervisor.apply_supervisor_merged_acceptance_resume
+        with mock.patch.object(github_bus, "gh_json") as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event") as wake, \
+                mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume", wraps=gateway) as spy:
+            error, changed = self.run_native_chair_review(self.chair_payload(action))
+        self.assertIsNone(error)
+        self.assertTrue(changed)
+        spy.assert_called_once_with(self.config, self.task["id"], action["reason"], chair_observation={
+            key: action[key] for key in supervisor.MERGED_ACCEPTANCE_OBSERVATION_KEYS})
+        reads.assert_not_called()
+        wake.assert_not_called()
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual(task["status"], "acceptance")
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                    "reviewed_sha", "ci_sha", "ci_status", "merge_sha", "required_acceptance", "depends_on"):
+            self.assertEqual(task[key], self.task[key])
+        self.assertNotIn("acceptance_evidence", task)
+        self.assertEqual(len(state["tasks"]), 1)  # no helper
+        self.assertEqual(state["blockers"], zero["blockers"])  # history and sibling untouched
+        rows = [json.loads(line) for line in self.runtime_log.read_text().splitlines()]
+        self.assertEqual([(row["type"], row["merge_sha"]) for row in rows],
+                         [("supervisor_merged_acceptance_resumed", self.task["merge_sha"])])
+        snapshot = self.path.read_bytes()
+        self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+        self.assertEqual(self.path.read_bytes(), snapshot)
+
+    def test_zero_open_merged_tasks_keep_every_other_gate_without_residue(self) -> None:
+        import copy
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Claude",
+                      "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open"}
+        helper = {"id": "UNBLOCK-A", "title": "Helper", "phase": "test", "owner": "Codex", "reviewer": "Claude2",
+                  "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open",
+                  "task_class": "unblock", "helper_parent": self.task["id"], "helper_kind": "manual_unblock"}
+        cases = {
+            "unmerged": {"merge_sha": None}, "short_merge_sha": {"merge_sha": "2f16b4f"},
+            "ci_red": {"ci_status": "failure"}, "ci_pending": {"ci_status": "queued"},
+            "ci_other_sha": {"ci_sha": "1" * 40}, "no_review": {"reviewed_sha": None},
+            "review_other_sha": {"reviewed_sha": "1" * 40}, "self_review": {"reviewer": "Claude"},
+            "external_gate": {"external_gate": True}, "release_gate": {"task_class": "release", "mutates_canonical": False},
+            "noncanonical": {"mutates_canonical": False},
+            "evidence_complete": {"acceptance_evidence": {key: "ref" for key in self.task["required_acceptance"]}},
+            "no_required_keys": {"required_acceptance": []},
+            "acceptance_review_request": {"acceptance_review_request": {"state": "pending"}},
+            "in_progress": {"status": "in_progress"}, "done": {"status": "done"},
+        }
+        for kind in [*cases, "two_open", "dependency", "open_helper", "empty_reason"]:
+            with self.subTest(kind=kind):
+                board = self.zero_open_board()
+                if kind in cases:
+                    board["tasks"][0].update(cases[kind])
+                    board["tasks"][0] = {k: v for k, v in board["tasks"][0].items() if v is not None}
+                if kind == "two_open":
+                    board["blockers"] += [{**self.board["blockers"][0], "message": f"Open {i}"} for i in range(2)]
+                if kind == "dependency":
+                    board["tasks"][0]["depends_on"] = ["DEP-A"]; board["tasks"].append(dependency)
+                if kind == "open_helper":
+                    board["tasks"].append(helper)
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                if kind != "empty_reason":
+                    action = self.chair_action(board, depends_on=list(board["tasks"][0].get("depends_on") or []))
+                    message = supervisor.build_chair_review_message(
+                        self.config, reason="blocked_task_triage", markdown_path=self.root / "d.md",
+                        json_path=self.root / "d.json", approval_state={"pending": [], "history": []}, state={},
+                        provider_report={}, status=board)
+                    self.assertNotIn("merged_acceptance=eligible candidate_sha=", message)
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+                    _, changed = self.run_native_chair_review(self.chair_payload(action))
+                    self.assertFalse(changed)
+                reason = "" if kind == "empty_reason" else "Runtime evidence exists"
+                self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(self.config, self.task["id"], reason))
                 self.assert_untouched(before)
 
     def test_existing_chair_merged_acceptance_wiring_exact_review_own_CI_normal_protected_merge(self) -> None:
@@ -5628,9 +5807,11 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
         two = copy.deepcopy(self.board)
         two["blockers"].append(self.blocker(self.TARGET, "Second blocker", "2026-10-27T01:00:00Z"))
         boards["two_blockers"] = two
-        zero = copy.deepcopy(self.board)
-        zero["blockers"] = [b for b in zero["blockers"] if b["task_id"] != self.TARGET]
-        boards["zero_blockers"] = zero
+        # Zero open blockers is now an admitted merged context (see the zero-open
+        # bounded test); three or more stay excluded like two.
+        three = copy.deepcopy(two)
+        three["blockers"].append(self.blocker(self.TARGET, "Third blocker", "2026-10-27T02:00:00Z"))
+        boards["three_blockers"] = three
         dependency = copy.deepcopy(self.board)
         dependency["tasks"][16]["depends_on"] = ["PLAIN-00"]
         boards["dependency_incomplete"] = dependency
@@ -5643,6 +5824,108 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
                 self.assertEqual(self.selected(board), self.window())
                 self.assertTrue(all("merged_acceptance=eligible" not in line for line in self.blocked_lines(board)))
                 self.assertIsNone(self.context_error(self.payload("blocked_task_triage", self.window_helpers()), board))
+
+    def zero_open(self, board: dict, task_id: str | None = None) -> dict:
+        """Keep the merged record's original blocker as resolved history."""
+        import copy
+        board = copy.deepcopy(board)
+        for blocker in board["blockers"]:
+            if blocker["task_id"] == (task_id or self.TARGET):
+                blocker.update(status="resolved", resolved_at="2026-10-28T00:00:00Z")
+        return board
+
+    def test_zero_open_merged_record_reaches_bounded_reserve_and_same_gateway(self) -> None:
+        import github_bus
+        from test_ai_status import EMPTY_OPEN_BLOCKER_FINGERPRINT
+        zero = self.zero_open(self.board)
+        before = self.write(zero)
+        # Same fixed eight plus the shared reserve; the merged option shows the empty-set fingerprint.
+        self.assertEqual(self.selected(zero), [*self.window(), self.TARGET])
+        lines = self.blocked_lines(zero)
+        self.assertEqual(len(lines), 9)
+        self.assertEqual(lines[:8], self.blocked_lines(self.board)[:8])
+        self.assertIn("merged_acceptance=eligible", lines[-1])
+        self.assertIn(f"blocker_fingerprint={EMPTY_OPEN_BLOCKER_FINGERPRINT}", lines[-1])
+        action = self.merged_action(zero)
+        self.assertEqual(action["blocker_fingerprint"], EMPTY_OPEN_BLOCKER_FINGERPRINT)
+        # No explicit decision: the ordinary helper route is still required, never waived.
+        self.assertEqual(self.context_error(self.payload("blocked_task_triage", self.window_helpers()), zero),
+                         f"blocked_task_triage must resolve blocked tasks via {self.TARGET}:create_unblock_task")
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+            self.config, self.payload("blocked_task_triage", [], self.deferrals()),
+            supervisor.chair_blocked_task_selection(self.config, zero), zero), set())
+        # One-open observation against the zero board (and the reverse) is a stale batch.
+        for kind, (board, decision) in {
+            "one_observed_now_zero": (zero, self.merged_action(self.board)),
+            "zero_observed_now_one": (self.board, action),
+        }.items():
+            for reason in ("blocked_task_triage", "reassignment_triage"):
+                with self.subTest(kind=kind, reason=reason):
+                    stale_before = self.write(board)
+                    with mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume") as gateway:
+                        error, changed = self.run_native_chair_review(
+                            self.payload(reason, [decision], self.deferrals()), reason)
+                    self.assertIn(f"{reason} mixed recovery batch is stale", error or "")
+                    self.assertFalse(changed)
+                    gateway.assert_not_called()
+                    self.assert_untouched(stale_before)
+        # The fresh mixed batch applies once through the same gateway, adding no helper.
+        self.write(zero)
+        before_board = json.loads(before)
+        gateway = supervisor.apply_supervisor_merged_acceptance_resume
+        with mock.patch.object(github_bus, "gh_json") as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event") as wake, \
+                mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume", wraps=gateway) as spy:
+            error, changed = self.run_native_chair_review(self.payload("blocked_task_triage", [action], self.deferrals()))
+        self.assertIsNone(error)
+        self.assertTrue(changed)
+        spy.assert_called_once_with(self.config, self.TARGET, action["reason"], chair_observation={
+            key: action[key] for key in supervisor.MERGED_ACCEPTANCE_OBSERVATION_KEYS})
+        reads.assert_not_called()
+        wake.assert_not_called()
+        state = json.loads(self.path.read_text())
+        self.assertEqual(state["tasks"][:16], before_board["tasks"][:16])
+        self.assertEqual(len(state["tasks"]), 17)
+        target = state["tasks"][16]
+        self.assertEqual(target["status"], "acceptance")
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                    "reviewed_sha", "ci_sha", "ci_status", "merge_sha", "required_acceptance"):
+            self.assertEqual(target[key], before_board["tasks"][16][key])
+        self.assertEqual(state["blockers"], before_board["blockers"])  # nothing resolved, erased or added
+
+    def test_zero_open_merged_shares_reserve_with_ci_priority_and_ten_cap(self) -> None:
+        import copy
+        # CI-ready and zero-open merged records share the reserve, one slot each, in board order.
+        mixed = copy.deepcopy(self.board)
+        for index in range(3):
+            mixed["tasks"].insert(16, self.ci_ready(f"CI-READY-{index}"))
+            mixed["blockers"].append(self.blocker(f"CI-READY-{index}"))
+        mixed["tasks"].append(self.merged("MERGED-LATER"))
+        mixed = self.zero_open(self.zero_open(mixed), "MERGED-LATER")
+        self.assertEqual(self.selected(mixed), [*self.window(), "CI-READY-2", self.TARGET])
+        lines = self.blocked_lines(mixed)
+        self.assertIn("ci_recovery=eligible", lines[8])
+        self.assertIn("merged_acceptance=eligible", lines[9])
+        # Explicitly requested CI recovery keeps its priority over zero-open merged records.
+        requested = copy.deepcopy(mixed)
+        for task in requested["tasks"]:
+            if task["id"] in {"CI-READY-0", "CI-READY-1"}:
+                task["next"] = "Please resume_parent_task with resume_basis=candidate_ci_recovered now."
+        self.assertEqual(self.selected(requested), [*self.window(), "CI-READY-1", "CI-READY-0"])
+        # A zero-open CI-ready record is still not a CI-recovery candidate.
+        ci_zero = self.zero_open(mixed, "CI-READY-2")
+        self.assertEqual(self.selected(ci_zero), [*self.window(), "CI-READY-1", self.TARGET])
+        # Many zero-open merged records: still ten, original order, stable.
+        many = self.zero_open(self.board)
+        for index in range(30):
+            many["tasks"].append(self.merged(f"MERGED-EXTRA-{index:02d}"))
+        for _ in range(3):
+            self.assertEqual(self.selected(many), [*self.window(), self.TARGET, "MERGED-EXTRA-00"])
+        self.assertEqual(len(self.blocked_lines(many)), 10)
+        # Inside the window: no duplication, no reordering.
+        inside = self.zero_open(self.board)
+        inside["tasks"] = [inside["tasks"][16], *inside["tasks"][:16]]
+        self.assertEqual(self.selected(inside), [self.TARGET, *self.window()[:7]])
 
     def test_shared_reserve_cap_stable_order_and_ci_merged_fairness(self) -> None:
         import copy
@@ -5862,3 +6145,244 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
         opened = [b["task_id"] for b in state["blockers"] if b["status"] == "open"]
         self.assertNotIn("MERGED-THIRD-HELD", opened)
         self.assertEqual(len(opened), len(board["blockers"]) - 1)
+
+
+class ExistingApprovalSuccessCooldownFairnessTests(unittest.TestCase):
+    """A successful approval_triage must neither extend nor clear the shared
+    cooldown. Extending it let back-to-back approvals (each a fresh signal that
+    bypasses the cooldown) push an already-due blocked_task_triage, which may
+    not bypass, out of reach across every pending-empty gap."""
+
+    START = datetime(2026, 10, 29, 9, 0, 0, tzinfo=timezone.utc)
+
+    def setUp(self) -> None:
+        import copy
+        from datetime import timedelta
+        from test_ai_status import MERGED_BLOCKED_ACCEPTANCE_TASK, ai_status as board_commands
+
+        self.timedelta = timedelta
+        self.tmp = tempfile.TemporaryDirectory(prefix="approval-cooldown-fairness-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "chair-reviews").mkdir()
+        (self.root / "activity-log.jsonl").write_text("", encoding="utf-8")
+        self.status_path = self.root / "ai-status.json"
+        self.task = copy.deepcopy(MERGED_BLOCKED_ACCEPTANCE_TASK)
+        self.board = board_commands.default_state()
+        self.board.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
+            "message": "Runtime evidence blocker", "created_at": "2026-10-27T00:00:00Z"}]})
+        self.status_path.write_text(json.dumps(self.board), encoding="utf-8")
+        self.config = {
+            "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+            "chair_review": {"enabled": True, "cooldown_seconds": 900, "review_dir": str(self.root / "chair-reviews")},
+            "paths": {
+                "status_file": str(self.status_path),
+                "state_file": str(self.root / "state.json"),
+                "approval_queue": str(self.root / "approval-queue.json"),
+                "activity_log": str(self.root / "activity-log.jsonl"),
+                "event_queue": str(self.root / "event-queue.jsonl"),
+                "chair_review_dir": str(self.root / "chair-reviews"),
+            },
+        }
+        self.state = {"queue": {"events": {}}, "workers": {}, "provider_pauses": {}, "dispatch_pauses": [],
+                      "failure_streaks": {}, "chair_review": {
+                          "last_review_at": "2026-10-29T08:00:00Z", "last_attempt_at": "2026-10-29T08:00:00Z",
+                          "cooldown_until": "2026-10-29T08:15:00Z"}}
+        self.clock = [self.START]
+        self.pending: list[dict] = []
+        clock = self.clock
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return clock[0] if tz is not None else clock[0].replace(tzinfo=None)
+
+        # Only external IO is stubbed: the clock, the approval store, the brief
+        # writer, lane selection and the queue writer. The scheduler and refresh
+        # functions under test run unmodified.
+        mock.patch.object(supervisor, "datetime", Clock).start()
+        mock.patch.object(supervisor, "utc_now", side_effect=lambda: self.iso(clock[0])).start()
+        mock.patch.object(supervisor, "safe_load_approval_state",
+                          side_effect=lambda config: {"pending": [dict(item) for item in self.pending],
+                                                      "history": []}).start()
+        mock.patch.object(supervisor, "resolve_approval", side_effect=self.resolve).start()
+        mock.patch.object(supervisor, "ensure_task_brief", return_value=None).start()
+        self.choose = mock.patch.object(supervisor, "choose_chair_reviewer", return_value=("claude", "Claude")).start()
+        self.enqueue = mock.patch.object(supervisor, "enqueue_event").start()
+        self.addCleanup(mock.patch.stopall)
+
+    # Fixtures -----------------------------------------------------------
+
+    @staticmethod
+    def iso(moment: datetime) -> str:
+        return moment.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def advance(self, seconds: int) -> None:
+        self.clock[0] = self.clock[0] + self.timedelta(seconds=seconds)
+
+    def resolve(self, config, approval_id, **kwargs) -> None:
+        self.pending[:] = [item for item in self.pending if item["approval_id"] != approval_id]
+
+    def add_approval(self) -> str:
+        approval_id = f"apr-{len(self.pending)}-{self.iso(self.clock[0])}"
+        self.pending.append({"approval_id": approval_id, "status": "pending", "created_at": self.iso(self.clock[0])})
+        return approval_id
+
+    def queue(self) -> bool:
+        return supervisor.queue_chair_review(self.config, self.state, supervisor.load_status(self.config), {})
+
+    def active_reason(self) -> str | None:
+        return (self.state["chair_review"].get("active_review") or {}).get("reason")
+
+    def payload(self, reason: str) -> dict:
+        return {"version": 1, "decision": reason, "approval_ttl_minutes": 45, "reason": "r", "blocked_by": [],
+                "approval_actions": [{"approval_id": item["approval_id"], "decision": "deny", "reason": "r"}
+                                     for item in self.pending],
+                "reassignment_actions": [], "task_actions": [], "provider_actions": [], "recommended_focus": []}
+
+    def complete(self, payload: dict | None) -> bool:
+        """The active Chair run finishes: valid outputs, or none at all."""
+        active = self.state["chair_review"]["active_review"]
+        if payload is not None:
+            Path(active["markdown_path"]).write_text("# Review\n", encoding="utf-8")
+            Path(active["json_path"]).write_text(json.dumps(payload), encoding="utf-8")
+        self.state["queue"]["events"][active["queue_event_id"]] = {"status": "completed"}
+        return supervisor.refresh_chair_review_state(self.config, self.state, provider_report={})
+
+    def dispatch_approval(self) -> None:
+        self.add_approval()
+        self.assertEqual(supervisor.chair_review_reason(
+            self.state, {"pending": self.pending}, status=supervisor.load_status(self.config), config=self.config),
+            "approval_triage")
+        self.assertTrue(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": self.pending}))
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "approval_triage")
+
+    # Tests --------------------------------------------------------------
+
+    def test_existing_approval_success_preserves_due_blocked_cadence_and_original_failure_priority_controls(self) -> None:
+        status_bytes = self.status_path.read_bytes()
+        records = supervisor.dependency_ready_blocked_task_records(self.config, supervisor.load_status(self.config))
+        self.assertEqual([record["task_id"] for record in records], [self.task["id"]])
+        self.assertIsNotNone(records[0]["merged_acceptance_resume"])
+
+        # Approvals arrive every ten minutes (< 900s); each is resolved, leaving pending empty.
+        for _ in range(3):
+            before = self.state["chair_review"]["cooldown_until"]
+            self.dispatch_approval()
+            enqueued = self.enqueue.call_count
+            # Single active Chair: nothing else is dispatched while it runs, fresh signal or not.
+            self.advance(30)
+            self.add_approval()
+            self.assertFalse(self.queue())
+            self.assertEqual(self.enqueue.call_count, enqueued)
+            self.advance(30)
+            self.assertTrue(self.complete(self.payload("approval_triage")))
+            chair = self.state["chair_review"]
+            self.assertEqual(self.pending, [])
+            self.assertIsNone(chair["active_review"])
+            self.assertEqual(chair["last_reason"], "approval_triage")
+            self.assertEqual(chair["last_review_at"], self.iso(self.clock[0]))
+            self.assertEqual(chair["failure_streak"], 0)
+            # Neither extended nor cleared: the pre-approval deadline is kept as is.
+            self.assertEqual(chair["cooldown_until"], before)
+            self.assertEqual(self.status_path.read_bytes(), status_bytes)
+            self.advance(540)
+
+        # Pending is empty and nothing new arrived: the already-due blocked review now runs.
+        self.assertFalse(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": []}))
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "blocked_task_triage")
+        self.assertEqual(self.enqueue.call_count, 4)
+        self.assertEqual(self.enqueue.call_args.args[1]["reason"], "chair_review:blocked_task_triage")
+        # Queueing the review is the only effect: no board write, phase change or vote.
+        self.assertEqual(self.status_path.read_bytes(), status_bytes)
+        self.assertEqual(json.loads(self.status_path.read_text())["tasks"][0]["status"], "blocked")
+
+    def test_successful_approval_keeps_a_live_failure_deadline_and_seen_pending_cannot_bypass_it(self) -> None:
+        # A genuine failure: the blocked review finishes without its declared outputs.
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "blocked_task_triage")
+        self.advance(60)
+        self.assertTrue(self.complete(None))
+        failure_deadline = self.state["chair_review"]["cooldown_until"]
+        self.assertEqual(failure_deadline, self.iso(self.clock[0] + self.timedelta(seconds=900)))
+        self.assertEqual(self.state["chair_review"]["failure_streak"], 1)
+        self.advance(60)
+        self.assertFalse(self.queue())
+
+        # A fresh approval still takes priority over the due blocked review and bypasses the clock...
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete(self.payload("approval_triage")))
+        # ...but its success neither clears nor extends the live failure deadline.
+        self.assertEqual(self.state["chair_review"]["cooldown_until"], failure_deadline)
+        self.assertFalse(self.queue())
+        self.assertIsNone(self.state["chair_review"]["active_review"])
+
+        # A malformed approval verdict is a failure: it backs off again and the
+        # still-pending, already-seen approval cannot bypass that clock.
+        self.advance(60)
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete({"version": 1, "decision": "approval_triage"}))
+        retry_after = self.state["chair_review"]["cooldown_until"]
+        self.assertEqual(retry_after, self.iso(self.clock[0] + self.timedelta(seconds=900)))
+        self.assertEqual(self.state["chair_review"]["failure_streak"], 1)
+        self.assertEqual(len(self.pending), 1)
+        self.advance(60)
+        self.assertFalse(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": self.pending}))
+        enqueued = self.enqueue.call_count
+        self.assertFalse(self.queue())
+        self.assertEqual(self.enqueue.call_count, enqueued)
+
+        # Once the real deadline passes the cadence resumes on its own.
+        self.advance(900)
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "approval_triage")
+
+    def test_non_approval_success_still_sets_the_cooldown_and_blocks_due_work(self) -> None:
+        self.status_path.write_text(json.dumps({**self.board, "tasks": [], "blockers": []}), encoding="utf-8")
+        for reason in ("blocked_task_triage", "reassignment_triage", "provider_health_triage", "operational_review"):
+            with self.subTest(reason=reason):
+                self.advance(60)
+                self.state["chair_review"]["cooldown_until"] = "2026-10-29T08:15:00Z"
+                self.state["chair_review"]["active_review"] = {
+                    "agent_id": "claude", "agent": "Claude", "reason": reason, "queue_event_id": f"evt-{reason}",
+                    "markdown_path": str(self.root / "chair-reviews" / f"{reason}.md"),
+                    "json_path": str(self.root / "chair-reviews" / f"{reason}.json"),
+                }
+                self.assertTrue(self.complete(self.payload(reason)))
+                self.assertEqual(self.state["chair_review"]["last_reason"], reason)
+                self.assertEqual(self.state["chair_review"]["cooldown_until"],
+                                 self.iso(self.clock[0] + self.timedelta(seconds=900)))
+
+        # A real unexpired non-approval cooldown still blocks a due blocked review.
+        self.status_path.write_text(json.dumps(self.board), encoding="utf-8")
+        self.advance(60)
+        self.assertEqual(supervisor.chair_review_reason(
+            self.state, {"pending": []}, status=supervisor.load_status(self.config), config=self.config),
+            "blocked_task_triage")
+        self.assertFalse(self.queue())
+        self.enqueue.assert_not_called()
+
+    def test_approval_success_without_ready_blocked_rows_queues_no_follow_up_work(self) -> None:
+        idle = {**self.board, "tasks": [], "blockers": []}
+        self.status_path.write_text(json.dumps(idle), encoding="utf-8")
+        chair = self.state["chair_review"]
+        chair["last_operational_fingerprint"] = supervisor.operational_review_fingerprint(
+            idle, {"pending": []}, self.state)
+        chair["last_operational_review_at"] = self.iso(self.clock[0])
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete(self.payload("approval_triage")))
+        self.assertEqual(chair["cooldown_until"], "2026-10-29T08:15:00Z")
+        self.advance(60)
+        self.assertIsNone(supervisor.chair_review_reason(
+            self.state, {"pending": []}, status=idle, config=self.config))
+        self.assertFalse(self.queue())
+        self.assertEqual(self.enqueue.call_count, 1)
