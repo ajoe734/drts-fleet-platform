@@ -107,6 +107,19 @@ function load(filename) {
 }
 const query = load(queryEntry);
 ${behavior}
+// Execute the actual installed Router caller, isolated from unrelated native UI
+// imports by selecting its declaration from the parsed distribution. The
+// function body and query-string implementation are neither copied nor mocked.
+const routerRequire = createRequire(driverRequire.resolve('expo-router/package.json'));
+const callerPath = routerRequire.resolve('expo-router/build/fork/getPathFromState-forks.js');
+const callerSource = fs.readFileSync(callerPath, 'utf8');
+const callerAst = babel.parseSync(callerSource, {babelrc:false, configFile:false});
+const declaration = callerAst.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === 'appendQueryAndHash');
+assert.ok(declaration, 'real Router caller must exist');
+const append = vm.runInThisContext('(function(queryString){' + callerSource.slice(declaration.start, declaration.end) + ';return appendQueryAndHash;})')(query);
+const linked = append('/trip', {...params, '#':'stop'});
+assert.equal(linked, '/trip?' + query.stringify(params, {sort:false}) + '#stop');
+assert.deepEqual({...query.parseUrl(linked).query}, params);
 `);
   });
 
