@@ -1499,6 +1499,8 @@ MERGED_BLOCKED_ACCEPTANCE_TASK = {
                             "同候選SHA CI通過且獨立reviewer審查"],
     "last_update": "2026-10-27T00:00:00Z",
 }
+# open_blocker_fingerprint of zero open records: sha256 of the empty JSON list.
+EMPTY_OPEN_BLOCKER_FINGERPRINT = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 
 
 class MergedBlockedAcceptanceResumeTests(unittest.TestCase):
@@ -1628,6 +1630,96 @@ class MergedBlockedAcceptanceResumeTests(unittest.TestCase):
         for key in ("candidate_sha", "candidate_generation", "reviewed_sha", "ci_sha", "merge_sha"):
             self.assertEqual(task[key], before[key])
 
+    def zero_open_state(self) -> dict:
+        """The original blocker kept as resolved history plus an unrelated sibling's open blocker."""
+        state = copy.deepcopy(self.state)
+        state["blockers"][0].update(status="resolved", resolved_at="2026-10-28T00:00:00Z")
+        state["blockers"].append({"task_id": "SIBLING-TASK", "owner": "Codex", "waiting_for": "Claude",
+                                  "status": "open", "message": "Unrelated sibling blocker",
+                                  "created_at": "2026-10-27T02:00:00Z"})
+        return state
+
+    def test_zero_open_merged_resume_enters_acceptance_without_rewriting_blocker_history(self) -> None:
+        state = self.zero_open_state()
+        self.assertEqual(self.fingerprint_of(state["blockers"], self.task["id"]), (EMPTY_OPEN_BLOCKER_FINGERPRINT, 0))
+        env = {**self.env, "TASK_RESUME_BLOCKER_FINGERPRINT": EMPTY_OPEN_BLOCKER_FINGERPRINT}
+        for kind, board in (("resolved_history", state), ("no_blocker_records", {**copy.deepcopy(self.state), "blockers": []})):
+            with self.subTest(kind=kind):
+                self.log.unlink(missing_ok=True)
+                self.path.write_text(json.dumps(board))
+                before = copy.deepcopy(board)
+                self.execute("resume-blocked", "acceptance", "Runtime evidence available for original keys", env=env)
+                after = json.loads(self.path.read_text()); task = after["tasks"][0]
+                self.assertEqual(task["status"], "acceptance")
+                for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                            "reviewed_sha", "ci_sha", "ci_status", "merge_sha", "required_acceptance",
+                            "mutates_canonical", "depends_on"):
+                    self.assertEqual(task[key], before["tasks"][0][key])
+                self.assertNotIn("acceptance_evidence", task)
+                self.assertNotIn("waiting_for", task)
+                # Nothing to resolve: historical and sibling blockers stay byte-for-byte; no helper, no handoff.
+                self.assertEqual(after["blockers"], before["blockers"])
+                self.assertEqual(after["tasks"][1:], self.helpers)
+                self.assertEqual(after["handoffs"], [])
+                logs = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual([row["type"] for row in logs], ["blocked_task_resumed"])
+                self.assertEqual((logs[0]["resume_basis"], logs[0]["resume_status"], logs[0]["helper_task_id"]),
+                                 ("merged_runtime_acceptance_ready", "acceptance", None))
+        # The original roles then record the outstanding keys through the ordinary route.
+        keys = self.task["required_acceptance"]
+        self.execute("record-acceptance", "Owner records evidence", env={
+            **self.base_env, "AI_NAME": "Claude",
+            "ACCEPTANCE_EVIDENCE_JSON": json.dumps({key: f"audit.json#{index}" for index, key in enumerate(keys[:3])})})
+        self.execute("record-acceptance", "Reviewer records evidence", env={
+            **self.base_env, "AI_NAME": "Claude2", "ACCEPTANCE_EVIDENCE_JSON": json.dumps({keys[3]: "audit.json#3"})})
+        self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "done")
+
+    def test_zero_open_merged_resume_keeps_every_other_locked_guard(self) -> None:
+        env = {**self.env, "TASK_RESUME_BLOCKER_FINGERPRINT": EMPTY_OPEN_BLOCKER_FINGERPRINT}
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Claude",
+                      "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open"}
+        cases = {
+            "codex_actor": ({"AI_NAME": "Codex"}, {}), "helper": ({"TASK_RESUME_HELPER_ID": self.helpers[2]["id"]}, {}),
+            "missing_identity": ({"TASK_RESUME_ACCEPTANCE_IDENTITY_JSON": None}, {}),
+            "unmerged": ({}, {"merge_sha": None}), "review_missing": ({}, {"reviewed_sha": None}),
+            "self_review": ({}, {"reviewer": "Claude"}), "ci_red": ({}, {"ci_status": "failure"}),
+            "ci_pending": ({}, {"ci_status": "running"}), "ci_other_sha": ({}, {"ci_sha": "e" * 40}),
+            "generation_drift": ({}, {"candidate_generation": "new-generation"}),
+            "evidence_complete": ({}, {"acceptance_evidence": {key: "ref" for key in self.task["required_acceptance"]}}),
+            "external_gate": ({}, {"external_gate": True}),
+            "release_gate": ({}, {"task_class": "release", "mutates_canonical": False}),
+            "noncanonical": ({}, {"mutates_canonical": False}),
+            "pending_review_request": ({}, {"acceptance_review_request": {"state": "pending"}}),
+            "source_phase": ({}, {"status": "in_progress"}),
+        }
+        for kind, (env_changes, task_changes) in [*cases.items(), ("dependency", ({}, {})), ("open_helper", ({}, {}))]:
+            with self.subTest(kind=kind):
+                case_env = {k: v for k, v in {**env, **env_changes}.items() if v is not None}
+                state = self.zero_open_state()
+                state["tasks"][0].update(task_changes)
+                state["tasks"][0] = {k: v for k, v in state["tasks"][0].items() if v is not None}
+                if kind == "dependency":
+                    state["tasks"][0]["depends_on"] = ["DEP-A"]; state["tasks"].append(dependency)
+                    case_env["TASK_RESUME_DEPENDS_ON_JSON"] = '["DEP-A"]'
+                if kind == "open_helper":
+                    state["tasks"].append({**self.helpers[2], "id": "OPEN-HELPER", "status": "in_progress"})
+                self.assert_rejected("resume-blocked", "acceptance", "Invalid zero-open resume", env=case_env, state=state)
+        # The unmerged CI-recovery basis keeps its exactly-one contract for zero open blockers.
+        ci_task = {k: v for k, v in self.task.items() if k not in ("reviewed_sha", "merge_sha")}
+        ci_task.update(ci_status="success", pr_url="https://github.com/acme/fleet/pull/31",
+                       candidate_review_handoff={k: self.task[k] for k in (
+                           "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")})
+        state = self.zero_open_state(); state["tasks"][0] = ci_task
+        from control_plane.domain.chair_policy import CANDIDATE_CI_RECOVERY_IDENTITY_KEYS
+        reason = self.assert_rejected("resume-blocked", "in_progress", "Zero-open CI recovery", state=state, env={
+            **self.base_env, "AI_NAME": "Supervisor", "TASK_RESUME_BASIS": "candidate_ci_recovered",
+            "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps({k: ci_task[k] for k in CANDIDATE_CI_RECOVERY_IDENTITY_KEYS}),
+            "TASK_RESUME_CHAIR_PR_URL": ci_task["pr_url"], "TASK_RESUME_DEPENDS_ON_JSON": "[]",
+            "TASK_RESUME_DEPENDENCY_DONE_STATUSES": '["done"]',
+            "TASK_RESUME_BLOCKER_FINGERPRINT": EMPTY_OPEN_BLOCKER_FINGERPRINT, "CANDIDATE_HEAD_SHA": ci_task["candidate_sha"],
+            "CANDIDATE_BRANCH": ci_task["candidate_branch"], "PR_URL": ci_task["pr_url"], "CANDIDATE_CI_STATUS": "success"})
+        self.assertIn("Candidate CI recovery requires exactly one open blocker", reason)
+
     def test_stale_unmerged_red_gated_or_unauthorized_resume_has_no_side_effects(self) -> None:
         second = {"task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
                   "message": "Second protected blocker", "created_at": "2026-10-27T01:00:00Z"}
@@ -1677,7 +1769,12 @@ class MergedBlockedAcceptanceResumeTests(unittest.TestCase):
                 state["tasks"][0].update(task_changes)
                 state["tasks"][0] = {key: value for key, value in state["tasks"][0].items() if value is not None}
                 self.assert_rejected("resume-blocked", "acceptance", "Invalid merged resume", env=env, state=state)
-        for kind in ("second_blocker", "edited_blocker", "no_open_blocker", "dependency_regressed", "open_helper"):
+        # A fresh, stable zero-open snapshot is now admitted (see the zero-open test
+        # below); a zero/one count that changed after the observation is not.
+        cases = ("second_blocker", "edited_blocker", "one_to_zero_after_observation", "zero_to_one_after_observation",
+                 "zero_missing_fingerprint", "zero_blank_fingerprint", "zero_wrong_fingerprint",
+                 "dependency_regressed", "open_helper")
+        for kind in cases:
             with self.subTest(kind=kind):
                 state = copy.deepcopy(self.state); env = dict(self.env)
                 if kind == "second_blocker":
@@ -1686,9 +1783,21 @@ class MergedBlockedAcceptanceResumeTests(unittest.TestCase):
                     env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(state["blockers"], self.task["id"])[0]
                 if kind == "edited_blocker":
                     state["blockers"][0]["message"] = "Different blocker"
-                if kind == "no_open_blocker":
+                if kind == "one_to_zero_after_observation":
+                    # Observed with one open blocker; it was resolved before the locked reread.
                     state["blockers"][0]["status"] = "resolved"
-                    env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(state["blockers"], self.task["id"])[0]
+                if kind.startswith("zero_"):
+                    # Observed with zero open blockers; the board stays at zero below unless it drifts.
+                    state["blockers"][0]["status"] = "resolved"
+                    env["TASK_RESUME_BLOCKER_FINGERPRINT"] = EMPTY_OPEN_BLOCKER_FINGERPRINT
+                if kind == "zero_to_one_after_observation":
+                    state["blockers"].append(second)
+                if kind == "zero_missing_fingerprint":
+                    env.pop("TASK_RESUME_BLOCKER_FINGERPRINT")
+                if kind == "zero_blank_fingerprint":
+                    env["TASK_RESUME_BLOCKER_FINGERPRINT"] = ""
+                if kind == "zero_wrong_fingerprint":
+                    env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(self.state["blockers"], self.task["id"])[0]
                 if kind == "dependency_regressed":
                     state["tasks"][0]["depends_on"] = ["DEP-A"]; state["tasks"].append(dependency)
                     env["TASK_RESUME_DEPENDS_ON_JSON"] = '["DEP-A"]'

@@ -26,6 +26,9 @@ import {
   type StepRunner,
 } from "../../e2e/owned-referral-business-journey/run-finalization";
 import { ORIGINAL_UNKNOWN_BOOKING } from "../../e2e/owned-referral-business-journey/original-journal-recovery";
+// The real API route policy matcher (with its own path normalization); only
+// proof issuance/storage around it is faked.
+import { resolveRouteStepUpPolicy } from "../../../apps/api/src/common/auth/step-up.policy";
 
 const ROOT = process.cwd();
 const SPEC = path.join(
@@ -59,6 +62,65 @@ type DriverRow = {
   workState: string;
   deviceBindings: { bindingId: string; deviceId: string; status: string }[];
 };
+type SubmissionRow = {
+  submission: {
+    submissionId: string;
+    fleetPartnerId: string;
+    submissionType: string;
+    status: string;
+    revisionNo: number;
+    canonicalDriverId: string | null;
+    canonicalVehicleId: string | null;
+  };
+  driverDraft: ObjectData | null;
+  vehicleDraft: ObjectData | null;
+  // Fields only the detail read returns differently from its list row.
+  detail?: Partial<SubmissionRow["submission"]>;
+};
+const FLEET = "fleet-demo-001";
+const ADMIN_SESSION = "sess_synthetic_own_admin";
+const driverSubmission = (
+  submissionId: string,
+  nonce: string,
+  patch: Partial<SubmissionRow["submission"]> = {},
+  draft: ObjectData = {},
+): SubmissionRow => ({
+  submission: {
+    submissionId,
+    fleetPartnerId: FLEET,
+    submissionType: "driver_onboarding",
+    status: "approved",
+    revisionNo: 3,
+    canonicalDriverId: null,
+    canonicalVehicleId: null,
+    ...patch,
+  },
+  driverDraft: {
+    name: `合成測試司機 ${nonce.slice(-12)}`,
+    mobile: "synthetic-not-a-phone",
+    professionalDriverLicenseNo: `SIM-DL-${nonce}`,
+    taxiDriverRegistrationNo: `SIM-REG-${nonce}`,
+    ...draft,
+  },
+  vehicleDraft: null,
+});
+const vehicleSubmission = (
+  submissionId: string,
+  currentDriverSubmissionId: string,
+  canonicalVehicleId: string | null,
+): SubmissionRow => ({
+  submission: {
+    submissionId,
+    fleetPartnerId: FLEET,
+    submissionType: "vehicle_onboarding",
+    status: canonicalVehicleId ? "approved" : "draft",
+    revisionNo: 3,
+    canonicalDriverId: null,
+    canonicalVehicleId,
+  },
+  driverDraft: null,
+  vehicleDraft: { plateNo: "SIM-SYNTHETIC", currentDriverSubmissionId },
+});
 
 /** External API/IO fake ports only; the decision logic is the real adapter. */
 function world(
@@ -102,7 +164,31 @@ function world(
       ],
     },
   ];
-  const vehicles = [{ vehicleId: FULL.firstSupply.vehicleId }];
+  const vehicles: { vehicleId: string }[] = [
+    { vehicleId: FULL.firstSupply.vehicleId },
+  ];
+  // The original first pair's own submissions and a foreign Fleet's; no
+  // second-supply source exists unless a test adds it.
+  const submissions: SubmissionRow[] = [
+    driverSubmission("sub_first_driver", FULL.nonce, {
+      canonicalDriverId: FULL.firstSupply.driverId,
+    }),
+    vehicleSubmission(
+      "sub_first_vehicle",
+      "sub_first_driver",
+      FULL.firstSupply.vehicleId,
+    ),
+    driverSubmission(
+      "sub_foreign_fleet",
+      FULL.secondSupply.nonce,
+      { fleetPartnerId: "fleet-demo-002" },
+      {},
+    ),
+  ];
+  let listedTotal: number | null = null;
+  // Fake proof issuance/storage; the action is decided by the real matcher.
+  const admin = { sessionId: ADMIN_SESSION, realm: "platform" as const };
+  const proofs = new Map<string, { actionId: string; sessionId: string }>();
   const history = () => ({
     items: [
       ...[...orders.values()].map((order) => ({
@@ -168,20 +254,88 @@ function world(
       driver.workState = "offline";
       return { driverId, workState: "offline" };
     }),
-    revokeBinding: vi.fn(async (bindingId: string, deviceId: string) => {
-      log.push(`write:revoke:${bindingId}:${deviceId}`);
-      for (const driver of drivers)
-        for (const binding of driver.deviceBindings)
-          if (binding.bindingId === bindingId) {
-            binding.status = "revoked";
-            return {
-              bindingId,
-              deviceId: binding.deviceId,
-              driverId: driver.driverId,
-              revokedAt: "2026-10-28T15:01:00.000Z",
-            };
-          }
-      throw new JourneyFailure("api:request", 404, "NOT_FOUND");
+    adminSessionId: ADMIN_SESSION,
+    readAdminSession: vi.fn(async () => {
+      log.push("read:admin-session");
+      return {
+        active: true,
+        identity: {
+          realm: admin.realm,
+          actorType: "platform_admin",
+          authMode: "jwt_bearer",
+          sessionId: admin.sessionId,
+        },
+      };
+    }),
+    // Same contract as the spec's existing stepUp helper: the proof request
+    // names {POST, path}; `required` and the exact action are then required.
+    stepUp: vi.fn(async (proofPath: string, actionId: string) => {
+      log.push(`proof:${proofPath}`);
+      const policy = resolveRouteStepUpPolicy("POST", proofPath, admin.realm);
+      if (!policy || policy.actionId !== actionId)
+        throw new JourneyFailure("exact same-session action proof");
+      const reference = `stepup_synthetic_${proofs.size + 1}`;
+      proofs.set(reference, {
+        actionId: policy.actionId,
+        sessionId: admin.sessionId,
+      });
+      return reference;
+    }),
+    revokeBinding: vi.fn(
+      async (bindingId: string, deviceId: string, reference: string) => {
+        log.push(`write:revoke:${bindingId}:${deviceId}`);
+        // The API guard: the real route policy, then the proof's own action
+        // and session. The fake 403 is this fake's, not an observed status.
+        const policy = resolveRouteStepUpPolicy(
+          recovery.EXACT_SEVEN_REVOKE_ROUTE.method,
+          recovery.EXACT_SEVEN_REVOKE_ROUTE.path,
+          admin.realm,
+        );
+        const proof = proofs.get(reference);
+        if (
+          policy &&
+          !(
+            proof &&
+            proof.actionId === policy.actionId &&
+            proof.sessionId === admin.sessionId
+          )
+        )
+          throw new JourneyFailure("api:request", 403);
+        for (const driver of drivers)
+          for (const binding of driver.deviceBindings)
+            if (binding.bindingId === bindingId) {
+              binding.status = "revoked";
+              return {
+                bindingId,
+                deviceId: binding.deviceId,
+                driverId: driver.driverId,
+                revokedAt: "2026-10-28T15:01:00.000Z",
+              };
+            }
+        throw new JourneyFailure("api:request", 404, "NOT_FOUND");
+      },
+    ),
+    fleetPartnerId: FLEET,
+    readSupplySubmissions: vi.fn(async () => {
+      log.push("read:submissions");
+      return {
+        items: submissions.map((row) => structuredClone(row.submission)),
+        pageInfo: { totalItems: listedTotal ?? submissions.length },
+      };
+    }),
+    readSupplySubmission: vi.fn(async (submissionId: string) => {
+      log.push(`read:submission:${submissionId}`);
+      const row = submissions.find(
+        (item) => item.submission.submissionId === submissionId,
+      )!;
+      // The API detail shape: { submission, ...submission, drafts }.
+      const submission = structuredClone({ ...row.submission, ...row.detail });
+      return {
+        ...submission,
+        submission,
+        driverDraft: structuredClone(row.driverDraft),
+        vehicleDraft: structuredClone(row.vehicleDraft),
+      };
     }),
     persist: vi.fn(async (facts: ObjectData) => {
       log.push("persist");
@@ -195,13 +349,64 @@ function world(
     orders,
     others,
     drivers,
+    vehicles,
+    submissions,
+    admin,
+    proofs,
     ports,
     persisted,
     setActive: (value: unknown) => {
       active = value;
     },
+    setListedTotal: (value: number) => {
+      listedTotal = value;
+    },
     writes: () => log.filter((entry) => entry.startsWith("write:")),
+    proofRequests: () => log.filter((entry) => entry.startsWith("proof:")),
   };
+}
+
+/** The original provisionSupply chain for `${nonce}-second`, as stored. */
+function addSecond(
+  w: ReturnType<typeof world>,
+  options: {
+    approved?: boolean;
+    binding?: boolean;
+    vehicle?: boolean;
+    workState?: string;
+  } = {},
+) {
+  const { approved = true, binding = true, vehicle = true } = options;
+  w.submissions.push(
+    driverSubmission("sub_second_driver", FULL.secondSupply.nonce, {
+      status: approved ? "approved" : "draft",
+      canonicalDriverId: approved ? "drv_second_own" : null,
+    }),
+  );
+  if (vehicle) {
+    w.submissions.push(
+      vehicleSubmission(
+        "sub_second_vehicle",
+        "sub_second_driver",
+        approved ? "veh_second_own" : null,
+      ),
+    );
+    if (approved) w.vehicles.push({ vehicleId: "veh_second_own" });
+  }
+  if (approved)
+    w.drivers.push({
+      driverId: "drv_second_own",
+      workState: options.workState ?? "available",
+      deviceBindings: binding
+        ? [
+            {
+              bindingId: "drvbind_second",
+              deviceId: FULL.secondSupply.deviceId,
+              status: "active",
+            },
+          ]
+        : [],
+    });
 }
 
 const order = (state: ExactSevenRecoveryState, slot: ExactSevenSlot) =>
@@ -710,7 +915,11 @@ describe("FULL 40689200536 recovery under the actual finalizer plan", () => {
       binding: "revoked-verified",
       bindingId: "drvbind_first",
     });
-    // No exact original second device binding exists: unknown, not absent.
+    // Exactly one fresh proof, for the exact revoke route.
+    expect(w.proofRequests()).toEqual([
+      `proof:${recovery.EXACT_SEVEN_REVOKE_ROUTE.path}`,
+    ]);
+    // No exact original second source exists: unknown, not absent.
     expect(state.supply[1]!.qualification).toBe("not-observed-unknown");
     expect(cleanupErrors).toEqual([
       "exact-seven-second-supply-not-observed-unknown",
@@ -732,19 +941,9 @@ describe("FULL 40689200536 recovery under the actual finalizer plan", () => {
     });
   });
 
-  it("cleans a second supply only through its exact original device binding", async () => {
+  it("cleans a second supply only through its exact original source chain", async () => {
     const w = world();
-    w.drivers.push({
-      driverId: "drv_second_own",
-      workState: "available",
-      deviceBindings: [
-        {
-          bindingId: "drvbind_second",
-          deviceId: FULL.secondSupply.deviceId,
-          status: "active",
-        },
-      ],
-    });
+    addSecond(w);
     const state = createExactSevenRecoveryState();
     await precheckExactSevenOrders(state, w.ports);
     const { cleanupErrors } = await finalize(w, state);
@@ -755,6 +954,21 @@ describe("FULL 40689200536 recovery under the actual finalizer plan", () => {
       "write:offline:drv_second_own",
       `write:revoke:drvbind_second:${FULL.secondSupply.deviceId}`,
     ]);
+    expect(w.proofRequests()).toHaveLength(2);
+    expect(state.supply[1]).toMatchObject({
+      qualification: "qualified",
+      driverId: "drv_second_own",
+      vehicleId: "veh_second_own",
+      bindingId: "drvbind_second",
+      offline: "offline-verified",
+      binding: "revoked-verified",
+      sourceReadback: {
+        registryDeviceMatches: 1,
+        exactDriverSubmissions: 1,
+        exactVehicleSubmissions: 1,
+        driverSubmissionId: "sub_second_driver",
+      },
+    });
   });
 
   it("keeps partial cleanup durable when one write's ACK is lost", async () => {
@@ -1107,8 +1321,10 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
       const field = part === "offline" ? "offline" : "binding";
       expect(write).toHaveBeenCalledOnce();
       expect(state.supply[0]![field]).toBe("readback-missing");
-      // Durable order: attempted before the write, ACK checkpoint after it.
+      // Durable order: (the revoke's proof request,) attempted before the
+      // write, ACK checkpoint after it.
       expect(supplyAt(w, part === "offline" ? 0 : 1)).toEqual([
+        ...(part === "revoke" ? ["step-up-proof-requested"] : []),
         "attempted",
         "acknowledged-readback-pending",
         "readback-missing",
@@ -1138,6 +1354,7 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
         recovery.cleanExactSevenSupply(state, "first", part, w.ports),
       ).rejects.toThrow("disk");
       expect(w.writes()).toEqual([]);
+      expect(w.proofRequests()).toEqual([]);
       expect(state.supply[0]![part === "offline" ? "offline" : "binding"]).toBe(
         "intent-not-durable-not-sent",
       );
@@ -1182,18 +1399,7 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
   // original ACKed binding is absent and must never read as revoked.
   async function revokeActor(actorName: "first" | "second") {
     const w = world();
-    const second = {
-      driverId: "drv_second_own",
-      workState: "offline",
-      deviceBindings: [
-        {
-          bindingId: "drvbind_second",
-          deviceId: FULL.secondSupply.deviceId,
-          status: "active",
-        },
-      ],
-    };
-    w.drivers.push(second);
+    addSecond(w, { workState: "offline" });
     const { state } = await gated(w);
     if (actorName === "second")
       expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
@@ -1238,6 +1444,7 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
       const actor = state.supply[index === 0 ? 0 : 1]!;
       expect(actor).toMatchObject({ bindingId, binding: "readback-missing" });
       expect(bindingAt(w, index)).toEqual([
+        "step-up-proof-requested",
         "attempted",
         "acknowledged-readback-pending",
         "readback-missing",
@@ -1260,6 +1467,7 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
         "revoked-verified",
       );
       expect(bindingAt(w, index)).toEqual([
+        "step-up-proof-requested",
         "attempted",
         "acknowledged-readback-pending",
         "revoked-verified",
@@ -1281,6 +1489,644 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
       offline: "offline-verified",
       binding: "revoked-verified",
     });
+  });
+});
+
+// Before-evidence only: 40818721320 recorded the proofless revoke as a 4xx
+// write-denied without an exact status/code. These controls never stand in
+// for that live denial's status or for a live product proof.
+describe("R5: remote revoke carries a fresh same-session Admin step-up proof", () => {
+  async function gated(w = world()) {
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    await recovery.verifyExactSevenFinalActive(state, w.ports);
+    await recovery.cleanExactSevenSupply(state, "first", "offline", w.ports);
+    w.log.length = 0;
+    w.persisted.length = 0;
+    return { w, state };
+  }
+  const revoke = (
+    state: ExactSevenRecoveryState,
+    w: ReturnType<typeof world>,
+  ) => recovery.cleanExactSevenSupply(state, "first", "revoke", w.ports);
+
+  it("names a route the real API policy matcher binds to the exact action", () => {
+    const route = recovery.EXACT_SEVEN_REVOKE_ROUTE;
+    expect(
+      resolveRouteStepUpPolicy(route.method, route.path, "platform")?.actionId,
+    ).toBe(route.actionId);
+    // The API normalizes the /api prefix; another method or path is unbound.
+    expect(
+      resolveRouteStepUpPolicy("POST", "auth/driver/device/revoke", "platform")
+        ?.actionId,
+    ).toBe(route.actionId);
+    expect(resolveRouteStepUpPolicy("GET", route.path, "platform")).toBeNull();
+    expect(
+      resolveRouteStepUpPolicy(
+        "POST",
+        "/api/auth/driver/device/invite/revoke",
+        "platform",
+      ),
+    ).toBeNull();
+    // The proofless caller's realm is enforced; a Driver's own revoke is not.
+    expect(resolveRouteStepUpPolicy("POST", route.path, "driver")).toBeNull();
+  });
+
+  it("is refused without a proof and accepted with the same session's proof", async () => {
+    const { w, state } = await gated();
+    const first = FULL.firstSupply;
+    // The original proofless request shape against the same fake guard.
+    await expect(
+      w.ports.revokeBinding("drvbind_first", first.deviceId, ""),
+    ).rejects.toMatchObject({ stage: "api:request", status: 403 });
+    w.log.length = 0;
+    await revoke(state, w);
+    expect(w.log.filter((entry) => !entry.startsWith("persist"))).toEqual([
+      "read:drivers",
+      "read:vehicles",
+      "read:admin-session",
+      `proof:${recovery.EXACT_SEVEN_REVOKE_ROUTE.path}`,
+      `write:revoke:drvbind_first:${first.deviceId}`,
+      "read:drivers",
+    ]);
+    expect(w.ports.stepUp).toHaveBeenCalledWith(
+      recovery.EXACT_SEVEN_REVOKE_ROUTE.path,
+      "ops:driver-device:revoke",
+    );
+    expect(w.ports.revokeBinding).toHaveBeenLastCalledWith(
+      "drvbind_first",
+      first.deviceId,
+      "stepup_synthetic_1",
+    );
+    expect(state.supply[0]).toMatchObject({
+      binding: "revoked-verified",
+      bindingId: "drvbind_first",
+    });
+    // The proof reference is never custody.
+    expect(JSON.stringify(w.persisted)).not.toContain("stepup_synthetic");
+  });
+
+  it.each([
+    [
+      "an Admin session other than the issued one",
+      (w: ReturnType<typeof world>) =>
+        vi.mocked(w.ports.readAdminSession).mockResolvedValueOnce({
+          active: true,
+          identity: {
+            realm: "platform",
+            actorType: "platform_admin",
+            sessionId: "sess_other",
+          },
+        }),
+      "step-up-session-unverified",
+    ],
+    [
+      "a non-platform caller identity",
+      (w: ReturnType<typeof world>) =>
+        vi.mocked(w.ports.readAdminSession).mockResolvedValueOnce({
+          active: true,
+          identity: {
+            realm: "driver",
+            actorType: "driver",
+            sessionId: ADMIN_SESSION,
+          },
+        }),
+      "step-up-session-unverified",
+    ],
+    [
+      "an unreadable session",
+      (w: ReturnType<typeof world>) =>
+        vi
+          .mocked(w.ports.readAdminSession)
+          .mockRejectedValueOnce(new JourneyFailure("api:transport")),
+      "step-up-session-unverified",
+    ],
+    [
+      "a proof for another action",
+      (w: ReturnType<typeof world>) =>
+        vi
+          .mocked(w.ports.stepUp)
+          .mockRejectedValueOnce(
+            new JourneyFailure("exact same-session action proof"),
+          ),
+      "step-up-proof-unknown",
+    ],
+    [
+      "a refused proof request",
+      (w: ReturnType<typeof world>) =>
+        vi
+          .mocked(w.ports.stepUp)
+          .mockRejectedValueOnce(new JourneyFailure("admin:request", 403)),
+      "step-up-proof-denied",
+    ],
+    [
+      "a lost proof response",
+      (w: ReturnType<typeof world>) =>
+        vi
+          .mocked(w.ports.stepUp)
+          .mockRejectedValueOnce(new JourneyFailure("admin:transport")),
+      "step-up-proof-unknown",
+    ],
+    [
+      "an empty reference",
+      (w: ReturnType<typeof world>) =>
+        vi.mocked(w.ports.stepUp).mockResolvedValueOnce(""),
+      "step-up-proof-unknown",
+    ],
+  ] as const)(
+    "sends no revoke for %s, records it, and never retries",
+    async (_label, fail, binding) => {
+      const { w, state } = await gated();
+      fail(w);
+      await expect(revoke(state, w)).rejects.toThrow(
+        /first-revoke-step-up-(session-unverified|proof-(denied|unknown)-preserved)/,
+      );
+      expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+      expect(state.supply[0]!.binding).toBe(binding);
+      expect(w.persisted.at(-1)).toMatchObject({
+        supply: [expect.objectContaining({ binding }), expect.anything()],
+      });
+      if (binding === "step-up-proof-denied")
+        expect(state.supply[0]!.denial).toEqual({
+          stage: "step-up-proof",
+          httpStatus: 403,
+        });
+      else expect(state.supply[0]!.denial).toBeUndefined();
+      await expect(revoke(state, w)).rejects.toThrow(
+        "at-most-once-after-orders",
+      );
+      expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+      expect(w.ports.stepUp).toHaveBeenCalledTimes(
+        binding === "step-up-session-unverified" ? 0 : 1,
+      );
+    },
+  );
+
+  it("records a denied revoke with its typed status only, never retried", async () => {
+    const { w, state } = await gated();
+    vi.mocked(w.ports.revokeBinding).mockRejectedValueOnce(
+      new JourneyFailure("api:request", 409, "CONFLICT"),
+    );
+    await expect(revoke(state, w)).rejects.toThrow(
+      "first-revoke-write-denied-preserved",
+    );
+    expect(state.supply[0]).toMatchObject({
+      binding: "write-denied",
+      denial: { stage: "revoke", httpStatus: 409, code: "CONFLICT" },
+    });
+    await expect(revoke(state, w)).rejects.toThrow("at-most-once-after-orders");
+    expect(w.ports.revokeBinding).toHaveBeenCalledOnce();
+    expect(w.ports.stepUp).toHaveBeenCalledOnce();
+  });
+
+  it("is refused when the proof belongs to another session at the guard", async () => {
+    const { w, state } = await gated();
+    vi.mocked(w.ports.stepUp).mockImplementationOnce(async () => {
+      w.proofs.set("stepup_foreign", {
+        actionId: "ops:driver-device:revoke",
+        sessionId: "sess_other",
+      });
+      return "stepup_foreign";
+    });
+    await expect(revoke(state, w)).rejects.toThrow(
+      "first-revoke-write-denied-preserved",
+    );
+    expect(state.supply[0]!.binding).toBe("write-denied");
+    expect(w.drivers[0]!.deviceBindings[0]!.status).toBe("active");
+  });
+
+  it("does not issue a proof before the whole own set is terminal and read back", async () => {
+    // A live own order: no proof until it is terminal and the set read back.
+    const w = world({ main: { status: "created" } });
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    await expect(revoke(state, w)).rejects.toThrow("at-most-once-after-orders");
+    expect(w.ports.readAdminSession).not.toHaveBeenCalled();
+    expect(w.proofRequests()).toEqual([]);
+    // A retained in-trip own order keeps every supply step closed.
+    const retained = world({ main: { status: "on_trip" } });
+    const retainedState = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(retainedState, retained.ports);
+    await finalize(retained, retainedState);
+    expect(retained.proofRequests()).toEqual([]);
+    expect(retained.ports.readAdminSession).not.toHaveBeenCalled();
+    expect(retained.ports.revokeBinding).not.toHaveBeenCalled();
+  });
+
+  it("does not issue a proof for a binding that no longer matches", async () => {
+    const { w, state } = await gated();
+    w.drivers[0]!.deviceBindings[0]!.bindingId = "drvbind_replaced";
+    await expect(revoke(state, w)).rejects.toThrow("binding-changed");
+    expect(w.proofRequests()).toEqual([]);
+    expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+  });
+
+  it("issues nothing for an already revoked binding", async () => {
+    const { w, state } = await gated();
+    w.drivers[0]!.deviceBindings[0]!.status = "revoked";
+    await revoke(state, w);
+    expect(state.supply[0]!.binding).toBe("already-revoked");
+    expect(w.proofRequests()).toEqual([]);
+    expect(w.ports.readAdminSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a revoke ACK from another binding unverified", async () => {
+    const { w, state } = await gated();
+    vi.mocked(w.ports.revokeBinding).mockResolvedValueOnce({
+      bindingId: "drvbind_foreign",
+      deviceId: "foreign",
+      driverId: "drv_foreign_shared_fixture",
+    });
+    await expect(revoke(state, w)).rejects.toThrow(
+      "first-revoke-readback-missing",
+    );
+    expect(state.supply[0]!.binding).toBe("readback-missing");
+  });
+
+  it.each([
+    ["proof request", "stepUp", "step-up-proof-requested"],
+    ["revoke ACK", "revokeBinding", "attempted"],
+  ] as const)(
+    "keeps a delayed %s unknown at the finalizer budget, unretried",
+    async (_label, port, binding) => {
+      const w = world();
+      w.drivers[0]!.workState = "offline";
+      vi.mocked(w.ports[port]).mockImplementationOnce(
+        () => new Promise(() => undefined),
+      );
+      const state = createExactSevenRecoveryState();
+      await precheckExactSevenOrders(state, w.ports);
+      const { result } = await finalize(w, state, 300);
+      expect(
+        result.steps.find(
+          (step) => step.stage === "exact-seven-first-own-binding-revoked",
+        )?.outcome,
+      ).toBe("unknown-budget-exhausted");
+      expect(state.supply[0]!.binding).toBe(binding);
+      expect(w.ports.stepUp).toHaveBeenCalledOnce();
+      expect(w.ports.revokeBinding).toHaveBeenCalledTimes(
+        port === "stepUp" ? 0 : 1,
+      );
+      expect(result.wholeRunPassed).toBe(false);
+    },
+  );
+});
+
+describe("R6: second supply exact read-only source qualification", () => {
+  async function gated(w = world()) {
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    await recovery.verifyExactSevenFinalActive(state, w.ports);
+    w.log.length = 0;
+    return { w, state };
+  }
+  // For the actual finalizer plan, which runs the final readback itself.
+  async function prechecked(w: ReturnType<typeof world>) {
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    return { state };
+  }
+  const second = (state: ExactSevenRecoveryState) => state.supply[1]!;
+
+  it("qualifies only the complete exact original driver/vehicle/binding chain", async () => {
+    const w = world();
+    addSecond(w);
+    const { state } = await gated(w);
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      true,
+    );
+    expect(second(state)).toMatchObject({
+      qualification: "qualified",
+      driverId: "drv_second_own",
+      vehicleId: "veh_second_own",
+      bindingId: "drvbind_second",
+      sourceReadback: {
+        registryDeviceMatches: 1,
+        listComplete: true,
+        exactDriverSubmissions: 1,
+        partialFieldMatches: 0,
+        exactVehicleSubmissions: 1,
+        driverSubmissionStatus: "approved",
+        refusal: null,
+      },
+    });
+    // Read-only, and only the original Fleet's onboarding submissions.
+    expect(w.writes()).toEqual([]);
+    expect(w.proofRequests()).toEqual([]);
+    expect(w.ports.readSupplySubmission).not.toHaveBeenCalledWith(
+      "sub_foreign_fleet",
+    );
+    // No draft value (license, phone, name) enters custody.
+    const custody = JSON.stringify(w.persisted);
+    expect(custody).not.toContain("SIM-DL-");
+    expect(custody).not.toContain("synthetic-not-a-phone");
+    expect(custody).not.toContain("合成測試司機");
+  });
+
+  it("keeps a complete listing with no exact source unknown, never absent", async () => {
+    const { w, state } = await gated();
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      false,
+    );
+    expect(second(state)).toMatchObject({
+      qualification: "not-observed-unknown",
+      sourceReadback: {
+        registryDeviceMatches: 0,
+        listComplete: true,
+        candidates: 2,
+        candidatesRead: 2,
+        exactDriverSubmissions: 0,
+        absence: "not-claimed-authority-unattested",
+        refusal: "no-exact-source-observed",
+      },
+    });
+    expect(second(state).driverId).toBeUndefined();
+  });
+
+  it("distinguishes a created, never approved draft from absence", async () => {
+    const w = world();
+    addSecond(w, { approved: false });
+    const { state } = await gated(w);
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      false,
+    );
+    expect(second(state)).toMatchObject({
+      qualification: "created-no-canonical-driver",
+      sourceReadback: {
+        driverSubmissionId: "sub_second_driver",
+        driverSubmissionStatus: "draft",
+      },
+    });
+  });
+
+  it("distinguishes an approved Driver without the exact device binding", async () => {
+    const w = world();
+    addSecond(w, { binding: false });
+    const { state } = await prechecked(w);
+    const { cleanupErrors } = await finalize(w, state);
+    expect(second(state)).toMatchObject({
+      qualification: "created-binding-not-observed-unknown",
+      driverId: "drv_second_own",
+      offline: "pending",
+      binding: "pending",
+    });
+    expect(w.writes()).not.toContain("write:offline:drv_second_own");
+    expect(cleanupErrors).toEqual([
+      "exact-seven-second-supply-created-binding-not-observed-unknown",
+    ]);
+  });
+
+  it.each([
+    [
+      "a partial listing",
+      (w: ReturnType<typeof world>) => w.setListedTotal(99),
+      "qualification-unknown",
+      "submission-list-partial",
+    ],
+    [
+      "a foreign prefix of the exact fields",
+      (w: ReturnType<typeof world>) =>
+        w.submissions.push(
+          driverSubmission(
+            "sub_prefix",
+            `${FULL.secondSupply.nonce}-x`,
+            {},
+            {},
+          ),
+        ),
+      "not-observed-unknown",
+      "no-exact-source-observed",
+    ],
+    [
+      "only one exact field",
+      (w: ReturnType<typeof world>) =>
+        w.submissions.push(
+          driverSubmission(
+            "sub_half",
+            FULL.secondSupply.nonce,
+            {},
+            { taxiDriverRegistrationNo: "SIM-REG-other" },
+          ),
+        ),
+      "ambiguous-unknown",
+      "second-source-not-unique",
+    ],
+    [
+      "two exact sources",
+      (w: ReturnType<typeof world>) => {
+        addSecond(w);
+        w.submissions.push(
+          driverSubmission("sub_second_again", FULL.secondSupply.nonce),
+        );
+      },
+      "ambiguous-unknown",
+      "second-source-not-unique",
+    ],
+    [
+      "an exact device binding without its exact source",
+      (w: ReturnType<typeof world>) =>
+        w.drivers.push({
+          driverId: "drv_unsourced",
+          workState: "available",
+          deviceBindings: [
+            {
+              bindingId: "drvbind_unsourced",
+              deviceId: FULL.secondSupply.deviceId,
+              status: "active",
+            },
+          ],
+        }),
+      "mismatch-preserved",
+      "device-binding-without-exact-source-submission",
+    ],
+    [
+      "a source naming another canonical Driver",
+      (w: ReturnType<typeof world>) => {
+        addSecond(w);
+        w.submissions.find(
+          (row) => row.submission.submissionId === "sub_second_driver",
+        )!.submission.canonicalDriverId = "drv_someone_else";
+      },
+      "mismatch-preserved",
+      "source-driver-or-vehicle-chain-mismatch",
+    ],
+    [
+      "no exact vehicle of the source",
+      (w: ReturnType<typeof world>) => addSecond(w, { vehicle: false }),
+      "mismatch-preserved",
+      "source-driver-or-vehicle-chain-mismatch",
+    ],
+  ] as const)(
+    "refuses %s without any write",
+    async (_label, arrange, qualification, refusal) => {
+      const w = world();
+      arrange(w);
+      const { state } = await prechecked(w);
+      const { cleanupErrors } = await finalize(w, state);
+      expect(second(state)).toMatchObject({
+        qualification,
+        sourceReadback: { refusal },
+      });
+      // Only the first supply's own offline and revoke were sent.
+      expect(w.writes()).toEqual([
+        `write:offline:${FULL.firstSupply.driverId}`,
+        `write:revoke:drvbind_first:${FULL.firstSupply.deviceId}`,
+      ]);
+      expect(w.proofRequests()).toHaveLength(1);
+      expect(cleanupErrors).toEqual([
+        `exact-seven-second-supply-${qualification}`,
+      ]);
+      if (refusal === "submission-list-partial")
+        expect(w.ports.readSupplySubmission).not.toHaveBeenCalled();
+    },
+  );
+
+  // R1 (Codex REOPEN): the exact license/registration fields alone never
+  // authorize; each detail must still be the listed Fleet onboarding row at
+  // its listed status and revision, and the chain must be approved.
+  const secondRow = (w: ReturnType<typeof world>, id: string) =>
+    w.submissions.find((row) => row.submission.submissionId === id)!;
+  it.each([
+    [
+      "a detail of another Fleet than its list row",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          fleetPartnerId: "fleet-demo-002",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a detail that is not an onboarding submission",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          submissionType: "profile_correction",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "an unapproved detail at a newer revision than its list row",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          status: "revision_requested",
+          revisionNo: 4,
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a vehicle detail of another Fleet",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_vehicle").detail = {
+          fleetPartnerId: "fleet-demo-002",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a consistent but not approved driver source",
+      (w: ReturnType<typeof world>) => {
+        const row = secondRow(w, "sub_second_driver");
+        row.submission.status = "needs_revision";
+      },
+      "source-chain-not-approved",
+    ],
+  ] as const)(
+    "refuses %s with no second offline, proof or revoke",
+    async (_label, arrange, refusal) => {
+      const w = world();
+      addSecond(w);
+      arrange(w);
+      const { state } = await gated(w);
+      expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+        false,
+      );
+      expect(second(state).qualification).not.toBe("qualified");
+      expect(second(state)).toMatchObject({
+        qualification: "mismatch-preserved",
+        sourceReadback: { refusal },
+      });
+      expect(second(state).driverId).toBeUndefined();
+      expect(second(state).bindingId).toBeUndefined();
+      await expect(
+        recovery.cleanExactSevenSupply(state, "second", "offline", w.ports),
+      ).rejects.toThrow("second-supply-not-qualified");
+      await expect(
+        recovery.cleanExactSevenSupply(state, "second", "revoke", w.ports),
+      ).rejects.toThrow("second-supply-not-qualified");
+      expect(w.writes()).toEqual([]);
+      expect(w.proofRequests()).toEqual([]);
+      expect(w.ports.setOffline).not.toHaveBeenCalled();
+      expect(w.ports.readAdminSession).not.toHaveBeenCalled();
+      expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still qualifies the same chain when every detail equals its list row", async () => {
+    const w = world();
+    addSecond(w);
+    for (const id of ["sub_second_driver", "sub_second_vehicle"])
+      secondRow(w, id).detail = {
+        fleetPartnerId: FLEET,
+        status: "approved",
+        revisionNo: 3,
+      };
+    const { state } = await gated(w);
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      true,
+    );
+    await recovery.cleanExactSevenSupply(state, "second", "offline", w.ports);
+    await recovery.cleanExactSevenSupply(state, "second", "revoke", w.ports);
+    expect(second(state)).toMatchObject({
+      qualification: "qualified",
+      offline: "offline-verified",
+      binding: "revoked-verified",
+    });
+    expect(w.writes()).toEqual([
+      "write:offline:drv_second_own",
+      `write:revoke:drvbind_second:${FULL.secondSupply.deviceId}`,
+    ]);
+    expect(w.proofRequests()).toHaveLength(1);
+  });
+
+  it("keeps a failed detail read unknown with only the partial counts", async () => {
+    const w = world();
+    addSecond(w);
+    const { state } = await gated(w);
+    const real = vi
+      .mocked(w.ports.readSupplySubmission)
+      .getMockImplementation()!;
+    vi.mocked(w.ports.readSupplySubmission)
+      .mockImplementationOnce(real)
+      .mockRejectedValueOnce(new JourneyFailure("admin:transport"));
+    await expect(
+      recovery.qualifyExactSevenSecondSupply(state, w.ports),
+    ).rejects.toThrow("admin:transport");
+    expect(second(state)).toMatchObject({
+      qualification: "qualification-unknown",
+      sourceReadback: { candidatesRead: 1, exactDriverSubmissions: null },
+    });
+    expect(second(state).driverId).toBeUndefined();
+    expect(w.persisted.at(-1)).toMatchObject({
+      supply: [
+        expect.anything(),
+        expect.objectContaining({ qualification: "qualification-unknown" }),
+      ],
+    });
+  });
+
+  it("refuses more candidates than the bounded read budget", async () => {
+    const w = world();
+    for (let index = 0; index < 200; index += 1)
+      w.submissions.push(
+        driverSubmission(`sub_bulk_${index}`, `synthetic-bulk-${index}`),
+      );
+    const { state } = await gated(w);
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      false,
+    );
+    expect(second(state)).toMatchObject({
+      qualification: "qualification-unknown",
+      sourceReadback: { refusal: "submission-candidates-over-bound" },
+    });
+    expect(w.ports.readSupplySubmission).not.toHaveBeenCalled();
   });
 });
 
@@ -1354,5 +2200,46 @@ describe("actual hosted consumer wiring", () => {
         ts.isFunctionDeclaration(node) && node.name?.text === "exactSevenPlan",
     )[0]!.getText(source);
     expect(plan).not.toMatch(/booking|\/dispatch|sessions\/revoke/);
+  });
+
+  it("wires the revoke to the existing stepUp helper and the exact route", () => {
+    const ports = find(
+      (node) =>
+        ts.isBinaryExpression(node) &&
+        node.left.getText(source) === "exactSevenPorts" &&
+        ts.isObjectLiteralExpression(node.right),
+    )[0] as ts.BinaryExpression;
+    const property = (name: string) =>
+      (ports.right as ts.ObjectLiteralExpression).properties
+        .find((item) => item.name?.getText(source) === name)!
+        .getText(source);
+    // The original helper: same Admin token, POST step-up-proofs {method,path}.
+    expect(property("stepUp")).toBe("stepUp");
+    const helper = find(
+      (node) =>
+        ts.isVariableDeclaration(node) &&
+        node.name.getText(source) === "stepUp",
+    )[0]!.getText(source);
+    expect(helper).toContain('"/control-plane-proxy/identity/step-up-proofs"');
+    expect(helper).toContain('body: { method: "POST", path }');
+    expect(helper).toContain("mask(reference)");
+    expect(helper).toContain("proof.actionId === actionId");
+    const revokeCall = property("revokeBinding");
+    expect(revokeCall).toContain('call("api", EXACT_SEVEN_REVOKE_ROUTE.path');
+    expect(revokeCall).toContain("method: EXACT_SEVEN_REVOKE_ROUTE.method");
+    expect(revokeCall).toContain('"x-drts-step-up-reference": stepUpReference');
+    expect(property("readAdminSession")).toContain(
+      'call("api", "/api/auth/session")',
+    );
+    expect(property("adminSessionId")).toContain("text(adminSessionId)");
+    expect(property("fleetPartnerId")).toContain("FLEET");
+    // The supply-review reads are GET only; no driver token is ever used.
+    for (const name of ["readSupplySubmissions", "readSupplySubmission"]) {
+      expect(property(name)).toContain(
+        "/control-plane-proxy/admin/supply-review/submissions",
+      );
+      expect(property(name)).not.toMatch(/method|body/);
+    }
+    expect(ports.right.getText(source)).not.toMatch(/"driver"|setSession/);
   });
 });
