@@ -9015,13 +9015,17 @@ def refresh_chair_review_state(
         if missing_outputs:
             error = error or "declared output missing: " + ", ".join(missing_outputs)
         if error:
+            if active_worker is not None and pid_is_alive(active_worker.get("pid")):
+                # The decision packet and the Markdown report are two separate
+                # writes from one still-running worker; a real review has taken
+                # 23+ seconds between them and still produced a valid pair
+                # (claude2 121818, JSON 12:19:21.507 -> MD 12:19:44.868, applied
+                # 12:19:58). Killing a genuinely alive worker on a fixed
+                # JSON-mtime age punished it for not having finished yet. Its
+                # own lifecycle -- stall/reap/TTL, pending-approval preemption
+                # above -- is what decides whether it is actually stuck.
+                return False
             if active_worker is not None:
-                try:
-                    output_age_seconds = time.time() - json_path.stat().st_mtime
-                except OSError:
-                    output_age_seconds = 0.0
-                if output_age_seconds < float(chair_review_settings(config).get("invalid_output_grace_seconds", 15)):
-                    return False
                 terminate_worker_pid(active_worker.get("pid"))
                 active_worker["status"] = "failed"
                 active_worker["last_event_at"] = utc_now()
