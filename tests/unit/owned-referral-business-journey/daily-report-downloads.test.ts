@@ -91,7 +91,7 @@ const R12_08_FAULTS = [
   "retry-changed-filter",
   "retry-missing-ack",
   "retry-foreign-row",
-  "retry-record-identity",
+  "retry-row-identity",
 ] as const;
 
 describe("managed FULL hosted supplemental artifact custody", () => {
@@ -231,7 +231,6 @@ function buildDailyDispatchRow(
   overrides: Partial<ObjectData> = {},
 ): ObjectData {
   return {
-    recordId: `daily:${ORDER_ID}`,
     serviceDate: "2026-10-26",
     orderId: ORDER_ID,
     orderNo: ORDER_NO,
@@ -992,12 +991,10 @@ ${inner}
     );
     const ownRow = buildDailyDispatchRow();
     const controlledSiblingRow = buildDailyDispatchRow({
-      recordId: `daily:${CONTROLLED_SIBLING_ORDER_ID}`,
       orderId: CONTROLLED_SIBLING_ORDER_ID,
       orderNo: "DRT-20261026-0002",
     });
     const unverifiedSiblingRow = buildDailyDispatchRow({
-      recordId: "daily:ord_unverified_sibling",
       orderId: "ord_unverified_sibling",
       orderNo: "DRT-20261026-0003",
     });
@@ -1966,7 +1963,6 @@ ${inner}
             );
         const siblingRow = (orderId: string) => ({
           ...ownRow,
-          recordId: `daily:${orderId}`,
           orderId,
           orderNo: "DRT-20261026-0000",
         });
@@ -2446,14 +2442,11 @@ ${inner}
                           toApiListData(
                             realRetry && r1208Fault === "retry-foreign-row"
                               ? [siblingRow("ord_foreign_unowned_998")]
-                              : realRetry &&
-                                  r1208Fault === "retry-record-identity"
+                              : realRetry && r1208Fault === "retry-row-identity"
                                 ? [
                                     previewSiblingRow,
-                                    {
-                                      ...ownRow,
-                                      recordId: "daily:other-record",
-                                    },
+                                    // Same orderId, another contract identity.
+                                    { ...ownRow, orderNo: "DRT-20261026-0099" },
                                   ]
                                 : dateFromVal === "2026-10-25"
                                   ? []
@@ -3244,8 +3237,8 @@ ${inner}
               "daily-report-r12-08-retry-same-filters-required",
             "retry-missing-ack": "object response required",
             "retry-foreign-row": "daily-report-preview-missing-own-order",
-            "retry-record-identity":
-              "daily-report-r12-08-readback-own-row-identity-required",
+            "retry-row-identity":
+              "daily-report-preview-own-order-field-mismatch",
           }[r1208Fault];
           expect(failure).toBeInstanceOf(JourneyFailure);
           expect(failure).toMatchObject({ stage: expectedStage });
@@ -3489,7 +3482,6 @@ ${inner}
               status: 200,
               rowCount: 2,
               ownRowVerified: true,
-              recordId: `daily:${ORDER_ID}`,
               orderId: ORDER_ID,
               orderNo: ORDER_NO,
               serviceDate: "2026-10-26",

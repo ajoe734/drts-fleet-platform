@@ -315,7 +315,6 @@ export type RebuildFailureRecoveryEvidence = Readonly<{
     status: number;
     rowCount: number;
     ownRowVerified: true;
-    recordId: string;
     orderId: string;
     orderNo: string;
     serviceDate: string;
@@ -2380,7 +2379,6 @@ async function runRebuildFailureSimulationAndRealRetry(input: {
       evidence,
     );
     const identityKeys = [
-      "recordId",
       "orderId",
       "orderNo",
       "serviceDate",
@@ -2454,7 +2452,6 @@ async function runRebuildFailureSimulationAndRealRetry(input: {
         status: readbackExchange.status,
         rowCount: readback.rowCount,
         ownRowVerified: true,
-        recordId: own.recordId as string,
         orderId: own.orderId as string,
         orderNo: own.orderNo as string,
         serviceDate: own.serviceDate as string,
