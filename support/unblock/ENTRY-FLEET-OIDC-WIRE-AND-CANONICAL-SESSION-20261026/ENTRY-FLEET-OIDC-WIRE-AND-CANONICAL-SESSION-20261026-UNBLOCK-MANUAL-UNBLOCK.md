@@ -1,7 +1,9 @@
 # Fleet OIDC remaining-blocker diagnosis
 
-Task: `ENTRY-FLEET-OIDC-WIRE-AND-CANONICAL-SESSION-20261026-UNBLOCK-MANUAL-UNBLOCK`  
-Owner / reviewer: Codex / Claude  
+Task: `ENTRY-FLEET-OIDC-WIRE-AND-CANONICAL-SESSION-20261026-UNBLOCK-MANUAL-UNBLOCK`
+
+Owner / reviewer: Codex / Claude
+
 Observed: 2026-10-29 UTC
 
 The parent has delivered its source repair. Its remaining requirement is
