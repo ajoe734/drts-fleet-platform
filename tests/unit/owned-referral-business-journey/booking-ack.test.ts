@@ -254,6 +254,156 @@ describe("original browser booking ACK observation", () => {
   });
 });
 
+describe("original booking ACK join with a never-settling UI click", () => {
+  const never = () => new Promise<void>(() => undefined);
+
+  async function collectUnhandled(run: () => Promise<void>) {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    try {
+      await run();
+      // Let any late rejection reach the process-level hook.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
+    return unhandled;
+  }
+
+  it("surfaces an already expired observation instead of waiting for the click", async () => {
+    const s = await setup();
+    const timeout = new Error("private URL");
+    timeout.name = "TimeoutError";
+    await expect(
+      clickAndSettleOriginalBookingAck(
+        never,
+        s.observe(Promise.reject(timeout)),
+      ),
+    ).rejects.toThrow("booking-response-wait:TimeoutError");
+    expect(s.claim).not.toHaveBeenCalled();
+    expect(s.journal.current).toMatchObject({
+      state: "ack_unknown",
+      body: s.raw,
+      idempotencyKey: s.command.idempotencyKey,
+    });
+  });
+
+  it("surfaces a refused ACK while the click is pending without treating it as success", async () => {
+    const s = await setup();
+    s.response.status = () => 409;
+    s.response.json = async () => ({
+      ok: false,
+      error: { code: "CONFLICT", message: "private detail" },
+    });
+    await expect(
+      clickAndSettleOriginalBookingAck(never, s.observe()),
+    ).rejects.toMatchObject({
+      stage: "booking-response-http",
+      status: 409,
+      code: "CONFLICT",
+    });
+    expect(s.claim).not.toHaveBeenCalled();
+    expect(s.journal.current?.state).toBe("ack_unknown");
+  });
+
+  it("ends at the existing operation deadline and retains a received ACK", async () => {
+    const s = await setup();
+    const click = deferred<void>();
+    const expired = new AbortController();
+    const removed = vi.spyOn(expired.signal, "removeEventListener");
+    const unhandled = await collectUnhandled(async () => {
+      const observed = s.observe();
+      const outcome = clickAndSettleOriginalBookingAck(
+        () => click.promise,
+        observed,
+        expired.signal,
+      );
+      const rejected = expect(outcome).rejects.toThrow(
+        "supplemental-original-booking-timeout",
+      );
+      await observed;
+      expect(s.journal.current).toMatchObject({
+        state: "acknowledged",
+        orderId: "order-own",
+        body: s.raw,
+      });
+      expired.abort(
+        new JourneyFailure("supplemental-original-booking-timeout"),
+      );
+      await rejected;
+      expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+      // A late native click failure after the join exits stays observed.
+      click.reject(new Error("private late click detail"));
+    });
+    expect(unhandled).toEqual([]);
+    expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
+    expect(s.journal.current?.state).toBe("acknowledged");
+  });
+
+  it("keeps a durable ACK and still surfaces a click that fails later", async () => {
+    const s = await setup();
+    const click = deferred<void>();
+    const observed = s.observe();
+    const outcome = clickAndSettleOriginalBookingAck(
+      () => click.promise,
+      observed,
+      new AbortController().signal,
+    );
+    const rejected = expect(outcome).rejects.toThrow(
+      "booking-ui-click:TimeoutError",
+    );
+    await observed;
+    const timeout = new Error("private selector and URL");
+    timeout.name = "TimeoutError";
+    click.reject(timeout);
+    await rejected;
+    expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
+    expect(s.journal.current?.state).toBe("acknowledged");
+  });
+
+  it("leaves no rejection or timer behind when the click settles after an expired observation", async () => {
+    const s = await setup();
+    const click = deferred<void>();
+    const unhandled = await collectUnhandled(async () => {
+      const timeout = new Error("private URL");
+      timeout.name = "TimeoutError";
+      // Count only timers the join itself would create; the clock is not run.
+      vi.useFakeTimers();
+      try {
+        await expect(
+          clickAndSettleOriginalBookingAck(
+            () => click.promise,
+            s.observe(Promise.reject(timeout)),
+            new AbortController().signal,
+          ),
+        ).rejects.toThrow("booking-response-wait:TimeoutError");
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+      click.reject(new Error("private late click detail"));
+    });
+    expect(unhandled).toEqual([]);
+  });
+
+  it("does not let an operation deadline skip an ACK that already settled with the click", async () => {
+    const s = await setup();
+    const expired = new AbortController();
+    await expect(
+      clickAndSettleOriginalBookingAck(
+        async () => undefined,
+        s.observe(),
+        expired.signal,
+      ),
+    ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
+    expired.abort(new JourneyFailure("scheduled-original-cancel-timeout"));
+    expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
+    expect(s.journal.current?.state).toBe("acknowledged");
+  });
+});
+
 describe("original routed server ACK before UI release", () => {
   it("persists the actual ACK before navigation and releases its exact bytes once", async () => {
     const order: string[] = [];

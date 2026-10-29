@@ -790,10 +790,15 @@ export async function settleRoutedOriginalBookingAck<T>(
   return result.value;
 }
 
-/** A failed click stays failed; settle its one observer before owned cleanup. */
+/**
+ * A failed click stays failed; settle its one observer before owned cleanup.
+ * An observation that already failed, or the caller's own existing operation
+ * deadline (`expired`), ends the wait for a UI click that never settles.
+ */
 export async function clickAndSettleOriginalBookingAck<T>(
   click: () => Promise<void>,
   observation: Promise<T>,
+  expired?: AbortSignal,
 ): Promise<T> {
   // Attach the rejection handler immediately, before waiting for the UI action.
   // Keep the failure as data until this same observation is awaited below.
@@ -801,16 +806,49 @@ export async function clickAndSettleOriginalBookingAck<T>(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
-  let clickFailure: JourneyFailure | undefined;
+  // The click's own late outcome stays observed after this join has returned.
+  const clicked = new Promise<void>((resolve) => resolve(click())).then(
+    () => ({ kind: "clicked" as const }),
+    (error: unknown) => ({
+      kind: "click-failed" as const,
+      failure: bookingObservationFailure("booking-ui-click", error),
+    }),
+  );
+  const observationFailed = settled.then((result) =>
+    result.ok
+      ? new Promise<never>(() => undefined)
+      : { kind: "observation-failed" as const, error: result.error },
+  );
+  let onExpired: (() => void) | undefined;
+  const deadline = new Promise<{ kind: "expired"; failure: JourneyFailure }>(
+    (resolve) => {
+      if (!expired) return;
+      onExpired = () =>
+        resolve({
+          kind: "expired",
+          failure: bookingObservationFailure(
+            "booking-ui-click",
+            expired.reason,
+          ),
+        });
+      if (expired.aborted) onExpired();
+      else expired.addEventListener("abort", onExpired, { once: true });
+    },
+  );
   try {
-    await click();
-  } catch (error) {
-    clickFailure = bookingObservationFailure("booking-ui-click", error);
+    const first = await Promise.race([clicked, observationFailed, deadline]);
+    if (first.kind === "observation-failed") throw first.error;
+    // The operation deadline already expired with the click still pending. A
+    // received ACK stays durable through its own observer; it is not success.
+    if (first.kind === "expired") throw first.failure;
+    const result = await Promise.race([settled, deadline]);
+    if (first.kind === "click-failed") throw first.failure;
+    if ("kind" in result) throw result.failure;
+    if (!result.ok) throw result.error;
+    return result.value;
+  } finally {
+    if (onExpired) expired?.removeEventListener("abort", onExpired);
   }
-  const result = await settled;
-  if (clickFailure) throw clickFailure;
-  if (!result.ok) throw result.error;
-  return result.value;
 }
 
 export type SafeEvent = {

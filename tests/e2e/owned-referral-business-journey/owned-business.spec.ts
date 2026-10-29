@@ -3129,12 +3129,20 @@ test(journeyName, async ({ browser, request }) => {
           await expect(create).toBeEnabled();
           await finalizer.checkpoint(`supplemental-${name}-original-booking`);
           await page.route(url, handle);
-          deadline = setTimeout(
-            () =>
-              fail(new JourneyFailure("supplemental-original-booking-timeout")),
-            25_000,
+          // The same 25s operation budget also ends a never-settling UI click.
+          const expired = new AbortController();
+          deadline = setTimeout(() => {
+            const timeout = new JourneyFailure(
+              "supplemental-original-booking-timeout",
+            );
+            fail(timeout);
+            expired.abort(timeout);
+          }, 25_000);
+          await clickAndSettleOriginalBookingAck(
+            () => create.click(),
+            settled,
+            expired.signal,
           );
-          await clickAndSettleOriginalBookingAck(() => create.click(), settled);
           requireFact(
             state.orderId && state.journal && state.quote,
             "supplemental original booking ACK custody",
@@ -3259,11 +3267,15 @@ test(journeyName, async ({ browser, request }) => {
               reject = no;
             });
             void ack.catch(() => undefined);
-            const timer = setTimeout(
-              () =>
-                reject(new JourneyFailure("scheduled-original-cancel-timeout")),
-              20_000,
-            );
+            // The same 20s operation budget also ends a never-settling UI click.
+            const expired = new AbortController();
+            const timer = setTimeout(() => {
+              const timeout = new JourneyFailure(
+                "scheduled-original-cancel-timeout",
+              );
+              reject(timeout);
+              expired.abort(timeout);
+            }, 20_000);
             const handle = async (route: Route) => {
               try {
                 booking.actions.push("cancel");
@@ -3293,6 +3305,7 @@ test(journeyName, async ({ browser, request }) => {
                     .locator('[data-drt-operation="referral-cancel"]')
                     .click(),
                 ack,
+                expired.signal,
               );
             } finally {
               clearTimeout(timer);
