@@ -29,6 +29,9 @@ import {
   validateActualReceiptPdfBytes,
   consumeNativeReceiptPdfDownload,
   captureOriginalUiCancellation,
+  originalCancellationResponseFacts,
+  originalCancellationTerminalFacts,
+  waitForOriginalCancellationTerminalUI,
   object,
   text,
   integer,
@@ -2444,7 +2447,8 @@ test(journeyName, async ({ browser, request }) => {
           driver: (path, options) => call("driver", path, options),
           heartbeat: (id, state) =>
             heartbeat(id, state, ++cancellationSequence),
-          cancelFromActualUI: async (id, expectedRefusal) => {
+          cancelFromActualUI: async (id, expectedRefusal, checkpoint) => {
+            const tripURL = page.url();
             // Observe the actual cancellation-window UI. A disabled button is
             // not an attempted UI cancellation; API refusal keeps separate provenance.
             const button = page.locator(
@@ -2578,13 +2582,66 @@ test(journeyName, async ({ browser, request }) => {
                 );
                 const captured = await waiting;
                 const { payload } = captured;
+                const responseFacts = originalCancellationResponseFacts(
+                  captured,
+                  {
+                    orderId: id,
+                    runtime,
+                  },
+                );
+                await checkpoint({ response: responseFacts });
+                const cancelledHeading = page
+                  .getByText("行程已取消", { exact: true })
+                  .first();
+                // OutcomeScreen has no order-number label. Its server page
+                // selects the exact history order from orderId (or errors), so
+                // bind the real outcome DOM/route to that same URL and readback.
+                const ownRoute = page
+                  .getByText(
+                    `${text(current.pickupAddress)} → ${text(current.dropoffAddress)}`,
+                    { exact: true },
+                  )
+                  .first();
+                const terminalCheckpoint = async (
+                  phase: "before-wait" | "url-ready" | "rendered" | "failed",
+                ) => {
+                  const dom = {
+                    cancelledVisible: await cancelledHeading
+                      .isVisible()
+                      .catch(() => null),
+                    ownRouteVisible: await ownRoute
+                      .isVisible()
+                      .catch(() => null),
+                  };
+                  await checkpoint({
+                    response: responseFacts,
+                    terminal: originalCancellationTerminalFacts(
+                      page.url(),
+                      { tripURL, orderId: id },
+                      dom,
+                      phase,
+                    ),
+                  });
+                };
                 await cancelPhase("browser-cancel-terminal-ui", async () => {
                   if (captured.status === 200) {
-                    await page.waitForURL(
-                      (url) =>
-                        url.searchParams.get("screen") === "cancelled" &&
-                        url.searchParams.get("orderId") === id,
-                    );
+                    await terminalCheckpoint("before-wait");
+                    try {
+                      await waitForOriginalCancellationTerminalUI(
+                        page,
+                        id,
+                        async () => {
+                          await terminalCheckpoint("url-ready");
+                          await expect(cancelledHeading).toBeVisible();
+                          await expect(ownRoute).toBeVisible();
+                        },
+                      );
+                      await terminalCheckpoint("rendered");
+                    } catch (error) {
+                      // Diagnostic reads cannot replace the original failure.
+                      await terminalCheckpoint("failed").catch(() => undefined);
+                      throw error;
+                    }
                   } else {
                     const afterDenial = object(
                       (await referral("/api/referral/active")).data,
