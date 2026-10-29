@@ -4882,9 +4882,12 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                       f"candidate_branch={self.task['candidate_branch']} owner={self.task['owner']} "
                       f"reviewer={self.task['reviewer']} "
                       f"required_acceptance={'|'.join(self.task['required_acceptance'])} depends_on=- "
-                      f"blocker_fingerprint={action['blocker_fingerprint']}", message)
+                      f"blocker_fingerprint={action['blocker_fingerprint']} open_blockers=1", message)
         self.assertIn("resume_basis=merged_runtime_acceptance_ready", message)
         self.assertNotIn("ci_recovery=eligible candidate_sha=", message)
+        # The hard-rule prose names open_blockers=1 as the case requiring the
+        # Chair to confirm the blocker is the sole remaining one.
+        self.assertIn("若 `open_blockers=1`，你必須實際確認那一個 open blocker 是唯一剩餘阻礙", message)
 
         # Protected controls first: each stale/forged/malformed decision leaves no residue.
         before = self.path.read_bytes()
@@ -5091,7 +5094,14 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
             self.config, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
             approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=zero)
         self.assertIn(f"merged_acceptance=eligible candidate_sha={self.task['candidate_sha']} ", message)
-        self.assertIn(f"blocker_fingerprint={EMPTY_OPEN_BLOCKER_FINGERPRINT}", message)
+        self.assertIn(f"blocker_fingerprint={EMPTY_OPEN_BLOCKER_FINGERPRINT} open_blockers=0", message)
+        # The hard-rule prose must not tell the Chair this zero-open row needs
+        # a blocker to confirm: the eligible row and its own instructions must
+        # not contradict (reopen finding F1). Covers the actual generated
+        # text, not just the eligibility/fingerprint context dict.
+        self.assertNotIn("剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge", message)
+        self.assertIn("若 `open_blockers=0`，代表這個已 merge 的任務目前沒有任何 open blocker", message)
+        self.assertIn("不需要、也不要去確認或捏造一個不存在的 blocker", message)
         action = self.chair_action(zero)
         self.assertEqual(action["blocker_fingerprint"], EMPTY_OPEN_BLOCKER_FINGERPRINT)
 
