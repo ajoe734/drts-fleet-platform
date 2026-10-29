@@ -1067,7 +1067,7 @@ describe("actual native privacy form and canonical session readback", () => {
         const response: FeeResponse = {
           url: () => url,
           request: () => ({ method: () => "POST" }),
-          status: () => change.status ?? 307,
+          status: () => change.status ?? 303,
           headers: () => ({
             "x-drts-candidate-sha": change.sha ?? "a".repeat(40),
           }),
@@ -1109,6 +1109,7 @@ describe("actual native privacy form and canonical session readback", () => {
     );
   });
   it.each([
+    { label: "stale method-preserving POST redirect", status: 307 },
     { label: "non-redirect POST", status: 200 },
     { label: "POST failure", status: 403 },
     { label: "wrong SHA", sha: "b".repeat(40) },
