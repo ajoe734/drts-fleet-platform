@@ -1194,6 +1194,12 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     expect(events.indexOf("Ops revoked")).toBeGreaterThan(readback);
     expect(f.h.callback.status).toBe("cancelled");
     expect(f.h.session.status).toBe("closed");
+    expect(result.unresolved).not.toContain(
+      "r08-own-terminal-readback-unverified",
+    );
+    expect(result.unresolved).toContain(
+      "r08-required-original-ui-replay-unverified",
+    );
     expect(result.wholeRunPassed).toBe(false);
     await expect(f.run.cleanup()).rejects.toThrow(
       "r08-own-run-cleanup-at-most-once",
@@ -1207,6 +1213,7 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     f.h.session.linkedCaseNo = "SIM-unowned-case";
     const result = await f.finish("runner-interrupted");
     expect(f.run.snapshot().cleanup).toBe("unknown");
+    expect(result.unresolved).toContain("r08-own-terminal-readback-unverified");
     expect(f.writes).toHaveLength(4);
     expect(result.wholeRunPassed).toBe(false);
   });
@@ -1219,6 +1226,7 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     });
     const result = await f.finish("runner-interrupted");
     expect(f.run.snapshot().cleanup).toBe("unknown");
+    expect(result.unresolved).toContain("r08-own-terminal-readback-unverified");
     expect(f.writes).toHaveLength(5);
     expect(f.h.callback.status).toBe("pending");
     expect(f.h.session.status).toBe("active");
