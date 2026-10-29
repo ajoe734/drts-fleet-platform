@@ -3735,6 +3735,11 @@ process.exit(99);
           (entry) => entry.entrySlug === "stale-manifest-entry",
         )!;
         const readback = [
+          {
+            ...ownSource,
+            entrySlug: "same-pair-own-entry",
+            partnerCode: "SAME_PAIR_OWN",
+          },
           stale,
           // Disjoint malformed and conflicting historical programs cannot
           // become a source or contaminate the selected program's checks.
@@ -3943,6 +3948,147 @@ process.exit(99);
               SIM_PLATFORM_ADMIN_SESSION_ID,
         ),
       ).toBe(false);
+    });
+
+    it.each([
+      "no-active-entries",
+      "no-own-source",
+      "inactive-own-source",
+      "revoked-own-source",
+      "missing-tenant",
+      "missing-program",
+      "manifest-source",
+      "seed-tenant-manifest-program",
+      "wrong-partner-type",
+      "conflicting-fleet-alias",
+      "ambiguous-own-programs",
+      "ambiguous-own-tenants",
+      "selected-program-conflict",
+      "selected-program-missing-tenant",
+      "selected-program-manifest-tenant",
+    ])("fails closed before fixture writes for %s", async (scenario) => {
+      const own = {
+        partnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
+        partnerType: "fleet_partner",
+        tenantId: "tenant-demo-001",
+        programId: "program-referral-community",
+        entrySlug: "canonical-own-fleet",
+        partnerCode: "CANONICAL_OWN_FLEET",
+        status: "active",
+        activeFlag: true,
+      };
+      const unrelated = {
+        ...own,
+        partnerId: "partner-unrelated",
+        partnerType: "referral_channel",
+        programId: "disjoint-program",
+        entrySlug: "unrelated-entry",
+        partnerCode: "UNRELATED",
+      };
+      const secondOwn = {
+        ...own,
+        entrySlug: "second-own",
+        partnerCode: "SECOND_OWN",
+      };
+      const conflict = {
+        ...unrelated,
+        programId: own.programId,
+        tenantId: "tenant-other",
+      };
+      const cases: Record<string, Array<Record<string, unknown>>> = {
+        "no-active-entries": [],
+        "no-own-source": [unrelated],
+        "inactive-own-source": [unrelated, { ...own, activeFlag: false }],
+        "revoked-own-source": [
+          unrelated,
+          { ...own, revokedAt: "2026-10-29T00:00:00Z" },
+        ],
+        "missing-tenant": [unrelated, { ...own, tenantId: " " }],
+        "missing-program": [unrelated, { ...own, programId: null }],
+        "manifest-source": [
+          unrelated,
+          { ...own, tenantId: "10000000-0000-0000-0000-000000000201" },
+        ],
+        "seed-tenant-manifest-program": [
+          unrelated,
+          { ...own, programId: "10000000-0000-0000-0000-000000000302" },
+        ],
+        "wrong-partner-type": [
+          unrelated,
+          { ...own, partnerType: "referral_channel" },
+        ],
+        "conflicting-fleet-alias": [
+          unrelated,
+          { ...own, fleetPartnerId: "fleet-other" },
+        ],
+        "ambiguous-own-programs": [
+          own,
+          { ...secondOwn, programId: "another-own-program" },
+        ],
+        "ambiguous-own-tenants": [
+          own,
+          { ...secondOwn, tenantId: "tenant-other" },
+        ],
+        "selected-program-conflict": [conflict, own],
+        "selected-program-missing-tenant": [
+          own,
+          { ...conflict, tenantId: null },
+        ],
+        "selected-program-manifest-tenant": [
+          own,
+          { ...conflict, tenantId: "10000000-0000-0000-0000-000000000201" },
+        ],
+      };
+      const missing = [
+        "no-active-entries",
+        "no-own-source",
+        "inactive-own-source",
+        "revoked-own-source",
+      ].includes(scenario);
+      const harness = await createOwnedForeignFleetRealServiceHarness({
+        partnerEntriesOverride: cases[scenario]!,
+      });
+      const originalEntries =
+        harness.tenantPartnerService.listPlatformPartnerEntries();
+      const originalFleets =
+        await harness.fleetPartnerService.listFleetPartners();
+      const env = createNoProvidedForeignFleetEnv();
+      let saved: OperationalRoleSessionsEvidence | undefined;
+      await expect(
+        prepareOperationalRoleSessions(env, {
+          fetch: harness.fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            env[name] = value;
+          },
+          save: (_name, data) => {
+            saved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+      expect(saved?.stage).toBe("foreign_fleet:resolve-tenant-program");
+      expect(saved?.foreign_fleet_precondition).toBe(
+        missing ? "missing-external-fixture" : "invalid-external-fixture",
+      );
+      expect(saved?.cleanup).toBe("passed");
+      expect(
+        harness.calls.filter(
+          (call) =>
+            call.method !== "GET" &&
+            /control-plane-proxy\/(admin\/fleet-partners|platform-admin\/partner-entries)/.test(
+              call.url,
+            ),
+        ),
+      ).toEqual([]);
+      expect(harness.tenantPartnerService.listPlatformPartnerEntries()).toEqual(
+        originalEntries,
+      );
+      expect(await harness.fleetPartnerService.listFleetPartners()).toEqual(
+        originalFleets,
+      );
+      expect(
+        env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID,
+      ).toBeUndefined();
     });
 
     it("rejects tenant/program readback mismatches (manifest UUID 201 mixed with demo seed or conflicting tenantId bindings) and same-ownFleet returns without deactivating fleet-demo-001", async () => {
