@@ -81,7 +81,16 @@ TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting
 ai-status.sh assign ENTRY-FLEET-OIDC-WIRE-AND-CANONICAL-SESSION-20261026-UNBLOCK-MANUAL-UNBLOCK Codex Claude
 ```
 
-`<next 文本>`沿用本文件原第 52-59 行已經寫好的那段內容（Source key accepted / second key UNMET / custody HOLD / resolved_parent_status=blocked 等），不重複貼出，內容不變。
+`<next 文本>`（兩個 `assign` 指令的 `resolved_parent_next` 欄位都填這一段，內容相同）：
+
+> Source key remains accepted: exact 029380eac03e5d7cb121f30c1e4ad87cbfe8254b / PR3042 / merge 50387a6ad8d3f4f3186d590b02bde571d062c158.
+> Remaining key same_release_legitimate_fleet_oidc_session_readback is UNMET. Deploy 40662565606 on 1a3fbf8bca9e607085eb0c2e670b46763331f1da
+> deployed/health succeeded; operational and quote-expiry jobs failed. FULL 40681440811 success uses API-key bootstrap, not human OIDC.
+> Original unique SR-LIVE-ENTRY-001 operator must pin the actually served Fleet+API same release, use legitimate IdP account/active Fleet entry
+> via GET /api/auth/login?partner_id=<entry> -> real callback -> secure drts_session -> GET /api/auth/session, and save redacted canonical
+> active partner_user identity/session readback with run/revision evidence. Keep original seven-owned-order custody HOLD and source history;
+> do not deploy/rerun FULL or grant wider billing scopes for this helper. Supervisor must preserve parent blocked pending these
+> resources/evidence; helper disposition resolved_parent_status=blocked, resolved_parent_waiting_for=Codex.
 
 完成上面兩個 `assign` 之後，Supervisor 用 `ai-status.sh note` 對**父任務**
 （`ENTRY-FLEET-OIDC-WIRE-AND-CANONICAL-SESSION-20261026`）記錄當前診斷——這只會更新父任務的 `next`/`last_update`，
