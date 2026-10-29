@@ -3755,7 +3755,10 @@ process.exit(99);
           );
         // Credential signals.evaluatedAt is refreshed on each list read.
         const credentialRecords = (credentials: typeof originalCredentials) =>
-          credentials.map(({ signals: _signals, ...record }) => record);
+          credentials.map((credential) => ({
+            ...credential,
+            signals: { ...credential.signals, evaluatedAt: "read-time" },
+          }));
         const deps = {
           fetch: harness.fetchImpl,
           mask: () => {},
