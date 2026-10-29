@@ -4960,6 +4960,148 @@ class CandidateCiResumeTests(unittest.TestCase):
             self.config, state, {"task_id": "ARCHIVE-PARENT", "reason": "route"}, {}))
         self.assertIn("ARCHIVE-PARENT", state["governance_escalations"])
 
+    # The native 20261029T142413Z-claude2.json blocked_by: bare ids, no colon or reason.
+    NATIVE_142413_BARE_IDS = [
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-HISTORY-REPAIR",
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-PLANNING-DECISION",
+        "SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026-UNBLOCK-MANUAL-UNBLOCK",
+    ]
+
+    def chair_message(self, status: dict) -> str:
+        return supervisor.build_chair_review_message(
+            {}, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=status)
+
+    def prompt_deferral_example(self, message: str) -> str:
+        import re
+        match = re.search(r'合法範例：`"([^"]+)"`', message)
+        self.assertIsNotNone(match, "prompt carries no reasoned deferral example")
+        return match.group(1)
+
+    def deferred_and_synthesized(self, payload: dict, status: dict) -> tuple[set, list]:
+        selection = supervisor.chair_blocked_task_selection(self.config, status)
+        deferred = supervisor.chair_reasoned_deferral_task_ids(self.config, payload, selection, status)
+        synthesized = supervisor.synthesize_reassignment_followup_task_actions(
+            self.config, {**payload, "decision": "reassignment_triage"}, status)
+        return deferred, [(a["task_id"], a["action"]) for a in synthesized]
+
+    def test_R7_chair_prompt_teaches_reasoned_deferral_eligibility_and_grammar(self) -> None:
+        message = self.chair_message(self.board)
+        for taught in (
+            "理由延期（不建 helper、也不給該任務任何 action）只限下方摘要中預期 `action=create_unblock_task`",
+            "governance artifact 或 lineage 深度已達上限、recursion guard 會拒絕替它建 child",
+            "預設的穩定 helper ID（`<TASK-ID>-UNBLOCK-<KIND>`）已保留在 board 上或 archive 裡",
+            "只有在同一份 JSON 同時帶有一個與某個被選中任務現況完全吻合的明確 `resume_parent_task`",
+            "`resume_basis=candidate_ci_recovered` 或 `merged_runtime_acceptance_ready`",
+            "這不是「所有 blocked 列都可延期」",
+            "不要為此新建 helper-of-helper、history 或 archive 任務",
+            "stale 或 malformed），整批會在任何動作前被拒絕",
+            "精確格式是 `TASK-ID: 具體理由`（ASCII `:` 或全形 `：` 皆可）",
+            f"理由至少 {supervisor.CHAIR_DEFERRAL_MIN_REASON_CHARS} 個字元",
+            "`H3-HOLD` 都會讓該項失效",
+            "`PD-4` 這種字母加一或兩位數字的里程碑標籤",
+            "裸 ID（只寫 `\"HELD-UNBLOCK\"`、沒有冒號與理由）",
+        ):
+            with self.subTest(taught=taught):
+                self.assertIn(taught, message)
+        # The rule sits in the hard-rule list, after the existing helper/resume/wait rules.
+        rules = message.split("硬規則：\n", 1)[1].split("\n\n", 1)[0]
+        self.assertLess(rules.index("`wait_for_parent_resolution`"), rules.index("- 理由延期"))
+        self.assertLess(rules.index("- 理由延期"), rules.index("- 延期項目寫在 `blocked_by`"))
+        # The prompt's own example is accepted by the real parser and, for an actual
+        # governance helper, by the real eligibility check.
+        example = self.prompt_deferral_example(message)
+        self.assertEqual(supervisor.chair_deferral_entry_task_ids({"blocked_by": [example]}), {"HELD-UNBLOCK"})
+        self.add_held_governance_helper()
+        deferred, synthesized = self.deferred_and_synthesized({"blocked_by": [example]}, self.board)
+        self.assertEqual(deferred, {"HELD-UNBLOCK"})
+        self.assertNotIn(("HELD-UNBLOCK", "create_unblock_task"), synthesized)
+
+    def test_R7_prompt_grammar_accepts_guarded_reserved_and_mixed_deferrals(self) -> None:
+        base = json.loads(json.dumps(self.board))
+        # (1) Governance artifact: the recursion guard refuses a child, no recovery action needed.
+        self.add_held_governance_helper()
+        snapshot = json.loads(json.dumps(self.board))
+        task_map = supervisor.task_index_from_status(self.config, snapshot)
+        self.assertTrue(supervisor.chair_unblock_recursion_guarded(self.config, task_map["HELD-UNBLOCK"], task_map))
+        for entry in (self.HELD_DEFERRAL, self.HELD_DEFERRAL.replace("HELD-UNBLOCK:", "HELD-UNBLOCK：", 1)):
+            with self.subTest(guarded=entry[:13]):
+                deferred, synthesized = self.deferred_and_synthesized({"blocked_by": [entry]}, snapshot)
+                self.assertEqual(deferred, {"HELD-UNBLOCK"})
+                self.assertEqual(synthesized, [])
+        # (2) Helper reserved: the stable helper ID is archived; the parent itself is ordinary.
+        snapshot = self.archive_parent_board()
+        task_map = supervisor.task_index_from_status(self.config, snapshot)
+        self.assertFalse(supervisor.chair_unblock_recursion_guarded(self.config, task_map["ARCHIVE-PARENT"], task_map))
+        self.assertTrue(supervisor.chair_unblock_helper_reserved(snapshot, task_map, "ARCHIVE-PARENT", "manual_unblock"))
+        deferred, synthesized = self.deferred_and_synthesized({"blocked_by": [self.ARCHIVE_DEFERRAL]}, snapshot)
+        self.assertEqual((deferred, synthesized), ({"ARCHIVE-PARENT"}, []))
+        self.assertIsNone(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]))
+        # (3) Ordinary record inside a mixed batch whose explicit CI recovery matches exactly.
+        self.board = json.loads(json.dumps(base))
+        self.add_operator_hold()
+        snapshot = json.loads(json.dumps(self.board))
+        task_map = supervisor.task_index_from_status(self.config, snapshot)
+        self.assertFalse(supervisor.chair_unblock_recursion_guarded(self.config, task_map["OPERATOR-ONLY"], task_map))
+        self.assertFalse(supervisor.chair_unblock_helper_reserved(snapshot, task_map, "OPERATOR-ONLY", "manual_unblock"))
+        records = {r["task_id"]: r for r in supervisor.chair_blocked_task_selection(self.config, snapshot)}
+        payload = self.mixed_payload("blocked_task_triage", [self.OPERATOR_DEFERRAL])
+        self.assertTrue(supervisor.matching_explicit_parent_resume(payload, records[self.task["id"]]))
+        self.assertEqual(supervisor.stale_mixed_recovery_deferrals(self.config, payload, snapshot), [])
+        deferred, synthesized = self.deferred_and_synthesized(payload, snapshot)
+        self.assertEqual((deferred, synthesized), ({"OPERATOR-ONLY"}, []))
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot))
+
+    def test_R7_prompt_named_invalid_deferrals_stay_rejected(self) -> None:
+        governance = self.add_held_governance_helper()
+        self.add_operator_hold()
+        snapshot = json.loads(json.dumps(self.board))
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        # Bare ids, as natively written at 14:24:13, name nothing for the parser.
+        self.assertEqual(supervisor.chair_deferral_entry_task_ids({"blocked_by": self.NATIVE_142413_BARE_IDS}), set())
+        invalid = {
+            "bare_id": ["HELD-UNBLOCK"],
+            "short_reason": ["HELD-UNBLOCK：維持 blocked，只差人工"],
+            "other_task_id": ["HELD-UNBLOCK：與 ORIGINAL-PARENT 相同理由，維持既有 blocker、owner 與 reviewer 不動。"],
+            "h3_hold_token": ["HELD-UNBLOCK：既有治理 helper 仍受 H3-HOLD 約束，維持原 blocker 不動，不建 nested helper。"],
+        }
+        self.assertLess(len("維持 blocked，只差人工"), supervisor.CHAIR_DEFERRAL_MIN_REASON_CHARS)
+        for kind, blocked_by in invalid.items():
+            with self.subTest(invalid=kind):
+                self.assertEqual(supervisor.chair_deferral_entry_task_ids({"blocked_by": blocked_by}), set())
+                self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+                    self.config, {"blocked_by": blocked_by}, selection, snapshot), set())
+        # Natural wording and a short milestone label stay acceptable.
+        for entry in ("HELD-UNBLOCK：既有治理 helper 仍受 H3/H4 HOLD 約束，維持原 blocker 不動，不建 nested helper。",
+                      "HELD-UNBLOCK：卡在 PD-4 的既有人類治理權責，recursion guard 禁止再建 nested helper。"):
+            with self.subTest(valid=entry[13:24]):
+                self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+                    self.config, {"blocked_by": [entry]}, selection, snapshot), {"HELD-UNBLOCK"})
+        # Outside a mixed batch an ordinary record keeps the helper route despite a well-formed entry.
+        ordinary = {"blocked_by": [self.OPERATOR_DEFERRAL]}
+        self.assertEqual(supervisor.chair_deferral_entry_task_ids(ordinary), {"OPERATOR-ONLY"})
+        deferred, synthesized = self.deferred_and_synthesized(ordinary, snapshot)
+        self.assertEqual(deferred, set())
+        self.assertIn(("OPERATOR-ONLY", "create_unblock_task"), synthesized)
+        # Stale or malformed explicit recovery voids every deferral of the mixed batch up front.
+        for kind, action in {"stale_fingerprint": {**self.action, "blocker_fingerprint": "0" * 64},
+                             "stale_generation": {**self.action, "candidate_generation": "generation-two"},
+                             "malformed_missing_pr": {k: v for k, v in self.action.items() if k != "pr_url"}}.items():
+            with self.subTest(recovery=kind):
+                payload = {**self.mixed_payload("blocked_task_triage", [self.HELD_DEFERRAL, self.OPERATOR_DEFERRAL]),
+                           "task_actions": [action]}
+                self.assertEqual(supervisor.stale_mixed_recovery_deferrals(self.config, payload, snapshot),
+                                 ["HELD-UNBLOCK", "OPERATOR-ONLY"])
+                self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(self.config, payload, selection, snapshot),
+                                 {"HELD-UNBLOCK"})  # only the guard-eligible record; the ordinary one is not
+                self.assertEqual(supervisor.validate_chair_review_context(
+                    payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config,
+                    status=snapshot),
+                    "blocked_task_triage mixed recovery batch is stale; refusing it without deferring "
+                    "HELD-UNBLOCK, OPERATOR-ONLY")
+        self.assertEqual(snapshot["tasks"][1], governance)
+
 
 class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
     """Supervisor-authority merged-acceptance resume through the real board writer."""
