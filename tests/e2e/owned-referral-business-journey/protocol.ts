@@ -923,6 +923,72 @@ export async function settleOriginalBookingOperation<T>(
   return outcome.value;
 }
 
+/**
+ * One original booking operation: armed with the caller's existing budget,
+ * closed on every exit and never reopened. A closed operation sends nothing.
+ */
+export class OriginalBookingOperation {
+  private readonly controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  constructor(private readonly label: string) {}
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  get open(): boolean {
+    return !this.controller.signal.aborted;
+  }
+
+  /** Arm the existing budget; `onExpire` runs that budget's own failure first. */
+  arm(ms: number, onExpire?: (failure: JourneyFailure) => void) {
+    requireFact(
+      this.open && this.timer === undefined,
+      `${this.label} budget armed once while open`,
+    );
+    this.timer = setTimeout(() => {
+      const failure = new JourneyFailure(`${this.label}-timeout`);
+      onExpire?.(failure);
+      this.controller.abort(failure);
+    }, ms);
+  }
+
+  close() {
+    clearTimeout(this.timer);
+    if (this.open)
+      this.controller.abort(new JourneyFailure(`${this.label}-closed`));
+  }
+
+  /** Recheck immediately before the one real send, after every earlier await. */
+  async send<T>(send: () => Promise<T>): Promise<T> {
+    requireFact(this.open, `${this.label} within its operation budget`);
+    return send();
+  }
+}
+
+/**
+ * End an operation's drains on every exit. A failed operation is closed first,
+ * so its abandoned route/quote work neither holds the caller nor sends; its own
+ * failure stays primary. A successful one drains within its armed budget.
+ */
+export async function closeOriginalBookingOperation(
+  operation: OriginalBookingOperation,
+  succeeded: boolean,
+  drain: () => Promise<unknown>,
+): Promise<void> {
+  if (!succeeded) operation.close();
+  try {
+    await drainWithinOperationBudget(
+      new Promise<unknown>((resolve) => resolve(drain())),
+      operation.signal,
+    );
+  } catch (error) {
+    if (succeeded) throw error;
+  } finally {
+    operation.close();
+  }
+}
+
 export type SafeEvent = {
   stage: string;
   status?: number;

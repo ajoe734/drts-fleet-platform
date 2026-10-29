@@ -6,6 +6,8 @@ import {
   clickAndSettleOriginalBookingAck,
   drainWithinOperationBudget,
   settleOriginalBookingOperation,
+  OriginalBookingOperation,
+  closeOriginalBookingOperation,
   observeOriginalBookingAck,
   settleRoutedOriginalBookingAck,
   originalBookingRouteFailure,
@@ -577,6 +579,204 @@ describe("original booking caller drains within the existing operation budget", 
     await expect(
       drainWithinOperationBudget(Promise.resolve(), expired.signal),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("original booking operation closes on every exit and never sends late", () => {
+  // Only the clock functions the budget uses are faked; promise turns and
+  // setImmediate stay real.
+  const fakeBudgetClock = () =>
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+  async function unsentJournal(
+    persist: (snapshot: BookingJournalSnapshot) => Promise<void>,
+  ) {
+    const s = await setup();
+    const journal = new BookingWriteJournal(
+      {
+        ...s.command,
+        definitionSha: "b".repeat(40),
+        runtimeSha: runtime,
+        nonce: "synthetic-unit-late-send",
+        partnerUserRef: "referral-demo-yuhe-residence",
+      },
+      persist,
+    );
+    return { ...s, journal };
+  }
+
+  it("refuses the one real send when the budget expires while the journal persist is held", async () => {
+    fakeBudgetClock();
+    try {
+      const persisted = deferred<void>();
+      const s = await unsentJournal(() => persisted.promise);
+      const operation = new OriginalBookingOperation(
+        "supplemental-original-booking",
+      );
+      const expiredWith: JourneyFailure[] = [];
+      operation.arm(25_000, (failure) => expiredWith.push(failure));
+      const fetch = vi.fn(async () => undefined);
+      const sending = s.journal.beforeSend(
+        s.raw,
+        s.command.idempotencyKey,
+        () => operation.send(fetch),
+      );
+      const refused = expect(sending).rejects.toThrow(
+        "supplemental-original-booking within its operation budget",
+      );
+      // The caller's existing deadline fires and the caller exits first.
+      vi.advanceTimersByTime(25_000);
+      expect(expiredWith.map((f) => f.message)).toEqual([
+        "supplemental-original-booking-timeout",
+      ]);
+      expect(operation.open).toBe(false);
+      persisted.resolve();
+      await refused;
+      expect(fetch).not.toHaveBeenCalled();
+      expect(s.journal.current).toMatchObject({
+        state: "ack_unknown",
+        body: s.raw,
+        idempotencyKey: s.command.idempotencyKey,
+      });
+      // The original attempt stays single: no replacement send is possible.
+      await expect(
+        s.journal.beforeSend(s.raw, s.command.idempotencyKey, fetch),
+      ).rejects.toThrow("one frozen booking send only");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends exactly once while the operation is open", async () => {
+    const s = await unsentJournal(async () => undefined);
+    const operation = new OriginalBookingOperation("main-original-booking");
+    const fetch = vi.fn(async () => undefined);
+    await s.journal.beforeSend(s.raw, s.command.idempotencyKey, () =>
+      operation.send(fetch),
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    operation.close();
+  });
+
+  it("closes a main operation whose observation failed before its route started", async () => {
+    fakeBudgetClock();
+    try {
+      const s = await setup();
+      const timeout = new Error("private URL");
+      timeout.name = "TimeoutError";
+      const operation = new OriginalBookingOperation("main-original-booking");
+      const unroute = vi.fn(async () => undefined);
+      let routeStarted = false;
+      let succeeded = false;
+      operation.arm(15_000);
+      try {
+        await settleOriginalBookingOperation(
+          () => new Promise<void>(() => undefined),
+          s.observe(Promise.reject(timeout)),
+          operation.signal,
+          () => (routeStarted ? Promise.resolve() : undefined),
+        );
+        succeeded = true;
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          "booking-response-wait:TimeoutError",
+        );
+      } finally {
+        await closeOriginalBookingOperation(operation, succeeded, unroute);
+      }
+      expect(succeeded).toBe(false);
+      expect(unroute).toHaveBeenCalledTimes(1);
+      expect(operation.open).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      // A late UI POST reaching the still-registered route is refused.
+      routeStarted = true;
+      const fetch = vi.fn(async () => undefined);
+      await expect(operation.send(fetch)).rejects.toThrow(
+        "main-original-booking within its operation budget",
+      );
+      expect(fetch).not.toHaveBeenCalled();
+      expect(() => operation.arm(15_000)).toThrow(
+        "main-original-booking budget armed once while open",
+      );
+      expect(s.claim).not.toHaveBeenCalled();
+      expect(s.journal.current?.state).toBe("ack_unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends a supplemental setup failure before its budget is armed without waiting on quotes", async () => {
+    const quote = deferred<void>();
+    const operation = new OriginalBookingOperation(
+      "supplemental-original-booking",
+    );
+    const unroute = vi.fn(async () => undefined);
+    const unhandled = await collectUnhandled(async () => {
+      const setupFailure = new JourneyFailure("supplemental setup failed");
+      const succeeded = false;
+      const caller = (async () => {
+        try {
+          throw setupFailure; // e.g. toBeEnabled before the 25s arm
+        } finally {
+          await closeOriginalBookingOperation(
+            operation,
+            succeeded,
+            async () => {
+              await unroute();
+              await Promise.all([quote.promise]);
+            },
+          );
+        }
+      })();
+      await expect(caller).rejects.toBe(setupFailure);
+      expect(operation.open).toBe(false);
+      expect(unroute).toHaveBeenCalledTimes(1);
+      quote.reject(new Error("private late quote body"));
+    });
+    expect(unhandled).toEqual([]);
+  });
+
+  it("drains a successful operation within its armed budget and reports an abandoned drain", async () => {
+    fakeBudgetClock();
+    try {
+      const operation = new OriginalBookingOperation(
+        "supplemental-original-booking",
+      );
+      operation.arm(25_000);
+      const closing = closeOriginalBookingOperation(
+        operation,
+        true,
+        () => new Promise<void>(() => undefined),
+      );
+      const rejected = expect(closing).rejects.toThrow(
+        "supplemental-original-booking-timeout",
+      );
+      await Promise.resolve();
+      expect(operation.open).toBe(true);
+      vi.advanceTimersByTime(25_000);
+      await rejected;
+      expect(operation.open).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a drain failure of a successful operation and closes it", async () => {
+    const operation = new OriginalBookingOperation("main-original-booking");
+    const failure = new JourneyFailure("supplemental actual UI quote intent");
+    await expect(
+      closeOriginalBookingOperation(operation, true, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(operation.open).toBe(false);
+    const ok = new OriginalBookingOperation("main-original-booking");
+    await expect(
+      closeOriginalBookingOperation(ok, true, async () => undefined),
+    ).resolves.toBeUndefined();
+    expect(ok.open).toBe(false);
   });
 });
 

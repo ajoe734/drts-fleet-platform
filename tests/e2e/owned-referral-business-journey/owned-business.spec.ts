@@ -50,7 +50,8 @@ import {
   originalBookingRouteFailure,
   type BookingAckResponse,
   clickAndSettleOriginalBookingAck,
-  drainWithinOperationBudget,
+  OriginalBookingOperation,
+  closeOriginalBookingOperation,
   settleOriginalBookingOperation,
   NATIVE_REQUEST_TIMEOUT_MS,
   persistPrivateJson,
@@ -1360,7 +1361,7 @@ test(journeyName, async ({ browser, request }) => {
       );
       let routeStarted = false;
       // The main booking's one budget is the existing native request deadline.
-      const mainBookingExpired = new AbortController();
+      const mainBooking = new OriginalBookingOperation("main-original-booking");
       let finishOriginalRoute!: () => void;
       const originalRouteFinished = new Promise<void>((resolve) => {
         finishOriginalRoute = resolve;
@@ -1396,6 +1397,11 @@ test(journeyName, async ({ browser, request }) => {
             await route.continue();
             return;
           }
+          if (!mainBooking.open) {
+            // A closed operation never sends and never mutates its owner state.
+            await route.abort("blockedbyclient").catch(() => undefined);
+            return;
+          }
           routeStarted = true;
           try {
             const rawBody = text(
@@ -1408,7 +1414,7 @@ test(journeyName, async ({ browser, request }) => {
             await Promise.all([...observedQuoteTasks]);
             // An abandoned caller never receives a late first POST.
             requireFact(
-              !mainBookingExpired.signal.aborted,
+              mainBooking.open,
               "main original booking within its operation budget",
             );
             const selected = quotesById.get(text(actualCommand.quoteId));
@@ -1453,10 +1459,13 @@ test(journeyName, async ({ browser, request }) => {
                 "actual UI booking key header required",
               ),
               async () => {
-                const original = await route.fetch({
-                  maxRedirects: 0,
-                  maxRetries: 0,
-                });
+                // Recheck after the journal's durable persist await as well.
+                const original = await mainBooking.send(() =>
+                  route.fetch({
+                    maxRedirects: 0,
+                    maxRetries: 0,
+                  }),
+                );
                 try {
                   await settleRoutedOriginalBookingAck(
                     original,
@@ -1474,8 +1483,9 @@ test(journeyName, async ({ browser, request }) => {
               },
             );
           } catch (error) {
-            bookingState.routeError = originalBookingRouteFailure(error);
-            rejectOriginalResponse(bookingState.routeError);
+            const failure = originalBookingRouteFailure(error);
+            if (mainBooking.open) bookingState.routeError = failure;
+            rejectOriginalResponse(failure);
             evidence.record({
               stage: bookingState.journal?.current
                 ? "booking:send-ACK-unknown"
@@ -1488,35 +1498,36 @@ test(journeyName, async ({ browser, request }) => {
           }
         },
       );
-      const feeCheckbox = page.getByRole("checkbox", {
-        name: "我已確認費用與優惠說明",
-        exact: true,
-      });
-      await expect(feeCheckbox).not.toBeChecked();
-      await expect(
-        page.locator('[data-drt-operation="referral-create"]'),
-      ).toBeDisabled();
-      await feeCheckbox.check();
-      await expect(feeCheckbox).toBeChecked();
-      await finalizer.checkpoint("main-original-booking");
-      const mainBookingBudget = setTimeout(
-        () =>
-          mainBookingExpired.abort(
-            new JourneyFailure("main-original-booking-timeout"),
-          ),
-        NATIVE_REQUEST_TIMEOUT_MS,
-      );
+      let mainBookingSucceeded = false;
       try {
+        const feeCheckbox = page.getByRole("checkbox", {
+          name: "我已確認費用與優惠說明",
+          exact: true,
+        });
+        await expect(feeCheckbox).not.toBeChecked();
+        await expect(
+          page.locator('[data-drt-operation="referral-create"]'),
+        ).toBeDisabled();
+        await feeCheckbox.check();
+        await expect(feeCheckbox).toBeChecked();
+        await finalizer.checkpoint("main-original-booking");
+        mainBooking.arm(NATIVE_REQUEST_TIMEOUT_MS);
         await settleOriginalBookingOperation(
           () => page.locator('[data-drt-operation="referral-create"]').click(),
           bookingAck,
-          mainBookingExpired.signal,
+          mainBooking.signal,
           () => (routeStarted ? originalRouteFinished : undefined),
         );
+        mainBookingSucceeded = true;
       } finally {
-        clearTimeout(mainBookingBudget);
+        // Close on every exit, including an observation that failed before the
+        // route started: a later route invocation can no longer send.
+        await closeOriginalBookingOperation(
+          mainBooking,
+          mainBookingSucceeded,
+          () => page.unroute(`${origins.referral}/api/referral/booking`),
+        );
       }
-      await page.unroute(`${origins.referral}/api/referral/booking`);
       if (bookingState.routeError) throw bookingState.routeError;
       requireFact(
         orderId && bookingState.quote,
@@ -3025,12 +3036,18 @@ test(journeyName, async ({ browser, request }) => {
           fail = reject;
         });
         void settled.catch(() => undefined);
-        let deadline: ReturnType<typeof setTimeout> | undefined;
         // The same 25s operation budget also ends a never-settling UI click
         // and the route/quote drains below.
-        const expired = new AbortController();
+        const operation = new OriginalBookingOperation(
+          "supplemental-original-booking",
+        );
         const url = `${origins.referral}/api/referral/booking`;
         const handle = async (route: Route) => {
+          if (!operation.open) {
+            // A closed operation never sends and never mutates its owner state.
+            await route.abort().catch(() => undefined);
+            return;
+          }
           try {
             requireFact(
               route.request().method() === "POST" &&
@@ -3085,18 +3102,21 @@ test(journeyName, async ({ browser, request }) => {
             );
             // An abandoned caller never receives a late first POST.
             requireFact(
-              !expired.signal.aborted,
+              operation.open,
               "supplemental original booking within its operation budget",
             );
             await state.journal.beforeSend(
               raw,
               text(route.request().headers()["idempotency-key"]),
               async () => {
-                state.actions.push("booking");
-                const original = await route.fetch({
-                  maxRedirects: 0,
-                  maxRetries: 0,
-                  timeout: 15000,
+                // Recheck after the journal's durable persist await as well.
+                const original = await operation.send(() => {
+                  state.actions.push("booking");
+                  return route.fetch({
+                    maxRedirects: 0,
+                    maxRetries: 0,
+                    timeout: 15000,
+                  });
                 });
                 try {
                   await settleRoutedOriginalBookingAck(
@@ -3130,6 +3150,7 @@ test(journeyName, async ({ browser, request }) => {
             await route.abort().catch(() => undefined);
           }
         };
+        let succeeded = false;
         try {
           await page.goto(
             `${origins.referral}/embed/${ENTRY}?state=handoff&screen=book`,
@@ -3156,17 +3177,11 @@ test(journeyName, async ({ browser, request }) => {
           await expect(create).toBeEnabled();
           await finalizer.checkpoint(`supplemental-${name}-original-booking`);
           await page.route(url, handle);
-          deadline = setTimeout(() => {
-            const timeout = new JourneyFailure(
-              "supplemental-original-booking-timeout",
-            );
-            fail(timeout);
-            expired.abort(timeout);
-          }, 25_000);
+          operation.arm(25_000, fail);
           await clickAndSettleOriginalBookingAck(
             () => create.click(),
             settled,
-            expired.signal,
+            operation.signal,
           );
           requireFact(
             state.orderId && state.journal && state.quote,
@@ -3179,24 +3194,23 @@ test(journeyName, async ({ browser, request }) => {
             "supplemental independent exact order ID set",
           );
           controlledOrderIds.push(state.orderId);
+          succeeded = true;
           return state as typeof state & {
             orderId: string;
             journal: BookingWriteJournal;
             quote: ObjectData;
           };
         } finally {
-          try {
-            page.off("response", observeQuote);
-            await drainWithinOperationBudget(
-              (async () => {
-                await page.unroute(url, handle);
-                await Promise.all(quoteTasks);
-              })(),
-              expired.signal,
-            );
-          } finally {
-            clearTimeout(deadline);
-          }
+          page.off("response", observeQuote);
+          // A setup failure before the 25s budget is armed closes at once.
+          await closeOriginalBookingOperation(
+            operation,
+            succeeded,
+            async () => {
+              await page.unroute(url, handle);
+              await Promise.all(quoteTasks);
+            },
+          );
         }
       };
       // Original C1 is the legal real null-final-driver/no-arrival source. Read
