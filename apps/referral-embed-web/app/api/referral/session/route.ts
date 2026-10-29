@@ -69,7 +69,8 @@ function redirectResponse(request: Request, returnTo: string | undefined) {
     targetUrl = new URL("/", requestUrl);
   }
 
-  const response = NextResponse.redirect(targetUrl);
+  // Both callers complete native POST forms; open the destination with GET.
+  const response = NextResponse.redirect(targetUrl, 303);
   response.headers.set("Cache-Control", "no-store, max-age=0");
   return response;
 }
