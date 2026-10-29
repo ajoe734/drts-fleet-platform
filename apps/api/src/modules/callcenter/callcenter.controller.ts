@@ -90,13 +90,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/announce-identity")
-  announceAgentIdentity(
+  async announceAgentIdentity(
     @Param("callId") callId: string,
     @Body() command: AnnounceCallAgentIdentityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.announceAgentIdentity(callId, command, requestId),
+      await this.callcenterService.announceAgentIdentityForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -118,13 +122,13 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/eta")
-  quoteCallEta(
+  async quoteCallEta(
     @Param("callId") callId: string,
     @Body() command: QuoteCallEtaCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.quoteEta(callId, command, requestId),
+      await this.callcenterService.quoteEtaForWrite(callId, command, requestId),
       requestId,
     );
   }
