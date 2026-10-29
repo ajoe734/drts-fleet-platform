@@ -33,6 +33,9 @@ import {
   adjacentEmptyDayFromSource,
   countCanonicalDailySource,
   validateEmptyDailyReportArtifactDownload,
+  requireEmptyDailyReportList,
+  EMPTY_DAY_CANDIDATE_OFFSETS,
+  EMPTY_DAY_MAX_DISTANCE,
   DAILY_REPORT_FORMATS,
   DAILY_REPORT_MIME_TYPES,
   DailyReportHttpFailure,
@@ -352,6 +355,34 @@ function cancelledCase() {
   });
   delete row.caseKind;
   return { order, expected, row };
+}
+
+// A canonical createdAt at 02:10 Asia/Taipei on the given Taipei calendar day.
+function taipeiCreatedAt(day: string): string {
+  return new Date(`${day}T02:10:00.000+08:00`).toISOString();
+}
+
+// Plain UTC calendar arithmetic for expected values only; the selection under
+// test always runs through adjacentEmptyDayFromSource itself.
+function shiftDay(day: string, offset: number): string {
+  return new Date(Date.parse(`${day}T00:00:00.000Z`) + offset * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+// The authorized nearest-first bounded order, written out independently.
+const NEAREST_FIRST_OFFSETS = Array.from({ length: 31 }, (_, index) => [
+  -(index + 1),
+  index + 1,
+]).flat();
+
+function occupantOn(
+  base: ObjectData,
+  orderId: string,
+  day: string,
+  overrides: Partial<ObjectData> = {},
+): ObjectData {
+  return { ...base, orderId, createdAt: taipeiCreatedAt(day), ...overrides };
 }
 
 // R12-10 external API port. Only fetch/env are controlled: the helper, the
@@ -1481,14 +1512,411 @@ ${inner}
         ORDER_ID,
       ).count,
     ).toBe(1);
-    expect(() =>
-      adjacentEmptyDayFromSource(occupied, positive, ORDER_ID),
-    ).toThrow("daily-report-no-authoritatively-empty-adjacent-day");
+    // Both adjacent days occupied: the bounded nearest-first search continues
+    // to D-2 (2026-10-24), which is genuinely empty, instead of failing.
+    expect(adjacentEmptyDayFromSource(occupied, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
     expect(() =>
       adjacentEmptyDayFromSource({ items: [] }, positive, ORDER_ID),
     ).toThrow("daily-report-authoritative-own-positive-source-required");
     expect(() =>
       adjacentEmptyDayFromSource({ rows: [] }, positive, ORDER_ID),
+    ).toThrow(JourneyFailure);
+  });
+
+  // Hosted run 40948572369 shape: C1 (finalStatus=cancelled) whose D-1 and D+1
+  // both hold matching rows. The pre-fix adjacent-only helper threw
+  // daily-report-no-authoritatively-empty-adjacent-day; D-2 is genuinely empty.
+  it("TEN02: both adjacent days occupied under cancelled positive filters selects the nearest genuinely empty D-2", () => {
+    const c1 = cancelledCase();
+    const positive = buildDailyReportFilters(c1.expected);
+    expect(positive.finalStatus).toBe("cancelled");
+    expect(positive.serviceDateFrom).toBe("2026-10-26");
+    const source = {
+      items: [
+        c1.order,
+        occupantOn(c1.order, "occupied-prior", "2026-10-25"),
+        occupantOn(c1.order, "occupied-next", "2026-10-27"),
+        // Completed rows on D-2 do not occupy the cancelled query.
+        occupantOn(buildOrderFixture(), "completed-on-d-2", "2026-10-24"),
+      ],
+    };
+    const countOn = (day: string) =>
+      countCanonicalDailySource(
+        source,
+        { ...positive, serviceDateFrom: day, serviceDateTo: day },
+        ORDER_ID,
+      ).count;
+    expect(countOn("2026-10-25")).toBe(1);
+    expect(countOn("2026-10-27")).toBe(1);
+    expect(countOn("2026-10-24")).toBe(0);
+    expect(adjacentEmptyDayFromSource(source, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
+    // Deterministic: the same snapshot always yields the same first zero.
+    expect(adjacentEmptyDayFromSource(source, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
+  });
+
+  it("TEN02: empty-day candidates are exactly -1,+1,-2,+2,...,-31,+31", () => {
+    expect(EMPTY_DAY_MAX_DISTANCE).toBe(31);
+    expect(EMPTY_DAY_CANDIDATE_OFFSETS).toHaveLength(62);
+    expect([...EMPTY_DAY_CANDIDATE_OFFSETS]).toEqual(NEAREST_FIRST_OFFSETS);
+    expect(EMPTY_DAY_CANDIDATE_OFFSETS.slice(0, 2)).toEqual([-1, 1]);
+    expect(Object.isFrozen(EMPTY_DAY_CANDIDATE_OFFSETS)).toBe(true);
+  });
+
+  it("TEN02: keeps the original -1 then +1 precedence and walks nearest-first to the first zero", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    // Every other candidate day is empty unless occupied below.
+    expect(
+      adjacentEmptyDayFromSource({ items: [own] }, positive, ORDER_ID),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [own, occupantOn(own, "occupied-prior", "2026-10-25")],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // Occupy the first k candidates; the (k+1)th is selected. k covers the
+    // original pair, the first rings, the +/-15 middle and the +/-31 edge
+    // (the exhaustive list is pinned by the candidate-order test above).
+    for (const k of [0, 1, 2, 3, 4, 5, 28, 29, 30, 31, 59, 60, 61]) {
+      const items = [
+        own,
+        ...NEAREST_FIRST_OFFSETS.slice(0, k).map((offset) =>
+          occupantOn(own, `occupied-${offset}`, shiftDay("2026-10-26", offset)),
+        ),
+      ];
+      expect(adjacentEmptyDayFromSource({ items }, positive, ORDER_ID)).toBe(
+        shiftDay("2026-10-26", NEAREST_FIRST_OFFSETS[k]!),
+      );
+    }
+    // -2 is tried before +2, +2 before -3.
+    const ring1 = [
+      own,
+      occupantOn(own, "p1", "2026-10-25"),
+      occupantOn(own, "n1", "2026-10-27"),
+    ];
+    expect(
+      adjacentEmptyDayFromSource({ items: ring1 }, positive, ORDER_ID),
+    ).toBe("2026-10-24");
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: [...ring1, occupantOn(own, "p2", "2026-10-24")] },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-28");
+  });
+
+  it("TEN02: all 62 bounded candidates occupied fails closed without searching beyond +/-31", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const items = [
+      own,
+      ...NEAREST_FIRST_OFFSETS.map((offset) =>
+        occupantOn(own, `occupied-${offset}`, shiftDay("2026-10-26", offset)),
+      ),
+    ];
+    // D-32 (2026-09-24) and D+32 (2026-11-27) are genuinely empty but outside
+    // the bound: they must never be selected.
+    for (const day of ["2026-09-24", "2026-11-27"])
+      expect(
+        countCanonicalDailySource(
+          { items },
+          { ...positive, serviceDateFrom: day, serviceDateTo: day },
+          ORDER_ID,
+        ).count,
+      ).toBe(0);
+    const failure = (() => {
+      try {
+        adjacentEmptyDayFromSource({ items }, positive, ORDER_ID);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    expect(failure).toMatchObject({
+      stage:
+        "daily-report-no-authoritatively-empty-adjacent-day:nearest-first-31-occupied",
+    });
+    // Freeing only D+31 (the last candidate) selects it.
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: items.filter((item) => item.orderId !== "occupied-31") },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-11-26");
+  });
+
+  it("TEN02: rows outside the exact positive filters never occupy a candidate; reservationWindowStart and Taipei midnight decide the date", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const foreign = NEAREST_FIRST_OFFSETS.flatMap((offset) => {
+      const day = shiftDay("2026-10-26", offset);
+      return [
+        occupantOn(own, `tenant-${offset}`, day, { tenantId: "other" }),
+        occupantOn(own, `partner-${offset}`, day, { partnerId: "other" }),
+        occupantOn(own, `status-${offset}`, day, { status: "cancelled" }),
+        occupantOn(own, `product-${offset}`, day, {
+          businessDispatchSubtype: "other",
+        }),
+        occupantOn(own, `source-${offset}`, day, { orderSource: "concierge" }),
+      ];
+    });
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: [own, ...foreign] },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    // Canonical tenant_portal and legacy portal normalize to the same source:
+    // a tenant_portal row does occupy D-1 for the portal positive order.
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "canonical-tenant-portal", "2026-10-25", {
+              orderSource: "tenant_portal",
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // reservationWindowStart wins over createdAt.
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "reserved-elsewhere", "2026-10-25", {
+              reservationWindowStart: taipeiCreatedAt("2026-12-31"),
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "reserved-on-d-1", "2026-12-31", {
+              reservationWindowStart: taipeiCreatedAt("2026-10-25"),
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // Taipei midnight: 2026-10-24T16:00Z is 2026-10-25 00:00 Asia/Taipei.
+    const midnight = (orderId: string, createdAt: string) => ({
+      ...own,
+      orderId,
+      createdAt,
+    });
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("before-d-1", "2026-10-24T15:59:59.999Z"),
+            midnight("late-d", "2026-10-26T15:59:59.999Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("start-d-1", "2026-10-24T16:00:00.000Z"),
+            midnight("late-d", "2026-10-26T15:59:59.999Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("start-d-1", "2026-10-24T16:00:00.000Z"),
+            midnight("start-d+1", "2026-10-26T16:00:00.000Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-24");
+  });
+
+  it.each([
+    // [positive Taipei day, occupied days, expected selection]
+    ["2028-03-01", ["2028-02-29", "2028-03-02"], "2028-02-28"],
+    ["2028-03-01", [], "2028-02-29"],
+    ["2027-03-01", [], "2027-02-28"],
+    ["2027-01-01", [], "2026-12-31"],
+    ["2027-01-01", ["2026-12-31", "2027-01-02"], "2026-12-30"],
+    ["2026-12-31", ["2026-12-30"], "2027-01-01"],
+    ["2026-10-31", ["2026-10-30", "2026-11-01"], "2026-10-29"],
+  ] as const)(
+    "TEN02: month/year/leap boundary from %s with %j occupied selects %s",
+    (positiveDay, occupiedDays, selected) => {
+      const positive = {
+        ...buildDailyReportFilters(
+          resolveExpectedDailyDispatchRecord(
+            buildOrderFixture(),
+            buildTaskFixture(),
+            buildOwnContext(),
+          ),
+        ),
+        serviceDateFrom: positiveDay,
+        serviceDateTo: positiveDay,
+      };
+      const own = buildOrderFixture({
+        createdAt: taipeiCreatedAt(positiveDay),
+      });
+      const items = [
+        own,
+        ...occupiedDays.map((day) => occupantOn(own, `occupied-${day}`, day)),
+      ];
+      expect(adjacentEmptyDayFromSource({ items }, positive, ORDER_ID)).toBe(
+        selected,
+      );
+    },
+  );
+
+  it("TEN02: missing, malformed or own-positive-less sources are rejected, never treated as an empty day", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const sources: unknown[] = [
+      null,
+      undefined,
+      {},
+      { items: null },
+      { items: "not-an-array" },
+      { items: [] },
+      // Own positive missing while other matching rows exist on D.
+      { items: [occupantOn(own, "someone-else", "2026-10-26")] },
+      // Own order moved off the positive date.
+      { items: [occupantOn(own, ORDER_ID, "2026-10-25")] },
+      // Own order present but under another status.
+      { items: [{ ...own, status: "cancelled" }] },
+      // A malformed matching row on a candidate day cannot be counted as zero.
+      {
+        items: [
+          own,
+          occupantOn(own, "malformed-source", "2026-10-25", {
+            orderSource: null,
+          }),
+        ],
+      },
+      {
+        items: [
+          own,
+          occupantOn(own, "malformed-time", "2026-10-25", {
+            createdAt: null,
+          }),
+        ],
+      },
+    ];
+    for (const source of sources)
+      expect(() =>
+        adjacentEmptyDayFromSource(source, positive, ORDER_ID),
+      ).toThrow(JourneyFailure);
+    expect(() =>
+      adjacentEmptyDayFromSource({ items: [] }, positive, ORDER_ID),
+    ).toThrow("daily-report-authoritative-own-positive-source-required");
+  });
+
+  it("TEN02: empty preview requires zero items and an explicit pageInfo.totalItems === 0", () => {
+    const stage = "daily-report-empty-preview";
+    expect(() =>
+      requireEmptyDailyReportList(successWireBytes(toApiListData([])), stage),
+    ).not.toThrow();
+    expect(() =>
+      requireEmptyDailyReportList(
+        Buffer.from(JSON.stringify({ ok: true, data: toApiListData([]) })),
+        stage,
+      ),
+    ).not.toThrow();
+    // totalItems > 0 with an empty first page is not an empty day.
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes(toApiListData([], { totalItems: 1, totalPages: 1 })),
+        stage,
+      ),
+    ).toThrow(`${stage}-total-items-zero-required`);
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes(toApiListData([buildDailyDispatchRow()])),
+        stage,
+      ),
+    ).toThrow(`${stage}-zero-rows-required`);
+    // No pageInfo, or a bare legacy array, cannot prove totalItems === 0.
+    expect(() =>
+      requireEmptyDailyReportList(successWireBytes({ items: [] }), stage),
+    ).toThrow(JourneyFailure);
+    expect(() =>
+      requireEmptyDailyReportList(
+        Buffer.from(JSON.stringify({ ok: true, data: [] })),
+        stage,
+      ),
+    ).toThrow(JourneyFailure);
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes({
+          ...toApiListData([]),
+          pageInfo: { ...toApiListData([]).pageInfo, totalItems: "0" },
+        }),
+        stage,
+      ),
     ).toThrow(JourneyFailure);
   });
 
@@ -1734,6 +2162,46 @@ ${inner}
     },
     {
       caseName:
+        "adjacent days occupied selects the nearest genuinely empty day for the full empty consumer",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "adjacent days occupied then source changes on the selected day after empty jobs must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "adjacent days occupied then source changes positive count after empty jobs must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "empty preview nonzero totalItems with empty first page must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "cancelled null row with adjacent days occupied selects the nearest genuinely empty day",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
         "cancelled null row uses normal UI filter rebuild and all immutable formats",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1953,6 +2421,15 @@ ${inner}
           restoreClock = () => clock.mockRestore();
         }
         const cancelled = failureCase.startsWith("cancelled null");
+        // TEN02 nearest-first: matching rows on D-1 and D+1 move the genuinely
+        // empty day to D-2; otherwise the original D-1 is the empty day.
+        const adjacentOccupied = failureCase.includes("adjacent days occupied");
+        const emptyDay = adjacentOccupied ? "2026-10-24" : "2026-10-25";
+        const sourceChange = failureCase.includes("source changes positive")
+          ? "positive"
+          : failureCase.includes("source changes")
+            ? "empty"
+            : undefined;
         const cancelledSource = cancelledCase();
         const ownRow = cancelled
           ? cancelledSource.row
@@ -2177,7 +2654,7 @@ ${inner}
                     serviceProductCode: serviceProductVal,
                   });
                   const rows =
-                    dateFromVal === "2026-10-25"
+                    dateFromVal === emptyDay
                       ? []
                       : rebuiltInBackend || alreadyMaterialized
                         ? [previewSiblingRow, ownRow]
@@ -2188,12 +2665,11 @@ ${inner}
                     null,
                     previewFailure === true ||
                       (typedFault === "exchange-http" &&
-                        dateFromVal === "2026-10-25")
+                        dateFromVal === emptyDay)
                       ? 503
                       : 200,
                     { "content-type": "application/json" },
-                    typedFault === "exchange-http" &&
-                      dateFromVal === "2026-10-25"
+                    typedFault === "exchange-http" && dateFromVal === emptyDay
                       ? errorWireBytes()
                       : failureCase === "preview-invalid-json"
                         ? Buffer.from("not-json")
@@ -2265,7 +2741,16 @@ ${inner}
                                                   },
                                                 }),
                                               )
-                                            : wireBytes(toApiListData(rows)),
+                                            : failureCase.startsWith(
+                                                  "empty preview nonzero totalItems",
+                                                ) && dateFromVal === emptyDay
+                                              ? wireBytes(
+                                                  toApiListData([], {
+                                                    totalItems: 1,
+                                                    totalPages: 1,
+                                                  }),
+                                                )
+                                              : wireBytes(toApiListData(rows)),
                   );
                 },
               });
@@ -2409,7 +2894,7 @@ ${inner}
                     "POST",
                     rebuildUrl,
                     faultPoint === "rebuild-command-json" &&
-                      dateFromVal === "2026-10-25"
+                      dateFromVal === emptyDay
                       ? privateMarker
                       : JSON.stringify(retryBody),
                     200,
@@ -2424,7 +2909,7 @@ ${inner}
                           }),
                         )
                       : successWireBytes({
-                          rebuiltCount: dateFromVal === "2026-10-25" ? 0 : 2,
+                          rebuiltCount: dateFromVal === emptyDay ? 0 : 2,
                           generatedAt,
                         }),
                   );
@@ -2448,7 +2933,7 @@ ${inner}
                                     // Same orderId, another contract identity.
                                     { ...ownRow, orderNo: "DRT-20261026-0099" },
                                   ]
-                                : dateFromVal === "2026-10-25"
+                                : dateFromVal === emptyDay
                                   ? []
                                   : [previewSiblingRow, ownRow],
                           ),
@@ -2465,7 +2950,7 @@ ${inner}
                   if (
                     routeFault &&
                     routeFault !== "matching-command-binding" &&
-                    dateFromVal === "2026-10-25" &&
+                    dateFromVal === emptyDay &&
                     format === "csv"
                   ) {
                     const unrelated = routeFault.startsWith("unrelated-");
@@ -2496,10 +2981,10 @@ ${inner}
                     );
                     if (!unrelated) return;
                   }
-                  const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
+                  const jobId = `job_harness_${dateFromVal === emptyDay ? "empty_" : ""}${format}`;
                   lastAcceptedJobId = jobId;
                   const rows =
-                    dateFromVal === "2026-10-25"
+                    dateFromVal === emptyDay
                       ? []
                       : [
                           jobSiblingRow,
@@ -2514,7 +2999,7 @@ ${inner}
                     format,
                     jobId,
                     rows,
-                    dateFromVal === "2026-10-25" || cancelled
+                    dateFromVal === emptyDay || cancelled
                       ? {
                           filters: {
                             ...buildDailyReportFilters(
@@ -2551,7 +3036,7 @@ ${inner}
                     `${OPS_ORIGIN}/control-plane-proxy/reports/jobs`,
                     JSON.stringify(
                       routeFault === "matching-command-binding" &&
-                        dateFromVal === "2026-10-25"
+                        dateFromVal === emptyDay
                         ? {
                             ...reqBody,
                             filters: {
@@ -2710,7 +3195,7 @@ ${inner}
                   if (target === ORDER_ID) {
                     return makeLocator({
                       point: "own-row",
-                      count: async () => (dateFromVal === "2026-10-25" ? 0 : 1),
+                      count: async () => (dateFromVal === emptyDay ? 0 : 1),
                       innerText: async () =>
                         `${ORDER_ID} ${ORDER_NO} 2026-10-26 ${PICKUP_ADDRESS} ${DROPOFF_ADDRESS} ${DRIVER_ID} ${VEHICLE_ID} ${PLATE_NO}`,
                     });
@@ -2835,16 +3320,25 @@ ${inner}
           }),
           readCanonicalOrders: async () => {
             sourceReads += 1;
+            const positiveOrder = cancelled
+              ? cancelledSource.order
+              : buildOrderFixture();
             return {
               items: [
-                cancelled ? cancelledSource.order : buildOrderFixture(),
-                ...(failureCase.startsWith("source changes") &&
-                sourceReads === 2
+                positiveOrder,
+                ...(adjacentOccupied
                   ? [
-                      buildOrderFixture({
-                        orderId: "writer-created-order",
-                        createdAt: "2026-10-24T18:10:00.000Z",
-                      }),
+                      occupantOn(positiveOrder, "occupied-prior", "2026-10-25"),
+                      occupantOn(positiveOrder, "occupied-next", "2026-10-27"),
+                    ]
+                  : []),
+                ...(sourceChange && sourceReads === 2
+                  ? [
+                      occupantOn(
+                        positiveOrder,
+                        "writer-created-order",
+                        sourceChange === "positive" ? "2026-10-26" : emptyDay,
+                      ),
                     ]
                   : []),
               ],
@@ -3187,9 +3681,22 @@ ${inner}
           ).rejects.toThrow();
           return;
         }
-        if (failureCase.startsWith("source changes")) {
+        if (failureCase.startsWith("empty preview nonzero totalItems")) {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-empty-preview-total-items-zero-required",
+          });
+          expect(sourceReads).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          expect(
+            createdJobs.filter((job) => job.jobId.includes("_empty_")),
+          ).toHaveLength(0);
+          return;
+        }
+        if (sourceChange) {
           await expect(run).rejects.toThrow(
-            "daily-report-empty-day-authoritative-source-control-required",
+            sourceChange === "positive"
+              ? "daily-report-empty-positive-source-count-stable-required"
+              : "daily-report-empty-day-authoritative-source-control-required",
           );
           expect(api!.reportCalls()).toHaveLength(6);
           expect(sourceReads).toBe(2);
@@ -3333,7 +3840,7 @@ ${inner}
         expect(result.filters.finalStatus).toBe(
           cancelled ? "cancelled" : "completed",
         );
-        expect(result.emptyDay.serviceDate).toBe("2026-10-25");
+        expect(result.emptyDay.serviceDate).toBe(emptyDay);
         expect(result.emptyDay.sourceBefore.emptyCount).toBe(0);
         expect(result.emptyDay.sourceAfter.ownPositivePresent).toBe(true);
         expect(result.emptyDay.restoredPositiveRow).toBe(true);

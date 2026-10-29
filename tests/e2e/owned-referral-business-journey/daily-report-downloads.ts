@@ -696,6 +696,20 @@ export function countCanonicalDailySource(
   return Object.freeze({ count, ownPresent });
 }
 
+// TEN02 empty-day candidates, nearest first and bounded: -1, +1, -2, +2, ...,
+// -31, +31 days from the positive Taipei service date. The first pair is the
+// original adjacent pair; nothing outside +/-31 is ever considered.
+export const EMPTY_DAY_MAX_DISTANCE = 31;
+export const EMPTY_DAY_CANDIDATE_OFFSETS: readonly number[] = Object.freeze(
+  Array.from(
+    { length: EMPTY_DAY_MAX_DISTANCE * 2 },
+    (_, index) => (index % 2 === 0 ? -1 : 1) * (Math.floor(index / 2) + 1),
+  ),
+);
+
+// Selects the first candidate whose exact positive filters (tenant, partner,
+// normalized source, product, finalStatus) count zero in the same complete
+// canonical read already in RAM. No further source read and no other filter.
 export function adjacentEmptyDayFromSource(
   source: unknown,
   positive: DailyReportFilters,
@@ -708,15 +722,28 @@ export function adjacentEmptyDayFromSource(
   );
   const ms = Date.parse(`${positive.serviceDateFrom}T00:00:00.000Z`);
   requireFact(Number.isFinite(ms), "daily-report-valid-positive-date-required");
-  for (const offset of [-1, 1]) {
+  for (const offset of EMPTY_DAY_CANDIDATE_OFFSETS) {
     const day = new Date(ms + offset * 86_400_000).toISOString().slice(0, 10);
     const empty = { ...positive, serviceDateFrom: day, serviceDateTo: day };
     if (countCanonicalDailySource(source, empty, ownOrderId).count === 0)
       return day;
   }
   throw new JourneyFailure(
-    "daily-report-no-authoritatively-empty-adjacent-day",
+    `daily-report-no-authoritatively-empty-adjacent-day:nearest-first-${EMPTY_DAY_MAX_DISTANCE}-occupied`,
   );
+}
+
+// TEN02 empty preview: zero items AND an explicit pageInfo.totalItems === 0.
+// An empty first page alone never proves an empty day.
+export function requireEmptyDailyReportList(bytes: Buffer, stage: string) {
+  requireFact(
+    unwrapEnvelopeList(bytes, stage).length === 0,
+    `${stage}-zero-rows-required`,
+  );
+  const pageInfo = object(
+    object(object(camelWire(JSON.parse(bytes.toString("utf8")))).data).pageInfo,
+  );
+  requireFact(pageInfo.totalItems === 0, `${stage}-total-items-zero-required`);
 }
 
 export function validateDailyPreviewRows(
@@ -3301,8 +3328,9 @@ export async function runOwnedDailyReportDownloads(
           })
         : undefined;
 
-    // TEN02: independent adjacent day, selected from a complete committed
-    // canonical read, NOT from an empty report preview. Keep full orders in RAM.
+    // TEN02: independent nearest-first (+/-31) empty day, selected from a
+    // complete committed canonical read, NOT from an empty report preview.
+    // Keep full orders in RAM.
     const beforeStartedAt = new Date().toISOString();
     const beforeOrders = await readCanonicalOrders();
     const beforeReadAt = new Date().toISOString();
@@ -3394,10 +3422,9 @@ export async function runOwnedDailyReportDownloads(
       const exchange = await pending;
       assertDailyReportHttpStatus(exchange, phase, [200], runtimeSha, evidence);
       assertEmptyQuery(exchange.searchParams);
-      requireFact(
-        unwrapEnvelopeList(exchange.bytes, `daily-report-empty-${phase}`)
-          .length === 0,
-        `daily-report-empty-${phase}-zero-rows-required`,
+      requireEmptyDailyReportList(
+        exchange.bytes,
+        `daily-report-empty-${phase}`,
       );
     };
     emptyDayConsumerPhase = "preview-ready";
