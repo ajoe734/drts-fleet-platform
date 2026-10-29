@@ -1,6 +1,7 @@
 """Pure controlled Logging ports: no subprocess, credentials, or product calls."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -1591,6 +1592,30 @@ class OpsDashboardTimeoutReadbackTests(unittest.TestCase):
 
 
 MODULE_COLLECT_OPS = MODULE.collect_ops_dashboard_timeout
+
+
+class FleetRootTimeoutReadbackTests(unittest.TestCase):
+    def test_real_cli_accepts_fixed_current_profile_without_product_or_cloud(self):
+        # Only gcloud is replaced. Exercise the actual script/argparse/collector,
+        # projection, safe artifact writer and exit status in a fresh process.
+        with TemporaryDirectory() as directory:
+            directory = Path(directory)
+            gcloud = directory / "gcloud"
+            gcloud.write_text('#!/bin/sh\nprintf \'[]\\n\'\n')
+            gcloud.chmod(0o700)
+            output = directory / "snapshot.json"
+            result = subprocess.run(
+                ["python3", str(SOURCE), "--profile", "fleet-root-timeout-40891070459-v1",
+                 "--output", str(output)],
+                env={**os.environ, **ENV, "PATH": str(directory) + os.pathsep + os.environ["PATH"]},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = json.loads(output.read_text())
+            self.assertEqual(actual["readStatus"], "no-matching-request-logs")
+            self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+            self.assertEqual(actual["definitionSha"], D)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":
