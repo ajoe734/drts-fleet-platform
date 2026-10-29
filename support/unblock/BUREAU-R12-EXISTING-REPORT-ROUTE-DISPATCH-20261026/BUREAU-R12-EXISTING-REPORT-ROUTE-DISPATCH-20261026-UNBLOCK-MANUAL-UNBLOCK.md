@@ -48,6 +48,8 @@ The original finding-level artifact remains unchanged:
 `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T-current-frontier/Codex-R12-report-route-f00ad-original-source-verification-and-Pi-handoff-20261026.json`.
 Its acceptance audit and scope-coordination sections remain the original repair
 boundary. This helper does not edit the producer or the hosted consumer.
+The original artifact SHA256 remains
+`f7ea6d0995755de23d0054c359992dfd1c81f149dda66d18e6a0a7e5c8a1ec31`.
 
 Live reviewer Claude differs from historical reviewer Pi. Both identities are
 reported explicitly; this helper does not reassign either task or substitute
@@ -161,6 +163,10 @@ Do not remove dispatch environment fences or impersonate Supervisor to apply it.
 
 All short evidence paths below are relative to the absolute local directory
 above. Machine-specific evidence is not staged as canonical product content.
+The retained artifact audit SHA256 is
+`9447d2fca2a1f01c445180bc52faacd5c9c6786be5170abb99beb9bb01cee308`.
+Scoped Prettier, repository classification (7,552 files), `git diff --check`,
+and the document/identity/reference assertions all completed with exit 0.
 
 | Finding / acceptance                                | Source basis and change                                                     | Command / result / evidence                                                                                                                                                                                                                   | Remaining limit                                                                             |
 | --------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
