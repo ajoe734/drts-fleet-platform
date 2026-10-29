@@ -274,6 +274,7 @@ export type OriginalCancellationResponseFacts = {
   envelopeOk: boolean;
   responseOrderMatches: boolean;
   responseCancelled: boolean;
+  cancelledAt: string | null;
   refusal: "ORDER_NOT_CANCELABLE" | "OTHER" | null;
 };
 
@@ -293,6 +294,7 @@ export function originalCancellationResponseFacts(
     "bounded original UI cancellation command",
   );
   const data = captured.status === 200 ? object(captured.data) : null;
+  const cancelledAt = data?.cancelledAt;
   const code = captured.payload.error
     ? object(captured.payload.error).code
     : null;
@@ -312,6 +314,14 @@ export function originalCancellationResponseFacts(
     envelopeOk: captured.payload.ok === true,
     responseOrderMatches: data?.orderId === expected.orderId,
     responseCancelled: data?.status === "cancelled",
+    cancelledAt:
+      typeof cancelledAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        cancelledAt,
+      ) &&
+      Number.isFinite(Date.parse(cancelledAt))
+        ? cancelledAt
+        : null,
     refusal:
       code === null ? null : code === "ORDER_NOT_CANCELABLE" ? code : "OTHER",
   };
