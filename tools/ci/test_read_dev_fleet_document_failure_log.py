@@ -1,6 +1,7 @@
 """Pure controlled Logging ports: no subprocess, credentials, or product calls."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -1539,13 +1540,15 @@ class OpsDashboardTimeoutReadbackTests(unittest.TestCase):
             return eval(expression, {"__builtins__": {}})
 
         job_condition = re.search(r"\n    if: (.+)", "\n" + job)[1]
-        fleet_run = ("python3 operations/verification/read-dev-fleet-document-failure-log.py\n"
-                     "          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json")
+        fleet_run = ("python3 operations/verification/read-dev-fleet-document-failure-log.py \\\n"
+                     "            --output .artifacts/dev-fleet-document-failure-readback/snapshot.json")
         ops_run = ("python3 operations/verification/read-dev-fleet-document-failure-log.py\n"
                    "          --profile ops-dashboard-timeout-40647433932-v1\n"
                    "          --output .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json")
         fleet_artifact = ("name: dev-fleet-document-failure-readback-${{ github.run_id }}\n"
-                          "          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json")
+                          "          path: |\n"
+                          "            .artifacts/dev-fleet-document-failure-readback/snapshot.json\n"
+                          "            .artifacts/dev-fleet-document-failure-readback/fleet-root-timeout.json")
         ops_artifact = ("name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}\n"
                         "          path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json")
         cases = [((False, False), False, None), ((True, False), True, "fleet"),
@@ -1581,7 +1584,8 @@ class OpsDashboardTimeoutReadbackTests(unittest.TestCase):
                 self.assertEqual(len(uploads), 1)
                 if expected == "fleet":
                     self.assertIn(fleet_run, reads[0])
-                    self.assertNotIn("--profile", reads[0])
+                    self.assertEqual(reads[0].count("--profile"), 1)
+                    self.assertIn("--profile fleet-root-timeout-40891070459-v1", reads[0])
                     self.assertIn(fleet_artifact, uploads[0])
                 else:
                     self.assertIn(ops_run, reads[0])
@@ -1591,6 +1595,368 @@ class OpsDashboardTimeoutReadbackTests(unittest.TestCase):
 
 
 MODULE_COLLECT_OPS = MODULE.collect_ops_dashboard_timeout
+
+
+def fleet_root_request(status=None, trace=TRACE, instance="synthetic-fleet-instance"):
+    row = ops_request(status, trace, instance, timestamp="2026-10-29T14:31:01Z")
+    row["resource"]["labels"].update(
+        service_name=FLEET_SERVICE,
+        revision_name="drts-dev-fleet-partner-portal-web-00162-x96",
+    )
+    row["httpRequest"]["requestUrl"] = "https://synthetic.example/?private=omitted"
+    return row
+
+
+def fleet_root_context(trace=TRACE, instance="synthetic-fleet-instance", stream="stderr"):
+    row = fleet_root_request(trace=trace, instance=instance)
+    del row["httpRequest"]
+    row["logName"] = MODULE.OPS_CONTEXT_STREAMS[stream]
+    return row
+
+
+def collect_fleet_root(port, env=ENV):
+    return MODULE.collect_fleet_root_timeout(env, port)
+
+
+class FleetRootTimeoutReadbackTests(unittest.TestCase):
+    def test_real_cli_accepts_fixed_current_profile_without_product_or_cloud(self):
+        # Only gcloud is replaced. Exercise the actual script/argparse/collector,
+        # projection, safe artifact writer and exit status in a fresh process.
+        with TemporaryDirectory() as directory:
+            directory = Path(directory)
+            gcloud = directory / "gcloud"
+            gcloud.write_text('#!/bin/sh\nprintf \'[]\\n\'\n')
+            gcloud.chmod(0o700)
+            output = directory / "snapshot.json"
+            result = subprocess.run(
+                ["python3", str(SOURCE), "--profile", "fleet-root-timeout-40891070459-v1",
+                 "--output", str(output)],
+                env={**os.environ, **ENV, "PATH": str(directory) + os.pathsep + os.environ["PATH"]},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = json.loads(output.read_text())
+            self.assertEqual(actual["readStatus"], "no-matching-request-logs")
+            self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+            self.assertEqual(actual["definitionSha"], D)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+
+    def test_current_cohort_outcomes_and_fixed_query_are_not_old_fleet_or_ops(self):
+        rows = [fleet_root_request(status, trace=None, instance=None)
+                for status in [200, 304, 403, 499, 500, 503, 504, None]]
+        port = Port(success(rows))
+        actual = collect_fleet_root(port)
+        self.assertIsNone(actual["readFailureCode"])
+        self.assertEqual([row["status"] for row in actual["requests"]],
+                         [200, 304, 403, 499, 500, 503, 504, None])
+        self.assertEqual(actual["candidateStatus"], "multiple-window-route-candidates")
+        self.assertEqual(actual["responseObservations"],
+                         {"status-recorded": 7, "no-status-recorded": 1})
+        self.assertTrue(all(row["serviceRole"] == "fleet-web" and row["route"] == "fleet-root"
+                            and row["phase"] == "authenticated-fleet-root-before-first-supply"
+                            and row["association"] == "window-route-cohort-only"
+                            for row in actual["requests"]))
+        command, kwargs = port.calls[0]
+        query = command[3]
+        for fixed in ["drts-dev-devcc-20260825", "us-central1", FLEET_SERVICE,
+                      "drts-dev-fleet-partner-portal-web-00162-x96",
+                      "2026-10-29T14:30:45Z", "2026-10-29T14:31:30Z",
+                      MODULE.ADMIN_REQUEST_LOG, 'httpRequest.requestMethod="GET"']:
+            self.assertIn(fixed, query)
+        for absent in ["httpRequest.status", MODULE.FLEET_REVISION, MODULE.OPS_REVISION,
+                       MODULE.REVISION, MODULE.ADMIN_REVISION, MODULE.START, MODULE.OPS_START]:
+            self.assertNotIn(absent, query)
+        pattern = json.loads(re.search(r'httpRequest\.requestUrl=~("(?:\\.|[^"\\])*")', query)[1])
+        for url in ["https://synthetic.example/", "https://synthetic.example/?private=omitted"]:
+            self.assertTrue(re.search(pattern, url))
+        for path in ["", "//", "/dashboard", "/api/auth/session", "/control-plane-proxy/", "/%2f"]:
+            self.assertFalse(re.search(pattern, "https://synthetic.example" + path))
+        self.assertEqual(command[:3], ["gcloud", "logging", "read"])
+        self.assertEqual(command[command.index("--limit") + 1], "40")
+        self.assertEqual(kwargs, {"capture_output": True, "text": True, "timeout": 90})
+        self.assertEqual(len(port.calls), 1)
+
+    def test_provenance_keeps_diagnostic_failed_and_runtime_sources_distinct(self):
+        actual = collect_fleet_root(Port(success([])))
+        self.assertEqual(actual["schema"], "dev-fleet-root-timeout-readback-v1")
+        self.assertEqual(actual["definitionSha"], D)
+        self.assertEqual(actual["failedSourceSha"], "1e4c41bd16346c11bcbf3cfc1bcf4b9d238a0989")
+        self.assertEqual(actual["runtimeSha"], "7796a2bebda614eb8e00f410b945532f5089d9d1")
+        self.assertEqual((actual["method"], actual["path"]), ("GET", "/"))
+        original = actual["originalFailure"]
+        self.assertEqual((original["runId"], original["jobId"]), (40891070459, 123507711583))
+        self.assertEqual(original["artifact"]["sha256"],
+                         "7604dc669774a0ea14ab0da58c5e66d2725c2cc9248c4e835d91ea0665d15caa")
+        self.assertEqual(original["artifact"]["bytes"], 4412)
+        self.assertEqual(original["clientObservation"]["requestDurationMs"], 15001)
+        self.assertIsNone(original["clientObservation"]["responseStatus"])
+        self.assertEqual(actual["candidateStatus"], "no-matching-request-records")
+        self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+        for absent in ["rootCause", "success", "coldStart"]:
+            self.assertNotIn(absent, actual)
+        self.assertIn("Original raw FAIL remains FAIL", actual["qualification"])
+
+    def test_fixed_resource_role_revision_and_window_revalidated_on_both_reads(self):
+        changes = [("project_id", "foreign"), ("location", "asia-east1"),
+                   ("service_name", MODULE.OPS_SERVICE), ("service_name", MODULE.SERVICE),
+                   ("revision_name", MODULE.FLEET_REVISION),
+                   ("revision_name", MODULE.OPS_REVISION), ("revision_name", MODULE.REVISION)]
+        for context in [False, True]:
+            for field, value in changes:
+                with self.subTest(context=context, field=field, value=value):
+                    row = fleet_root_context() if context else fleet_root_request()
+                    row["resource"]["labels"][field] = value
+                    port = (Port(success([fleet_root_request()]), success([row])) if context
+                            else Port(success([row])))
+                    self.assertEqual(collect_fleet_root(port)["readFailureCode"],
+                                     "LOG_OUTSIDE_FIXED_RESOURCE")
+                    self.assertEqual(len(port.calls), 2 if context else 1)
+            for timestamp in ["2026-10-29T14:30:44.999Z", "2026-10-29T14:31:30.001Z",
+                              MODULE.OPS_START, "2026-10-29T22:31:01+08:00", None, "invalid"]:
+                with self.subTest(context=context, timestamp=timestamp):
+                    row = fleet_root_context() if context else fleet_root_request()
+                    row["timestamp"] = timestamp
+                    port = (Port(success([fleet_root_request()]), success([row])) if context
+                            else Port(success([row])))
+                    self.assertIn(collect_fleet_root(port)["readFailureCode"],
+                                  {"LOG_OUTSIDE_FIXED_WINDOW", "INVALID_LOG_TIMESTAMP"})
+        for boundary in ["2026-10-29T14:30:45Z", "2026-10-29T14:31:30Z"]:
+            row = fleet_root_request(trace=None, instance=None)
+            row["timestamp"] = boundary
+            self.assertIsNone(collect_fleet_root(Port(success([row])))["readFailureCode"])
+
+    def test_wrong_method_path_stream_url_and_status_fail_closed(self):
+        changes = [("requestMethod", method, "REQUEST_OUTSIDE_FIXED_ROUTE")
+                   for method in [None, "HEAD", "POST", [], 1]]
+        changes += [("requestUrl", "https://synthetic.example" + path, "REQUEST_OUTSIDE_FIXED_ROUTE")
+                    for path in ["/dashboard", "//", "/%2f", "/api/auth/session", "/a/.."]]
+        changes += [("requestUrl", url, "INVALID_REQUEST_URL")
+                    for url in [None, [], "file:///", "https://", "https://[bad/",
+                                "https://user:private@synthetic.example/", "https://synthetic.example/#private"]]
+        changes += [("status", status, "INVALID_REQUEST_STATUS")
+                    for status in [True, "200", 200.0, [], 0, 99, 600]]
+        for field, value, code in changes:
+            with self.subTest(field=field, value=value):
+                row = fleet_root_request()
+                row["httpRequest"][field] = value
+                port = Port(success([row]))
+                actual = collect_fleet_root(port)
+                self.assertEqual(actual["readFailureCode"], code)
+                self.assertEqual(actual["requests"], [])
+                self.assertEqual(len(port.calls), 1)
+        for context in [False, True]:
+            for stream in [None, "foreign", f"projects/{MODULE.PROJECT}/logs/run.googleapis.com%2Fvarlog%2Fsystem"]:
+                row = fleet_root_context() if context else fleet_root_request()
+                row["logName"] = stream
+                port = (Port(success([fleet_root_request()]), success([row])) if context
+                        else Port(success([row])))
+                self.assertEqual(collect_fleet_root(port)["readFailureCode"], "LOG_OUTSIDE_FIXED_STREAM")
+
+    def test_latency_absence_and_no_context_never_prove_startup_or_caller(self):
+        for latency, expected in [(None, "UNOBSERVED"), ("15.001s", "at-or-above-client-abort"),
+                                  ("15.000999s", "below-client-abort"), ("0.2s", "below-client-abort"),
+                                  ("15001ms", "UNOBSERVED"), ([], "UNOBSERVED")]:
+            row = fleet_root_request(trace=None, instance=None)
+            row["httpRequest"]["latency"] = latency
+            row["textPayload"] = "Starting new instance. Reason: AUTOSCALING private-suffix"
+            actual = collect_fleet_root(Port(success([row])))
+            request = actual["requests"][0]
+            self.assertEqual(request["latencyVersusClientAbort"], expected)
+            self.assertIsNone(request["status"])
+            self.assertEqual(request["statusClass"], "UNOBSERVED")
+            self.assertEqual(request["requestPlatformReason"], "UNOBSERVED")
+            self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+            self.assertNotIn("coldStart", request)
+
+    def test_context_uses_only_observed_keys_and_separates_trace_from_instance(self):
+        traced = fleet_root_context(trace=TRACE, instance=None, stream="stdout")
+        instanced = fleet_root_context(trace=None)
+        instanced["jsonPayload"] = {"error": {"name": "AbortError", "code": "ETIMEDOUT"}}
+        port = Port(success([fleet_root_request()]), success([traced, instanced]))
+        actual = collect_fleet_root(port)
+        self.assertIsNone(actual["readFailureCode"])
+        self.assertEqual([row["association"] for row in actual["context"]],
+                         ["observed-request-trace", "same-instance-context-only"])
+        self.assertEqual(actual["context"][1]["errorCodes"], ["ETIMEDOUT"])
+        self.assertEqual(actual["context"][0]["traceFingerprint"], actual["requests"][0]["traceFingerprint"])
+        self.assertEqual(actual["context"][1]["instanceFingerprint"], actual["requests"][0]["instanceFingerprint"])
+        query = port.calls[1][0][3]
+        for fixed in [FLEET_SERVICE, "00162-x96", "2026-10-29T14:30:45Z", "2026-10-29T14:31:30Z"]:
+            self.assertIn(fixed, query)
+        self.assertEqual(re.findall(r'trace=("[^"%]*")', query), [json.dumps(TRACE)])
+        self.assertEqual(re.findall(r'labels.instanceId=("[^"]*")', query),
+                         [json.dumps("synthetic-fleet-instance")])
+        self.assertEqual(re.findall(r'logName=("[^"]*")', query),
+                         [json.dumps(value) for value in MODULE.OPS_CONTEXT_STREAMS.values()])
+        self.assertEqual(port.calls[1][0][port.calls[1][0].index("--limit") + 1], "100")
+        self.assertNotIn("--page-token", port.calls[1][0])
+
+    def test_unobserved_or_injected_correlation_cannot_broaden_reads(self):
+        for trace, instance in [(TRACE[:-1] + "c", "foreign"), (None, None),
+                                (None, 'a" OR true')]:
+            port = Port(success([fleet_root_request()]),
+                        success([fleet_root_context(trace=trace, instance=instance)]))
+            actual = collect_fleet_root(port)
+            self.assertEqual(actual["readFailureCode"], "LOG_OUTSIDE_OBSERVED_REQUEST_CORRELATION")
+            self.assertEqual(actual["context"], [])
+            self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+        for instance in [None, "", [], 1, 'a" OR true', "a/b", "a" * 513]:
+            port = Port(success([fleet_root_request(trace=None, instance=instance)]))
+            actual = collect_fleet_root(port)
+            self.assertIsNone(actual["readFailureCode"])
+            self.assertIsNone(actual["requests"][0]["instanceFingerprint"])
+            self.assertEqual(len(port.calls), 1)
+        for trace in ["", [], "foreign", 'a" OR true']:
+            port = Port(success([fleet_root_request(trace=trace)]))
+            self.assertEqual(collect_fleet_root(port)["readFailureCode"], "INVALID_LOG_TRACE")
+            self.assertEqual(len(port.calls), 1)
+
+    def test_environment_refusals_precede_any_logging(self):
+        for field, value, code in [("DEV_GCP_PROJECT_ID", "nodal-alloy-503700-s3", "DEV_TARGET_MISMATCH"),
+                                   ("DEV_GCP_REGION", "asia-east1", "DEV_TARGET_MISMATCH"),
+                                   ("EXPECTED_DEFINITION_SHA", "dev", "IMMUTABLE_DEFINITION_MISMATCH"),
+                                   ("GITHUB_SHA", MODULE.FLEET_ROOT_RUNTIME_SHA, "IMMUTABLE_DEFINITION_MISMATCH")]:
+            port = Port()
+            self.assertEqual(collect_fleet_root(port, {**ENV, field: value})["readFailureCode"], code)
+            self.assertEqual(port.calls, [])
+
+    def test_exact_platform_reasons_do_not_rewrite_status_or_scan_messages(self):
+        text, reason, _statuses = REQUEST_REASONS[1]
+        for candidate, expected in [(text, reason), (text + " private-tail", "UNOBSERVED"),
+                                    ("body\n" + text, "UNOBSERVED")]:
+            row = fleet_root_request(200, trace=None, instance=None)
+            row["textPayload"] = candidate
+            row["jsonPayload"] = {"message": text, "body": text}
+            actual = collect_fleet_root(Port(success([row])))
+            self.assertEqual(actual["requests"][0]["requestPlatformReason"], expected)
+            self.assertEqual(actual["requests"][0]["status"], 200)
+            self.assertNotIn(text, json.dumps(actual))
+
+    def test_context_bad_trace_and_malformed_metadata_fail_closed(self):
+        for field, value, code in [("trace", "foreign", "INVALID_LOG_TRACE"),
+                                   ("resource", None, "INVALID_LOG_RESOURCE")]:
+            row = fleet_root_context()
+            row[field] = value
+            actual = collect_fleet_root(Port(success([fleet_root_request()]), success([row])))
+            self.assertEqual(actual["readFailureCode"], code)
+            self.assertEqual(actual["context"], [])
+        for metadata in [None, [], "GET /"]:
+            row = fleet_root_request()
+            row["httpRequest"] = metadata
+            actual = collect_fleet_root(Port(success([row])))
+            self.assertEqual(actual["readFailureCode"], "MISSING_REQUEST_METADATA")
+
+    def test_new_profile_adds_no_arbitrary_query_resource_or_window_cli(self):
+        for extra in [["--profile", "fleet-root-timeout"], ["--revision", "foreign"],
+                      ["--start", "2026-10-01T00:00:00Z"], ["--filter", "true"]]:
+            with self.subTest(extra=extra), \
+                    mock.patch("sys.argv", ["readback", "--output", "unused", *extra]), \
+                    mock.patch.object(MODULE, "collect_fleet_root_timeout") as collector, \
+                    redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MODULE.main_with_ops_dashboard_profile()
+                self.assertEqual(error.exception.code, 2)
+                collector.assert_not_called()
+
+    def test_truncated_malformed_unavailable_and_full_pages_never_retry(self):
+        failures = [
+            (subprocess.CompletedProcess([], 0, "[truncated", ""), "MALFORMED_LOGGING_RESPONSE"),
+            (success({}), "INVALID_LOGGING_ROWS"),
+            (subprocess.CompletedProcess([], 0, "x" * (MODULE.MAX_RESPONSE_BYTES + 1), ""), "LOGGING_RESPONSE_TOO_LARGE"),
+            (subprocess.CompletedProcess([], 1, "", "PERMISSION_DENIED private"), "PERMISSION_DENIED"),
+            (subprocess.TimeoutExpired([], 90), "LOGGING_READ_TIMEOUT"),
+            (OSError("private"), "LOGGING_TOOL_UNAVAILABLE"),
+        ]
+        for context in [False, True]:
+            full = [fleet_root_context()] * 100 if context else [fleet_root_request()] * 40
+            for response, code in failures + [(success(full), "LOGGING_RESULT_LIMIT_REACHED")]:
+                with self.subTest(context=context, code=code):
+                    port = (Port(success([fleet_root_request(200)]), response) if context else Port(response))
+                    actual = collect_fleet_root(port)
+                    self.assertEqual(actual["readFailureCode"], code)
+                    self.assertEqual(len(port.calls), 2 if context else 1)
+                    self.assertEqual(actual["readStatus"], "unobserved")
+                    self.assertEqual(actual["correlationStatus"], "UNOBSERVED")
+                    self.assertNotIn("private", json.dumps(actual))
+                    if context:
+                        self.assertEqual(actual["requests"][0]["status"], 200)
+        for row in [None, [], {}, {"resource": None}]:
+            self.assertIsNotNone(collect_fleet_root(Port(success([row])))["readFailureCode"])
+
+    def test_maximum_nonfull_pages_retain_all_current_candidates(self):
+        requests = [fleet_root_request(200, trace=None, instance=f"instance_{i}") for i in range(39)]
+        context = [fleet_root_context(trace=None, instance=f"instance_{i % 39}") for i in range(99)]
+        port = Port(success(requests), success(context))
+        actual = collect_fleet_root(port)
+        self.assertIsNone(actual["readFailureCode"])
+        self.assertEqual((len(actual["requests"]), len(actual["context"]), len(port.calls)), (39, 99, 2))
+
+    def test_real_cli_writes_only_closed_projection_and_no_raw_private_fields(self):
+        marker = "synthetic-private-fleet-value"
+        request = fleet_root_request(200, instance=marker)
+        request["httpRequest"].update(headers={"Cookie": marker}, body=marker, remoteIp=marker,
+                                      userAgent=marker, requestUrl="https://synthetic.example/?token=" + marker)
+        request["textPayload"] = marker
+        context = fleet_root_context(instance=marker)
+        context["jsonPayload"] = {
+            "error": {"name": "TypeError", "code": "ECONNRESET", "message": marker},
+            "headers": {"Authorization": "Bearer " + marker}, "body": marker,
+            "email": marker, "actorId": marker, "startupStatus": marker, "statusReason": marker,
+        }
+        context["textPayload"] = "Error: " + marker + " private-stack"
+        with TemporaryDirectory() as directory:
+            directory = Path(directory)
+            fixture = directory / "fixture.json"
+            fixture.write_text(json.dumps({"requests": [request], "context": [context]}))
+            gcloud = directory / "gcloud"
+            gcloud.write_text('#!/usr/bin/python3\nimport json, os, sys\n'
+                              'with open(os.environ["READBACK_FIXTURE"]) as f: data = json.load(f)\n'
+                              'print(json.dumps(data["requests" if "httpRequest.requestMethod" in sys.argv[3] else "context"]))\n')
+            gcloud.chmod(0o700)
+            output = directory / "snapshot.json"
+            result = subprocess.run(
+                ["python3", str(SOURCE), "--profile", MODULE.FLEET_ROOT_TIMEOUT_PROFILE, "--output", str(output)],
+                env={**os.environ, **ENV, "READBACK_FIXTURE": str(fixture),
+                     "PATH": str(directory) + os.pathsep + os.environ["PATH"]},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rendered = output.read_text() + result.stdout + result.stderr
+            for excluded in [marker, TRACE, "synthetic.example", "token=", "Cookie", "Authorization", "Bearer", "private-stack"]:
+                self.assertNotIn(excluded, rendered)
+            actual = json.loads(output.read_text())
+            self.assertEqual(actual["context"][0]["errorClasses"], ["TypeError"])
+            self.assertEqual(actual["context"][0]["errorCodes"], ["ECONNRESET"])
+            self.assertEqual(json.loads(result.stdout), {"readStatus": "request-metadata-observed",
+                                                       "readFailureCode": None, "requestCount": 1})
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(output.with_suffix(".tmp").exists())
+
+    def test_workflow_runs_both_fleet_profiles_even_when_one_read_fails(self):
+        workflow = (ROOT / ".github/workflows/ci-integ.yml").read_text()
+        job = workflow.split("  readonly-fleet-document-failure-readback:\n", 1)[1].split("\n\n", 1)[0]
+        block = job.split("      - name: Read only the fixed failure window without invoking the product\n", 1)[1]
+        block = block.split("\n      - name:", 1)[0]
+        script = "\n".join(line[10:] for line in block.split("run: |\n", 1)[1].splitlines())
+        for original_exit, current_exit in [(0, 0), (1, 0), (0, 1), (1, 1)]:
+            with self.subTest(original=original_exit, current=current_exit), TemporaryDirectory() as directory:
+                directory = Path(directory)
+                python = directory / "python3"
+                python.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+                                  'case "$*" in *--profile*) exit "$CURRENT_EXIT";; *) exit "$ORIGINAL_EXIT";; esac\n')
+                python.chmod(0o700)
+                log = directory / "calls.log"
+                result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10,
+                                        env={"PATH": str(directory) + ":/usr/bin:/bin", "CALL_LOG": str(log),
+                                             "ORIGINAL_EXIT": str(original_exit), "CURRENT_EXIT": str(current_exit)})
+                self.assertEqual(result.returncode, int(bool(original_exit or current_exit)))
+                calls = log.read_text().splitlines()
+                self.assertEqual(len(calls), 2)
+                self.assertNotIn("--profile", calls[0])
+                self.assertIn("--profile fleet-root-timeout-40891070459-v1", calls[1])
+                self.assertIn("/snapshot.json", calls[0])
+                self.assertIn("/fleet-root-timeout.json", calls[1])
 
 
 if __name__ == "__main__":
