@@ -9015,7 +9015,7 @@ def refresh_chair_review_state(
         if missing_outputs:
             error = error or "declared output missing: " + ", ".join(missing_outputs)
         if error:
-            if active_worker is not None and pid_is_alive(active_worker.get("pid")):
+            if missing_outputs and active_worker is not None and pid_is_alive(active_worker.get("pid")):
                 # The decision packet and the Markdown report are two separate
                 # writes from one still-running worker; a real review has taken
                 # 23+ seconds between them and still produced a valid pair
@@ -9024,6 +9024,8 @@ def refresh_chair_review_state(
                 # JSON-mtime age punished it for not having finished yet. Its
                 # own lifecycle -- stall/reap/TTL, pending-approval preemption
                 # above -- is what decides whether it is actually stuck.
+                # Only an incomplete pair waits: once both files exist, a
+                # malformed or invalid packet is final and fails immediately.
                 return False
             if active_worker is not None:
                 terminate_worker_pid(active_worker.get("pid"))
