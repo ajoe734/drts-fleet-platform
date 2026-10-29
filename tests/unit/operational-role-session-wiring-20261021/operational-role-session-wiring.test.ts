@@ -45,6 +45,7 @@ import {
 } from "../../../operations/verification/prepare-operational-role-sessions";
 import {
   operationalRoleRequestHeaders,
+  prepareOperationalFleetSession,
   probeOperationalDocumentRoleAccess,
   verifyOperationalRoleSession,
   type RoleAccessProbeSetup,
@@ -2053,6 +2054,7 @@ process.exit(99);
     async function createOwnedForeignFleetRealServiceHarness(
       options: {
         partnerEntriesOverride?: Array<Record<string, unknown>>;
+        skipOwnSourceEntry?: boolean;
         overrideCreatedFleetId?: string;
         overrideCreatedFleetActive?: boolean;
         dropFleetCreateResponseAfterPersist?: boolean;
@@ -2308,20 +2310,22 @@ process.exit(99);
       }
       // The owned-fixture source must be a real canonical own-Fleet binding,
       // rather than an arbitrary referral entry from the default seed.
-      await tenantPartnerService.createPlatformPartnerEntry({
-        tenantId: "tenant-canonical-own-source",
-        fleetPartnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
-        partnerCode: "CANONICAL_OWN_FLEET",
-        partnerType: "fleet_partner",
-        programId: "program-canonical-own-source",
-        entrySlug: "canonical-own-fleet",
-        displayName: "Canonical Own Fleet",
-        businessDispatchSubtype: "enterprise_dispatch",
-        authMode: "partner_api_key",
-        eligibilityMode: "none",
-        status: "active",
-        activeFlag: true,
-      });
+      if (!options.skipOwnSourceEntry) {
+        await tenantPartnerService.createPlatformPartnerEntry({
+          tenantId: "tenant-canonical-own-source",
+          fleetPartnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
+          partnerCode: "CANONICAL_OWN_FLEET",
+          partnerType: "fleet_partner",
+          programId: "program-canonical-own-source",
+          entrySlug: "canonical-own-fleet",
+          displayName: "Canonical Own Fleet",
+          businessDispatchSubtype: "enterprise_dispatch",
+          authMode: "partner_api_key",
+          eligibilityMode: "none",
+          status: "active",
+          activeFlag: true,
+        });
+      }
       const jwtAuthService = new JwtAuthService(
         identityRepository,
         tenantPartnerService,
@@ -2908,6 +2912,7 @@ process.exit(99);
               const createdEntry =
                 await tenantPartnerController.createPlatformPartnerEntry(
                   body as CreatePartnerChannelEntryCommand,
+                  headers["x-request-id"],
                 );
               if (
                 options.dropEntryCreateResponseAfterPersist &&
@@ -3706,6 +3711,103 @@ process.exit(99);
         .find((e) => e.entrySlug === "yuhe-residence");
       expect(preExistingEntry?.status).toBe("active");
       expect(preExistingEntry?.activeFlag).toBe(true);
+    });
+
+    it("accepts the normal onboarding producer's manifest tenant and dedicated opaque programme, preserving its resources during owned foreign cleanup", async () => {
+      const harness = await createOwnedForeignFleetRealServiceHarness({
+        skipOwnSourceEntry: true,
+      });
+      const configuration = JSON.parse(
+        readFileSync(
+          "tests/e2e/fixtures/operational-browser-journeys.json",
+          "utf8",
+        ),
+      ).fleetApplicationSetup;
+      const env = createNoProvidedForeignFleetEnv();
+      for (const [name, value] of Object.entries(env)) {
+        vi.stubEnv(name, value);
+      }
+      vi.stubEnv("DRTS_OPERATIONAL_FLEET_SESSION_TOKEN", undefined);
+      vi.stubGlobal("fetch", harness.fetchImpl);
+      // Run the unchanged normal producer against real controllers, guards,
+      // services and repositories. Only HTTP/SQL transport ports are simulated.
+      const own = await prepareOperationalFleetSession(configuration);
+      try {
+        expect(own.metadata.source).toBe("worker-issued-session");
+        const source = harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === own.metadata.entrySlug)!;
+        expect(source.partnerId).toBe(OPERATIONAL_OWN_FLEET_PARTNER_ID);
+        expect(source.tenantId).toBe("10000000-0000-0000-0000-000000000201");
+        expect(source.programId).toBe(`${source.entrySlug}-program`);
+        expect(source.programId).toMatch(
+          /^operational-fleet-[0-9a-f-]+-program$/,
+        );
+        const originalCredentials =
+          harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
+            source.entrySlug,
+          );
+        const deps = {
+          fetch: harness.fetchImpl,
+          mask: () => {},
+          exportSession: (name: string, value: string) => {
+            env[name] = value;
+          },
+          save: () => {},
+        };
+        const evidence = await prepareOperationalRoleSessions(env, deps);
+        expect(evidence.status).toBe("passed");
+        expect(evidence.foreign_fleet_precondition).toBe(
+          "satisfied-by-owned-canonical-fleet",
+        );
+        const foreignFleetId =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
+        expect(foreignFleetId).not.toBe(source.partnerId);
+        const foreignSlug =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_ENTRY_SLUG!;
+        const foreign = harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === foreignSlug)!;
+        expect(foreign).toMatchObject({
+          partnerId: foreignFleetId,
+          tenantId: source.tenantId,
+          programId: source.programId,
+          status: "active",
+        });
+        expect((await teardownOperationalRoleSessions(env, deps)).status).toBe(
+          "passed",
+        );
+        expect(
+          (await harness.fleetPartnerService.getFleetPartner(foreignFleetId))
+            .active,
+        ).toBe(false);
+        expect(
+          harness.tenantPartnerService
+            .listPlatformPartnerEntries()
+            .find((entry) => entry.entrySlug === foreignSlug)?.status,
+        ).toBe("revoked");
+        expect(
+          harness.tenantPartnerService
+            .listPlatformPartnerEntries()
+            .find((entry) => entry.entrySlug === source.entrySlug),
+        ).toEqual(source);
+        expect(
+          harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
+            source.entrySlug,
+          ),
+        ).toEqual(originalCredentials);
+        expect(
+          (await harness.fleetPartnerService.getFleetPartner(source.partnerId))
+            .active,
+        ).toBe(true);
+      } finally {
+        await own.cleanup();
+      }
+      expect(
+        harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === own.metadata.entrySlug)?.status,
+      ).toBe("revoked");
     });
 
     it.each(["stale-first", "own-first"])(
