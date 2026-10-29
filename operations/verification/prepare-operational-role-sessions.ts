@@ -75,7 +75,7 @@ const DISALLOWED_OPS_REVIEWER_ROLES = new Set([
   "superadmin",
 ]);
 
-const MANIFEST_DISALLOWED_TENANT_UUID = "10000000-0000-0000-0000-000000000201";
+const MANIFEST_TENANT_UUID = "10000000-0000-0000-0000-000000000201";
 const DEMO_SEED_TENANT_ID = "tenant-demo-001";
 const DEMO_SEED_PROGRAM_ID = "program-referral-community";
 const IDENTITY_SESSION_REVOKE_CSRF_TOKEN =
@@ -2846,16 +2846,18 @@ export async function prepareOperationalRoleSessions(
             "Active partner entry in Platform Admin readback is missing canonical tenantId or programId",
           );
         }
+        // The normal onboarding producer uses the manifest tenant with its
+        // dedicated opaque programme. The tenant alone is not a mixed pair;
+        // authority comes from the active canonical own-Fleet entry readback.
         const mixesManifestAndSeed =
-          (itemTenantId === MANIFEST_DISALLOWED_TENANT_UUID &&
+          (itemTenantId === MANIFEST_TENANT_UUID &&
             itemProgramId === DEMO_SEED_PROGRAM_ID) ||
           (itemTenantId === DEMO_SEED_TENANT_ID &&
-            /^10000000-0000-0000-0000-/i.test(itemProgramId)) ||
-          itemTenantId === MANIFEST_DISALLOWED_TENANT_UUID;
+            /^10000000-0000-0000-0000-/i.test(itemProgramId));
         if (mixesManifestAndSeed) {
           evidence.foreign_fleet_precondition = "invalid-external-fixture";
           throw new OperationalForeignFleetFixturePreconditionError(
-            `Active partner entry mixes disallowed manifest tenant (${itemTenantId}) with program (${itemProgramId})`,
+            `Active partner entry mixes manifest and demo seed identifiers: tenant (${itemTenantId}), program (${itemProgramId})`,
           );
         }
         if (

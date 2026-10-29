@@ -3743,10 +3743,19 @@ process.exit(99);
         expect(source.programId).toMatch(
           /^operational-fleet-[0-9a-f-]+-program$/,
         );
+        const ownSessions =
+          await harness.identityRepository.listSessionsByPrincipal(
+            own.metadata.keyId!,
+          );
+        expect(ownSessions).toHaveLength(1);
+        expect(ownSessions[0]?.revokedAt).toBeNull();
         const originalCredentials =
           harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
             source.entrySlug,
           );
+        // Credential signals.evaluatedAt is refreshed on each list read.
+        const credentialRecords = (credentials: typeof originalCredentials) =>
+          credentials.map(({ signals: _signals, ...record }) => record);
         const deps = {
           fetch: harness.fetchImpl,
           mask: () => {},
@@ -3792,10 +3801,17 @@ process.exit(99);
             .find((entry) => entry.entrySlug === source.entrySlug),
         ).toEqual(source);
         expect(
-          harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
-            source.entrySlug,
+          credentialRecords(
+            harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
+              source.entrySlug,
+            ),
           ),
-        ).toEqual(originalCredentials);
+        ).toEqual(credentialRecords(originalCredentials));
+        expect(
+          await harness.identityRepository.listSessionsByPrincipal(
+            own.metadata.keyId!,
+          ),
+        ).toEqual(ownSessions);
         expect(
           (await harness.fleetPartnerService.getFleetPartner(source.partnerId))
             .active,
