@@ -9048,9 +9048,13 @@ def refresh_chair_review_state(
         chair_state["last_reason"] = active.get("reason")
         chair_state["last_decision"] = payload
         chair_state["failure_streak"] = 0
-        chair_state["cooldown_until"] = (
-            datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
-        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        # Approvals bypass the cooldown as fresh signals, so a successful one must
+        # neither extend nor clear it: extending let back-to-back approvals starve
+        # an already-due blocked_task_triage, and clearing would drop a live failure backoff.
+        if str(active.get("reason") or "") != "approval_triage":
+            chair_state["cooldown_until"] = (
+                datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         chair_state["active_review"] = None
         write_activity_log(
             config,
