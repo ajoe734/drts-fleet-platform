@@ -885,6 +885,7 @@ export async function settleRoutedOriginalBookingAck<T>(
   request: ReturnType<BookingAckResponse["request"]>,
   observe: (original: BookingAckResponse) => Promise<T>,
   release: (bytes: Buffer) => Promise<void>,
+  mark?: OriginalBookingMark,
 ): Promise<T> {
   let bytes: Buffer;
   try {
@@ -905,13 +906,17 @@ export async function settleRoutedOriginalBookingAck<T>(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
+  // The observer resolves only after its journal ACK is durable.
+  if (result.ok) noteTransition(mark, "ack-durable");
   let releaseError: unknown;
   try {
     // Deliver those exact server bytes even if the observer rejected them.
     // A refused or malformed ACK must not become a fabricated browser success.
     await release(bytes);
+    noteTransition(mark, "release-completed");
   } catch (error) {
     releaseError = error;
+    noteTransition(mark, "release-failed");
   }
   if (!result.ok) throw result.error;
   if (releaseError)
@@ -954,6 +959,7 @@ export async function clickAndSettleOriginalBookingAck<T>(
   click: () => Promise<void>,
   observation: Promise<T>,
   expired?: AbortSignal,
+  mark?: OriginalBookingMark,
 ): Promise<T> {
   // Attach the rejection handler immediately, before waiting for the UI action.
   // Keep the failure as data until this same observation is awaited below.
@@ -963,11 +969,17 @@ export async function clickAndSettleOriginalBookingAck<T>(
   );
   // The click's own late outcome stays observed after this join has returned.
   const clicked = new Promise<void>((resolve) => resolve(click())).then(
-    () => ({ kind: "clicked" as const }),
-    (error: unknown) => ({
-      kind: "click-failed" as const,
-      failure: bookingObservationFailure("booking-ui-click", error),
-    }),
+    () => {
+      noteTransition(mark, "click-settled");
+      return { kind: "clicked" as const };
+    },
+    (error: unknown) => {
+      noteTransition(mark, "click-failed");
+      return {
+        kind: "click-failed" as const,
+        failure: bookingObservationFailure("booking-ui-click", error),
+      };
+    },
   );
   const observationFailed = settled.then((result) =>
     result.ok
@@ -989,7 +1001,11 @@ export async function clickAndSettleOriginalBookingAck<T>(
     if (first.kind === "click-failed") throw first.failure;
     if ("kind" in result) throw result.failure;
     if (!result.ok) throw result.error;
+    noteTransition(mark, "join-completed");
     return result.value;
+  } catch (error) {
+    noteTransition(mark, "join-failed");
+    throw error;
   } finally {
     deadline.dispose();
   }
@@ -1052,13 +1068,182 @@ export async function settleOriginalBookingOperation<T>(
 }
 
 /**
+ * Finite, credential-free transitions of one original booking operation. They
+ * are diagnostics only: no transition gates, retries or relaxes any wait.
+ */
+export type OriginalBookingTransition =
+  | "armed"
+  | "ack-durable"
+  | "release-completed"
+  | "release-failed"
+  | "dispose-completed"
+  | "handler-finished"
+  | "handler-failed"
+  | "click-settled"
+  | "click-failed"
+  | "join-completed"
+  | "join-failed"
+  | "drain-started"
+  | "unroute-completed"
+  | "quote-drain-completed"
+  | "drain-completed"
+  | "drain-failed";
+/** A real await still outstanding, in causal order (earliest window first). */
+export type OriginalBookingPending =
+  | "ack"
+  | "release"
+  | "dispose"
+  | "handler"
+  | "click"
+  | "join"
+  | "unroute"
+  | "quote-drain"
+  | "drain";
+export type OriginalBookingMark = (
+  transition: OriginalBookingTransition,
+) => void;
+export type OriginalBookingPhases = {
+  frozenBy: "open" | "expired" | "closed";
+  transitions: { transition: OriginalBookingTransition; elapsedMs?: number }[];
+  pending: OriginalBookingPending[];
+};
+const PHASE_ELAPSED_LIMIT_MS = 3_600_000;
+
+/** An observer never throws into, delays or reorders the observed operation. */
+function noteTransition(
+  mark: OriginalBookingMark | undefined,
+  transition: OriginalBookingTransition,
+) {
+  try {
+    mark?.(transition);
+  } catch {
+    // Diagnostic only; the observed outcome stays the original one.
+  }
+}
+
+/**
  * One original booking operation: armed with the caller's existing budget,
  * closed on every exit and never reopened. A closed operation sends nothing.
+ *
+ * It also keeps a bounded phase trace (each finite transition at most once,
+ * with elapsed ms since construction). The trace freezes when the budget
+ * expires or the operation closes; any later transition is not retained.
  */
 export class OriginalBookingOperation {
   private readonly controller = new AbortController();
   private timer: ReturnType<typeof setTimeout> | undefined;
-  constructor(private readonly label: string) {}
+  private readonly marks = new Map<
+    OriginalBookingTransition,
+    number | undefined
+  >();
+  private frozen: OriginalBookingPhases | undefined;
+  private readonly startedAt: number | undefined;
+  constructor(
+    private readonly label: string,
+    private readonly clock: () => number = () => Date.now(),
+  ) {
+    this.startedAt = this.elapsedBase();
+  }
+
+  private elapsedBase(): number | undefined {
+    try {
+      const now = this.clock();
+      return Number.isFinite(now) ? now : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Record one transition while the trace is live; never throws. */
+  readonly mark: OriginalBookingMark = (transition) => {
+    if (this.frozen || this.marks.has(transition)) return;
+    const now = this.elapsedBase();
+    const elapsed =
+      now === undefined || this.startedAt === undefined
+        ? undefined
+        : Math.round(now - this.startedAt);
+    this.marks.set(
+      transition,
+      elapsed !== undefined && elapsed >= 0 && elapsed <= PHASE_ELAPSED_LIMIT_MS
+        ? elapsed
+        : undefined,
+    );
+  };
+
+  private freeze(frozenBy: "expired" | "closed") {
+    if (this.frozen) return;
+    try {
+      this.frozen = { ...this.livePhases(), frozenBy };
+    } catch {
+      this.frozen = { frozenBy, transitions: [], pending: [] };
+    }
+  }
+
+  private livePhases(): OriginalBookingPhases {
+    const has = (t: OriginalBookingTransition) => this.marks.has(t);
+    const pending: OriginalBookingPending[] = [];
+    if (has("armed")) {
+      const handlerEnded = has("handler-finished") || has("handler-failed");
+      if (!handlerEnded) {
+        // ACK durability precedes exact byte release, then the original
+        // response disposal and the route handler's own finish.
+        if (!has("ack-durable")) pending.push("ack");
+        else if (!has("release-completed") && !has("release-failed"))
+          pending.push("release");
+        else if (!has("dispose-completed")) pending.push("dispose");
+        else pending.push("handler");
+      }
+      const clickEnded = has("click-settled") || has("click-failed");
+      if (!clickEnded) pending.push("click");
+      else if (handlerEnded && !has("join-completed") && !has("join-failed"))
+        pending.push("join");
+    }
+    if (
+      has("drain-started") &&
+      !has("drain-completed") &&
+      !has("drain-failed")
+    ) {
+      if (!has("unroute-completed")) pending.push("unroute");
+      else if (!has("quote-drain-completed")) pending.push("quote-drain");
+      else pending.push("drain");
+    }
+    return {
+      frozenBy: "open",
+      transitions: [...this.marks].map(([transition, elapsedMs]) =>
+        elapsedMs === undefined ? { transition } : { transition, elapsedMs },
+      ),
+      pending,
+    };
+  }
+
+  /** The frozen trace, or the live one while the operation is still open. */
+  phases(): OriginalBookingPhases {
+    const phases = this.frozen ?? this.livePhases();
+    return {
+      ...phases,
+      transitions: phases.transitions.map((t) => ({ ...t })),
+      pending: [...phases.pending],
+    };
+  }
+
+  /** Safe evidence for the existing allowlisted journey evidence. */
+  phaseEvents(): SafeEvent[] {
+    const phases = this.phases();
+    return [
+      ...phases.transitions.map(
+        ({ transition, elapsedMs }): SafeEvent => ({
+          stage: `${this.label}-phase:${transition}`,
+          ...(elapsedMs === undefined ? {} : { phaseElapsedMs: elapsedMs }),
+          result: "observed",
+        }),
+      ),
+      ...phases.pending.map(
+        (pending): SafeEvent => ({
+          stage: `${this.label}-${phases.frozenBy}-pending:${pending}`,
+        }),
+      ),
+    ];
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -1074,7 +1259,10 @@ export class OriginalBookingOperation {
       this.open && this.timer === undefined,
       `${this.label} budget armed once while open`,
     );
+    this.mark("armed");
     this.timer = setTimeout(() => {
+      // Freeze first: the outstanding stages are those at the deadline itself.
+      this.freeze("expired");
       const failure = new JourneyFailure(`${this.label}-timeout`);
       onExpire?.(failure);
       this.controller.abort(failure);
@@ -1083,6 +1271,7 @@ export class OriginalBookingOperation {
 
   close() {
     clearTimeout(this.timer);
+    this.freeze("closed");
     if (this.open)
       this.controller.abort(new JourneyFailure(`${this.label}-closed`));
   }
@@ -1113,11 +1302,16 @@ export async function closeOriginalBookingOperation(
     operation.close();
     return;
   }
+  operation.mark("drain-started");
   try {
     await drainWithinOperationBudget(
       new Promise<unknown>((resolve) => resolve(drain())),
       operation.signal,
     );
+    operation.mark("drain-completed");
+  } catch (error) {
+    operation.mark("drain-failed");
+    throw error;
   } finally {
     operation.close();
   }
@@ -1148,6 +1342,7 @@ export type SafeEvent = {
   nativeCauseCode?: string;
   requestAborted?: boolean;
   requestDurationMs?: number;
+  phaseElapsedMs?: number;
   requestMethod?: string;
   requestRoute?: "/" | "OTHER";
   result?: "observed" | "retained" | "unexecuted" | "failed" | "cleaned";
@@ -1177,6 +1372,7 @@ const eventFields = new Set([
   "nativeCauseCode",
   "requestAborted",
   "requestDurationMs",
+  "phaseElapsedMs",
   "requestMethod",
   "requestRoute",
   "result",

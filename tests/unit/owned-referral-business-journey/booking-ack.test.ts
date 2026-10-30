@@ -858,6 +858,11 @@ describe("actual main and supplemental booking callers keep a failed guard until
     };
     let clickImpl: () => Promise<void> = async () => undefined;
     const failures: Record<string, Error | undefined> = {};
+    // Optional controlled settlement of the actual Playwright release/drain
+    // ports; unset, each settles at once as before.
+    const holds: Partial<
+      Record<"fulfill" | "dispose" | "unroute", () => Promise<void>>
+    > = {};
     const page = {
       route: async (url: string, handler: Handler) => {
         routes.push({ url, handler });
@@ -867,6 +872,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
         routes = routes.filter(
           (r) => !(r.url === url && (!handler || r.handler === handler)),
         );
+        await holds.unroute?.();
       },
       on: (_event: string, listener: (response: unknown) => void) =>
         listeners.push(listener),
@@ -927,11 +933,14 @@ describe("actual main and supplemental booking callers keep a failed guard until
             status: () => 200,
             headers: () => ({ "x-drts-candidate-sha": runtime }),
             body: async () => body,
-            dispose: async () => undefined,
+            dispose: async () => {
+              await holds.dispose?.();
+            },
           };
         },
         fulfill: async () => {
           counts.fulfills += 1;
+          await holds.fulfill?.();
         },
       });
     }
@@ -957,6 +966,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
       page,
       counts,
       failures,
+      holds,
       expect: expectPort,
       post,
       quoteResponse,
@@ -1262,9 +1272,13 @@ describe("actual main and supplemental booking callers keep a failed guard until
     },
   );
 
-  function supplementalHarness() {
+  function supplementalHarness(
+    options: { clock?: () => number; evidence?: Evidence } = {},
+  ) {
     const p = fakePage();
     const writes: string[] = [];
+    const operations: OriginalBookingOperation[] = [];
+    const evidence = options.evidence ?? new Evidence();
     const extraBookings: Record<string, unknown>[] = [];
     const controlledOrderIds: string[] = [];
     const checkpoint = vi.fn(async () => undefined);
@@ -1301,14 +1315,21 @@ describe("actual main and supplemental booking callers keep a failed guard until
       object,
       text,
       requireFact,
-      OriginalBookingOperation,
+      // The actual operation class; only its clock is controllable and each
+      // instance is retained for inspection.
+      OriginalBookingOperation: class extends OriginalBookingOperation {
+        constructor(label: string) {
+          super(label, options.clock);
+          operations.push(this);
+        }
+      },
       closeOriginalBookingOperation,
       clickAndSettleOriginalBookingAck,
       originalBookingRouteFailure,
       observeOriginalBookingAck,
       settleRoutedOriginalBookingAck,
       BookingWriteJournal,
-      evidence: new Evidence(),
+      evidence,
     };
     const book = compile<(name: string) => Promise<Record<string, unknown>>>(
       bookExtraFromUI,
@@ -1320,6 +1341,8 @@ describe("actual main and supplemental booking callers keep a failed guard until
       extraBookings,
       controlledOrderIds,
       checkpoint,
+      operations,
+      evidence,
       book,
       raw: (quoteId: string, key: string) => command(quoteId, key),
     };
@@ -1429,6 +1452,273 @@ describe("actual main and supplemental booking callers keep a failed guard until
       // guard remains and was never invoked.
       expect(h.counts).toMatchObject({ fetches: 1, aborts: 0, unroutes: 1 });
       expect(h.routes()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Diagnostics for the existing 25s deadline after a durable ACK: each window
+  // below ends in the same original failure; only the frozen safe phase trace
+  // in journey evidence identifies which real await was still outstanding.
+  const phaseEvidence = (evidence: Evidence) =>
+    evidence.events.filter((e) =>
+      /^supplemental-original-booking-(phase|expired-pending|closed-pending)/.test(
+        e.stage,
+      ),
+    );
+  const pendingStages = (evidence: Evidence) =>
+    phaseEvidence(evidence)
+      .map((e) => e.stage)
+      .filter((stage) => stage.includes("-pending:"));
+  const transitions = (evidence: Evidence) =>
+    phaseEvidence(evidence)
+      .map((e) => e.stage)
+      .filter((stage) => stage.includes("-phase:"))
+      .map((stage) => stage.split(":")[1]);
+  type AfterAckWindow =
+    | "release"
+    | "dispose"
+    | "click"
+    | "unroute"
+    | "quote-drain";
+  async function expireAfterDurableAck(
+    window: AfterAckWindow,
+    options: Parameters<typeof supplementalHarness>[0] = {},
+  ) {
+    const h = supplementalHarness(options);
+    const raw = h.raw("quote-extra", "extra-key");
+    h.setResponder(async () => ack("order-extra", "quote-extra"));
+    // The one held real await; the test may let it settle after the deadline.
+    const late = deferred<void>();
+    const held = () => late.promise;
+    if (window === "release") h.holds.fulfill = held;
+    if (window === "dispose") h.holds.dispose = held;
+    if (window === "unroute") h.holds.unroute = held;
+    h.setClick(async () => {
+      h.quoteResponse(Promise.resolve({ data: proposal("quote-extra") }));
+      void h.post(raw, "extra-key");
+      // Observed after the route consumed its quote: only the final drain
+      // waits for it.
+      if (window === "quote-drain")
+        h.quoteResponse(
+          late.promise.then(() => ({ data: proposal("quote-extra") })),
+        );
+      if (window === "click") await late.promise;
+    });
+    const outcome = h.book("reservation-2");
+    const rejected = outcome.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await turns();
+    vi.advanceTimersByTime(25_000);
+    const error = await rejected;
+    await turns();
+    return { h, error, raw, late };
+  }
+
+  it("supplemental: windows after a durable ACK keep one original timeout and report the exact outstanding phase", async () => {
+    budgetClock();
+    try {
+      const expected: Record<AfterAckWindow, string> = {
+        release: "release",
+        dispose: "dispose",
+        click: "click",
+        unroute: "unroute",
+        "quote-drain": "quote-drain",
+      };
+      const seen: Record<string, string[]> = {};
+      for (const window of Object.keys(expected) as AfterAckWindow[]) {
+        const unhandled = await collectUnhandled(async () => {
+          const { h, error, raw, late } = await expireAfterDurableAck(window);
+          // The identical original failure and budget; durable ACK is not UI
+          // success and nothing is retried or relaxed.
+          expect(error).toBeInstanceOf(JourneyFailure);
+          expect((error as JourneyFailure).stage).toBe(
+            "supplemental-original-booking-timeout",
+          );
+          expect(h.counts.fetches).toBe(1);
+          expect(h.counts.network).toBe(0);
+          const state = h.extraBookings[0] as {
+            actions: string[];
+            journal: BookingWriteJournal;
+          };
+          expect(state.actions).toEqual(["booking"]);
+          expect(state.journal.current).toMatchObject({
+            state: "acknowledged",
+            orderId: "order-extra",
+            body: raw,
+            idempotencyKey: "extra-key",
+          });
+          // Only a completed click/ACK join reached the existing custody
+          // bookkeeping before its drain; the return itself never happened.
+          expect(h.controlledOrderIds).toEqual(
+            window === "unroute" || window === "quote-drain"
+              ? ["order-extra"]
+              : [],
+          );
+          expect(transitions(h.evidence)).toContain("ack-durable");
+          seen[window] = pendingStages(h.evidence);
+          // The held await settling after the deadline is not retained in
+          // the frozen trace, and a stray POST is still not sent.
+          const before = phaseEvidence(h.evidence);
+          const frozen = h.operations[0]!.phases();
+          late.resolve();
+          await turns();
+          await h.post(raw, "extra-key");
+          await turns();
+          expect(phaseEvidence(h.evidence)).toEqual(before);
+          expect(h.operations[0]!.phases()).toEqual(frozen);
+          expect(h.counts.fetches).toBe(1);
+          expect(vi.getTimerCount()).toBe(0);
+        });
+        expect(unhandled).toEqual([]);
+      }
+      expect(seen).toEqual(
+        Object.fromEntries(
+          Object.entries(expected).map(([window, pending]) => [
+            window,
+            [`supplemental-original-booking-expired-pending:${pending}`],
+          ]),
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supplemental: the recorded phase order follows the actual helpers and stays credential-free", async () => {
+    budgetClock();
+    try {
+      const { h } = await expireAfterDurableAck("click");
+      expect(transitions(h.evidence)).toEqual([
+        "armed",
+        "ack-durable",
+        "release-completed",
+        "dispose-completed",
+        "handler-finished",
+      ]);
+      const unrouted = await expireAfterDurableAck("unroute");
+      // The click settled first (it only emits the POST), then the route.
+      expect(transitions(unrouted.h.evidence)).toEqual([
+        "armed",
+        "click-settled",
+        "ack-durable",
+        "release-completed",
+        "dispose-completed",
+        "handler-finished",
+        "join-completed",
+        "drain-started",
+      ]);
+      for (const event of phaseEvidence(unrouted.h.evidence)) {
+        expect(Object.keys(event).sort()).toEqual(
+          event.stage.includes("-phase:")
+            ? ["phaseElapsedMs", "result", "stage"]
+            : ["stage"],
+        );
+        if (event.phaseElapsedMs !== undefined) {
+          expect(Number.isInteger(event.phaseElapsedMs)).toBe(true);
+          expect(event.phaseElapsedMs).toBeGreaterThanOrEqual(0);
+          expect(event.phaseElapsedMs).toBeLessThanOrEqual(3_600_000);
+        }
+      }
+      const serialized = JSON.stringify(phaseEvidence(unrouted.h.evidence));
+      for (const secret of [
+        "order-extra",
+        "extra-key",
+        "quote-extra",
+        bookingUrl,
+        passengerName,
+        phone,
+        pickupAddress,
+      ])
+        expect(serialized).not.toContain(secret);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supplemental: a completed click/ACK/drain returns with no false timeout or phase failure evidence", async () => {
+    budgetClock();
+    try {
+      const h = supplementalHarness();
+      h.setResponder(async () => ack("order-extra", "quote-extra"));
+      h.setClick(async () => {
+        h.quoteResponse(Promise.resolve({ data: proposal("quote-extra") }));
+        void h.post(h.raw("quote-extra", "extra-key"), "extra-key");
+      });
+      const booked = await h.book("reservation-2");
+      expect(booked).toMatchObject({
+        orderId: "order-extra",
+        actions: ["booking"],
+      });
+      expect(h.controlledOrderIds).toEqual(["order-extra"]);
+      expect(phaseEvidence(h.evidence)).toEqual([]);
+      const phases = h.operations[0]!.phases();
+      expect(phases.frozenBy).toBe("closed");
+      expect(phases.pending).toEqual([]);
+      expect(phases.transitions.map((t) => t.transition)).toEqual([
+        "armed",
+        "click-settled",
+        "ack-durable",
+        "release-completed",
+        "dispose-completed",
+        "handler-finished",
+        "join-completed",
+        "drain-started",
+        "unroute-completed",
+        "quote-drain-completed",
+        "drain-completed",
+      ]);
+      expect(h.counts).toMatchObject({ fetches: 1, fulfills: 1, unroutes: 1 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supplemental: a failing phase clock or evidence sink never changes the original outcome", async () => {
+    budgetClock();
+    try {
+      const clocked = await expireAfterDurableAck("click", {
+        clock: () => {
+          throw new Error("private clock failure");
+        },
+      });
+      expect((clocked.error as JourneyFailure).stage).toBe(
+        "supplemental-original-booking-timeout",
+      );
+      expect(pendingStages(clocked.h.evidence)).toEqual([
+        "supplemental-original-booking-expired-pending:click",
+      ]);
+      expect(
+        phaseEvidence(clocked.h.evidence).every(
+          (e) => e.phaseElapsedMs === undefined,
+        ),
+      ).toBe(true);
+      // The existing ACK evidence still records; only phase events refuse.
+      const refusing = new Evidence();
+      const record = refusing.record.bind(refusing);
+      refusing.record = (event) => {
+        if (/-(phase|pending):/.test(event.stage))
+          throw new JourneyFailure("evidence field not allowlisted");
+        record(event);
+      };
+      const unhandled = await collectUnhandled(async () => {
+        const sunk = await expireAfterDurableAck("release", {
+          evidence: refusing,
+        });
+        expect((sunk.error as JourneyFailure).stage).toBe(
+          "supplemental-original-booking-timeout",
+        );
+        expect(sunk.h.operations[0]!.phases().pending).toEqual(["release"]);
+        expect(phaseEvidence(refusing)).toEqual([]);
+        expect(refusing.events.map((e) => e.stage)).toContain(
+          "booking-ack-durable",
+        );
+        expect(sunk.h.counts.fetches).toBe(1);
+      });
+      expect(unhandled).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1576,6 +1866,87 @@ describe("original routed server ACK before UI release", () => {
     expect(s.claim).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
     expect(s.journal.current?.state).toBe("ack_unknown");
+  });
+});
+
+describe("original booking operation phase trace is bounded and observational", () => {
+  it("freezes at the deadline with bounded elapsed ms and drops later transitions", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let now = 1_000;
+      const operation = new OriginalBookingOperation(
+        "supplemental-original-booking",
+        () => now,
+      );
+      operation.arm(25_000);
+      now += 40;
+      operation.mark("ack-durable");
+      operation.mark("ack-durable"); // first occurrence only
+      now += 3_600_001;
+      operation.mark("click-settled"); // beyond the bound: no elapsed kept
+      vi.advanceTimersByTime(25_000);
+      expect(operation.open).toBe(false);
+      operation.mark("release-completed");
+      operation.close();
+      expect(operation.phases()).toEqual({
+        frozenBy: "expired",
+        transitions: [
+          { transition: "armed", elapsedMs: 0 },
+          { transition: "ack-durable", elapsedMs: 40 },
+          { transition: "click-settled" },
+        ],
+        pending: ["release"],
+      });
+      const evidence = new Evidence();
+      for (const event of operation.phaseEvents()) evidence.record(event);
+      expect(evidence.events.map((e) => e.stage)).toEqual([
+        "supplemental-original-booking-phase:armed",
+        "supplemental-original-booking-phase:ack-durable",
+        "supplemental-original-booking-phase:click-settled",
+        "supplemental-original-booking-expired-pending:release",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps each helper outcome when its phase observer throws", async () => {
+    const throwing = () => {
+      throw new Error("observer failure");
+    };
+    const s = await setup();
+    const bytes = Buffer.from(JSON.stringify(s.body));
+    const release = vi.fn(async () => undefined);
+    await expect(
+      settleRoutedOriginalBookingAck(
+        { ...s.response, body: async () => bytes },
+        s.response.request(),
+        (original) => s.observe(Promise.resolve(original)),
+        release,
+        throwing,
+      ),
+    ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(s.journal.current?.state).toBe("acknowledged");
+    await expect(
+      clickAndSettleOriginalBookingAck(
+        async () => undefined,
+        Promise.resolve("joined"),
+        undefined,
+        throwing,
+      ),
+    ).resolves.toBe("joined");
+    const clickFailure = new JourneyFailure("booking-ui-click:Error");
+    await expect(
+      clickAndSettleOriginalBookingAck(
+        async () => {
+          throw clickFailure;
+        },
+        Promise.resolve("joined"),
+        undefined,
+        throwing,
+      ),
+    ).rejects.toBe(clickFailure);
   });
 });
 
