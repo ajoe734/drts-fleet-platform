@@ -88,9 +88,7 @@ export default async function NewBookingPage({
           role="status"
           data-testid="enterprise-booking-directory-unavailable"
         >
-          {locale === "zh"
-            ? "目前無法讀取已儲存的乘客、地址與成本中心，請確認企業登入狀態後重新整理。"
-            : "Saved passengers, addresses and cost centers are unavailable. Check your enterprise session and refresh."}
+          {tr("new.directoryUnavailable")}
         </div>
       ) : null}
       <EnterpriseBookingForm

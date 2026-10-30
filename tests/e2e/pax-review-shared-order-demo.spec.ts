@@ -942,7 +942,9 @@ async function readAssignedTripAndAccept(
       .click({ timeout: 30_000 }),
   );
   await step("Driver verify assigned trip UUID", async () => {
-    await expect(driver).toHaveURL(/\/trip$/);
+    await expect(driver).toHaveURL(
+      (url) => url.pathname === new URL(`${base}/trip`).pathname,
+    );
     await expect(
       driver.getByText(orderId, { exact: false }).first(),
     ).toBeVisible();

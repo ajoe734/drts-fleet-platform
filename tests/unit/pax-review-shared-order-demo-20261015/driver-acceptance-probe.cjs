@@ -154,9 +154,30 @@ Module._load = function (request, parent, isMain) {
       useRouter: () => ({
         replace: () => {},
         push: (value) => {
-          route = value;
+          const url = new URL(
+            typeof value === "string" ? value : value.pathname,
+            "https://driver.invalid",
+          );
+          if (typeof value !== "string") {
+            for (const [key, parameter] of Object.entries(value.params ?? {})) {
+              if (parameter === undefined) continue;
+              const values = Array.isArray(parameter) ? parameter : [parameter];
+              for (const entry of values)
+                url.searchParams.append(key, String(entry));
+            }
+          }
+          route = `${url.pathname}${url.search}${url.hash}`;
         },
       }),
+      useLocalSearchParams: () => {
+        const params = new URL(route, "https://driver.invalid").searchParams;
+        return Object.fromEntries(
+          [...new Set(params.keys())].map((key) => {
+            const values = params.getAll(key);
+            return [key, values.length === 1 ? values[0] : values];
+          }),
+        );
+      },
     };
   if (request === "expo-image-picker") return {};
   if (request === "expo-constants")
@@ -382,7 +403,11 @@ const click = async (label) => {
   assert.ok(node, `Missing real Driver control: ${label}`);
   assert.ok(!node.props.disabled, `Real Driver control is disabled: ${label}`);
   await act(async () => node.props.onPress());
-  if (route === "/trip" && label === "開啟目前行程") await open("trip");
+  if (
+    new URL(route, "https://driver.invalid").pathname === "/trip" &&
+    label === "開啟目前行程"
+  )
+    await open("trip");
 };
 const page = {
   goto: async (url) => {
@@ -416,7 +441,11 @@ const page = {
   },
 };
 const expectation = (value) => ({
-  toHaveURL: async (pattern) => assert.match(route, pattern),
+  toHaveURL: async (pattern) => {
+    if (typeof pattern === "function")
+      assert.equal(pattern(new URL(route, "https://driver.invalid")), true);
+    else assert.match(route, pattern);
+  },
   toBeVisible: async () =>
     assert.equal(
       value.visible(),
