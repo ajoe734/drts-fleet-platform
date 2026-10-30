@@ -134,13 +134,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("vehicles/:vehicleId/compliance")
-  updateVehicleCompliance(
+  async updateVehicleCompliance(
     @Param("vehicleId") vehicleId: string,
     @Body() command: UpdateVehicleComplianceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateVehicleCompliance(
+      await this.regulatoryRegistryService.updateVehicleComplianceFromPersistence(
         vehicleId,
         command,
       ),
@@ -340,10 +340,11 @@ export class RegulatoryRegistryController {
   }
 
   @Get("contracts")
-  listContracts(@Headers("x-request-id") requestId?: string) {
+  async listContracts(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
-        items: this.regulatoryRegistryService.listContracts(),
+        items:
+          await this.regulatoryRegistryService.listContractsFromPersistence(),
       },
       requestId,
     );
@@ -376,7 +377,7 @@ export class RegulatoryRegistryController {
   }
 
   @Get("contracts/:contractId/operational-view")
-  getContractOperationalView(
+  async getContractOperationalView(
     @Param("contractId") contractId: string,
     @Headers("x-tenant-id") headerTenantId?: string,
     @Headers("x-partner-id") headerPartnerId?: string,
@@ -392,7 +393,7 @@ export class RegulatoryRegistryController {
       serviceScope: headerServiceScope || queryServiceScope || undefined,
     };
     const view =
-      this.requireContractOperationalViewService().getOperationalView(
+      await this.requireContractOperationalViewService().getOperationalViewFromPersistence(
         contractId,
         scopeContext,
       );
@@ -400,7 +401,7 @@ export class RegulatoryRegistryController {
   }
 
   @Get("contracts/:contractId/operational-terms")
-  getContractOperationalTerms(
+  async getContractOperationalTerms(
     @Param("contractId") contractId: string,
     @Headers("x-tenant-id") headerTenantId?: string,
     @Headers("x-partner-id") headerPartnerId?: string,
@@ -416,7 +417,7 @@ export class RegulatoryRegistryController {
       serviceScope: headerServiceScope || queryServiceScope || undefined,
     };
     const terms =
-      this.requireContractOperationalViewService().getOperationalTerms(
+      await this.requireContractOperationalViewService().getOperationalTermsFromPersistence(
         contractId,
         scopeContext,
       );
@@ -424,7 +425,7 @@ export class RegulatoryRegistryController {
   }
 
   @Get("contracts/:contractId")
-  getContract(
+  async getContract(
     @Param("contractId") contractId: string,
     @Headers("x-tenant-id") headerTenantId?: string,
     @Headers("x-partner-id") headerPartnerId?: string,
@@ -440,7 +441,7 @@ export class RegulatoryRegistryController {
       serviceScope: headerServiceScope || queryServiceScope || undefined,
     };
     const contract =
-      this.requireContractOperationalViewService().validateContractScope(
+      await this.requireContractOperationalViewService().validateContractScopeFromPersistence(
         contractId,
         scopeContext,
       );

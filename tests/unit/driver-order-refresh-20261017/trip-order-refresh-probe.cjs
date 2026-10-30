@@ -96,7 +96,11 @@ Module._load = function (request, parent, isMain) {
       useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
     };
   if (request === "expo-router")
-    return { Redirect: "Redirect", useRouter: () => ({ replace: () => {} }) };
+    return {
+      Redirect: "Redirect",
+      useRouter: () => ({ replace: () => {} }),
+      useLocalSearchParams: () => ({}),
+    };
   if (request === "expo-image-picker") return {};
   if (request === "expo-constants")
     return { default: { expoConfig: { extra: {} } } };

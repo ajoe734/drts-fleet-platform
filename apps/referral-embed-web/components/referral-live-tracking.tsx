@@ -14,6 +14,7 @@ export function referralLiveArrival(
   pending: string,
 ): string {
   const tracking = trip.liveTracking;
+  if (!tracking || tracking.locationFreshness !== "fresh") return pending;
   const at =
     trip.status === "on_trip"
       ? tracking?.dropoffRoute?.estimatedArrivalAt
@@ -55,7 +56,9 @@ export function ReferralLiveTrackingPanel({
   theme,
   mapConfig,
 }: {
-  trip: ReferralPassengerTripSnapshot;
+  trip: ReferralPassengerTripSnapshot & {
+    localLocationAgeSeconds?: number | null;
+  };
   error: boolean;
   refresh: () => void;
   theme: ReturnType<typeof buildEmbedTheme>;
@@ -89,7 +92,8 @@ export function ReferralLiveTrackingPanel({
   const arrival = referralLiveArrival(trip, "");
   const fresh = tracking?.locationFreshness === "fresh";
   const ageSeconds =
-    location && tracking
+    trip.localLocationAgeSeconds ??
+    (location && tracking
       ? Math.max(
           0,
           Math.round(
@@ -98,7 +102,7 @@ export function ReferralLiveTrackingPanel({
               1000,
           ),
         )
-      : null;
+      : null);
   const showMap = Boolean(
     mapConfig?.enabled &&
     mapConfig.browserKey &&

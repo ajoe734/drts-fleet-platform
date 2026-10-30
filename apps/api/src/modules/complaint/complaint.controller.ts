@@ -29,8 +29,12 @@ import { IdempotencyService } from "../../common/idempotency";
 import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { IncidentService } from "../incident/incident.service";
-import { ComplaintService } from "./complaint.service";
+import {
+  ComplaintService,
+  type ComplaintAuditActor,
+} from "./complaint.service";
 import { toActionReceipt } from "../../common/action-receipt";
+import { CurrentIdentity } from "../../common/auth/auth.decorators";
 
 function toComplaintActionEnvelope<T>(
   data: T,
@@ -174,6 +178,7 @@ export class ComplaintController {
     @Body() command: AssignComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @CurrentIdentity() identity: ComplaintAuditActor | null = null,
   ) {
     await this.complaintService.refreshSettlementCases();
     const updated = await this.complaintService.assignComplaintCase(
@@ -182,6 +187,15 @@ export class ComplaintController {
       requestId,
       {
         captureAudit: true,
+        ...(identity
+          ? {
+              auditActor: {
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                tenantId: identity.tenantId,
+              },
+            }
+          : {}),
         ...(idempotencyKey?.trim()
           ? {
               commandIdentity: {
@@ -209,6 +223,7 @@ export class ComplaintController {
     @Body() command: AddComplaintCaseNoteCommand,
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @CurrentIdentity() identity: ComplaintAuditActor | null = null,
   ) {
     await this.complaintService.refreshSettlementCases();
     const updated = await this.complaintService.addComplaintCaseNote(
@@ -217,6 +232,15 @@ export class ComplaintController {
       requestId,
       {
         captureAudit: true,
+        ...(identity
+          ? {
+              auditActor: {
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                tenantId: identity.tenantId,
+              },
+            }
+          : {}),
         ...(idempotencyKey?.trim()
           ? {
               commandIdentity: {
@@ -272,6 +296,7 @@ export class ComplaintController {
     @Body() command: ReopenComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @CurrentIdentity() identity: ComplaintAuditActor | null = null,
   ) {
     await this.complaintService.refreshSettlementCases();
     const updated = await this.complaintService.reopenComplaintCase(
@@ -280,6 +305,15 @@ export class ComplaintController {
       requestId,
       {
         captureAudit: true,
+        ...(identity
+          ? {
+              auditActor: {
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                tenantId: identity.tenantId,
+              },
+            }
+          : {}),
         ...(idempotencyKey?.trim()
           ? {
               commandIdentity: {
@@ -307,6 +341,7 @@ export class ComplaintController {
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @CurrentIdentity() identity: ComplaintAuditActor | null = null,
   ) {
     await this.complaintService.refreshSettlementCases();
     const updated = await this.complaintService.resolveComplaintCase(
@@ -315,6 +350,15 @@ export class ComplaintController {
       requestId,
       {
         captureAudit: true,
+        ...(identity
+          ? {
+              auditActor: {
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                tenantId: identity.tenantId,
+              },
+            }
+          : {}),
         ...(idempotencyKey?.trim()
           ? {
               commandIdentity: {
@@ -342,6 +386,7 @@ export class ComplaintController {
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @CurrentIdentity() identity: ComplaintAuditActor | null = null,
   ) {
     await this.complaintService.refreshSettlementCases();
     const updated = await this.complaintService.closeComplaintCase(
@@ -350,6 +395,15 @@ export class ComplaintController {
       requestId,
       {
         captureAudit: true,
+        ...(identity
+          ? {
+              auditActor: {
+                actorId: identity.actorId,
+                actorType: identity.actorType,
+                tenantId: identity.tenantId,
+              },
+            }
+          : {}),
         ...(idempotencyKey?.trim()
           ? {
               commandIdentity: {

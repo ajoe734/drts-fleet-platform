@@ -1,9 +1,15 @@
-import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  randomUUID,
+  createHash,
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import type {
   ComplaintCaseRecord,
   ComplaintCaseStatus,
-  ComplaintTimelineEntry,
+  IncidentRecord,
+  IncidentStatus,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 
@@ -11,6 +17,8 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
 import { ComplaintService } from "../complaint/complaint.service";
+import { IncidentService } from "../incident/incident.service";
+import { isFleetIncidentReplyEntry } from "../incident/incident.repository";
 import {
   FleetDocumentStorageService,
   MAX_FLEET_DOCUMENT_BYTES,
@@ -33,13 +41,13 @@ export interface FleetCaseItem {
   // reply), but it is never presented as platform-owned.
   responsibility: "fleet" | "shared" | "platform" | "unattributed";
   fleetPartnerId: string;
-  status: ComplaintCaseStatus;
-  slaDueAt: string;
+  status: ComplaintCaseStatus | IncidentStatus;
+  slaDueAt: string | null;
   slaBreachedAt: string | null;
-  slaBreach: boolean;
+  slaBreach: boolean | null;
   slaTone: "danger" | "success" | "neutral";
   slaLabel: string;
-  reopenCount: number;
+  reopenCount: number | null;
   relatedOrder: string | null;
   relatedCall: string | null;
   assignee: string;
@@ -64,7 +72,7 @@ export interface FleetCaseTimelineEvent {
   tone: "accent" | "warn" | "danger" | "success";
   t: string;
   actor: string;
-  actorRealm: "ops" | "tenant" | "system";
+  actorRealm: "ops" | "tenant" | "system" | "unknown";
   body: string;
   attachments?: FleetCaseTimelineAttachment[] | undefined;
 }
@@ -264,6 +272,7 @@ export class FleetPartnerCaseService {
     @Optional()
     private readonly storage: FleetDocumentStorageService = new FleetDocumentStorageService(),
     @Optional() private readonly callcenterService?: CallcenterService,
+    @Optional() private readonly incidentService?: IncidentService,
   ) {
     this.seedCases();
   }
@@ -653,6 +662,17 @@ export class FleetPartnerCaseService {
       }
     }
 
+    if (this.incidentService) {
+      try {
+        return await this.mapIncidentToFleetCase(
+          await this.incidentService.getIncidentForReadback(caseId),
+        );
+      } catch (error) {
+        if (!(error instanceof ApiRequestError && error.code === "NOT_FOUND"))
+          throw error;
+      }
+    }
+
     throw new ApiRequestError(
       HttpStatus.NOT_FOUND,
       "CASE_NOT_FOUND",
@@ -790,6 +810,56 @@ export class FleetPartnerCaseService {
     };
   }
 
+  private async mapIncidentToFleetCase(
+    incident: IncidentRecord,
+  ): Promise<FleetCaseItem> {
+    const attribution = this.fleetPartnerService
+      ? incident.relatedOrderId
+        ? await this.fleetPartnerService.resolveOrderDriverFleetAttribution(
+            incident.relatedOrderId,
+          )
+        : await this.fleetPartnerService.resolveIncidentDriverFleetAttribution(
+            incident.relatedDriverId,
+            incident.occurredAt ?? incident.createdAt,
+          )
+      : null;
+    const isClosed = incident.status === "closed";
+    return {
+      id: incident.incidentId,
+      caseNo: incident.incidentId,
+      type: "incident",
+      cat: incident.category,
+      desc: incident.description,
+      driver: attribution?.driverName ?? incident.relatedDriverId ?? "—",
+      driverId: attribution?.driverId ?? incident.relatedDriverId ?? "",
+      severity: incident.severity,
+      responsibility: attribution ? "fleet" : "unattributed",
+      fleetPartnerId: attribution?.fleetPartnerId ?? "",
+      status: incident.status,
+      slaDueAt: null,
+      slaBreachedAt: null,
+      slaBreach: null,
+      slaTone: "neutral",
+      slaLabel: "SLA unknown",
+      reopenCount: null,
+      relatedOrder: incident.relatedOrderId,
+      relatedCall: null,
+      assignee: incident.assignedTo ?? "—",
+      openedAt: incident.createdAt,
+      updatedAt: incident.updatedAt,
+      actionDescriptor: {
+        action: "respond",
+        enabled: !isClosed && !!attribution,
+        riskLevel: "medium",
+        ...(isClosed
+          ? { disabledReasonCode: "case_closed" }
+          : !attribution
+            ? { disabledReasonCode: "case_unattributed" }
+            : {}),
+      },
+    };
+  }
+
   async listCases(fleetPartnerId: string): Promise<FleetCaseItem[]> {
     await this.complaintService?.refreshSettlementCases?.();
     const result: FleetCaseItem[] = [];
@@ -830,6 +900,16 @@ export class FleetPartnerCaseService {
       }
     }
 
+    if (this.incidentService) {
+      for (const incident of await this.incidentService.listIncidentsForReadback()) {
+        if (seen.has(incident.incidentId)) continue;
+        const mapped = await this.mapIncidentToFleetCase(incident);
+        if (!this.isFleetScopeMatch(mapped.fleetPartnerId, fleetPartnerId))
+          continue;
+        seen.add(incident.incidentId);
+        result.push(mapped);
+      }
+    }
     return result;
   }
 
@@ -874,6 +954,30 @@ export class FleetPartnerCaseService {
     await this.complaintService?.refreshSettlementCases?.();
     const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
+
+    if (caseItem.type === "incident" && this.incidentService) {
+      const entries = await this.incidentService.getTimelineForReadback(
+        caseItem.id,
+      );
+      return entries.map((entry) => ({
+        entryId: entry.entryId,
+        caseId: caseItem.id,
+        at: entry.createdAt,
+        tone: isFleetIncidentReplyEntry(entry) ? "accent" : "warn",
+        t: isFleetIncidentReplyEntry(entry) ? "車行回覆" : entry.action,
+        actor: entry.actor,
+        actorRealm: isFleetIncidentReplyEntry(entry) ? "tenant" : "unknown",
+        body: entry.note,
+        ...(isFleetIncidentReplyEntry(entry) &&
+        entry.fleetReply.attachments.length
+          ? {
+              attachments: entry.fleetReply.attachments.map((item) => ({
+                ...item,
+              })),
+            }
+          : {}),
+      }));
+    }
 
     const tl =
       this.timelines.get(caseItem.id) ||
@@ -1037,7 +1141,7 @@ export class FleetPartnerCaseService {
 
     // Idempotency check: deduplicate if same idempotency-key resubmitted
     const idempotencyKey = command.idempotencyKey?.trim() || "";
-    if (idempotencyKey) {
+    if (idempotencyKey && caseItem.type !== "incident") {
       const dedupKey = `${caseItem.id}:${idempotencyKey}`;
       const existing = this.repliesByIdempotencyKey.get(dedupKey);
       if (existing) {
@@ -1091,8 +1195,11 @@ export class FleetPartnerCaseService {
 
     // Resolve attachments for timeline
     const resolvedAttachments: FleetCaseTimelineAttachment[] = [];
-    const fleetReplyAttachments: NonNullable<
-      ComplaintTimelineEntry["fleetReplyAttachments"]
+    const fleetReplyAttachments: Array<
+      Pick<
+        FleetCaseAttachmentRecord,
+        "attachmentId" | "name" | "size" | "fileSize"
+      >
     > = [];
     if (command.attachmentIds?.length) {
       await this.loadStoredAttachments(caseItem.id);
@@ -1146,6 +1253,61 @@ export class FleetPartnerCaseService {
     // An empty array is still set: it records that this reply has no
     // attachments, so its text is never re-read as a legacy manifest.
     const notePayload = `${fleetReplyNotePrefix(fleetPartnerId)}${content}${formatAttachmentNamesSuffix(resolvedAttachments)}`;
+
+    if (caseItem.type === "incident") {
+      if (!this.incidentService)
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "INCIDENT_REPLY_UNAVAILABLE",
+          "Incident reply persistence is unavailable.",
+        );
+      const receipt = await this.incidentService.addFleetReplyForCommit(
+        caseItem.id,
+        {
+          fleetPartnerId,
+          idempotencyKey: replyRecord.idempotencyKey,
+          bodyHash: createHash("sha256")
+            .update(
+              JSON.stringify({
+                content,
+                attachmentIds: command.attachmentIds ?? [],
+              }),
+            )
+            .digest("hex"),
+          content,
+          actorId,
+          note: notePayload,
+          attachments: fleetReplyAttachments,
+        },
+      );
+      const entry = receipt.entry;
+      if (!receipt.deduplicated && this.auditNotificationService)
+        this.auditNotificationService.recordAuditLog({
+          actorId,
+          actorType: "partner_api_key",
+          tenantId: null,
+          moduleName: "fleet-partner",
+          actionName: "submit_fleet_case_reply",
+          resourceType: "fleet_case",
+          resourceId: caseItem.id,
+          newValuesSummary: {
+            replyId: entry.entryId,
+            content: entry.fleetReply.content,
+            attachmentCount: entry.fleetReply.attachments.length,
+          },
+        });
+      return {
+        replyId: entry.entryId,
+        caseId: entry.incidentId,
+        fleetPartnerId: entry.fleetReply.fleetPartnerId,
+        idempotencyKey: entry.fleetReply.idempotencyKey,
+        content: entry.fleetReply.content,
+        actorId: entry.actor,
+        repliedAt: entry.createdAt,
+        attachments: entry.fleetReply.attachments.map((item) => ({ ...item })),
+        deduplicated: receipt.deduplicated,
+      };
+    }
 
     let settlementTimelineEntryId: string | undefined;
     let ordinaryReplyTimelineEntryId: string | undefined;

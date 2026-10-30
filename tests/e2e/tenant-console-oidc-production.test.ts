@@ -466,7 +466,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             headers: { "Content-Type": "application/json" },
           });
         }
-        const res = tenantPartnerController.listCostCenters(
+        const res = await tenantPartnerController.listCostCenters(
           undefined,
           undefined,
           undefined,

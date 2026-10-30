@@ -523,13 +523,13 @@ export class MultiTaxiController {
   @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId")
   @RequireRealms("platform")
   @RequireScopes("multi_taxi_records:export")
-  getTripOperationalExportJob(
+  async getTripOperationalExportJob(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.requireReportingFilingService().getMultiTaxiTripExportJob(
+      await this.requireReportingFilingService().getMultiTaxiTripExportJobForRead(
         jobId,
         identity,
         requestId,
@@ -541,13 +541,13 @@ export class MultiTaxiController {
   @Get("platform-admin/multi-taxi-trip-records/export-jobs/:jobId/download")
   @RequireRealms("platform")
   @RequireScopes("multi_taxi_records:export")
-  downloadTripOperationalExport(
+  async downloadTripOperationalExport(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.requireReportingFilingService().issueMultiTaxiTripExportDownload(
+      await this.requireReportingFilingService().issueMultiTaxiTripExportDownloadForRead(
         jobId,
         identity,
         requestId,

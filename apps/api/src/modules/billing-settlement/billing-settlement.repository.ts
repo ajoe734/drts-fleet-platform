@@ -477,6 +477,87 @@ export class BillingSettlementRepository {
     }
   }
 
+  /** Serialize every command for this batch on the original payment lock key.
+   * The held session has no outer transaction: a proof receipt still commits
+   * before its independently acknowledged batch/statement repair writes.
+   */
+  async withReimbursementBatchTarget<T>(
+    batchId: string,
+    execute: (target: {
+      batch: ReimbursementBatchRecord | null;
+      statement: DriverStatementRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+      markProofPaid: (
+        input: Parameters<
+          BillingSettlementRepository["markRemittanceProofPaid"]
+        >[0],
+      ) => Promise<MarkRemittanceProofPaidResult>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    const key = `remittance-proof-payment:${batchId}`;
+    let locked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        key,
+      ]);
+      locked = true;
+      const result = await client.query<JsonRecordRow>(
+        "SELECT record FROM billing.phase1_reimbursement_batches WHERE batch_id = $1",
+        [batchId],
+      );
+      const candidate = result.rows[0]
+        ? this.parseRecord<ReimbursementBatchRecord>(
+            result.rows[0].record,
+            "billing.phase1_reimbursement_batches",
+          )
+        : null;
+      const batch = candidate?.batchId === batchId ? candidate : null;
+      const statementResult = batch
+        ? await client.query<JsonRecordRow>(
+            "SELECT record FROM billing.phase1_driver_statements WHERE statement_id = $1",
+            [batch.statementId],
+          )
+        : null;
+      const statementCandidate = statementResult?.rows[0]
+        ? this.parseRecord<DriverStatementRecord>(
+            statementResult.rows[0].record,
+            "billing.phase1_driver_statements",
+          )
+        : null;
+      const statement =
+        statementCandidate?.statementId === batch?.statementId
+          ? statementCandidate
+          : null;
+      return await execute({
+        batch,
+        statement,
+        persist: (changes) => this.persistChanges(changes, client),
+        markProofPaid: (input) => this.markRemittanceProofPaid(input, client),
+      });
+    } finally {
+      if (!locked) {
+        client.release(
+          new Error(
+            "Reimbursement batch lock acquisition was not acknowledged.",
+          ),
+        );
+      } else {
+        try {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [key],
+          );
+          client.release();
+        } catch (error) {
+          client.release(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    }
+  }
+
   async findMultiTaxiPaymentException(
     orderId: string,
   ): Promise<MultiTaxiPaymentExceptionRecord | null> {
@@ -850,6 +931,31 @@ export class BillingSettlementRepository {
       "billing.phase1_tenant_billing_profiles",
     );
     return profile.tenantId === tenantId ? profile : null;
+  }
+
+  async listCommittedReimbursementBatches() {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_reimbursement_batches ORDER BY updated_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<ReimbursementBatchRecord>(
+        row.record,
+        "billing.phase1_reimbursement_batches",
+      ),
+    );
+  }
+
+  async findCommittedReimbursementBatch(batchId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_reimbursement_batches WHERE batch_id = $1`,
+      [batchId],
+    );
+    if (!result.rows[0]) return null;
+    const batch = this.parseRecord<ReimbursementBatchRecord>(
+      result.rows[0].record,
+      "billing.phase1_reimbursement_batches",
+    );
+    return batch.batchId === batchId ? batch : null;
   }
 
   async loadState(): Promise<BillingSettlementState> {
@@ -1913,18 +2019,21 @@ export class BillingSettlementRepository {
    * receipt" language -- a proof invalidated after payment must not break
    * replay of a payment that already happened.
    */
-  async markRemittanceProofPaid(input: {
-    batchId: string;
-    proofId: string;
-    idempotencyKey: string;
-    driverId: string;
-    amount: MoneyAmount;
-    paidAt: string;
-  }): Promise<MarkRemittanceProofPaidResult> {
+  async markRemittanceProofPaid(
+    input: {
+      batchId: string;
+      proofId: string;
+      idempotencyKey: string;
+      driverId: string;
+      amount: MoneyAmount;
+      paidAt: string;
+    },
+    borrowedClient?: Awaited<ReturnType<DatabaseService["connect"]>>,
+  ): Promise<MarkRemittanceProofPaidResult> {
     if (!this.isEnabled()) {
       throw new Error("Remittance proof persistence is unavailable.");
     }
-    const client = await this.databaseService!.connect();
+    const client = borrowedClient ?? (await this.databaseService!.connect());
     try {
       await client.query("BEGIN");
 
@@ -2023,7 +2132,7 @@ export class BillingSettlementRepository {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
-      client.release();
+      if (!borrowedClient) client.release();
     }
   }
 

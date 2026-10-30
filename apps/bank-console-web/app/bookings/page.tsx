@@ -16,6 +16,11 @@ import { loadBankBookingsData } from "@/lib/bank-bookings-data";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
 import {
   BOOKING_PAGE_SIZES,
+  BOOKING_STATE_PRESENTATION,
+  bookingStateTabs,
+  matchesBookingState,
+  isActiveBookingState,
+  formatBookingDateTime,
   paginateBookingItems,
   deriveBookingPeriods,
   filterBookingItems,
@@ -25,16 +30,6 @@ import {
 } from "@/lib/bookings";
 import { t } from "@/lib/translations";
 
-const bookingPillTone: Record<
-  BookingState,
-  "info" | "warn" | "success" | "danger"
-> = {
-  assigned: "info",
-  en_route: "warn",
-  completed: "success",
-  cancelled: "danger",
-};
-
 const directionLabelKey: Record<
   BookingDirection,
   "bookings.direction.outbound" | "bookings.direction.inbound"
@@ -43,26 +38,6 @@ const directionLabelKey: Record<
   inbound: "bookings.direction.inbound",
 };
 
-const stateLabelKey: Record<
-  BookingState,
-  | "bookings.state.assigned"
-  | "bookings.state.en_route"
-  | "bookings.state.completed"
-  | "bookings.state.cancelled"
-> = {
-  assigned: "bookings.state.assigned",
-  en_route: "bookings.state.en_route",
-  completed: "bookings.state.completed",
-  cancelled: "bookings.state.cancelled",
-};
-
-const STATE_TAB_ORDER: BookingState[] = [
-  "assigned",
-  "en_route",
-  "completed",
-  "cancelled",
-];
-
 function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -70,16 +45,6 @@ function one(value: string | string[] | undefined): string | undefined {
 function formatPeriod(period: string) {
   if (!period) return "—";
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 export default async function BookingsPage({
@@ -128,8 +93,8 @@ export default async function BookingsPage({
       page: String(page),
       pageSize: String(pagination.pageSize),
     });
-  const activeCount = bookings.filter(
-    (item) => item.state === "assigned" || item.state === "en_route",
+  const activeCount = bookings.filter((item) =>
+    isActiveBookingState(item.state),
   ).length;
   const completedCount = bookings.filter(
     (item) => item.state === "completed",
@@ -230,7 +195,7 @@ export default async function BookingsPage({
           <span>{t("common.all", locale)}</span>
           <span className="users-filter-badge">{scopedBookings.length}</span>
         </Link>
-        {STATE_TAB_ORDER.map((tabState) => {
+        {bookingStateTabs(scopedBookings).map((tabState) => {
           const isActive = state === tabState;
 
           return (
@@ -240,11 +205,14 @@ export default async function BookingsPage({
               href={stateTabHref(tabState)}
               key={tabState}
             >
-              <span>{t(stateLabelKey[tabState], locale)}</span>
+              <span>
+                {t(BOOKING_STATE_PRESENTATION[tabState].labelKey, locale)}
+              </span>
               <span className="users-filter-badge">
                 {
-                  scopedBookings.filter((item) => item.state === tabState)
-                    .length
+                  scopedBookings.filter((item) =>
+                    matchesBookingState(item.state, tabState),
+                  ).length
                 }
               </span>
             </Link>
@@ -429,10 +397,13 @@ export default async function BookingsPage({
                   <span>{item.dropoffLabel}</span>
                 </div>
               </Td>
-              <Td mono>{formatDateTime(item.scheduledAt)}</Td>
+              <Td mono>{formatBookingDateTime(item.scheduledAt)}</Td>
               <Td>
-                <CanvasPill tone={bookingPillTone[item.state]} dot>
-                  {t(stateLabelKey[item.state], locale)}
+                <CanvasPill
+                  tone={BOOKING_STATE_PRESENTATION[item.state].tone}
+                  dot
+                >
+                  {t(BOOKING_STATE_PRESENTATION[item.state].labelKey, locale)}
                 </CanvasPill>
               </Td>
               <Td mono>{item.benefitReferenceMasked}</Td>

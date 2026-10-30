@@ -190,6 +190,8 @@ const en = {
   "new.saved.passengers": "Passenger shortcuts",
   "new.saved.addresses": "Frequent addresses",
   "new.saved.costCenters": "Cost centers",
+  "new.directoryUnavailable":
+    "Saved passengers, addresses and cost centers are unavailable. Check your enterprise session and refresh.",
   "new.card.next": "Next steps",
   "new.next.review": "Continue to review",
   "new.next.back": "Back to my bookings",
@@ -889,6 +891,8 @@ const zh: Record<TranslationKey, string> = {
   "new.saved.passengers": "乘客捷徑",
   "new.saved.addresses": "常用地址",
   "new.saved.costCenters": "成本中心",
+  "new.directoryUnavailable":
+    "目前無法讀取已儲存的乘客、地址與成本中心，請確認企業登入狀態後重新整理。",
   "new.card.next": "下一步",
   "new.next.review": "繼續到 review",
   "new.next.back": "返回我的預約",

@@ -346,7 +346,11 @@ export default async function FleetCaseDetailPage({
               tone={isClosed ? "neutral" : (c.slaTone as any)}
               dot
             >
-              {isClosed ? "closed" : c.slaLabel}
+              {isClosed
+                ? "closed"
+                : c.slaBreach === null
+                  ? t("case.sla.unknown", locale)
+                  : c.slaLabel}
             </CanvasPill>
             <CanvasPill theme={theme} tone="danger">
               {c.severity}
@@ -489,22 +493,32 @@ export default async function FleetCaseDetailPage({
                         tone={status === "closed" ? "neutral" : "info"}
                         dot
                       >
-                        {status}
+                        {c.type === "incident"
+                          ? t(`case.status.${status}`, locale)
+                          : status}
                       </CanvasPill>
                     ),
                   },
                   {
                     k: "SLA STATUS",
-                    v: c.slaBreachedAt ? "breached" : "on_track",
+                    v:
+                      c.slaBreach === null
+                        ? t("case.sla.unknown", locale)
+                        : c.slaBreachedAt
+                          ? "breached"
+                          : "on_track",
                     mono: true,
                   },
-                  { k: "SLA DUE AT", v: c.slaDueAt, mono: true },
+                  { k: "SLA DUE AT", v: c.slaDueAt ?? "—", mono: true },
                   {
                     k: "SLA BREACHED AT",
                     v: c.slaBreachedAt || "—",
                     mono: true,
                   },
-                  { k: "REOPENS", v: `${c.reopenCount} 次` },
+                  {
+                    k: "REOPENS",
+                    v: c.reopenCount === null ? "—" : `${c.reopenCount} 次`,
+                  },
                   {
                     k: "司機",
                     v: `${c.driver} (${c.driverId})`,
@@ -574,7 +588,10 @@ export default async function FleetCaseDetailPage({
                     v: c.relatedCall || "—",
                     mono: true,
                   },
-                  { k: "RELATED INCIDENT", v: "— (未升級)" },
+                  {
+                    k: "RELATED INCIDENT",
+                    v: c.type === "incident" ? c.id : "— (未升級)",
+                  },
                   {
                     k: "DRIVER",
                     v: `${c.driverId} ${c.driver}`,

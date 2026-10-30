@@ -170,9 +170,9 @@ describe("multi-tenant header controller routing", () => {
     });
   });
 
-  it("requires x-tenant-id for tenant partner endpoints", () => {
+  it("requires x-tenant-id for tenant partner endpoints", async () => {
     const tenantPartnerService = {
-      listPassengers: vi.fn(),
+      listPassengersForRead: vi.fn(),
     } as unknown as TenantPartnerService;
     const controller = new TenantPartnerController(
       tenantPartnerService,
@@ -188,20 +188,23 @@ describe("multi-tenant header controller routing", () => {
 
     let thrown: unknown;
     try {
-      controller.listPassengers(undefined, "req-tenant-partner-missing-tenant");
+      await controller.listPassengers(
+        undefined,
+        "req-tenant-partner-missing-tenant",
+      );
     } catch (error) {
       thrown = error;
     }
 
     expect(getErrorCode(thrown)).toBe("TENANT_ID_REQUIRED");
-    expect(tenantPartnerService.listPassengers).not.toHaveBeenCalled();
+    expect(tenantPartnerService.listPassengersForRead).not.toHaveBeenCalled();
   });
 
-  it("forwards a trimmed x-tenant-id through tenant partner endpoints", () => {
+  it("forwards a trimmed x-tenant-id through tenant partner endpoints", async () => {
     const tenantPartnerService = {
       assertTenantAccessScope:
         TenantPartnerService.prototype.assertTenantAccessScope,
-      listPassengers: vi.fn(() => [
+      listPassengersForRead: vi.fn(async () => [
         {
           passengerId: "psg-tenant-alpha-001",
           tenantId: "tenant-alpha",
@@ -249,7 +252,7 @@ describe("multi-tenant header controller routing", () => {
       ],
     };
 
-    const passengersEnvelope = controller.listPassengers(
+    const passengersEnvelope = await controller.listPassengers(
       headerTenantId,
       requestId,
     );
@@ -264,7 +267,7 @@ describe("multi-tenant header controller routing", () => {
       requestId,
     );
 
-    expect(tenantPartnerService.listPassengers).toHaveBeenCalledWith(
+    expect(tenantPartnerService.listPassengersForRead).toHaveBeenCalledWith(
       "tenant-alpha",
     );
     expect(

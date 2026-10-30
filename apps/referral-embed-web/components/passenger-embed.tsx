@@ -41,6 +41,7 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   ReferralPassengerFareQuote,
+  ReferralOrderFeeConfirmation,
   ReferralPassengerRatingResult,
   SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
@@ -90,6 +91,7 @@ function referralUiMessage(code: unknown, booking = false) {
   if (
     [
       "UNAUTHORIZED",
+      "JWT_INVALID",
       "REFERRAL_SESSION_INVALID",
       "REFERRAL_SESSION_REQUIRED",
       "REFERRAL_SESSION_EXPIRED",
@@ -231,6 +233,67 @@ function vehicleClassLabel(
     known(quoted) ??
     known(reported) ??
     (reported === "enterprise_dispatch" ? "商務派車" : (reported ?? ""))
+  );
+}
+
+/** Read the original per-order confirmation; never rebuild it from today's fees. */
+function FeeConfirmationReadback({
+  theme,
+  confirmation,
+  compact = false,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  confirmation: ReferralOrderFeeConfirmation | null | undefined;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation();
+  const summary = confirmation?.summary;
+  const scheduled = summary?.requestedScheduledAt;
+  const pickupTime = scheduled
+    ? Number.isFinite(Date.parse(scheduled))
+      ? formatShortDateTime(scheduled, "Asia/Taipei")
+      : t("fees.timePending")
+    : t("fees.now");
+  const vehicle = summary?.vehicleType
+    ? embedVehicles.some((item) => item.code === summary.vehicleType)
+      ? t(`embed.vehicle.${summary.vehicleType}.name` as TranslationKey)
+      : t("fees.vehiclePending")
+    : t("fees.unspecified");
+  return (
+    <div>
+      <DetailRow
+        theme={theme}
+        label={compact ? "費用確認時間：" : "費用確認時間"}
+        value={
+          confirmation?.feeConfirmedAt
+            ? formatShortDateTime(confirmation.feeConfirmedAt, "Asia/Taipei")
+            : "未提供確認紀錄"
+        }
+        last
+      />
+      {summary ? (
+        <details style={{ marginTop: 8, fontSize: 12.5, color: theme.ink2 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+            下單前確認內容
+          </summary>
+          <div
+            style={{ display: "grid", gap: 6, marginTop: 8, lineHeight: 1.6 }}
+          >
+            <div>
+              {summary.pickupAddress} → {summary.dropoffAddress}
+            </div>
+            <div>{t("fees.schedule", { time: pickupTime, vehicle })}</div>
+            <div>
+              當時試算：
+              {t("fees.estimate", {
+                min: summary.estimatedMin,
+                max: summary.estimatedMax,
+              })}
+            </div>
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -2983,18 +3046,9 @@ function TripScreen({
       </div>
 
       <Card theme={theme}>
-        <DetailRow
+        <FeeConfirmationReadback
           theme={theme}
-          label="費用確認時間"
-          value={
-            activeTrip?.feeConfirmation?.feeConfirmedAt
-              ? formatShortDateTime(
-                  activeTrip.feeConfirmation.feeConfirmedAt,
-                  "Asia/Taipei",
-                )
-              : "未提供確認紀錄"
-          }
-          last
+          confirmation={activeTrip?.feeConfirmation}
         />
       </Card>
       <Card theme={theme} accent={theme.primary}>
@@ -3248,7 +3302,7 @@ function TripsScreen({
           : trip.completedAt || trip.createdAt,
         "Asia/Taipei",
       ),
-      feeConfirmedAt: trip.feeConfirmation?.feeConfirmedAt ?? null,
+      feeConfirmation: trip.feeConfirmation ?? null,
       from: trip.pickupAddress,
       to: trip.dropoffAddress,
       state: normalizeTripState(trip.status),
@@ -3299,21 +3353,24 @@ function TripsScreen({
               ? "neutral"
               : "info";
         return (
-          <Link
-            href={buildHref(context, {
-              screen:
-                trip.state === "completed"
-                  ? "completed"
-                  : NON_COMPLETED_TERMINAL_STATUSES.includes(trip.state)
-                    ? "cancelled"
-                    : "trip",
-              state: "handoff",
-              orderId: trip.orderId,
-            })}
-            key={trip.id}
-            style={{ textDecoration: "none", color: "inherit" }}
-          >
-            <Card theme={theme}>
+          <Card theme={theme} key={trip.id}>
+            <Link
+              href={buildHref(context, {
+                screen:
+                  trip.state === "completed"
+                    ? "completed"
+                    : NON_COMPLETED_TERMINAL_STATUSES.includes(trip.state)
+                      ? "cancelled"
+                      : "trip",
+                state: "handoff",
+                orderId: trip.orderId,
+              })}
+              style={{
+                display: "block",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span
                   style={{
@@ -3361,14 +3418,6 @@ function TripsScreen({
                   >
                     {trip.date} · {displayOrderNo(trip.id)}
                   </div>
-                  <div
-                    style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}
-                  >
-                    費用確認時間：
-                    {trip.feeConfirmedAt
-                      ? formatShortDateTime(trip.feeConfirmedAt, "Asia/Taipei")
-                      : "未提供確認紀錄"}
-                  </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   <Pill theme={theme} tone={tone} dot>
@@ -3387,8 +3436,15 @@ function TripsScreen({
                   </div>
                 </div>
               </div>
-            </Card>
-          </Link>
+            </Link>
+            <div style={{ marginTop: 8 }}>
+              <FeeConfirmationReadback
+                theme={theme}
+                confirmation={trip.feeConfirmation}
+                compact
+              />
+            </div>
+          </Card>
         );
       })}
     </AppShell>
@@ -3516,18 +3572,9 @@ function ReceiptScreen({
         </div>
       </Card>
       <Card theme={theme}>
-        <DetailRow
+        <FeeConfirmationReadback
           theme={theme}
-          label="費用確認時間"
-          value={
-            liveData?.receipt?.feeConfirmation?.feeConfirmedAt
-              ? formatShortDateTime(
-                  liveData.receipt.feeConfirmation.feeConfirmedAt,
-                  "Asia/Taipei",
-                )
-              : "未提供確認紀錄"
-          }
-          last
+          confirmation={liveData?.receipt?.feeConfirmation}
         />
       </Card>
       <Card theme={theme} title="乘客與車輛" subtitle="個資已遮罩">

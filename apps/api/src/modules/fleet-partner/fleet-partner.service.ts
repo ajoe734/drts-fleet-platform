@@ -1,5 +1,8 @@
 import { PLATFORM_CURRENCY, getIamFleetRoleScopes } from "@drts/contracts";
-import type { ManageFleetHumanRoleCommand, FleetHumanRoleRecord } from "@drts/contracts";
+import type {
+  ManageFleetHumanRoleCommand,
+  FleetHumanRoleRecord,
+} from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import { IdentityRepository } from "../identity/identity.repository";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -123,80 +126,182 @@ export class FleetPartnerService implements OnModuleInit {
     private readonly statementDecisions?: FleetStatementDecisionRepository,
     @Optional() private readonly identityRepository?: IdentityRepository,
     @Optional() private readonly tenantPartnerService?: TenantPartnerService,
-    @Optional() private readonly partnerLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    private readonly partnerLinkRepository?: PartnerUserIdentityLinkRepository,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
   ) {}
 
-  private async requireManagedFleetEntry(fleetPartnerId: string, entrySlug: string) {
-    if (!this.fleetPartnerRepository?.isEnabled() || !this.tenantPartnerService ||
-        !this.identityRepository?.isEnabled() || !this.partnerLinkRepository?.isEnabled() ||
-        !this.securityEventsService?.isEnabled()) {
-      throw new ApiRequestError(503, "FLEET_ROLE_AUTHORITY_UNAVAILABLE", "Canonical Fleet, entry, link, IAM and audit storage are required.");
+  private async requireManagedFleetEntry(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ) {
+    if (
+      !this.fleetPartnerRepository?.isEnabled() ||
+      !this.tenantPartnerService ||
+      !this.identityRepository?.isEnabled() ||
+      !this.partnerLinkRepository?.isEnabled() ||
+      !this.securityEventsService?.isEnabled()
+    ) {
+      throw new ApiRequestError(
+        503,
+        "FLEET_ROLE_AUTHORITY_UNAVAILABLE",
+        "Canonical Fleet, entry, link, IAM and audit storage are required.",
+      );
     }
-    const fleet = await this.fleetPartnerRepository.findActiveFleetPartnerById(fleetPartnerId);
-    const entries = await this.tenantPartnerService.resolvePartnerEntries(entrySlug);
-    const entry = entries.find((candidate) => candidate.entrySlug === entrySlug &&
-      candidate.partnerType === "fleet_partner" && candidate.partnerId === fleetPartnerId);
-    if (!fleet || !entry) throw new ApiRequestError(404, "FLEET_ENTRY_NOT_FOUND", "Active Fleet entry not found for this Fleet.");
+    const fleet =
+      await this.fleetPartnerRepository.findActiveFleetPartnerById(
+        fleetPartnerId,
+      );
+    const entries =
+      await this.tenantPartnerService.resolvePartnerEntries(entrySlug);
+    const entry = entries.find(
+      (candidate) =>
+        candidate.entrySlug === entrySlug &&
+        candidate.partnerType === "fleet_partner" &&
+        candidate.partnerId === fleetPartnerId,
+    );
+    if (!fleet || !entry)
+      throw new ApiRequestError(
+        404,
+        "FLEET_ENTRY_NOT_FOUND",
+        "Active Fleet entry not found for this Fleet.",
+      );
     return entry;
   }
 
-  async listFleetHumanRoles(fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
+  async listFleetHumanRoles(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetHumanRoleRecord[]> {
     await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
-    const rows = await this.identityRepository!.listFleetHumanRoles(entrySlug, fleetPartnerId);
+    const rows = await this.identityRepository!.listFleetHumanRoles(
+      entrySlug,
+      fleetPartnerId,
+    );
     return rows.map(({ membership, binding }) => ({
-      entrySlug, principalId: membership.principalId, membershipId: membership.membershipId,
+      entrySlug,
+      principalId: membership.principalId,
+      membershipId: membership.membershipId,
       roleCode: binding.roleCode as FleetHumanRoleRecord["roleCode"],
-      status: membership.status, validTo: binding.validTo,
+      status: membership.status,
+      validTo: binding.validTo,
     }));
   }
 
-  async manageFleetHumanRole(fleetPartnerId: string, command: ManageFleetHumanRoleCommand,
-    manager: BootstrapRequestIdentity | null): Promise<FleetHumanRoleRecord> {
-    if (!manager || !["platform", "ops"].includes(manager.realm) ||
-        !["platform_admin", "ops_user"].includes(manager.actorType) ||
-        !manager.scopes?.includes("foundation:write") || !manager.principalId) {
-      throw new ApiRequestError(403, "FLEET_ROLE_MANAGER_DENIED", "A verified platform Fleet manager is required.");
+  async manageFleetHumanRole(
+    fleetPartnerId: string,
+    command: ManageFleetHumanRoleCommand,
+    manager: BootstrapRequestIdentity | null,
+  ): Promise<FleetHumanRoleRecord> {
+    if (
+      !manager ||
+      !["platform", "ops"].includes(manager.realm) ||
+      !["platform_admin", "ops_user"].includes(manager.actorType) ||
+      !manager.scopes?.includes("foundation:write") ||
+      !manager.principalId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "FLEET_ROLE_MANAGER_DENIED",
+        "A verified platform Fleet manager is required.",
+      );
     }
-    if (!command || typeof command.entrySlug !== "string" || !command.entrySlug.trim() ||
-        typeof command.partnerUserRef !== "string" || !command.partnerUserRef.trim() ||
-        typeof command.enabled !== "boolean" || !getIamFleetRoleScopes(command.roleCode)) {
-      throw new ApiRequestError(400, "FLEET_ROLE_INVALID", "Entry, linked subject, enabled state and Fleet role are required.");
+    if (
+      !command ||
+      typeof command.entrySlug !== "string" ||
+      !command.entrySlug.trim() ||
+      typeof command.partnerUserRef !== "string" ||
+      !command.partnerUserRef.trim() ||
+      typeof command.enabled !== "boolean" ||
+      !getIamFleetRoleScopes(command.roleCode)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_ROLE_INVALID",
+        "Entry, linked subject, enabled state and Fleet role are required.",
+      );
     }
-    if (command.validTo != null && (!Number.isFinite(Date.parse(command.validTo)) ||
-        Date.parse(command.validTo) <= Date.now())) {
-      throw new ApiRequestError(400, "FLEET_ROLE_EXPIRY_INVALID", "Expiry must be in the future.");
+    if (
+      command.validTo != null &&
+      (!Number.isFinite(Date.parse(command.validTo)) ||
+        Date.parse(command.validTo) <= Date.now())
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_ROLE_EXPIRY_INVALID",
+        "Expiry must be in the future.",
+      );
     }
     const entrySlug = command.entrySlug.trim();
     await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
-    const link = await this.partnerLinkRepository!.find(entrySlug, command.partnerUserRef.trim());
-    if (!link || link.status !== "active" || !link.drtsPassengerId ||
-        link.drtsPassengerId === manager.principalId) {
-      throw new ApiRequestError(409, "FLEET_ROLE_LINK_INVALID", "Target needs an existing active linked human account.");
+    const link = await this.partnerLinkRepository!.find(
+      entrySlug,
+      command.partnerUserRef.trim(),
+    );
+    if (
+      !link ||
+      link.status !== "active" ||
+      !link.drtsPassengerId ||
+      link.drtsPassengerId === manager.principalId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "FLEET_ROLE_LINK_INVALID",
+        "Target needs an existing active linked human account.",
+      );
     }
     const records = await this.identityRepository!.manageFleetHumanRole({
-      entrySlug, fleetPartnerId, principalId: link.drtsPassengerId, roleCode: command.roleCode,
-      enabled: command.enabled, validTo: command.validTo ?? null,
+      entrySlug,
+      fleetPartnerId,
+      principalId: link.drtsPassengerId,
+      roleCode: command.roleCode,
+      enabled: command.enabled,
+      validTo: command.validTo ?? null,
       managerPrincipalId: manager.principalId,
       audit: async (client) => {
-        await this.securityEventsService!.recordEventRequired({
-          actorId: manager.actorId, actorType: manager.actorType, realm: manager.realm,
-          tenantId: null, partnerId: entrySlug, eventType: "fleet_human_role.managed",
-          eventFamily: "role", outcome: "success", severity: "medium",
-          targetType: "user", targetId: link.drtsPassengerId,
-          sessionId: manager.sessionId ?? null, tokenId: manager.tokenId ?? null,
-          authMethods: manager.amr ?? [], sourceIp: null, userAgent: null,
-          requestId: null, traceId: null, reasonCode: null, approvalId: null,
-          beforeSummary: null,
-          afterSummary: { fleetPartnerId, entrySlug, roleCode: command.roleCode,
-            enabled: command.enabled, validTo: command.validTo ?? null },
-        }, client);
+        await this.securityEventsService!.recordEventRequired(
+          {
+            actorId: manager.actorId,
+            actorType: manager.actorType,
+            realm: manager.realm,
+            tenantId: null,
+            partnerId: entrySlug,
+            eventType: "fleet_human_role.managed",
+            eventFamily: "role",
+            outcome: "success",
+            severity: "medium",
+            targetType: "user",
+            targetId: link.drtsPassengerId,
+            sessionId: manager.sessionId ?? null,
+            tokenId: manager.tokenId ?? null,
+            authMethods: manager.amr ?? [],
+            sourceIp: null,
+            userAgent: null,
+            requestId: null,
+            traceId: null,
+            reasonCode: null,
+            approvalId: null,
+            beforeSummary: null,
+            afterSummary: {
+              fleetPartnerId,
+              entrySlug,
+              roleCode: command.roleCode,
+              enabled: command.enabled,
+              validTo: command.validTo ?? null,
+            },
+          },
+          client,
+        );
       },
     });
-    return { entrySlug, principalId: records.membership.principalId,
+    return {
+      entrySlug,
+      principalId: records.membership.principalId,
       membershipId: records.membership.membershipId,
       roleCode: records.binding.roleCode as FleetHumanRoleRecord["roleCode"],
-      status: records.membership.status, validTo: records.binding.validTo };
+      status: records.membership.status,
+      validTo: records.binding.validTo,
+    };
   }
 
   async onModuleInit() {
@@ -889,6 +994,16 @@ export class FleetPartnerService implements OnModuleInit {
     periodMonth: string,
     fleetPartnerId?: string,
   ) {
+    // Use committed producer inputs without replacing a newer local command.
+    const [driverAffiliations, revenueShareRules]: [
+      DriverFleetAffiliationRecord[],
+      FleetPartnerRevenueShareRuleRecord[],
+    ] = this.fleetPartnerRepository?.isEnabled()
+      ? await Promise.all([
+          this.fleetPartnerRepository.loadDriverAffiliations(),
+          this.fleetPartnerRepository.loadRevenueShareRules(),
+        ])
+      : [this.driverAffiliations, this.revenueShareRules];
     await this.billingSettlementService.generateDriverStatements({
       periodMonth,
     });
@@ -921,11 +1036,16 @@ export class FleetPartnerService implements OnModuleInit {
           driverStatement.driverId,
           trip.completedAt,
           fleetPartnerId,
+          driverAffiliations,
         );
         if (!affiliation) {
           continue;
         }
-        const match = this.matchRevenueShareRule(affiliation, trip);
+        const match = this.matchRevenueShareRule(
+          affiliation,
+          trip,
+          revenueShareRules,
+        );
         if (!match) {
           continue;
         }
@@ -1142,8 +1262,10 @@ export class FleetPartnerService implements OnModuleInit {
     driverId: string,
     completedAt: string,
     fleetPartnerId?: string,
+    affiliations: readonly DriverFleetAffiliationRecord[] = this
+      .driverAffiliations,
   ) {
-    return this.driverAffiliations
+    return affiliations
       .filter((affiliation) => {
         if (affiliation.driverId !== driverId) {
           return false;
@@ -1196,7 +1318,9 @@ export class FleetPartnerService implements OnModuleInit {
         await this.ownedMobilityService.prepareOrderAction({ orderId });
       } catch (error) {
         if (
-          !(error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND")
+          !(
+            error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND"
+          )
         ) {
           // A genuine refresh failure (e.g. the durable store is down) is a
           // distinct outcome from "this order has no canonical record" and
@@ -1248,6 +1372,38 @@ export class FleetPartnerService implements OnModuleInit {
     };
   }
 
+  /** Driver-only incidents use their real occurrence/report timestamp. */
+  async resolveIncidentDriverFleetAttribution(
+    driverId: string | null,
+    asOf: string | null,
+  ): Promise<{
+    driverId: string;
+    driverName: string;
+    fleetPartnerId: string;
+  } | null> {
+    if (!driverId || !asOf || !Number.isFinite(Date.parse(asOf))) return null;
+    const affiliations = this.isPersistenceEnabled()
+      ? await this.loadCanonicalDriverAffiliations()
+      : this.driverAffiliations;
+    const at = Date.parse(asOf);
+    const effective = affiliations.filter(
+      (item) =>
+        item.driverId === driverId &&
+        Date.parse(item.effectiveFrom) <= at &&
+        (!item.effectiveUntil || Date.parse(item.effectiveUntil) >= at),
+    );
+    if (new Set(effective.map((item) => item.fleetPartnerId)).size !== 1)
+      return null;
+    const driver = this.regulatoryRegistryService
+      .listDrivers()
+      .find((item) => item.driverId === driverId);
+    return {
+      driverId,
+      driverName: driver?.name ?? driverId,
+      fleetPartnerId: effective[0]!.fleetPartnerId,
+    };
+  }
+
   /** The actual fulfillment event (driver + a credible historical event
    * time) for an order: prefers its driver task's own lifecycle timestamp,
    * falling back to the dispatch assignment's when no task exists yet. */
@@ -1268,15 +1424,12 @@ export class FleetPartnerService implements OnModuleInit {
     }
 
     const assignment =
-      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(
-        orderId,
-      ) ??
+      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(orderId) ??
       this.ownedMobilityService
         .getDispatchAssignmentsForOrder(orderId)
         .filter(
           (candidate) =>
-            candidate.status !== "rejected" &&
-            candidate.status !== "cancelled",
+            candidate.status !== "rejected" && candidate.status !== "cancelled",
         )
         .at(-1) ??
       null;
@@ -1290,8 +1443,10 @@ export class FleetPartnerService implements OnModuleInit {
   private matchRevenueShareRule(
     affiliation: DriverFleetAffiliationRecord,
     trip: BillingSettlementTripRecord,
+    rules: readonly FleetPartnerRevenueShareRuleRecord[] = this
+      .revenueShareRules,
   ): StatementRuleMatch | null {
-    const candidateRules = this.revenueShareRules
+    const candidateRules = rules
       .filter((rule) => {
         if (rule.fleetPartnerId !== affiliation.fleetPartnerId) {
           return false;

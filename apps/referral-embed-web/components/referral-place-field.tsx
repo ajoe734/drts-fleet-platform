@@ -86,11 +86,22 @@ export function ReferralPlaceField({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [mapFailed, setMapFailed] = useState(googleMapsAuthFailed());
+  const selectionSequence = useRef(0);
   const mapAvailable = Boolean(
     mapConfig?.enabled && mapConfig.browserKey && !mapFailed,
   );
 
   useEffect(() => onGoogleMapsAuthFailure(() => setMapFailed(true)), []);
+
+  useEffect(() => {
+    if (disabled) {
+      selectionSequence.current += 1;
+      setBusy(false);
+    }
+    return () => {
+      selectionSequence.current += 1;
+    };
+  }, [disabled]);
 
   // Suggestions only while the rider is typing, never for programmatic fills.
   useEffect(() => {
@@ -149,22 +160,31 @@ export function ReferralPlaceField({
     };
   }, [typing, value]);
 
-  async function choosePoint(next: LatLngLiteral) {
+  async function resolvePoint(next: LatLngLiteral, selection: number) {
     setPoint(next);
     setBusy(true);
     setNotice(null);
     try {
       const address = await reverseGeocode(next);
+      if (selection !== selectionSequence.current) return;
       setTyping(false);
       onChange(address);
     } catch {
-      setNotice(t("place.noAddress"));
+      if (selection === selectionSequence.current)
+        setNotice(t("place.noAddress"));
     } finally {
-      setBusy(false);
+      if (selection === selectionSequence.current) setBusy(false);
     }
   }
 
+  function choosePoint(next: LatLngLiteral) {
+    if (disabled) return;
+    return resolvePoint(next, ++selectionSequence.current);
+  }
+
   function useCurrentLocation() {
+    if (disabled) return;
+    const selection = ++selectionSequence.current;
     if (!("geolocation" in navigator)) {
       setNotice(t("place.noGeolocation"));
       return;
@@ -172,12 +192,18 @@ export function ReferralPlaceField({
     setBusy(true);
     setNotice(null);
     navigator.geolocation.getCurrentPosition(
-      (position) =>
-        void choosePoint({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        }),
+      (position) => {
+        if (selection !== selectionSequence.current) return;
+        void resolvePoint(
+          {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          },
+          selection,
+        );
+      },
       () => {
+        if (selection !== selectionSequence.current) return;
         setBusy(false);
         setNotice(t("place.locationDenied"));
       },
@@ -222,6 +248,9 @@ export function ReferralPlaceField({
             name={name}
             value={value}
             onChange={(event) => {
+              selectionSequence.current += 1;
+              setBusy(false);
+              setNotice(null);
               setTyping(true);
               onChange(event.currentTarget.value);
             }}
@@ -262,6 +291,9 @@ export function ReferralPlaceField({
                 role="option"
                 aria-selected={false}
                 onClick={() => {
+                  selectionSequence.current += 1;
+                  setBusy(false);
+                  setNotice(null);
                   setTyping(false);
                   setSuggestions([]);
                   if (suggestion.location) setPoint(suggestion.location);

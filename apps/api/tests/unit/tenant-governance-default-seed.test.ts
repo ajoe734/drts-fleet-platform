@@ -73,6 +73,20 @@ function createInMemoryTenantPartnerRepository(
       },
     ),
     loadState: vi.fn(async () => cloneState(state)),
+    readTenantMasterDirectory: vi.fn(async (tenantId: string) => {
+      const directory = cloneState(state);
+      return {
+        passengers: directory.passengers.filter(
+          (record) => record.tenantId === tenantId,
+        ),
+        addresses: directory.addresses.filter(
+          (record) => record.tenantId === tenantId,
+        ),
+        costCenters: directory.costCenters.filter(
+          (record) => record.tenantId === tenantId,
+        ),
+      };
+    }),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       state = {
         notificationPreferences: mergeByKey(

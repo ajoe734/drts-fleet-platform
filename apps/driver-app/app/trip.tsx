@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { ApiClientError } from "@drts/api-client";
 import type {
@@ -840,13 +840,27 @@ function getTripAuthorityBannerProps(
 }
 
 export default function TripScreen() {
-  const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
+  const { taskId } = useLocalSearchParams<{ taskId?: string | string[] }>();
+  const selectedTaskId = Array.isArray(taskId) ? taskId[0] : taskId;
+  const selectedTaskIdRef = useRef(selectedTaskId);
+  selectedTaskIdRef.current = selectedTaskId;
+  const [loadedTaskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(
+    null,
+  );
+  const taskDetail =
+    selectedTaskId && loadedTaskDetail?.taskId !== selectedTaskId
+      ? null
+      : loadedTaskDetail;
+  const taskDetailRef = useRef(taskDetail);
+  taskDetailRef.current = taskDetail;
+  const tripMountedRef = useRef(true);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
   const [actualFareState, setActualFareState] = useState<{
     taskId: string | null;
     draft: ActualFareDraft;
   }>({ taskId: null, draft: emptyActualFareDraft() });
   const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([]);
+  const completionDraftGenerationRef = useRef(0);
   const [signoffReference, setSignoffReference] = useState("");
   const [expenseType, setExpenseType] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -1039,7 +1053,8 @@ export default function TripScreen() {
   const isOwnedTaskTerminal =
     !isForwardedTrip &&
     Boolean(
-      taskDetail && ["completed", "cancelled", "rejected"].includes(taskDetail.status),
+      taskDetail &&
+      ["completed", "cancelled", "rejected"].includes(taskDetail.status),
     );
   const recordingActive =
     !isOwnedTaskTerminal &&
@@ -1233,6 +1248,7 @@ export default function TripScreen() {
   }
 
   function resetCompletionDraft() {
+    completionDraftGenerationRef.current += 1;
     setActualFareState({ taskId: null, draft: emptyActualFareDraft() });
     setProofPhotos([]);
     setSignoffReference("");
@@ -1270,6 +1286,13 @@ export default function TripScreen() {
   }, [identityReady]);
 
   useEffect(() => {
+    tripMountedRef.current = true;
+    return () => {
+      tripMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
       setTaskDetail(null);
       setTaskViewDetail(null);
@@ -1280,6 +1303,9 @@ export default function TripScreen() {
   }, []);
 
   async function loadTrip(showSpinner: boolean) {
+    const isCurrentSelection = () =>
+      selectedTaskIdRef.current === selectedTaskId;
+    if (!isCurrentSelection()) return;
     if (!isDriverIdentityProvisioned()) {
       setTaskDetail(null);
       setTaskViewDetail(null);
@@ -1300,7 +1326,13 @@ export default function TripScreen() {
     try {
       setError(null);
       const tasks = await client.listDriverTasks();
-      const firstTask = tasks[0] ?? null;
+      if (!isCurrentSelection()) return;
+      const firstTask = selectedTaskId
+        ? (tasks.find((task) => task.taskId === selectedTaskId) ?? null)
+        : (tasks[0] ?? null);
+      if (selectedTaskId && !firstTask) {
+        throw new Error("找不到所選任務，請返回任務清單重新整理。");
+      }
       setTaskDetail(firstTask);
       setOrderDetail((current) =>
         current?.orderId === firstTask?.orderId ? current : null,
@@ -1318,6 +1350,7 @@ export default function TripScreen() {
             : Promise.resolve(null),
         ]);
 
+      if (!isCurrentSelection()) return;
       setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
       setQueuedCompletionUpdatedAt(pendingCompletion?.updatedAt ?? null);
       setPlatformPresenceSummary(presenceSummary);
@@ -1334,8 +1367,10 @@ export default function TripScreen() {
         const order = isForwardedTask(firstTask)
           ? await client.getOrder(firstTask.orderId)
           : await client.getDriverTaskOrder(firstTask.taskId);
+        if (!isCurrentSelection()) return;
         setOrderDetail(order);
       } catch (orderError) {
+        if (!isCurrentSelection()) return;
         const temporaryFailure =
           orderError instanceof ApiClientError &&
           (orderError.statusCode === 429 || orderError.statusCode >= 500);
@@ -1349,13 +1384,14 @@ export default function TripScreen() {
         }
       }
     } catch (loadError) {
+      if (!isCurrentSelection()) return;
       setError(getErrorMessage(loadError));
       setTaskDetail(null);
       setTaskViewDetail(null);
       setPlatformPresenceSummary(null);
       setOrderDetail(null);
     } finally {
-      setLoading(false);
+      if (isCurrentSelection()) setLoading(false);
     }
   }
 
@@ -1366,7 +1402,7 @@ export default function TripScreen() {
     } else {
       setLoading(false);
     }
-  }, [identityReady, isProvisioned]);
+  }, [identityReady, isProvisioned, selectedTaskId]);
 
   useEffect(() => {
     return subscribeTrackingDiagnostic(setTrackingDiagnostic);
@@ -1562,11 +1598,14 @@ export default function TripScreen() {
 
   async function requestPhotoPermission(
     source: "camera" | "library",
+    isCurrentDraft: () => boolean,
   ): Promise<boolean> {
     const response =
       source === "camera"
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!isCurrentDraft()) return false;
 
     if (response.granted) {
       return true;
@@ -1582,6 +1621,14 @@ export default function TripScreen() {
   }
 
   async function pickProofPhotos(source: "camera" | "library") {
+    const currentTaskId = taskDetail?.taskId;
+    if (!currentTaskId) return;
+    const draftGeneration = completionDraftGenerationRef.current;
+    const isCurrentDraft = () =>
+      tripMountedRef.current &&
+      selectedTaskIdRef.current === selectedTaskId &&
+      taskDetailRef.current?.taskId === currentTaskId &&
+      completionDraftGenerationRef.current === draftGeneration;
     if (remainingSlots <= 0) {
       Alert.alert(
         "已達照片上限",
@@ -1590,8 +1637,8 @@ export default function TripScreen() {
       return;
     }
 
-    const hasPermission = await requestPhotoPermission(source);
-    if (!hasPermission) {
+    const hasPermission = await requestPhotoPermission(source, isCurrentDraft);
+    if (!hasPermission || !isCurrentDraft()) {
       return;
     }
 
@@ -1610,7 +1657,7 @@ export default function TripScreen() {
             selectionLimit: remainingSlots,
           });
 
-    if (result.canceled || result.assets.length === 0) {
+    if (!isCurrentDraft() || result.canceled || result.assets.length === 0) {
       return;
     }
 
@@ -1635,6 +1682,11 @@ export default function TripScreen() {
 
     const client = getDriverClient();
     const now = new Date().toISOString();
+    const actionTaskId = taskDetail.taskId;
+    const isCurrentTask = () =>
+      tripMountedRef.current &&
+      selectedTaskIdRef.current === selectedTaskId &&
+      taskDetailRef.current?.taskId === actionTaskId;
 
     try {
       setSubmittingAction(action);
@@ -1709,8 +1761,11 @@ export default function TripScreen() {
           return;
       }
 
+      if (!isCurrentTask()) return;
+
       if (action === "complete") {
         await stopDriverLocationHeartbeat();
+        if (!isCurrentTask()) return;
         clearDurationTicker();
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
@@ -1732,6 +1787,8 @@ export default function TripScreen() {
         return;
       }
 
+      if (!isCurrentTask()) return;
+
       if (shouldReloadTripAfterFailedAction(action)) {
         try {
           await loadTrip(false);
@@ -1743,6 +1800,7 @@ export default function TripScreen() {
         }
       }
 
+      if (!isCurrentTask()) return;
       Alert.alert("錯誤", actionErrorMessage);
     } finally {
       setSubmittingAction(null);
