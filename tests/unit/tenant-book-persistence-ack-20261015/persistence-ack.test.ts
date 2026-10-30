@@ -30,36 +30,120 @@ function deferred() {
 // Only the SQL transport is simulated. Service, controller envelopes, SQL write
 // selection, Promise.all propagation and repository loadState are production code.
 function fixture() {
+  type RecordRow = Record<string, unknown>;
+  type Tables = Map<string, Map<string, RecordRow>>;
+  type Transaction = { pending: Tables | null };
   let nextWrite: ReturnType<typeof deferred> | undefined;
-  const rows = new Map<string, Map<string, unknown>>();
-  const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
-    if (sql.includes("INSERT INTO")) {
-      const table = /INSERT INTO\s+(\S+)/.exec(sql)?.[1];
-      if (!table) throw new Error("Unexpected SQL insert");
-      const record = JSON.parse(String(values![5])) as Record<string, unknown>;
-      const gate = nextWrite;
-      nextWrite = undefined;
-      if (gate) await gate.promise;
-      const key = String(
-        record.passengerId ??
-          record.addressId ??
-          `${record.tenantId}:${record.code}`,
+  const rows: Tables = new Map();
+  // Canonical reads precede writes; observe the actual INSERT entry separately.
+  const writeQuery = vi.fn();
+  const query = vi.fn(
+    async (
+      sql: string,
+      values?: readonly unknown[],
+      transaction?: Transaction,
+    ) => {
+      const result = (
+        records: RecordRow[] = [],
+        rowCount = records.length,
+      ) => ({
+        rows: structuredClone(records),
+        rowCount,
+      });
+      if (sql.trim() === "BEGIN") {
+        if (!transaction || transaction.pending)
+          throw new Error("Unexpected SQL transaction start");
+        transaction.pending = new Map();
+        return result();
+      }
+      if (sql.trim() === "COMMIT") {
+        if (!transaction?.pending)
+          throw new Error("Unexpected SQL transaction commit");
+        // Commit only this client's staged rows. A sibling client's successful
+        // write must survive both this commit and a later rollback.
+        for (const [table, staged] of transaction.pending) {
+          const committed = rows.get(table) ?? new Map<string, RecordRow>();
+          for (const [key, record] of staged)
+            committed.set(key, structuredClone(record));
+          rows.set(table, committed);
+        }
+        transaction.pending = null;
+        return result();
+      }
+      if (sql.trim() === "ROLLBACK") {
+        if (!transaction) throw new Error("Unexpected SQL rollback");
+        transaction.pending = null;
+        return result();
+      }
+      if (sql.includes("INSERT INTO")) {
+        writeQuery(sql, values);
+        const table = /INSERT INTO\s+(\S+)/.exec(sql)?.[1];
+        if (!table) throw new Error("Unexpected SQL insert");
+        const record = JSON.parse(String(values![5])) as RecordRow;
+        const gate = nextWrite;
+        nextWrite = undefined;
+        if (gate) await gate.promise;
+        const key = String(
+          record.passengerId ??
+            record.addressId ??
+            String(record.tenantId) + ":" + String(record.code),
+        );
+        const current =
+          transaction?.pending?.get(table)?.get(key) ??
+          rows.get(table)?.get(key);
+        // Model only the real SQL's conditional conflict update. A rejected
+        // foreign owner returns zero rows, never a fabricated successful ACK.
+        if (
+          current &&
+          /WHERE\s+tenant_(?:passenger|address)\.tenant_id\s*=\s*EXCLUDED\.tenant_id/i.test(
+            sql,
+          ) &&
+          current.tenantId !== record.tenantId
+        )
+          return result();
+        const target = transaction?.pending ?? rows;
+        const tableRows = target.get(table) ?? new Map<string, RecordRow>();
+        tableRows.set(key, structuredClone(record));
+        target.set(table, tableRows);
+        return result(
+          /RETURNING passenger_id\b/i.test(sql)
+            ? [{ passenger_id: record.passengerId }]
+            : /RETURNING address_id\b/i.test(sql)
+              ? [{ address_id: record.addressId }]
+              : [],
+          1,
+        );
+      }
+      const table = /FROM\s+(\S+)/.exec(sql)?.[1];
+      const committed = table ? rows.get(table) : undefined;
+      const staged = table ? transaction?.pending?.get(table) : undefined;
+      const visible = new Map([...(committed ?? []), ...(staged ?? [])]);
+      const tenantParameter = /\btenant_id\s*=\s*\$(\d+)/.exec(sql);
+      return result(
+        [...visible.values()]
+          .filter(
+            (record) =>
+              !tenantParameter ||
+              record.tenantId === values?.[Number(tenantParameter[1]) - 1],
+          )
+          .map((record) => ({ record })),
       );
-      const tableRows = rows.get(table) ?? new Map<string, unknown>();
-      tableRows.set(key, record);
-      rows.set(table, tableRows);
-    }
-    const table = /FROM\s+(\S+)/.exec(sql)?.[1];
-    return {
-      rows: table
-        ? [...(rows.get(table)?.values() ?? [])].map((record) => ({ record }))
-        : [],
-      rowCount: 1,
-    };
-  });
+    },
+  );
   const repository = new TenantPartnerRepository({
     isEnabled: () => true,
     query,
+    connect: async () => {
+      const transaction: Transaction = { pending: null };
+      return {
+        query: (sql: string, values?: readonly unknown[]) =>
+          query(sql, values, transaction),
+        release() {
+          if (transaction.pending)
+            throw new Error("SQL transaction released before its outcome");
+        },
+      };
+    },
   } as unknown as DatabaseService);
   vi.spyOn(repository, "reportPersistenceFailure").mockImplementation(() => {});
   const audit = new AuditNotificationService();
@@ -78,6 +162,7 @@ function fixture() {
     repository,
     audit,
     query,
+    writeQuery,
     delay() {
       nextWrite = deferred();
       return nextWrite;
@@ -171,7 +256,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
           settled = true;
         },
       );
-      await vi.waitFor(() => expect(f.query).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(f.writeQuery).toHaveBeenCalledTimes(2));
       await new Promise<void>((resolve) => setImmediate(resolve));
       const pending = !settled;
       const whilePending = operation.read(f.service);
@@ -201,7 +286,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
       const rejected = expect(
         Promise.resolve(operation.mutate(f.controller)),
       ).rejects.toThrow("SQL refused");
-      await vi.waitFor(() => expect(f.query).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(f.writeQuery).toHaveBeenCalledTimes(2));
       const unrelated = await f.service.upsertPassenger(tenantId, {
         passengerId: "unrelated",
         fullName: "Unrelated committed user",
@@ -238,7 +323,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
       const rejected = expect(
         Promise.resolve(operation.mutate(f.controller, "new-record")),
       ).rejects.toThrow("SQL refused");
-      await vi.waitFor(() => expect(f.query).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(f.writeQuery).toHaveBeenCalledTimes(1));
       gate.reject(new Error("SQL refused"));
       await rejected;
       expect(operation.read(f.service)).toEqual(before);
@@ -321,7 +406,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
       passengerId: "shared-id",
       fullName: "Original tenant owner",
     });
-    await vi.waitFor(() => expect(f.query).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(f.writeQuery).toHaveBeenCalledTimes(1));
     const refused = expect(
       f.service.upsertPassenger("other-tenant", {
         passengerId: "shared-id",
@@ -331,7 +416,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
     gate.resolve();
     const committed = await first;
     await refused;
-    expect(f.query).toHaveBeenCalledTimes(1);
+    expect(f.writeQuery).toHaveBeenCalledTimes(1);
     expect(f.service.getPassengerMasterRecord(tenantId, "shared-id")).toEqual(
       committed,
     );
@@ -352,7 +437,7 @@ describe("tenant book canonical persistence acknowledgement", () => {
         fullName: "Rejected",
       }),
     ).rejects.toThrow("SQL refused");
-    await vi.waitFor(() => expect(f.query).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(f.writeQuery).toHaveBeenCalledTimes(2));
     const later = f.service.upsertPassenger(tenantId, {
       passengerId: "ordered",
       fullName: "Later success",
