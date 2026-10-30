@@ -316,6 +316,7 @@ const REALM_ACTOR_TYPE: Record<AuthRealm, string> = {
   ops: "ops_user",
   driver: "driver_user",
   partner: "partner_api_key",
+  agency: "agency_user",
 };
 
 async function activate(guard: BootstrapAuthGuard, context: unknown) {

@@ -173,6 +173,30 @@
       "amended_at": "2026-10-24",
       "scope": "Appended referral_monthly_rating_governance_allocations V0130 only; all previous allocations, amendments and task ownership entries remain unchanged",
       "reason": "Registers the R04 monthly driver rating governance migration V0130__referral_monthly_rating_governance.sql at accepted protected dev 352d347e25cfcaecc2ab21f376b6976cc0944486, whose previous highest reserved migration is V0129 in referral_passenger_fee_consent_allocations."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "amended_at": "2026-10-25",
+      "scope": "Appended regulatory_agency_access_allocations V0132 and V0133 only; all previous allocations, amendments and task ownership entries remain unchanged. V0131 stays reserved for BUREAU-R02 (V0131__exclusivity_operator_binding.sql) and is not claimed here.",
+      "reason": "Registers the R13 agency read-only portal migrations V0132__regulatory_agencies.sql and V0133__agency_access_logs.sql at origin/dev a852615e5737b8bb47f90a95c0e1a1ae872c8cec, whose highest accepted migration is V0130 (R04); V0131 is the R02 reservation."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R02-EXCLUSIVE-OPERATOR-CHECK-20261024",
+      "amended_at": "2026-10-25",
+      "scope": "Appended exclusivity_operator_binding_allocations V0131 only; all previous allocations, amendments and task ownership entries remain unchanged",
+      "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) and BUREAU-R13 (V0132, V0133) merged to origin/dev and 3-leaf migration_reservation_scope_coordination."
+    },
+    {
+      "amended_by_task_id": "BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025",
+      "amended_at": "2026-10-25",
+      "scope": "Append V0134 to normal_onboarding_supply_pair_allocations; original V0128 entry and all prior allocations, amendments and task ownership entries remain unchanged",
+      "reason": "Registers V0134__approved_supply_renewal.sql under the existing SA/SD supply eligibility and canonical registry submission family (docs/02-architecture/phase1_delta_sa_supply_eligibility_mobile_reporting_20260619.md, docs/02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md) at origin/dev 521dbbabd23799b7dd5e7b98cfe22ea921c6e68f after V0133__agency_access_logs.sql."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
+      "amended_at": "2026-10-25",
+      "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
+      "reason": "Registers the R11 per-trip operational record truth, telemetry.driver_location_events route provenance, historical backfill/reconciliation, payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
     }
   ],
   "voice_application_allocations": [
@@ -817,6 +841,33 @@
         "Existing numeric legacy ETA values preserve their behavior; a new NULL estimate without driver observation/destination does not create a zero-minute candidate.",
         "All license, contract, insurance, exclusivity, workstate, product and location checks remain unchanged."
       ]
+    },
+    {
+      "task_id": "BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025",
+      "version": "V0134",
+      "migration_filename": "V0134__approved_supply_renewal.sql",
+      "domain": "approved_supply_renewal",
+      "target_schema": "fleet, reg",
+      "primary_tables": [
+        "fleet.vehicle_supply_drafts",
+        "fleet.supply_submissions",
+        "reg.phase1_registry_expiry_events"
+      ],
+      "referenced_tables": [
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_vehicles",
+        "reg.phase1_registry_policies",
+        "reg.phase1_registry_contracts",
+        "reg.phase1_registry_supply_pairs"
+      ],
+      "description": "Replaces the V0034 plate-only unique index on fleet.vehicle_supply_drafts with a non-unique lookup index so an approved canonical vehicle can receive subsequent insurance_update / contract_update submissions while preserving historical onboarding draft rows; adds canonical target and subject lookup indexes on fleet.supply_submissions; extends reg.phase1_registry_expiry_events.entity_type check constraint to permit 'contract' alongside 'driver' and 'policy' for R14 expiry reminder supersession.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Approved supply submissions remain immutable; subsequent vehicle insurance_update/contract_update and driver document_update create new fleet.supply_submissions rows bound to the authoritative canonical_vehicle_id/canonical_driver_id without overwriting historical onboarding draft rows.",
+        "Active pending/in-review uniqueness is enforced at the submission layer per partner and canonical target; duplicate onboarding of an already-approved plate is rejected and routed to the typed renewal workflow.",
+        "Approval of a typed renewal updates the existing canonical driver/vehicle record, creates a new linked policy/contract version while superseding prior active coverage and R14 expiry events, and aggregates readiness across applicable approved submissions inside the existing single transaction.",
+        "reg.phase1_registry_expiry_events.entity_type permits ('driver', 'policy', 'contract') so contract_update approval can supersede pending contract expiry alerts in the same transaction."
+      ]
     }
   ],
   "referral_passenger_fee_consent_allocations": [
@@ -864,6 +915,94 @@
         "UNIQUE (driver_id, period_month, rule_type) enforces per-driver, per-Asia/Taipei-month, per-rule idempotency so coaching and termination_review records can both exist for the same driver and month without overwriting each other.",
         "Idempotent evaluation upserts aggregate fields (average_rating, rating_count, consecutive_low_months, triggered_months, monthly_breakdown) while preserving recorded handling status, outcome, outcome_reason, handled_by_actor_id, handled_at and audit_id.",
         "CHECK constraints enforce period_month YYYY-MM format, rule_type IN ('coaching', 'termination_review'), status IN ('pending', 'coached', 'terminated', 'dismissed'), and consistency between pending/null outcome and handled outcome/reason/actor/timestamp."
+      ]
+    }
+  ],
+  "exclusivity_operator_binding_allocations": [
+    {
+      "task_id": "BUREAU-R02-EXCLUSIVE-OPERATOR-CHECK-20261024",
+      "version": "V0131",
+      "migration_filename": "V0131__exclusivity_operator_binding.sql",
+      "domain": "exclusivity_operator_binding",
+      "target_schema": "reg",
+      "primary_tables": [
+        "reg.dispatch_exclusivities",
+        "reg.phase1_registry_exclusivities"
+      ],
+      "referenced_tables": ["reg.multi_taxi_operating_authorizations"],
+      "description": "Traffic Bureau R02 canonical dispatching-operator binding (exclusive_operator_id) on vehicle dispatch exclusivity records while preserving exclusiveProviderName as display text.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "reg.dispatch_exclusivities and reg.phase1_registry_exclusivities gain exclusive_operator_id varchar(100) NULL; existing rows without an operator ID remain NULL (unbound) and are blocked by runtime dispatch eligibility (exclusivity_operator_unbound) until bound to an approved operator.",
+        "Backfill copies non-empty trimmed record->>'exclusiveOperatorId' into reg.phase1_registry_exclusivities.exclusive_operator_id when exclusive_operator_id IS NULL without fabricating missing bindings.",
+        "idx_phase1_registry_exclusivities_operator_status indexes (exclusive_operator_id, review_status) on reg.phase1_registry_exclusivities for operator-scoped exclusivity lookups."
+      ]
+    }
+  ],
+  "regulatory_agency_access_allocations": [
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0132",
+      "migration_filename": "V0132__regulatory_agencies.sql",
+      "domain": "regulatory_agency_directory",
+      "target_schema": "core",
+      "primary_tables": ["core.regulatory_agencies"],
+      "referenced_tables": [
+        "iam.identity_memberships",
+        "iam.identity_role_bindings",
+        "iam.identity_invitations"
+      ],
+      "description": "Traffic Bureau R13 regulatory agency master record; agency memberships, role bindings and invitations reuse the canonical iam.identity_* tables with realm 'agency'.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "agency_code is UNIQUE; status IN ('active', 'suspended', 'retired'); display_name is non-blank.",
+        "No agency rows are seeded by the migration; platform admin creates agencies (open decision D1).",
+        "A suspended or retired agency denies every agency session on the next request (JwtAuthService durable-state check)."
+      ]
+    },
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0133",
+      "migration_filename": "V0133__agency_access_logs.sql",
+      "domain": "regulatory_agency_access_audit",
+      "target_schema": "admin",
+      "primary_tables": ["admin.agency_access_logs"],
+      "referenced_tables": [
+        "core.regulatory_agencies",
+        "iam.identity_principals"
+      ],
+      "description": "Traffic Bureau R13 append-only per-access audit of every agency read, export and agency-route authorization denial.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "BEFORE UPDATE OR DELETE row trigger and BEFORE TRUNCATE statement trigger reject mutation; DELETE only under the existing audit_retention_operator role with audit.allow_retention_archival = on (V0080 contract).",
+        "action, resource_type and outcome are CHECK-constrained; a denied or error outcome never records row_count.",
+        "No retention period, default or purge scheduler is introduced (open decision D9)."
+      ]
+    },
+    {
+      "task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
+      "version": "V0135",
+      "migration_filename": "V0135__multi_taxi_trip_record_truth_retention.sql",
+      "domain": "multi_taxi_trip_record_truth_retention",
+      "target_schema": "reporting",
+      "primary_tables": ["reporting.multi_taxi_trip_operational_records"],
+      "referenced_tables": [
+        "ops.phase1_owned_orders",
+        "ops.phase1_driver_tasks",
+        "ops.phase1_dispatch_assignments",
+        "ops.driver_completion_outbox",
+        "ops.passenger_dispatch_disclosure_snapshots",
+        "reporting.multi_taxi_electronic_receipts",
+        "billing.multi_taxi_passenger_payments",
+        "telemetry.driver_location_events",
+        "voice.legal_hold"
+      ],
+      "description": "Traffic Bureau R11 per-trip operational record truth, telemetry.driver_location_events GPS provenance columns/snapshot, historical backfill/reconciliation, transactional payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Extends V0056 reporting.multi_taxi_trip_operational_records with explicit statutory truth and provenance columns (order_no, assignment_id, route_summary, route_source, distance_meters, duration_seconds, collected_fare_minor, payment_status, toll_minor, toll_source, fare_policy_version, charging_mode) without creating a duplicate table.",
+        "multi_taxi_record_payment_collection_chk enforces that collected_fare_minor is non-null only when payment_status = 'captured', 0 when payment_status = 'refunded', and NULL when payment_status IN ('not_selected', 'authorized', 'failed', 'manual_recovery', 'unknown'), synchronized inside the same transaction via trg_sync_multi_taxi_trip_record_payment on billing.multi_taxi_passenger_payments without overwriting completion actual_fare_minor.",
+        "reporting.multi_taxi_two_calendar_year_retention_floor, trg_multi_taxi_trip_record_update_guard, trg_multi_taxi_trip_record_delete_guard, and trg_multi_taxi_trip_record_no_truncate forbid core trip-fact mutation once populated, forbid shortening retain_until below existing value or the two-calendar-year UTC floor (>= 2 calendar years and >= 730 days, rolling Feb 29 starts to Mar 1), forbid TRUNCATE, forbid DELETE while effective retain_until > clock_timestamp(), and after expiry require reporting.allow_trip_record_retention_purge = 'on' and no active hold in voice.legal_hold."
       ]
     }
   ]

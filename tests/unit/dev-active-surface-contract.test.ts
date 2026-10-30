@@ -15,6 +15,7 @@ const expectedServices = {
   "referral-embed-web": "drts-dev-referral-embed-web",
   "channel-partner-portal-web": "drts-channel-partner-portal-web",
   "passenger-app-web": "drts-dev-passenger-app-web",
+  "agency-portal-web": "drts-dev-agency-portal-web",
 } as const;
 
 function readRepoFile(relativePath: string): string {
@@ -47,6 +48,7 @@ describe("dev active surface contract", () => {
       "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
       "passenger-app-web": "DEV_GCP_PASSENGER_APP_SERVICE",
+      "agency-portal-web": "DEV_GCP_AGENCY_PORTAL_SERVICE",
     } as const;
 
     for (const [surface, service] of Object.entries(expectedServices)) {
@@ -67,7 +69,7 @@ describe("dev active surface contract", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
@@ -132,6 +134,7 @@ describe("dev active surface contract", () => {
       "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
       "passenger-app-web": "DEV_GCP_PASSENGER_APP_SERVICE",
+      "agency-portal-web": "DEV_GCP_AGENCY_PORTAL_SERVICE",
     });
 
     expect(source).toContain("uses: actions/checkout@v4");

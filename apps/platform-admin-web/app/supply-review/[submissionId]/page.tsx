@@ -265,7 +265,11 @@ export default function SupplyReviewDetailPage() {
       (d) => d.effectiveUntil && d.effectiveUntil < today,
     );
     const hasMissingDocs =
-      record?.submissionType === "vehicle_onboarding" && documents.length === 0;
+      (record?.submissionType === "vehicle_onboarding" ||
+        record?.submissionType === "insurance_update" ||
+        record?.submissionType === "contract_update" ||
+        record?.submissionType === "profile_correction") &&
+      documents.length === 0;
 
     return {
       isComplete: expiredDocs.length === 0 && !hasMissingDocs,
@@ -368,16 +372,31 @@ export default function SupplyReviewDetailPage() {
     }
   };
 
+  const isRenewalSubmission =
+    record?.submissionType === "insurance_update" ||
+    record?.submissionType === "contract_update" ||
+    record?.submissionType === "profile_correction";
+  const canonicalDlSuffix = isRenewalSubmission
+    ? currentStatus === "approved"
+      ? "(updated)"
+      : "(renewal target)"
+    : "(created)";
+  const targetVehicleOrDriverId =
+    record?.canonicalVehicleId ||
+    record?.subjectVehicleId ||
+    record?.canonicalDriverId ||
+    record?.subjectDriverId ||
+    null;
+
   const canonicalDlItems: CanvasDLItem[] = [
     {
-      k: record?.canonicalVehicleId
-        ? t("supplyReview.dl.createUpdateVehicle")
-        : t("supplyReview.dl.createUpdateDriver"),
-      v: record?.canonicalVehicleId
-        ? `${record.canonicalVehicleId} (created)`
-        : record?.canonicalDriverId
-          ? `${record.canonicalDriverId} (created)`
-          : t("supplyReview.diff.notCreated"),
+      k:
+        record?.canonicalVehicleId || record?.subjectVehicleId
+          ? t("supplyReview.dl.createUpdateVehicle")
+          : t("supplyReview.dl.createUpdateDriver"),
+      v: targetVehicleOrDriverId
+        ? `${targetVehicleOrDriverId} ${canonicalDlSuffix}`
+        : t("supplyReview.diff.notCreated"),
       mono: true,
     },
     {

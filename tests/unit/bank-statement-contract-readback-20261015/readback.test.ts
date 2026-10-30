@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
+import { JSDOM } from "jsdom";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IssuerContractStatusRecord } from "../../../packages/contracts/src/index";
@@ -362,24 +363,62 @@ describe("C084 production SSR date consumers (run with TZ=UTC and TZ=Asia/Taipei
     },
   );
 
-  it("home formats UTC instants with the same Taipei dates, including compact due labels", async () => {
-    const h = harness({
-      statements: [
-        {
-          period: "2026-10",
-          status: "due",
-          issuedAt: "2026-09-30T16:00:00Z",
-          dueAt: "2026-10-30T16:30:00Z",
-        },
-      ],
-    });
-    const html = renderToStaticMarkup(await h.page("app/page.tsx")(h.props()));
-    expect(html).toContain("2026-10-01");
-    expect(html).toContain("2026-10-31");
-    expect(html).toContain("10-31");
-    expect(html).not.toContain("2026-09-30");
-    expect(html).not.toContain("10-30");
-  });
+  it.each([
+    { now: "2026-10-29T15:59:59Z", today: "2026-10-29" },
+    { now: "2026-10-29T16:00:00Z", today: "2026-10-30" },
+    { now: "2026-10-29T16:04:25Z", today: "2026-10-30" },
+    { now: "2026-10-30T15:59:59Z", today: "2026-10-30" },
+    { now: "2026-10-30T16:00:00Z", today: "2026-10-31" },
+  ])(
+    "home keeps statement Taipei dates scoped to their fields at $now (today $today)",
+    async ({ now, today }) => {
+      // Freeze only the external Date clock; real SSR/loaders/formatters run.
+      // afterEach restores it, including when an assertion fails.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(now));
+      const h = harness({
+        statements: [
+          {
+            period: "2026-10",
+            status: "due",
+            issuedAt: "2026-09-30T16:00:00Z",
+            dueAt: "2026-10-30T16:30:00Z",
+          },
+        ],
+      });
+      const html = renderToStaticMarkup(
+        await h.page("app/page.tsx")(h.props()),
+      );
+      const dom = JSDOM.fragment(html);
+      expect(dom.querySelector(".bank-home-subtitle")?.textContent).toContain(
+        today,
+      );
+      // A legitimate header can contain 10-30 or the expected due date.
+      // Match each financial field exactly so it cannot mask a wrong value.
+      const statementFields = Array.from(dom.querySelectorAll(".dl-item"));
+      const fieldValues = (label: string) =>
+        statementFields
+          .filter(
+            (item) => item.querySelector(".dl-key")?.textContent === label,
+          )
+          .map((item) => item.querySelector(".dl-val")?.textContent);
+      const issued = fieldValues("Issued");
+      const due = fieldValues("Due");
+      expect(issued).toEqual(["2026-10-01"]);
+      expect(due).toEqual(["2026-10-31"]);
+      expect(issued).not.toContain("2026-09-30");
+      expect(due).not.toContain("2026-10-30");
+      const statementKpis = Array.from(dom.querySelectorAll(".bank-kpi"))
+        .filter(
+          (item) =>
+            item.querySelector(".bank-kpi-label")?.textContent ===
+            "Current statement",
+        )
+        .map((item) => item.querySelector(".bank-kpi-delta")?.textContent);
+      expect(statementKpis).toEqual(["2026-10 · due 10-31"]);
+      expect(statementKpis.join(" ")).not.toContain("10-30");
+    },
+  );
 
   it("signed ops role still masks finance despite a finance query", async () => {
     const h = harness({

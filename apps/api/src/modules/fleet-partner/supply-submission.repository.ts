@@ -541,6 +541,8 @@ export class SupplySubmissionRepository {
         INNER JOIN fleet.supply_submissions s
           ON s.submission_id = d.submission_id
         WHERE s.fleet_partner_id = $1
+          AND s.submission_type = 'vehicle_onboarding'
+          AND s.status IN ('draft', 'submitted', 'in_review', 'needs_revision')
           AND lower(d.plate_no) = lower($2)
           AND ($3::uuid IS NULL OR d.submission_id <> $3::uuid)
         LIMIT 1

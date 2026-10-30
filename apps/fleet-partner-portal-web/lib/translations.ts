@@ -83,6 +83,7 @@ const en: Dict = {
   "supply.dashboard.documents": "Document overview",
   "supply.dashboard.addDriver": "Add driver",
   "supply.dashboard.addVehicle": "Add vehicle",
+  "supply.dashboard.renewSupply": "Renew approved supply",
   "supply.dashboard.fallback":
     "Showing design fallback data until the fleet-partner supply API is available.",
   "supply.dashboard.group.draft": "Draft",
@@ -111,6 +112,34 @@ const en: Dict = {
   "supply.vehicleNew.title": "Add vehicle",
   "supply.vehicleNew.subtitle": "Vehicle draft -> upload docs -> submit",
   "supply.vehicleNew.cardTitle": "Vehicle supply draft",
+  "supply.vehicleNew.plateExistsRenewalTitle":
+    "Approved vehicle plate already registered",
+  "supply.vehicleNew.plateExistsRenewalBody":
+    "This plate is already registered as an approved vehicle in your fleet. To renew its insurance policy or fleet participation contract, create an approved supply renewal submission instead of onboarding a duplicate vehicle.",
+  "supply.vehicleNew.plateExistsRenewalAction":
+    "Open approved supply renewal",
+  "supply.renewalNew.title": "Renew approved supply",
+  "supply.renewalNew.subtitle":
+    "Select an approved vehicle or driver -> update policy/contract/license draft -> upload renewed documents -> submit for Platform review",
+  "supply.renewalNew.cardTitle": "Approved supply renewal draft",
+  "supply.renewalNew.fallback":
+    "Showing fallback renewal targets until the fleet-partner supply API is available.",
+  "supply.renewal.typeLabel": "Renewal submission type",
+  "supply.renewal.type.insurance_update":
+    "Vehicle insurance renewal (insurance_update)",
+  "supply.renewal.type.contract_update":
+    "Vehicle contract renewal (contract_update)",
+  "supply.renewal.type.profile_correction":
+    "Driver license / registration renewal (profile_correction)",
+  "supply.renewal.targetVehicleLabel": "Target approved vehicle",
+  "supply.renewal.targetDriverLabel": "Target approved driver",
+  "supply.renewal.selectVehiclePlaceholder": "Select an approved vehicle",
+  "supply.renewal.selectDriverPlaceholder": "Select an approved driver",
+  "supply.renewal.plateImmutableNote":
+    "Plate number is locked to the canonical approved vehicle on renewal submissions.",
+  "supply.renewal.currentCanonicalSummary": "Current canonical status",
+  "supply.renewal.requiredDocsHint":
+    "After creating the renewal draft, upload the renewed document with effectiveFrom and effectiveUntil dates on the detail page before submitting.",
   "supply.draft.tipTitle": "Submission tip",
   "supply.draft.tipBody":
     "After the draft is created, go to the detail page to upload documents, then submit with the revision-aware submit flow.",
@@ -668,6 +697,7 @@ const zh: Dict = {
   "supply.dashboard.documents": "文件總覽",
   "supply.dashboard.addDriver": "新增司機",
   "supply.dashboard.addVehicle": "新增車輛",
+  "supply.dashboard.renewSupply": "既有供給續期送審",
   "supply.dashboard.fallback":
     "目前顯示設計 fallback 資料；fleet-partner supply API 可用時會切換成 live data。",
   "supply.dashboard.group.draft": "草稿",
@@ -696,6 +726,34 @@ const zh: Dict = {
   "supply.vehicleNew.subtitle":
     "Vehicle draft · create -> upload docs -> submit",
   "supply.vehicleNew.cardTitle": "VehicleSupplyDraft",
+  "supply.vehicleNew.plateExistsRenewalTitle":
+    "此車牌已存在於車隊核可車輛主檔",
+  "supply.vehicleNew.plateExistsRenewalBody":
+    "此車牌已完成首次核准建檔。若需辦理同車續保（insurance_update）或續約（contract_update），請改由「既有供給續期送審」建立更新送審件，無須重複建檔。",
+  "supply.vehicleNew.plateExistsRenewalAction":
+    "前往既有供給續期送審",
+  "supply.renewalNew.title": "既有供給續期送審",
+  "supply.renewalNew.subtitle":
+    "選擇已核可車輛或司機 -> 更新續保／續約／證照效期草稿 -> 上傳新效期證明文件 -> 送交平台審核",
+  "supply.renewalNew.cardTitle": "既有供給續期草稿（SupplyRenewalDraft）",
+  "supply.renewalNew.fallback":
+    "目前顯示 fallback 續期標的資料；fleet-partner supply API 可用時會切換成 live data。",
+  "supply.renewal.typeLabel": "續期送審類型",
+  "supply.renewal.type.insurance_update":
+    "同車續保更新（insurance_update）",
+  "supply.renewal.type.contract_update":
+    "同車續約更新（contract_update）",
+  "supply.renewal.type.profile_correction":
+    "司機證照／執業登記證續期（profile_correction）",
+  "supply.renewal.targetVehicleLabel": "選擇已核可車輛（Canonical Vehicle）",
+  "supply.renewal.targetDriverLabel": "選擇已核可司機（Canonical Driver）",
+  "supply.renewal.selectVehiclePlaceholder": "請選擇已核可車輛",
+  "supply.renewal.selectDriverPlaceholder": "請選擇已核可司機",
+  "supply.renewal.plateImmutableNote":
+    "續保／續約送審綁定既有車輛主檔，車牌號碼鎖定不可變更。",
+  "supply.renewal.currentCanonicalSummary": "目前主檔效期與派工狀態",
+  "supply.renewal.requiredDocsHint":
+    "建立續期草稿後，請於詳情頁上傳含新效期（effectiveFrom / effectiveUntil）之續保保單、續約契約或新證照，再行送審。",
   "supply.draft.tipTitle": "送件提示",
   "supply.draft.tipBody":
     "建立草稿後，請到 detail 頁補上文件，再以 revision-aware submit 送審。",

@@ -59,6 +59,18 @@
   },
   "rules": [
     {
+      "id": "deepmerge-runtime-security-patch",
+      "pattern": "^patches/deepmerge@4\\.3\\.1\\.patch$",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
+      "id": "query-string-runtime-decoder-interop-patch",
+      "pattern": "^patches/query-string@7\\.1\\.3\\.patch$",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
       "id": "app-documentation",
       "pattern": "^apps/[^/]+/(?:README|AGENTS|CLAUDE)\\.md$",
       "classification": "documentation",
@@ -80,6 +92,18 @@
       "id": "app-tests",
       "pattern": "^apps/[^/]+/(?:tests?|__tests__)/|^apps/[^/]+/.*\\.(?:test|spec)\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
       "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "agency-portal-build-and-deploy-config",
+      "pattern": "^apps/agency-portal-web/(?:Dockerfile|next\\.config\\.[^/]+|tsconfig(?:\\.[^/]+)?\\.json)$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "agency-portal-app",
+      "pattern": "^apps/agency-portal-web/",
+      "classification": "product_runtime",
       "status": "active"
     },
     {
@@ -128,6 +152,18 @@
       "id": "package-tests",
       "pattern": "^packages/[^/]+/(?:tests?|__tests__)/|^packages/[^/]+/.*\\.(?:test|spec)\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
       "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "agency-auth-package-build-config",
+      "pattern": "^packages/agency-auth/tsconfig(?:\\.[^/]+)?\\.json$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "agency-auth-package",
+      "pattern": "^packages/agency-auth/",
+      "classification": "product_runtime",
       "status": "active"
     },
     {

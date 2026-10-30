@@ -240,5 +240,18 @@
     "paths": [
       "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
     ]
+  },
+  {
+    "advisory_id": "1243505",
+    "module_name": "deepmerge",
+    "reason": "npm latest remains 4.3.1. Local pnpm patch follows upstream PR #274, rejecting __proto__ in both merge loops including distributed CJS/UMD. Valid only when the gate verifies pinned patch bytes, manifest/lock binding and actual Expo consumers. Recheck upstream before expiry.",
+    "expires_at": "2026-11-11T00:00:00Z",
+    "versions": [
+      "4.3.1"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/config>deepmerge"
+    ],
+    "verified_patch": "deepmerge-4.3.1-prototype-poisoning"
   }
 ]

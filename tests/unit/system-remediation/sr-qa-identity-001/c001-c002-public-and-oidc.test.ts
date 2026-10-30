@@ -71,12 +71,45 @@ import importlib.util
 spec = importlib.util.spec_from_file_location("endpoints", "${publicEndpointsModule}")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+from subprocess import CompletedProcess
+from unittest.mock import patch
+import json
+
 http_fn = getattr(mod, "http", None)
-if http_fn:
-    res = http_fn("https://nonexistent-domain-for-testing-failure.smarttransport.tw")
-    resp = res.get("response")
-    # For a nonexistent domain, curl fails to connect (status is not 200)
-    assert resp is None or resp.get("status") != 200, "Must not return status 200 for nonexistent host"
+assert callable(http_fn), "Production http helper must exist"
+url = "https://nonexistent-domain-for-testing-failure.smarttransport.tw"
+expected_cmd = [
+    "curl", "--disable", "--silent", "--show-error", "--location", "--max-redirs", "5",
+    "--connect-timeout", "5", "--max-time", "15", "--proto", "=https",
+    "--proto-redir", "=https", "--output", mod.os.devnull, "--write-out",
+    '{"status":"%{http_code}","final_url":"%{url_effective}",'
+    '"remote_ip":"%{remote_ip}","redirects":%{num_redirects},'
+    '"ssl_verify_result":%{ssl_verify_result}}', url,
+]
+# Offline process fixtures only: production http/run/parser/classifier all execute.
+# The synthetic 200 with exit 6 tests the exit gate; it is not a real HTTP response.
+for exit_code, status, reachable in [(6, None, False), (35, "000", False), (6, "200", False), (0, "200", True)]:
+    stdout = "" if status is None else json.dumps({"status": status, "final_url": url})
+    stderr = "" if exit_code == 0 else "controlled curl failure"
+    process = CompletedProcess(expected_cmd, exit_code, stdout=" " + stdout + " ", stderr=stderr)
+    # Only the external execution port is mocked; curl/DNS/HTTP are never invoked.
+    with patch.object(mod.subprocess, "run", return_value=process) as external_run:
+        res = http_fn(url)
+        external_run.assert_called_once_with(
+            expected_cmd, text=True, capture_output=True, input="", timeout=25,
+        )
+    assert res["command"] == expected_cmd
+    assert res["exit_code"] == exit_code
+    assert res["stdout"] == stdout
+    assert res["stderr"] == stderr
+    resp = res["response"]
+    if status is None:
+        assert resp is None, "Empty curl output must not invent a response"
+    else:
+        assert resp == {"status": int(status), "final_url": url}, "Production parser must normalize the status"
+    if status in (None, "000"):
+        assert resp is None or resp["status"] != 200, "Failed connection must not return status 200"
+    assert res["reachable"] is reachable, "Process errors must fail closed even with synthetic status 200"
 print("FAIL_CLOSED_OK")
 `,
         ],

@@ -403,4 +403,158 @@ describe("ReportingFilingService sensitive-data governance", () => {
       governedFilingDetail.evidenceGovernance?.activeDeletionExceptions,
     ).toHaveLength(1);
   });
+
+  it("renders six-month operations summary PDF as aggregate summary and CSV as six monthly detail rows with unknown-snapshot handling", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new ReportingFilingService(auditNotificationService);
+    const months = [
+      "2026-05",
+      "2026-06",
+      "2026-07",
+      "2026-08",
+      "2026-09",
+      "2026-10",
+    ];
+    service.registerSixMonthOperationsSummaryProvider(async (filters) => [
+      {
+        from: filters.from ?? "2026-05-01",
+        to: filters.to ?? "2026-10-31",
+        businessArea: filters.businessArea ?? "taipei",
+        serviceProductCode: filters.serviceProductCode ?? "taxi_realtime",
+        demandRequestCount: 5,
+        actualDispatchCount: 4,
+        completedTripCount: 3,
+        cancelledOrderCount: 1,
+        averageDispatchableVehicleCount: 2,
+        validSnapshotCount: 2,
+        expectedSnapshotCount: 52992,
+        snapshotCoverageRate: 0.0001,
+        complaintCount: 2,
+        complaintsByCategory: { late_arrival: 1, no_show: 1 },
+        lateArrivalThresholdMinutes: 5,
+        onTimeTripCount: 2,
+        lateTripCount: 1,
+        noShowTripCount: 1,
+        punctualityUnknownTripCount: 0,
+        complaintCreatedLowRatingAutoCount: 0,
+        complaintCreatedManualCount: 2,
+        complaintClosedLowRatingAutoCount: 0,
+        complaintClosedManualCount: 1,
+        complaintOverdueLowRatingAutoCount: 0,
+        complaintOverdueManualCount: 0,
+        complaintStatisticsAsOf: "2026-10-31T23:59:59.000Z",
+        generatedAt: "2026-10-31T23:59:59.000Z",
+        monthlySummaries: months.map((periodMonth) => {
+          const isMay = periodMonth === "2026-05";
+          const isAug = periodMonth === "2026-08";
+          return {
+            periodMonth,
+            from: `${periodMonth}-01`,
+            to: `${periodMonth}-${periodMonth === "2026-06" || periodMonth === "2026-09" ? "30" : "31"}`,
+            businessArea: filters.businessArea ?? "taipei",
+            serviceProductCode: filters.serviceProductCode ?? "taxi_realtime",
+            demandRequestCount: isMay ? 3 : isAug ? 2 : 0,
+            actualDispatchCount: isMay ? 2 : isAug ? 2 : 0,
+            completedTripCount: isMay ? 2 : isAug ? 1 : 0,
+            cancelledOrderCount: isAug ? 1 : 0,
+            // May has 1 valid snapshot with 4 vehicles; Aug has 1 valid snapshot with 0 vehicles; empty months have validSnapshotCount=0 -> null
+            averageDispatchableVehicleCount: isMay ? 4 : isAug ? 0 : null,
+            validSnapshotCount: isMay || isAug ? 1 : 0,
+            expectedSnapshotCount: 8640,
+            snapshotCoverageRate: isMay || isAug ? 0.0001 : 0,
+            complaintCount: isMay ? 1 : isAug ? 1 : 0,
+            complaintsByCategory: isMay
+              ? { late_arrival: 1 }
+              : isAug
+                ? { no_show: 1 }
+                : {},
+            lateArrivalThresholdMinutes: 5,
+            onTimeTripCount: isMay ? 1 : isAug ? 1 : 0,
+            lateTripCount: isMay ? 1 : 0,
+            noShowTripCount: isAug ? 1 : 0,
+            punctualityUnknownTripCount: 0,
+            complaintCreatedLowRatingAutoCount: 0,
+            complaintCreatedManualCount: isMay || isAug ? 1 : 0,
+            complaintClosedLowRatingAutoCount: 0,
+            complaintClosedManualCount: isMay ? 1 : 0,
+            complaintOverdueLowRatingAutoCount: 0,
+            complaintOverdueManualCount: 0,
+            complaintStatisticsAsOf: "2026-10-31T23:59:59.000Z",
+            generatedAt: "2026-10-31T23:59:59.000Z",
+          };
+        }),
+      },
+    ]);
+
+    const filters = {
+      from: "2026-05-01",
+      to: "2026-10-31",
+      businessArea: "taipei",
+      serviceProductCode: "taxi_realtime",
+    };
+
+    const csvAccepted = service.createReportJob(
+      {
+        jobType: "six_month_operations_summary",
+        format: "csv",
+        filters,
+      },
+      "req-r10-csv-job",
+    );
+    const pdfAccepted = service.createReportJob(
+      {
+        jobType: "six_month_operations_summary",
+        format: "pdf",
+        filters,
+      },
+      "req-r10-pdf-job",
+    );
+    await flushBackgroundWork();
+
+    const csvJob = service.getReportJob(csvAccepted.jobId);
+    const pdfJob = service.getReportJob(pdfAccepted.jobId);
+    expect(csvJob.status).toBe("completed");
+    expect(pdfJob.status).toBe("completed");
+
+    // PDF job carries the 1 six-month aggregate summary row; CSV job carries all 6 monthly detail rows
+    expect(pdfJob.rows).toHaveLength(1);
+    expect(pdfJob.rows?.[0]).toMatchObject({
+      from: "2026-05-01",
+      to: "2026-10-31",
+      demandRequestCount: 5,
+      actualDispatchCount: 4,
+      averageDispatchableVehicleCount: 2,
+      complaintCount: 2,
+    });
+    expect(pdfJob.rows?.[0]).not.toHaveProperty("monthlySummaries");
+
+    expect(csvJob.rows).toHaveLength(6);
+    expect(
+      csvJob.rows?.map((r) => (r as { periodMonth: string }).periodMonth),
+    ).toEqual(months);
+    // June (validSnapshotCount = 0) has null average; August (validSnapshotCount = 1, 0 vehicles) has numeric 0
+    const juneRow = csvJob.rows?.find(
+      (r) => (r as { periodMonth: string }).periodMonth === "2026-06",
+    ) as { averageDispatchableVehicleCount: number | null };
+    const augRow = csvJob.rows?.find(
+      (r) => (r as { periodMonth: string }).periodMonth === "2026-08",
+    ) as { averageDispatchableVehicleCount: number | null };
+    expect(juneRow.averageDispatchableVehicleCount).toBeNull();
+    expect(augRow.averageDispatchableVehicleCount).toBe(0);
+
+    const csvArtifact = await service.renderReportArtifact(csvAccepted.jobId);
+    const pdfArtifact = await service.renderReportArtifact(pdfAccepted.jobId);
+    expect(csvArtifact.contentType).toBe("text/csv; charset=utf-8");
+    expect(pdfArtifact.contentType).toBe("application/pdf");
+    const csvLines = csvArtifact.buffer
+      .toString("utf8")
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split(/\r?\n/);
+    expect(csvLines).toHaveLength(7); // 1 header + 6 monthly rows
+    expect(csvLines[0]).toContain('"periodMonth"');
+    expect(csvLines[1]).toContain('"2026-05"');
+    expect(csvLines[6]).toContain('"2026-10"');
+    expect(pdfArtifact.buffer.subarray(0, 4).toString("utf8")).toBe("%PDF");
+  });
 });

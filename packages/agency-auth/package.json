@@ -1,0 +1,26 @@
+{
+  "name": "@drts/agency-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/route-handlers.ts",
+    "./constants": "./src/constants.ts",
+    "./agency-api": "./src/agency-api.ts",
+    "./verified-agency-session.server": "./src/verified-agency-session.server.ts"
+  },
+  "dependencies": {
+    "@drts/tenant-auth": "workspace:*"
+  },
+  "peerDependencies": {
+    "next": ">=16.0.0 <17"
+  },
+  "devDependencies": {
+    "next": "^16.4.1"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -2,12 +2,23 @@ import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
   PASSENGER_FEE_CONTENT_HASH,
 } from "@drts/contracts";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIResponse,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
 import {
   runSetup,
+  prepareOperationalReferralHandoff,
+  observeOperationalReferralZeroOrders,
+  OperationalReferralEvidenceError,
+  type OperationalReferralSubject,
   runOperationalDocumentAcceptance,
   requiredOrigin,
   operationalRequestHeaders,
@@ -84,6 +95,8 @@ type Journey = {
   baseUrlEnv: string;
   route: string;
   actorScope: string;
+  firstVisitConsentEvidence?: "privacy-fee-return-same-owner";
+  firstVisitRefusalEvidence?: "fallback-inactive-same-subject-zero-orders";
   environmentVariables?: Record<string, string>;
   browserSession?: BrowserSession;
   setup?: SetupRequest[];
@@ -159,7 +172,7 @@ function interpolatePath(
 }
 
 async function navigate(page: Page, origin: string, route: string) {
-  await page.goto(new URL(route, origin).toString(), {
+  return page.goto(new URL(route, origin).toString(), {
     waitUntil: "domcontentloaded",
   });
 }
@@ -229,39 +242,483 @@ async function assertReadback(
   });
 }
 
+type FirstReferralVisit = {
+  visitKey: string; // SHA-256 of the server-issued, owner-bound recoveryScope; not a credential.
+  recoveryScope: string; // RAM only; compared against authenticated session readbacks.
+  handoffId: string; // RAM only; never journal this identifier.
+  entryHost: string;
+  subject?: OperationalReferralSubject; // Issued subject + canonical entry, RAM only.
+  fee?: {
+    disclosureVersion: string;
+    contentHash: string;
+    acknowledgedAt: string;
+  };
+};
+
+function referralSession(
+  body: unknown,
+  visit: FirstReferralVisit,
+  active: boolean,
+) {
+  const root = body as {
+    ok?: unknown;
+    session?: {
+      handoffId?: unknown;
+      recoveryScope?: unknown;
+      partnerEntrySlug?: unknown;
+      entryHost?: unknown;
+      identityActive?: unknown;
+      consent?: { grantedAt?: string | null; bundleVersion?: string };
+    };
+    data?: {
+      active?: unknown;
+      session?: { recoveryScope?: unknown };
+      identity?: {
+        recovery_scope?: unknown;
+        handoff_id?: unknown;
+        entry_host?: unknown;
+        partner_entry_slug?: unknown;
+        identity_active?: unknown;
+      };
+    };
+  } | null;
+  const session = root?.session;
+  expect(root?.ok).toBe(true);
+  expect(
+    session?.handoffId === visit.handoffId,
+    "same referral handoffId",
+  ).toBe(true);
+  expect(
+    session?.recoveryScope === visit.recoveryScope,
+    "same referral recoveryScope",
+  ).toBe(true);
+  expect(session?.partnerEntrySlug).toBe("yuhe-residence");
+  expect(
+    session?.entryHost === visit.entryHost,
+    "same referral entryHost",
+  ).toBe(true);
+  expect(session?.identityActive).toBe(active);
+  expect(
+    session?.consent?.grantedAt === null,
+    "initial privacy consent must be absent",
+  ).toBe(!active);
+  if (!active)
+    expect(
+      session?.consent?.bundleVersion === null,
+      "inactive bundle must be absent",
+    ).toBe(true);
+  if (active) {
+    expect(root?.data?.active).toBe(true);
+    expect(root?.data?.identity?.recovery_scope).toBe(visit.recoveryScope);
+    expect(root?.data?.identity?.handoff_id).toBe(visit.handoffId);
+    expect(root?.data?.identity?.partner_entry_slug).toBe("yuhe-residence");
+    expect(root?.data?.identity?.entry_host).toBe(visit.entryHost);
+    expect(root?.data?.identity?.identity_active).toBe(true);
+    expect(root?.data?.session?.recoveryScope).toBe(visit.recoveryScope);
+    expect(typeof session?.consent?.grantedAt).toBe("string");
+    expect(
+      Number.isFinite(Date.parse(String(session?.consent?.grantedAt))),
+    ).toBe(true);
+  }
+  return {
+    identityActive: active,
+    privacyGranted: active,
+    consentBundleVersion: active ? session?.consent?.bundleVersion : null,
+  };
+}
+
+function referralFee(body: unknown) {
+  const root = body as { ok?: unknown; data?: Record<string, unknown> } | null;
+  expect(root?.ok).toBe(true);
+  const data = root?.data;
+  expect(data?.disclosureVersion).toBe(PASSENGER_FEE_DISCLOSURE_VERSION);
+  expect(data?.contentHash).toBe(PASSENGER_FEE_CONTENT_HASH);
+  expect(
+    data?.acknowledgedAt === null ||
+      (typeof data?.acknowledgedAt === "string" &&
+        Number.isFinite(Date.parse(data.acknowledgedAt))),
+  ).toBe(true);
+  // Explicit allowlist: do not spread upstream additions into the journal.
+  return {
+    disclosureVersion: data!.disclosureVersion as string,
+    contentHash: data!.contentHash as string,
+    acknowledgedAt: data!.acknowledgedAt as string | null,
+  };
+}
+
+async function prepareFirstReferralVisit(
+  page: Page,
+  origin: string,
+  entryHost: string,
+): Promise<FirstReferralVisit> {
+  try {
+    const issued = await prepareOperationalReferralHandoff(
+      "yuhe-residence",
+      entryHost,
+    );
+    const exchange = await page
+      .context()
+      .request.post(new URL("/api/referral/session", origin).toString(), {
+        data: {
+          action: "exchange",
+          artifact: issued.artifact,
+          entrySlug: "yuhe-residence",
+          entryHost,
+        },
+        maxRedirects: 0,
+      });
+    expect(exchange.status()).toBe(200);
+    expectCandidateRevision(exchange.headers(), "referral single-use exchange");
+    const body = await exchange.json();
+    expect(
+      body?.nextPath ===
+        "/embed/yuhe-residence?state=consent&entryHost=" +
+          encodeURIComponent(entryHost),
+    ).toBe(true);
+    const scope = body?.session?.recoveryScope;
+    expect(typeof scope === "string" && /^[a-f0-9]{64}$/.test(scope)).toBe(
+      true,
+    );
+    const visit: FirstReferralVisit = {
+      recoveryScope: scope,
+      handoffId: issued.handoffId,
+      entryHost,
+      visitKey: createHash("sha256").update(scope).digest("hex"),
+      subject: issued.subject,
+    };
+    referralSession(body, visit, false);
+    record({
+      kind: "referral-first-handoff-exchanged",
+      visitKey: visit.visitKey,
+      status: 200,
+      path: "/api/referral/session",
+      issuerPath: "/api/partner/ingress/referral-embed-handoff",
+      issuerStatus: 201,
+      entryPath: "/api/partner/entries/yuhe-residence",
+      entryStatus: 200,
+      identityActive: false,
+    });
+    return visit;
+  } catch (error) {
+    if (error instanceof OperationalReferralEvidenceError) throw error;
+    throw new Error("Referral legal first-visit handoff/exchange failed");
+  }
+}
+
+async function observeReferralRefusal(
+  page: Page,
+  origin: string,
+  visit: FirstReferralVisit,
+) {
+  const writes: string[] = [];
+  let phase = "before-refusal Ops authority/count";
+  const observe = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin === new URL(origin).origin &&
+      request.method() === "POST" &&
+      url.pathname.startsWith("/api/referral/")
+    )
+      writes.push(url.pathname);
+  };
+  // Observe before click and keep observing through readback/after0/return to
+  // consent. No grant, fees, quote or booking POST belongs in this interval.
+  page.on("request", observe);
+  try {
+    expect(
+      visit.subject?.entrySlug === "yuhe-residence" &&
+        visit.subject.entryHost === visit.entryHost,
+    ).toBe(true);
+    const before = await observeOperationalReferralZeroOrders(
+      visit.subject!,
+      "before-refusal",
+    );
+    record({ ...before, visitKey: visit.visitKey });
+    const control = page.getByRole("link", { name: "暫不使用", exact: true });
+    phase = "visible refusal and fallback";
+    await expect(control).toBeVisible();
+    const isFallback = (url: URL) =>
+      url.origin === new URL(origin).origin &&
+      url.pathname === "/embed/yuhe-residence" &&
+      url.searchParams.get("state") === "fallback" &&
+      url.searchParams.get("entryHost") === visit.entryHost;
+    const navigation = page.waitForURL(isFallback, {
+      timeout: interactionTimeoutMs,
+    });
+    void navigation.catch(() => {});
+    await control.click({ noWaitAfter: true });
+    await navigation;
+    // Next Link may have prefetched its RSC response. Read the reached route
+    // independently rather than requiring a second navigation network event.
+    expect(isFallback(new URL(page.url()))).toBe(true);
+    const fallback = await page.request.get(page.url(), { maxRedirects: 0 });
+    expect(fallback.status()).toBe(200);
+    expectCandidateRevision(fallback.headers(), "referral refusal fallback");
+    phase = "inactive active-route rejection";
+    const active = await page.request.get(
+      new URL("/api/referral/active", origin).toString(),
+      { maxRedirects: 0 },
+    );
+    expect(active.status()).toBe(401);
+    expectCandidateRevision(active.headers(), "referral inactive active route");
+    const rejected = await active.json();
+    expect(
+      rejected?.ok === false &&
+        rejected?.error?.code === "REFERRAL_SESSION_REQUIRED",
+    ).toBe(true);
+    // Existing development endpoint reads the signed inactive cookie FIRST.
+    // No cookie clearing, new context, second issuance or artifact replay.
+    phase = "same-subject inactive readback";
+    const read = await page
+      .context()
+      .request.post(new URL("/api/referral/session", origin).toString(), {
+        data: {
+          action: "demo-bootstrap",
+          entrySlug: "yuhe-residence",
+          entryHost: visit.entryHost,
+        },
+        maxRedirects: 0,
+      });
+    expect(read.status()).toBe(200);
+    expectCandidateRevision(
+      read.headers(),
+      "referral same-subject inactive readback",
+    );
+    const readBody = await read.json();
+    expect(
+      readBody?.nextPath ===
+        "/embed/yuhe-residence?state=consent&entryHost=" +
+          encodeURIComponent(visit.entryHost),
+    ).toBe(true);
+    const inactive = referralSession(readBody, visit, false);
+    record({
+      kind: "referral-first-refusal-inactive-readback",
+      visitKey: visit.visitKey,
+      path: "/api/referral/session",
+      status: 200,
+      ...inactive,
+    });
+    phase = "after-refusal Ops authority/count";
+    const after = await observeOperationalReferralZeroOrders(
+      visit.subject!,
+      "after-refusal",
+    );
+    expect(after.subjectKey).toBe(before.subjectKey);
+    record({ ...after, visitKey: visit.visitKey });
+    phase = "return to original consent control without writes";
+    const returned = await navigate(
+      page,
+      origin,
+      "/embed/yuhe-residence?state=consent&entryHost=" +
+        encodeURIComponent(visit.entryHost),
+    );
+    expect(returned?.status()).toBe(200);
+    expectCandidateRevision(
+      returned?.headers() ?? {},
+      "referral refusal return to consent",
+    );
+    await expect(
+      page.locator(
+        "form[action='/api/referral/session'] button[type='submit']",
+      ),
+    ).toBeVisible();
+    expect(
+      writes.length,
+      "refusal interval must contain no browser referral POST",
+    ).toBe(0);
+    record({
+      kind: "referral-first-refusal",
+      visitKey: visit.visitKey,
+      path: "/embed/yuhe-residence",
+      status: 200,
+      state: "fallback",
+      activePath: "/api/referral/active",
+      activeStatus: 401,
+      activeError: "REFERRAL_SESSION_REQUIRED",
+      grantConsentPosts: 0,
+      bookingPosts: 0,
+      semantics: "navigation-only-no-server-refusal-record",
+    });
+  } catch (error) {
+    // Never attach a response body, subject, cookie, artifact or assertion diff.
+    if (error instanceof OperationalReferralEvidenceError) throw error;
+    throw new Error(`Referral same-subject refusal evidence failed: ${phase}`);
+  } finally {
+    page.off("request", observe);
+  }
+}
+
+async function observeReferralPrivacyConsent(
+  page: Page,
+  origin: string,
+  visit: FirstReferralVisit,
+  control: Locator,
+  navigation: Promise<void>,
+) {
+  const url = new URL("/api/referral/session", origin).toString();
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.url() === url && response.request().method() === "POST",
+  );
+  void navigation.catch(() => {}); // Consume a navigation failure if POST rejects first.
+  await control.click({ noWaitAfter: true });
+  const post = await submitted;
+  // The native form completes POST with a 303 GET destination, not JSON consent.
+  expect(post.status()).toBe(303);
+  expectCandidateRevision(post.headers(), "referral privacy POST");
+  record({
+    kind: "referral-first-privacy-post",
+    visitKey: visit.visitKey,
+    status: post.status(),
+    path: "/api/referral/session",
+    outcome: "native-form-redirect",
+  });
+  await navigation;
+  const read = await page.request.get(url, { maxRedirects: 0 });
+  expect(read.status()).toBe(200);
+  expectCandidateRevision(read.headers(), "referral privacy canonical GET");
+  const state = referralSession(await read.json(), visit, true);
+  record({
+    kind: "referral-first-privacy-readback",
+    visitKey: visit.visitKey,
+    status: read.status(),
+    path: "/api/referral/session",
+    ...state,
+  });
+}
+
+async function observeReferralReturn(
+  page: Page,
+  origin: string,
+  visit: FirstReferralVisit,
+) {
+  expect(
+    visit.fee,
+    "first fee POST and canonical GET must precede return",
+  ).toBeDefined();
+  // Same Playwright context, signed session cookie and owner-bound canonical
+  // readback. Reject any new bootstrap/consent/fee write during return.
+  const unexpectedWrites: string[] = [];
+  const watchReturn = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    if (
+      request.method() === "POST" &&
+      url.origin === new URL(origin).origin &&
+      ["/api/referral/session", "/api/referral/fees"].includes(url.pathname)
+    )
+      unexpectedWrites.push(url.pathname);
+  };
+  page.on("request", watchReturn);
+  try {
+    const routeResponse = await navigate(
+      page,
+      origin,
+      "/embed/yuhe-residence?state=handoff&screen=book&entryHost=" +
+        encodeURIComponent(visit.entryHost),
+    );
+    expect(routeResponse?.status()).toBe(200);
+    expectCandidateRevision(
+      routeResponse?.headers() ?? {},
+      "referral return route",
+    );
+    const sessionResponse = await page.request.get(
+      new URL("/api/referral/session", origin).toString(),
+      { maxRedirects: 0 },
+    );
+    expect(sessionResponse.status()).toBe(200);
+    expectCandidateRevision(
+      sessionResponse.headers(),
+      "referral returning session GET",
+    );
+    const state = referralSession(await sessionResponse.json(), visit, true);
+    const read = await page.request.get(
+      new URL("/api/referral/fees", origin).toString(),
+      { maxRedirects: 0 },
+    );
+    expect(read.status()).toBe(200);
+    expectCandidateRevision(read.headers(), "referral returning fee GET");
+    const persisted = referralFee(await read.json());
+    expect(persisted).toEqual(visit.fee);
+    expect(
+      unexpectedWrites,
+      "return must not re-bootstrap or re-acknowledge",
+    ).toEqual([]);
+    record({
+      kind: "referral-same-owner-return",
+      visitKey: visit.visitKey,
+      sessionStatus: sessionResponse.status(),
+      feeStatus: read.status(),
+      sessionPath: "/api/referral/session",
+      feePath: "/api/referral/fees",
+      ...state,
+      ...persisted,
+    });
+  } finally {
+    page.off("request", watchReturn);
+  }
+}
+
 async function runSteps(
   page: Page,
   origin: string,
   steps: JourneyStep[],
   lastResultId: unknown,
   variables: TemplateVariables,
+  visit?: FirstReferralVisit,
 ) {
   for (const step of steps) {
     if (step.kind === "referral-fees") {
       const url = new URL("/api/referral/fees", origin).toString();
-      const response = await page.request.get(url);
-      expect(response.ok()).toBe(true);
-      const body = await response.json();
-      expect(body.data).toMatchObject({
-        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
-        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      const response = await page.request.get(url, { maxRedirects: 0 });
+      expect(response.status()).toBe(200);
+      expectCandidateRevision(response.headers(), "referral fee initial GET");
+      const initial = referralFee(await response.json());
+      expect(
+        initial.acknowledgedAt,
+        "returning fee consent is not first consent",
+      ).toBeNull();
+      expect(
+        visit,
+        "first-visit fee proof needs the setup owner",
+      ).toBeDefined();
+      record({
+        kind: "referral-first-fee-initial",
+        visitKey: visit!.visitKey,
+        status: response.status(),
+        path: "/api/referral/fees",
+        ...initial,
       });
-      if (body.data.acknowledgedAt === null) {
-        const submitted = page.waitForResponse(
-          (item) => item.url() === url && item.request().method() === "POST",
-        );
-        await page.locator(step.control).click();
-        expect((await submitted).ok()).toBe(true);
-      }
-      const read = await page.request.get(url);
-      expect(read.ok()).toBe(true);
-      const ack = (await read.json()).data;
-      expect(ack).toMatchObject({
-        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
-        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      const submitted = page.waitForResponse(
+        (item) => item.url() === url && item.request().method() === "POST",
+      );
+      const control = page.locator(step.control);
+      await expect(control).toBeVisible();
+      await control.click();
+      const post = await submitted;
+      expect(post.status()).toBe(200);
+      expectCandidateRevision(post.headers(), "referral fee first POST");
+      const ack = referralFee(await post.json());
+      expect(ack.acknowledgedAt).not.toBeNull();
+      record({
+        kind: "referral-first-fee-post",
+        visitKey: visit!.visitKey,
+        status: post.status(),
+        path: "/api/referral/fees",
+        ...ack,
       });
-      expect(typeof ack.acknowledgedAt).toBe("string");
-      expect(Number.isFinite(Date.parse(ack.acknowledgedAt))).toBe(true);
+      const read = await page.request.get(url, { maxRedirects: 0 });
+      expect(read.status()).toBe(200);
+      expectCandidateRevision(read.headers(), "referral fee canonical GET");
+      const persisted = referralFee(await read.json());
+      expect(persisted).toEqual(ack);
+      visit!.fee = { ...ack, acknowledgedAt: ack.acknowledgedAt! };
+      record({
+        kind: "referral-first-fee-readback",
+        visitKey: visit!.visitKey,
+        status: read.status(),
+        path: "/api/referral/fees",
+        ...persisted,
+      });
       continue;
     }
     if (step.kind === "navigate") {
@@ -370,6 +827,29 @@ test("requires a single immutable candidate SHA and complete formal journey mani
     manifest.candidateSha,
     "candidate manifest must bind its executable operations to one SHA",
   ).toBe(candidateSha);
+  expect(
+    manifest.journeys
+      .filter((journey) => journey.firstVisitConsentEvidence)
+      .map(({ id, firstVisitConsentEvidence }) => [
+        id,
+        firstVisitConsentEvidence,
+      ]),
+  ).toEqual([
+    ["referral-create-read-cancel-receipt", "privacy-fee-return-same-owner"],
+  ]);
+  expect(
+    manifest.journeys
+      .filter((journey) => journey.firstVisitRefusalEvidence)
+      .map(({ id, firstVisitRefusalEvidence }) => [
+        id,
+        firstVisitRefusalEvidence,
+      ]),
+  ).toEqual([
+    [
+      "referral-create-read-cancel-receipt",
+      "fallback-inactive-same-subject-zero-orders",
+    ],
+  ]);
   expect(manifest.journeys.map(({ id }) => id)).toEqual([
     "referral-create-read-cancel-receipt",
     "enterprise-create-read-update-cancel",
@@ -446,7 +926,16 @@ test("requires a single immutable candidate SHA and complete formal journey mani
   expect(manifest.documentAcceptance.setup.length).toBeGreaterThan(0);
 });
 
+// Signed handoff/session traffic must never enter trace request snapshots.
+// The synchronous allowlisted journal remains the durable referral evidence.
+const journeyTests = {
+  standard: test,
+  private: test.extend({ trace: "off", screenshot: "off" }),
+};
 for (const journey of manifest.journeys) {
+  const test = journey.firstVisitRefusalEvidence
+    ? journeyTests.private
+    : journeyTests.standard;
   test(`${journey.id} executes its declared operational contract`, async ({
     page,
   }) => {
@@ -457,16 +946,85 @@ for (const journey of manifest.journeys) {
     installEnvironmentVariables(journey, variables);
     await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup(
-      { request: page.context().request, record },
-      journey,
-      variables,
-    );
+    const visit = journey.firstVisitRefusalEvidence
+      ? await prepareFirstReferralVisit(
+          page,
+          origin,
+          String(variables.referralEntryHost),
+        )
+      : undefined;
+    // Normal setup now reads the already exchanged signed session. It must not
+    // issue another random Demo identity or silently replace our known subject.
+    let bootstrap: APIResponse | undefined;
+    const request = page.context().request;
+    const setupRequest = visit
+      ? new Proxy(request, {
+          get(target, key) {
+            if (key === "fetch")
+              return async (...args: Parameters<typeof target.fetch>) => {
+                const response = await target.fetch(...args);
+                if (
+                  args[0] ===
+                    new URL("/api/referral/session", origin).toString() &&
+                  args[1]?.method === "POST"
+                )
+                  bootstrap = response;
+                return response;
+              };
+            const value: unknown = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        })
+      : request;
+    await runSetup({ request: setupRequest, record }, journey, variables);
+    if (visit) {
+      expect(
+        bootstrap,
+        "normal setup must read the exchanged session",
+      ).toBeDefined();
+      expect(bootstrap!.status()).toBe(200);
+      expectCandidateRevision(
+        bootstrap!.headers(),
+        "referral existing Demo session",
+      );
+      const state = referralSession(await bootstrap!.json(), visit, false);
+      record({
+        kind: "referral-first-privacy-initial",
+        visitKey: visit.visitKey,
+        status: bootstrap!.status(),
+        path: "/api/referral/session",
+        ...state,
+      });
+    }
     await navigate(
       page,
       origin,
       interpolatePath(journey.route, null, variables),
     );
+    if (visit) {
+      await expect(
+        page.locator(
+          "form[action='/api/referral/session'] button[type='submit']",
+        ),
+      ).toBeVisible();
+      const preConsent = await page.request.get(
+        new URL("/api/referral/session", origin).toString(),
+        { maxRedirects: 0 },
+      );
+      expect(preConsent.status()).toBe(401);
+      expectCandidateRevision(
+        preConsent.headers(),
+        "referral unconsented session GET",
+      );
+      record({
+        kind: "referral-first-privacy-inactive-read",
+        visitKey: visit.visitKey,
+        status: preConsent.status(),
+        path: "/api/referral/session",
+      });
+    }
+
+    if (visit) await observeReferralRefusal(page, origin, visit);
 
     let lastResultId: unknown = null;
     for (const operation of journey.operations) {
@@ -522,6 +1080,7 @@ for (const journey of manifest.journeys) {
         operation.before ?? [],
         lastResultId,
         variables,
+        visit,
       );
       const activeControl = page.locator(operation.control).first();
       await expect(
@@ -550,8 +1109,18 @@ for (const journey of manifest.journeys) {
           },
           { timeout: interactionTimeoutMs },
         );
-        await activeControl.click({ noWaitAfter: true });
-        await navigation;
+        if (visit && operation.name === "explicit-consent")
+          await observeReferralPrivacyConsent(
+            page,
+            origin,
+            visit,
+            activeControl,
+            navigation,
+          );
+        else {
+          await activeControl.click({ noWaitAfter: true });
+          await navigation;
+        }
         // URL convergence plus authority readback is the contract. Some target
         // screens keep background requests open and never become network-idle.
         const target = page.url();
@@ -701,6 +1270,7 @@ for (const journey of manifest.journeys) {
       );
     }
 
+    if (visit) await observeReferralReturn(page, origin, visit);
     if (journey.id === "admin-review-approve-readback") {
       await runOperationalDocumentAcceptance(
         { request: page.context().request, record },

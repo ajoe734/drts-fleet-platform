@@ -21,6 +21,7 @@ const skippedRuntimeSurfaces = [] as const;
 
 type RuntimeSurfaceKey =
   | "api"
+  | "agency-portal-web"
   | "bank-console-web"
   | "channel-partner-portal-web"
   | "enterprise-dispatch-web"
@@ -229,6 +230,13 @@ const apiActors: ActorProfile[] = [
   { key: "api-observer", actorType: "runtime_observer" },
 ];
 
+// Public homepage/login/invite reachability only; request headers cannot
+// authenticate agency sessions or authorize protected queries/exports.
+const agencyPortalActors: ActorProfile[] = [
+  { key: "agency-viewer", actorType: "agency_viewer" },
+  { key: "agency-exporter", actorType: "agency_exporter" },
+];
+
 const platformMarker = /DRTS 平台管理|Platform|平台管理|租戶|稽核|健康/i;
 const opsMarker = /Operations Console|營運控制台|派車調度|營運總覽|客服中心/i;
 const fleetMarker = /Fleet Partner Portal|車行夥伴入口|車行營運總覽|分潤/i;
@@ -239,6 +247,8 @@ const channelPartnerMarker =
   /Channel Dashboard|渠道總覽|Referral Statements|分潤對帳單|Usage|用量明細/i;
 const referralEmbedMarker =
   /社區叫車|法碧康物業|Referral Embed|轉介嵌入前台|\/embed\/yuhe-residence/i;
+const agencyPortalMarker =
+  /主管機關唯讀查詢|接受機關帳號邀請|使用 Google 帳號登入/i;
 const referralEmbedEntrySlug =
   process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG ?? "yuhe-residence";
 const currentDevHostSuffix = "4t7rg6fmeq-uc.a.run.app";
@@ -940,6 +950,35 @@ const surfaces: RuntimeSurface[] = [
         path: "/audit",
         operation: "tenant audit",
         marker: tenantMarker,
+      },
+    ],
+  },
+  {
+    key: "agency-portal-web",
+    family: "bureau agency readonly portal public entry",
+    baseUrl: resolveCloudRunBaseUrl(
+      process.env.DRTS_DEV_AGENCY_PORTAL_BASE_URL,
+      "drts-dev-agency-portal-web",
+    ),
+    actors: agencyPortalActors,
+    routes: [
+      {
+        key: "home",
+        path: "/",
+        operation: "agency root redirects to login when unauthenticated",
+        marker: agencyPortalMarker,
+      },
+      {
+        key: "login",
+        path: "/login",
+        operation: "agency public login entry",
+        marker: agencyPortalMarker,
+      },
+      {
+        key: "invite",
+        path: "/invite",
+        operation: "agency public invitation entry",
+        marker: agencyPortalMarker,
       },
     ],
   },
