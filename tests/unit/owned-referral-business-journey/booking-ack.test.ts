@@ -850,12 +850,14 @@ describe("actual main and supplemental booking callers keep a failed guard until
       unroutes: 0,
       offs: 0,
     };
+    const fulfilledBodies: Buffer[] = [];
     let routes: { url: string; handler: Handler }[] = [];
     const listeners: ((response: unknown) => void)[] = [];
     let closed = false;
     let responder: () => Promise<Buffer> = async () => {
       throw new Error("no server response configured");
     };
+    let responseStatus = 200;
     let clickImpl: () => Promise<void> = async () => undefined;
     const failures: Record<string, Error | undefined> = {};
     // Optional controlled settlement of the actual Playwright release/drain
@@ -930,7 +932,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
           const body = await responder();
           return {
             url: () => bookingUrl,
-            status: () => 200,
+            status: () => responseStatus,
             headers: () => ({ "x-drts-candidate-sha": runtime }),
             body: async () => body,
             dispose: async () => {
@@ -938,8 +940,9 @@ describe("actual main and supplemental booking callers keep a failed guard until
             },
           };
         },
-        fulfill: async () => {
+        fulfill: async (options: { body: Buffer }) => {
           counts.fulfills += 1;
+          fulfilledBodies.push(options.body);
           await holds.fulfill?.();
         },
       });
@@ -965,6 +968,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
     return {
       page,
       counts,
+      fulfilledBodies,
       failures,
       holds,
       expect: expectPort,
@@ -977,6 +981,9 @@ describe("actual main and supplemental booking callers keep a failed guard until
       },
       setResponder: (next: () => Promise<Buffer>) => {
         responder = next;
+      },
+      setResponseStatus: (status: number) => {
+        responseStatus = status;
       },
       setClick: (next: () => Promise<void>) => {
         clickImpl = next;
@@ -1586,6 +1593,112 @@ describe("actual main and supplemental booking callers keep a failed guard until
       vi.useRealTimers();
     }
   });
+
+  it.each([
+    ["release", "refused"],
+    ["dispose", "refused"],
+    ["release", "malformed"],
+    ["dispose", "malformed"],
+  ] as const)(
+    "supplemental: settled observer refusal held at %s (%s response) reports its real pending phase",
+    async (window, responseKind) => {
+      budgetClock();
+      try {
+        const unhandled = await collectUnhandled(async () => {
+          const h = supplementalHarness();
+          const raw = h.raw("quote-extra", "extra-key");
+          const bytes =
+            responseKind === "refused"
+              ? Buffer.from(
+                  JSON.stringify({
+                    ok: false,
+                    error: {
+                      code: "CONFLICT",
+                      message: "private-refusal-payload",
+                    },
+                  }),
+                )
+              : Buffer.from("{private-malformed-payload");
+          const observationStage =
+            responseKind === "refused"
+              ? "booking-response-http"
+              : "booking-response-json:SyntaxError";
+          if (responseKind === "refused") h.setResponseStatus(409);
+          h.setResponder(async () => bytes);
+          const late = deferred<void>();
+          if (window === "release") h.holds.fulfill = () => late.promise;
+          else h.holds.dispose = () => late.promise;
+          h.setClick(async () => {
+            h.quoteResponse(Promise.resolve({ data: proposal("quote-extra") }));
+            void h.post(raw, "extra-key");
+          });
+          const outcome = h.book("reservation-2");
+          const rejected = outcome.then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          await turns();
+          expect(h.counts.fetches).toBe(1);
+          expect(h.fulfilledBodies).toEqual([bytes]);
+          const state = h.extraBookings[0] as {
+            actions: string[];
+            journal: BookingWriteJournal;
+          };
+          expect(state.actions).toEqual(["booking"]);
+          expect(state.journal.current).toMatchObject({
+            state: "ack_unknown",
+            body: raw,
+            idempotencyKey: "extra-key",
+          });
+          expect(h.evidence.events.map((e) => e.stage)).toContain(
+            observationStage,
+          );
+          vi.advanceTimersByTime(25_000);
+          const error = await rejected;
+          expect(error).toBeInstanceOf(JourneyFailure);
+          expect((error as JourneyFailure).stage).toBe(
+            "supplemental-original-booking-timeout",
+          );
+          expect(pendingStages(h.evidence)).toEqual([
+            `supplemental-original-booking-expired-pending:${window}`,
+          ]);
+          expect(transitions(h.evidence)).toContain("ack-rejected");
+          expect(transitions(h.evidence)).not.toContain("ack-durable");
+          expect(h.controlledOrderIds).toEqual([]);
+          expect(h.routes()).toBe(1);
+          expect(h.counts).toMatchObject({
+            fetches: 1,
+            fulfills: 1,
+            network: 0,
+            unroutes: 0,
+            offs: 1,
+          });
+          const before = phaseEvidence(h.evidence);
+          const frozen = h.operations[0]!.phases();
+          expect(frozen.frozenBy).toBe("expired");
+          expect(frozen.pending).toEqual([window]);
+          expect(JSON.stringify(before)).not.toMatch(
+            /private-refusal-payload|private-malformed-payload/,
+          );
+          late.resolve();
+          await turns();
+          await h.post(raw, "extra-key");
+          await turns();
+          expect(phaseEvidence(h.evidence)).toEqual(before);
+          expect(h.operations[0]!.phases()).toEqual(frozen);
+          expect(h.counts).toMatchObject({
+            fetches: 1,
+            network: 0,
+            aborts: 2,
+          });
+          expect(vi.getTimerCount()).toBe(0);
+        });
+        expect(unhandled).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("supplemental: the recorded phase order follows the actual helpers and stays credential-free", async () => {
     budgetClock();
