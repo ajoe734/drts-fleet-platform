@@ -3209,14 +3209,18 @@ test(journeyName, async ({ browser, request }) => {
                       ),
                     (bytes) =>
                       route.fulfill({ response: original, body: bytes }),
+                    operation.mark,
                   );
                 } finally {
                   await original.dispose();
+                  operation.mark("dispose-completed");
                 }
               },
             );
+            operation.mark("handler-finished");
             finish();
           } catch (error) {
+            operation.mark("handler-failed");
             fail(originalBookingRouteFailure(error));
             await route.abort().catch(() => undefined);
           }
@@ -3253,6 +3257,7 @@ test(journeyName, async ({ browser, request }) => {
             () => create.click(),
             settled,
             operation.signal,
+            operation.mark,
           );
           requireFact(
             state.orderId && state.journal && state.quote,
@@ -3275,14 +3280,32 @@ test(journeyName, async ({ browser, request }) => {
           page.off("response", observeQuote);
           // A failure (including setup before the 25s arm) closes at once and
           // keeps its closed guard until the page closes; success unroutes.
-          await closeOriginalBookingOperation(
-            operation,
-            succeeded,
-            async () => {
-              await page.unroute(url, handle);
-              await Promise.all(quoteTasks);
-            },
-          );
+          let returned = false;
+          try {
+            await closeOriginalBookingOperation(
+              operation,
+              succeeded,
+              async () => {
+                await page.unroute(url, handle);
+                operation.mark("unroute-completed");
+                await Promise.all(quoteTasks);
+                operation.mark("quote-drain-completed");
+              },
+            );
+            returned = succeeded;
+          } finally {
+            // Diagnostics only, after close froze the trace: the stages still
+            // outstanding at the 25s deadline (or at close). Never replaces
+            // the original failure or a successful return.
+            if (!returned) {
+              try {
+                for (const event of operation.phaseEvents())
+                  evidence.record(event);
+              } catch {
+                // An evidence refusal never masks the operation outcome.
+              }
+            }
+          }
         }
       };
       // Original C1 is the legal real null-final-driver/no-arrival source. Read
