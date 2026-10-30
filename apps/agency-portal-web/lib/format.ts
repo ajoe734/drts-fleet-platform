@@ -63,9 +63,9 @@ export function displayMinor(
   ) {
     return notProvided(locale);
   }
-  const formatted = new Intl.NumberFormat(
-    locale === "zh" ? "zh-TW" : "en-US",
-  ).format(amountMinor);
+  const formatted = new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    maximumFractionDigits: 2,
+  }).format(amountMinor / 100);
   return `${formatted} ${currency ?? ""}`.trim();
 }
 

@@ -168,7 +168,7 @@ describe("formal Bank read boundary", () => {
         programCode: "program-1",
         programLabel: "Canonical program",
         direction: "inbound",
-        state: "en_route",
+        state: "on_trip",
         pickupLabel: "City ••••",
         dropoffLabel: "Airport ••••",
         scheduledAt: formal().reservation_window_start,

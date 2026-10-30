@@ -2,6 +2,69 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReferralPassengerTripSnapshot } from "@drts/contracts";
 
+type LiveTripDisplay = ReferralPassengerTripSnapshot & {
+  /** Local elapsed display only; never replaces the server observation time. */
+  localLocationAgeSeconds?: number | null;
+};
+
+function trackingServerTime(
+  trip: ReferralPassengerTripSnapshot | null | undefined,
+  cancellationNow: number,
+) {
+  const observedAt = Date.parse(trip?.liveTracking?.observedAt ?? "");
+  return Number.isFinite(cancellationNow)
+    ? Math.max(
+        cancellationNow,
+        Number.isFinite(observedAt) ? observedAt : cancellationNow,
+      )
+    : observedAt;
+}
+
+function displayTrip(
+  trip: ReferralPassengerTripSnapshot | null,
+  serverNow: number,
+): LiveTripDisplay | null {
+  if (!trip?.liveTracking?.location) return trip;
+  const tracking = trip.liveTracking;
+  const ageMs = serverNow - Date.parse(tracking.location!.recordedAt);
+  const inWindow = (at: string) => {
+    const age = serverNow - Date.parse(at);
+    return Number.isFinite(age) && age >= -5_000 && age < 60_000;
+  };
+  const current = inWindow(tracking.location!.recordedAt);
+  const usable = tracking.locationFreshness === "fresh" && current;
+  const pickupEta =
+    usable && tracking.pickupEta && inWindow(tracking.pickupEta.calculatedAt)
+      ? tracking.pickupEta
+      : null;
+  const dropoffRoute =
+    usable &&
+    tracking.dropoffRoute &&
+    inWindow(tracking.dropoffRoute.generatedAt)
+      ? tracking.dropoffRoute
+      : null;
+  return {
+    ...trip,
+    localLocationAgeSeconds: Number.isFinite(ageMs)
+      ? Math.max(0, Math.round(ageMs / 1000))
+      : null,
+    liveTracking:
+      (tracking.locationFreshness === "fresh" && !current) ||
+      pickupEta !== tracking.pickupEta ||
+      dropoffRoute !== tracking.dropoffRoute
+        ? {
+            ...tracking,
+            locationFreshness:
+              tracking.locationFreshness === "fresh" && !current
+                ? "stale"
+                : tracking.locationFreshness,
+            pickupEta,
+            dropoffRoute,
+          }
+        : tracking,
+  };
+}
+
 export function useReferralLiveTrip(
   initial: ReferralPassengerTripSnapshot | null | undefined,
   scope: string,
@@ -11,6 +74,14 @@ export function useReferralLiveTrip(
     trip: ReferralPassengerTripSnapshot | null | undefined,
   ) => Date.parse(trip?.cancellationWindow?.asOf ?? "");
   const initialTime = snapshotTime(initial);
+  const [, setPollClock] = useState(0);
+  const trackingObservation = useRef({
+    scope,
+    orderId,
+    trip: initial ?? null,
+    serverNow: trackingServerTime(initial, initialTime),
+    monotonicAt: performance.now(),
+  });
   const observation = useRef({
     scope,
     orderId,
@@ -49,6 +120,16 @@ export function useReferralLiveTrip(
             Number.isFinite(previous) ? previous : serverTime,
           )
         : Number.NaN;
+      trackingObservation.current = {
+        scope,
+        orderId,
+        trip: trip ?? null,
+        serverNow: trackingServerTime(
+          trip,
+          Number.isFinite(serverNow) ? serverNow : previous,
+        ),
+        monotonicAt: now,
+      };
       // Unknown metadata stays unknown in the UI, but cannot erase an already
       // established clock floor for a later valid read of this same order.
       observation.current = {
@@ -75,15 +156,24 @@ export function useReferralLiveTrip(
     let live = true,
       pending = false;
     let controller: AbortController | null = null;
-    const refresh = async () => {
-      if (!live || pending || document.visibilityState === "hidden") return;
+    let generation = 0;
+    const refresh = async (replacePending = false) => {
+      if (
+        !live ||
+        (pending && !replacePending) ||
+        document.visibilityState === "hidden"
+      )
+        return;
+      if (replacePending) controller?.abort();
+      const requestGeneration = ++generation;
       pending = true;
-      controller = new AbortController();
+      const requestController = new AbortController();
+      controller = requestController;
       try {
         const response = await fetch("/api/referral/active", {
           cache: "no-store",
           credentials: "same-origin",
-          signal: controller.signal,
+          signal: requestController.signal,
         });
         const body = await response.json();
         if (!response.ok || !body?.ok || typeof body.data?.active !== "boolean")
@@ -96,7 +186,7 @@ export function useReferralLiveTrip(
             typeof trip.status !== "string")
         )
           throw new Error("Active trip is unavailable");
-        if (!live) return;
+        if (!live || requestGeneration !== generation) return;
         const ended =
           !trip ||
           trip.orderId !== orderId ||
@@ -118,15 +208,22 @@ export function useReferralLiveTrip(
         });
         if (ended) clearInterval(timer);
       } catch {
-        if (live) setSnapshot((s) => ({ ...s, error: true }));
+        if (live && requestGeneration === generation)
+          setSnapshot((s) => ({ ...s, error: true }));
       } finally {
-        pending = false;
+        if (requestGeneration === generation) {
+          pending = false;
+          controller = null;
+        }
       }
     };
     refreshRef.current = () => {
-      void refresh();
+      // Explicit refresh replaces only this read, not a command or identity.
+      void refresh(true);
     };
     const timer = setInterval(() => {
+      // Age retained observations even while a previous read is unsettled.
+      setPollClock((clock) => clock + 1);
       void refresh();
     }, 5000);
     const visible = () => {
@@ -135,6 +232,7 @@ export function useReferralLiveTrip(
     document.addEventListener("visibilitychange", visible);
     return () => {
       live = false;
+      generation += 1;
       controller?.abort();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
@@ -171,5 +269,17 @@ export function useReferralLiveTrip(
           ended: false,
           cancellationServerNow: authoritativeServerNow,
         };
-  return { ...current, refresh: () => refreshRef.current?.() };
+  const trackingClock = trackingObservation.current;
+  const displayServerNow =
+    trackingClock.scope === scope &&
+    trackingClock.orderId === orderId &&
+    trackingClock.trip === current.trip
+      ? trackingClock.serverNow +
+        Math.max(0, performance.now() - trackingClock.monotonicAt)
+      : trackingServerTime(current.trip, current.cancellationServerNow);
+  return {
+    ...current,
+    trip: displayTrip(current.trip, displayServerNow),
+    refresh: () => refreshRef.current?.(),
+  };
 }

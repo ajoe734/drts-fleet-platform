@@ -1450,7 +1450,9 @@ export class RegulatoryRegistryService
 
       if (changes.vehicles?.length) {
         const updatedIds = new Set(changes.vehicles.map((v) => v.vehicleId));
-        const clonedVehicles = changes.vehicles.map((v) => this.cloneVehicle(v));
+        const clonedVehicles = changes.vehicles.map((v) =>
+          this.cloneVehicle(v),
+        );
         this.vehicles = [
           ...clonedVehicles,
           ...this.vehicles.filter((v) => !updatedIds.has(v.vehicleId)),
@@ -1467,7 +1469,9 @@ export class RegulatoryRegistryService
           changes.disclosureProfiles.map((p) => p.vehicleId),
         );
         this.disclosureProfiles = [
-          ...this.disclosureProfiles.filter((p) => !updatedIds.has(p.vehicleId)),
+          ...this.disclosureProfiles.filter(
+            (p) => !updatedIds.has(p.vehicleId),
+          ),
           ...changes.disclosureProfiles.map((p) => ({ ...p })),
         ];
       }
@@ -1566,12 +1570,12 @@ export class RegulatoryRegistryService
         {
           ...existingDriver,
           name: command.driverDraft?.name?.trim() || existingDriver.name,
-          supportedServiceBuckets:
-            command.driverDraft?.supportedServiceProductCodes?.length
-              ? this.mapServiceBuckets(
-                  command.driverDraft.supportedServiceProductCodes,
-                )
-              : [...existingDriver.supportedServiceBuckets],
+          supportedServiceBuckets: command.driverDraft
+            ?.supportedServiceProductCodes?.length
+            ? this.mapServiceBuckets(
+                command.driverDraft.supportedServiceProductCodes,
+              )
+            : [...existingDriver.supportedServiceBuckets],
           licensesValid: true,
           licenseExpiry: nextLicenseExpiry,
           professionalDriverLicenseExpiry: nextProfExpiry,
@@ -1619,7 +1623,8 @@ export class RegulatoryRegistryService
             ? "verified_active"
             : "unverified",
         maskedDisplay,
-        verifiedByActorId: existingCred?.verifiedByActorId ?? command.reviewerId,
+        verifiedByActorId:
+          existingCred?.verifiedByActorId ?? command.reviewerId,
         verifiedAt: existingCred?.verifiedAt ?? command.approvedAt,
         sourceSubmissionId: current.submissionId,
         version: (existingCred?.version ?? 0) + 1,
@@ -1775,7 +1780,10 @@ export class RegulatoryRegistryService
         .map((prior) => ({
           ...prior,
           ...(prior.status === "active" || prior.status === "pending"
-            ? { status: "expired" as const, lifecycleStatus: "expired" as const }
+            ? {
+                status: "expired" as const,
+                lifecycleStatus: "expired" as const,
+              }
             : {}),
           supersededByPolicyId: prior.supersededByPolicyId ?? newPolicyId,
           supersededAt: prior.supersededAt ?? command.approvedAt,
@@ -1791,8 +1799,7 @@ export class RegulatoryRegistryService
         vehicleId,
         {
           entityType: "insurance_policy",
-          message:
-            "Vehicle insurance policy renewed from approved submission.",
+          message: "Vehicle insurance policy renewed from approved submission.",
           occurredAt: command.approvedAt,
           relatedEntityId: createdPolicy.policyId,
           emitEvent: !stageInMemoryUpdates,
@@ -1888,13 +1895,13 @@ export class RegulatoryRegistryService
             command.vehicleDraft?.businessArea ??
             priorContract?.operatingAreaId ??
             state.vehicle.operatingArea,
-          serviceScope:
-            command.vehicleDraft?.supportedServiceProductCodes?.length
-              ? this.mapServiceBuckets(
-                  command.vehicleDraft.supportedServiceProductCodes,
-                ).join(",")
-              : priorContract?.serviceScope ||
-                state.vehicle.supportedServiceBuckets.join(","),
+          serviceScope: command.vehicleDraft?.supportedServiceProductCodes
+            ?.length
+            ? this.mapServiceBuckets(
+                command.vehicleDraft.supportedServiceProductCodes,
+              ).join(",")
+            : priorContract?.serviceScope ||
+              state.vehicle.supportedServiceBuckets.join(","),
           startAt,
           endAt,
           status: "active",
@@ -1922,8 +1929,7 @@ export class RegulatoryRegistryService
                 lifecycleStatus: "expired" as const,
               }
             : {}),
-          supersededByContractId:
-            prior.supersededByContractId ?? newContractId,
+          supersededByContractId: prior.supersededByContractId ?? newContractId,
           supersededAt: prior.supersededAt ?? command.approvedAt,
           updatedAt: command.approvedAt,
         }));
@@ -2818,6 +2824,34 @@ export class RegulatoryRegistryService
     );
   }
 
+  async listContractsFromPersistence() {
+    if (!this.regulatoryRegistryRepository?.isEnabled())
+      return this.listContracts();
+    const contracts =
+      await this.regulatoryRegistryRepository.listCommittedContracts();
+    const evaluatedAt = new Date().toISOString();
+    return contracts.map((contract) =>
+      this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
+    );
+  }
+
+  async findContractFromPersistence(contractId: string) {
+    if (!this.regulatoryRegistryRepository?.isEnabled()) {
+      return (
+        this.listContracts().find(
+          (contract) => contract.contractId === contractId,
+        ) ?? null
+      );
+    }
+    const contract =
+      await this.regulatoryRegistryRepository.findCommittedContract(contractId);
+    return contract
+      ? this.cloneContract(
+          this.applyContractLifecycle(contract, new Date().toISOString()),
+        )
+      : null;
+  }
+
   listExpiringContracts(
     windowDays = 30,
     referenceDateMs: number = Date.now(),
@@ -3419,10 +3453,11 @@ export class RegulatoryRegistryService
     T extends
       | VehicleContractRecord
       | InsurancePolicyRecord
-      | DispatchExclusivityRecord,
+      | DispatchExclusivityRecord
+      | VehicleRegistryRecord,
   >(
     vehicleId: string,
-    family: "contracts" | "policies" | "exclusivities",
+    family: "contracts" | "policies" | "exclusivities" | "vehicles",
     context: string,
     stage: (state: RegulatoryVehicleCommandState) => T,
   ): Promise<T> {
@@ -3445,7 +3480,7 @@ export class RegulatoryRegistryService
         prepared = state;
         return {
           vehicles: [state.vehicle],
-          [family]: [result],
+          ...(family === "vehicles" ? {} : { [family]: [result] }),
         } as PersistRegulatoryRegistryChanges;
       };
       if (!repository.isEnabled()) {
@@ -3458,11 +3493,17 @@ export class RegulatoryRegistryService
           ),
         };
         const changes = apply(state);
-        await this.supersedeRenewedVehicleSourceEvents(
-          context,
-          result!,
-          state,
-        );
+        if (
+          family !== "vehicles" &&
+          result &&
+          !("dispatchableFlag" in result)
+        ) {
+          await this.supersedeRenewedVehicleSourceEvents(
+            context,
+            result,
+            state,
+          );
+        }
         this.publishVehicleSourceCommand(state, true);
         this.persistChanges(changes, context);
       } else {
@@ -3482,12 +3523,18 @@ export class RegulatoryRegistryService
             await repository.persistChangesWithExecutor(client, apply(state));
             // Preserve the original B4 family and late-receipt semantics, in
             // the same transaction as the actual acknowledged renewal.
-            await this.supersedeRenewedVehicleSourceEvents(
-              context,
-              result!,
-              state,
-              client,
-            );
+            if (
+              family !== "vehicles" &&
+              result &&
+              !("dispatchableFlag" in result)
+            ) {
+              await this.supersedeRenewedVehicleSourceEvents(
+                context,
+                result,
+                state,
+                client,
+              );
+            }
           });
         } catch (error) {
           repository.reportPersistenceFailure(error, context);
@@ -3507,11 +3554,21 @@ export class RegulatoryRegistryService
             canonical &&
             expected &&
             isDeepStrictEqual(canonical.vehicle, expected.vehicle) &&
-            canonical[family].some((record) =>
-              isDeepStrictEqual(record, result),
-            );
+            (family === "vehicles"
+              ? isDeepStrictEqual(canonical.vehicle, result)
+              : canonical[family].some((record) =>
+                  isDeepStrictEqual(record, result),
+                ));
           if (canonical)
-            this.publishVehicleSourceCommand(canonical, Boolean(matches));
+            this.publishVehicleSourceCommand(
+              canonical,
+              Boolean(matches),
+              family === "vehicles"
+                ? canonical.vehicle.supplyLifecycle.dispatch.blockedReasons.includes(
+                    "manual_hold",
+                  )
+                : undefined,
+            );
           if (!matches) {
             if (!prepared) throw error;
             const record = result as VehicleContractRecord &
@@ -3529,7 +3586,15 @@ export class RegulatoryRegistryService
           }
           return result!;
         }
-        this.publishVehicleSourceCommand(prepared!, true);
+        this.publishVehicleSourceCommand(
+          prepared!,
+          true,
+          family === "vehicles"
+            ? prepared!.vehicle.supplyLifecycle.dispatch.blockedReasons.includes(
+                "manual_hold",
+              )
+            : undefined,
+        );
       }
       return result!;
     });
@@ -3538,6 +3603,7 @@ export class RegulatoryRegistryService
   private publishVehicleSourceCommand(
     state: RegulatoryVehicleCommandState,
     emitEvent: boolean,
+    acknowledgedManualHold?: boolean,
   ) {
     state.vehicle = this.hydrateVehicleRecord(state.vehicle);
     const id = state.vehicle.vehicleId;
@@ -3587,8 +3653,11 @@ export class RegulatoryRegistryService
         current.supplyLifecycle.offboarding,
       );
     const manualHold =
-      current.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold") ||
-      saved.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold");
+      acknowledgedManualHold ??
+      (current.supplyLifecycle.dispatch.blockedReasons.includes(
+        "manual_hold",
+      ) ||
+        saved.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold"));
     const updated = this.reconcileVehicleLifecycle(
       id,
       {
@@ -3765,16 +3834,59 @@ export class RegulatoryRegistryService
     });
   }
 
+  async updateVehicleComplianceFromPersistence(
+    vehicleId: string,
+    command: UpdateVehicleComplianceCommand,
+  ): Promise<VehicleRegistryRecord> {
+    if (!this.regulatoryRegistryRepository?.isEnabled()) {
+      return this.updateVehicleCompliance(vehicleId, command);
+    }
+    return this.runVehicleSourceCommand(
+      vehicleId,
+      "vehicles",
+      "update_vehicle_compliance",
+      (state) => {
+        state.vehicle = this.stageVehicleCompliance(
+          vehicleId,
+          state.vehicle,
+          command,
+          state,
+          false,
+        );
+        return this.cloneVehicle(state.vehicle);
+      },
+    );
+  }
+
   updateVehicleCompliance(
     vehicleId: string,
     command: UpdateVehicleComplianceCommand,
   ) {
-    const vehicle = this.requireVehicle(vehicleId);
+    const vehicle = this.stageVehicleCompliance(
+      vehicleId,
+      this.requireVehicle(vehicleId),
+      command,
+    );
+    this.persistChanges(
+      { vehicles: [this.cloneVehicle(vehicle)] },
+      "update_vehicle_compliance",
+    );
+    return this.cloneVehicle(vehicle);
+  }
+
+  private stageVehicleCompliance(
+    vehicleId: string,
+    vehicle: VehicleRegistryRecord,
+    command: UpdateVehicleComplianceCommand,
+    sources?: RegulatoryVehicleCommandState,
+    emitEvent = true,
+  ): VehicleRegistryRecord {
     const evaluatedAt = new Date().toISOString();
     const lifecycle = this.evaluateVehicleSupplyLifecycle(
       vehicle,
       command.dispatchableFlag ?? vehicle.dispatchableFlag,
       evaluatedAt,
+      sources,
     );
     if (
       command.dispatchableFlag === true &&
@@ -3794,26 +3906,25 @@ export class RegulatoryRegistryService
     if (command.dispatchableFlag !== undefined) {
       vehicle.dispatchableFlag = command.dispatchableFlag;
     }
-    this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "vehicle",
-      message: vehicle.dispatchableFlag
-        ? "Vehicle manually marked dispatchable."
-        : "Vehicle manually placed on dispatch hold.",
-      occurredAt: evaluatedAt,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
-      ...(command.dispatchableFlag === undefined
-        ? {}
-        : { manualDispatchHold: command.dispatchableFlag === false }),
-    });
-    this.persistChanges(
+    return this.reconcileVehicleLifecycle(
+      vehicleId,
       {
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "vehicle",
+        message: vehicle.dispatchableFlag
+          ? "Vehicle manually marked dispatchable."
+          : "Vehicle manually placed on dispatch hold.",
+        occurredAt: evaluatedAt,
+        relatedEntityId: vehicleId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent,
+        ...(command.dispatchableFlag === undefined
+          ? {}
+          : { manualDispatchHold: command.dispatchableFlag === false }),
       },
-      "update_vehicle_compliance",
+      vehicle,
+      sources,
     );
-    return this.cloneVehicle(vehicle);
   }
 
   updateDriverWorkState(
@@ -4984,9 +5095,7 @@ export class RegulatoryRegistryService
         if (updatedDelta !== 0) {
           return updatedDelta;
         }
-        return (
-          new Date(right.endAt).getTime() - new Date(left.endAt).getTime()
-        );
+        return new Date(right.endAt).getTime() - new Date(left.endAt).getTime();
       });
 
     return candidates[0] ? this.cloneContract(candidates[0]) : null;
@@ -5025,9 +5134,7 @@ export class RegulatoryRegistryService
         if (updatedDelta !== 0) {
           return updatedDelta;
         }
-        return (
-          new Date(right.endAt).getTime() - new Date(left.endAt).getTime()
-        );
+        return new Date(right.endAt).getTime() - new Date(left.endAt).getTime();
       });
 
     return candidates[0] ? this.clonePolicy(candidates[0]) : null;
@@ -6523,7 +6630,11 @@ export class RegulatoryRegistryService
     const memoryContracts = enabled
       ? []
       : [...this.contracts].sort((a, b) =>
-          a.contractId < b.contractId ? -1 : a.contractId > b.contractId ? 1 : 0,
+          a.contractId < b.contractId
+            ? -1
+            : a.contractId > b.contractId
+              ? 1
+              : 0,
         );
     const memoryPolicies = enabled
       ? []
@@ -6542,8 +6653,8 @@ export class RegulatoryRegistryService
     const isValidEmail = (value: string | undefined | null): value is string =>
       Boolean(
         value &&
-          value.length <= 254 &&
-          /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(value),
+        value.length <= 254 &&
+        /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(value),
       );
     const platformRecipient = resolvePlatformAlertRecipient(process.env);
     const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
@@ -6583,7 +6694,11 @@ export class RegulatoryRegistryService
               string,
               string | string[]
             >;
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            if (
+              parsed &&
+              typeof parsed === "object" &&
+              !Array.isArray(parsed)
+            ) {
               for (const pid of normalizedPartnerIds) {
                 const entry = parsed[pid];
                 if (typeof entry === "string") partnerEmails.push(entry.trim());
@@ -6877,9 +6992,7 @@ export class RegulatoryRegistryService
             throughId: upperContract,
           })
         : memoryContracts
-            .filter(
-              (c) => !afterContractId || c.contractId > afterContractId,
-            )
+            .filter((c) => !afterContractId || c.contractId > afterContractId)
             .slice(0, limit);
       if (!page.length) break;
       for (const item of page) {
@@ -7010,11 +7123,7 @@ export class RegulatoryRegistryService
                     "credential-preexpiry-mail/v1:" +
                     createHash("sha256")
                       .update(
-                        JSON.stringify([
-                          scope,
-                          event.event_id,
-                          recipientEmail,
-                        ]),
+                        JSON.stringify([scope, event.event_id, recipientEmail]),
                       )
                       .digest("hex"),
                   recipientEmail,
@@ -7182,11 +7291,7 @@ export class RegulatoryRegistryService
                     "credential-preexpiry-mail/v1:" +
                     createHash("sha256")
                       .update(
-                        JSON.stringify([
-                          scope,
-                          event.event_id,
-                          recipientEmail,
-                        ]),
+                        JSON.stringify([scope, event.event_id, recipientEmail]),
                       )
                       .digest("hex"),
                   recipientEmail,
@@ -7276,7 +7381,8 @@ export class RegulatoryRegistryService
       ? []
       : this.policies
           .filter((p) => {
-            if (p.status === "cancelled" || p.supersededByPolicyId) return false;
+            if (p.status === "cancelled" || p.supersededByPolicyId)
+              return false;
             const endAtMs = Date.parse(p.endAt);
             const startAtMs = Date.parse(p.startAt);
             return (

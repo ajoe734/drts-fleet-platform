@@ -1423,12 +1423,12 @@ export class TenantPartnerController {
 
   @Get("tenant/passengers")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listPassengers(
+  async listPassengers(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: IdentityContext | null,
   ) {
-    const items = this.tenantPartnerService.listPassengers(
+    const items = await this.tenantPartnerService.listPassengersForRead(
       this.requireTenantId(tenantId, identity),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -1453,12 +1453,12 @@ export class TenantPartnerController {
 
   @Get("tenant/addresses")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listAddresses(
+  async listAddresses(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: IdentityContext | null,
   ) {
-    const items = this.tenantPartnerService.listAddresses(
+    const items = await this.tenantPartnerService.listAddressesForRead(
       this.requireTenantId(tenantId, identity),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -1466,7 +1466,7 @@ export class TenantPartnerController {
 
   @Get("tenant/cost-centers")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listCostCenters(
+  async listCostCenters(
     @Query("activeOnly") activeOnly?: string,
     @Query("ownerUserId") ownerUserId?: string,
     @Query("search") search?: string,
@@ -1484,7 +1484,7 @@ export class TenantPartnerController {
     if (search?.trim()) {
       query.search = search;
     }
-    const items = this.tenantPartnerService.listCostCenters(
+    const items = await this.tenantPartnerService.listCostCentersForRead(
       this.requireTenantId(tenantId, identity),
       query,
     );
@@ -1874,13 +1874,13 @@ export class TenantPartnerController {
 
   @Get("tenant/addresses/export-view")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listAddressExportView(
+  async listAddressExportView(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items: TenantAddressExportViewRecord[] =
-      this.tenantPartnerService.listAddressExportView(
+      await this.tenantPartnerService.listAddressExportViewForRead(
         this.requireTenantId(tenantId, identity),
       );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -2603,23 +2603,25 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/sla")
-  getSlaProfile(
+  async getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getSlaProfile(this.requireTenantId(tenantId)),
+      await this.tenantPartnerService.getSlaProfileForRead(
+        this.requireTenantId(tenantId),
+      ),
       requestId,
     );
   }
 
   @Get("tenant/sla/view")
-  getSlaProfileView(
+  async getSlaProfileView(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getSlaProfileView(
+      await this.tenantPartnerService.getSlaProfileViewFromPersistence(
         this.requireTenantId(tenantId),
       ),
       requestId,

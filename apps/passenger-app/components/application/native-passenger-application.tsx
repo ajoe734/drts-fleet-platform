@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import type { CreatePassengerComplaintCommand } from "@drts/contracts";
 import { PassengerLoginScreen } from "../auth/passenger-login-screen";
 import { NativeBookingScreen } from "../booking/native-booking-screen";
 import { NativePaymentMethodsScreen } from "../payment/native-payment-methods-screen";
@@ -84,6 +85,8 @@ function SupportForm({
   orderId: string;
   category: "service" | "lost_item";
 }) {
+  const [selectedCategory, setSelectedCategory] =
+    useState<CreatePassengerComplaintCommand["category"]>(category);
   const [content, setContent] = useState("");
   const [description, setDescription] = useState("");
   const [consent, setConsent] = useState(false);
@@ -100,10 +103,10 @@ function SupportForm({
         orderId,
         {
           rideId: orderId,
-          category,
+          category: selectedCategory,
           content: content.trim(),
           contactConsent: consent,
-          ...(category === "lost_item" && description.trim()
+          ...(selectedCategory === "lost_item" && description.trim()
             ? { lostItemDescription: description.trim() }
             : {}),
         },
@@ -120,13 +123,41 @@ function SupportForm({
   return (
     <ScrollView testID="app-support-screen">
       <Text accessibilityRole="header">
-        {category === "lost_item" ? "遺失物申報" : "行程客訴"}
+        {selectedCategory === "lost_item" ? "遺失物申報" : "行程客訴"}
       </Text>
       {caseId ? (
         <Text testID="app-support-success">申報已送出，案件編號：{caseId}</Text>
       ) : (
         <>
-          {category === "lost_item" && (
+          <Text>問題類型</Text>
+          {(
+            [
+              ["service", "駕駛服務品質"],
+              ["fare", "費用問題"],
+              ["lost_item", "尋找遺失物"],
+              ["other", "其他"],
+            ] as const
+          ).map(([value, label]) => (
+            <Pressable
+              key={value}
+              testID={`app-support-category-${value}`}
+              accessibilityRole="radio"
+              accessibilityLabel={label}
+              accessibilityState={{
+                selected: selectedCategory === value,
+                disabled: busy,
+              }}
+              disabled={busy}
+              onPress={() => setSelectedCategory(value)}
+              style={{ padding: 12, minHeight: 44 }}
+            >
+              <Text>
+                {selectedCategory === value ? "● " : "○ "}
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+          {selectedCategory === "lost_item" && (
             <TextInput
               testID="app-lost-item"
               accessibilityLabel="遺失物描述"

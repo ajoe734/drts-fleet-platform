@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
 import { getCandidateSha } from "./common/candidate-sha.middleware";
+import { registerDriverCompletionJsonMiddleware } from "./common/driver-completion-json.middleware";
 import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
 import { validateAuthStartupConfig } from "./config/auth-startup-config";
 import { buildHealthPayload } from "./health/health.controller";
@@ -19,6 +20,8 @@ async function bootstrap() {
   app.setGlobalPrefix("api", {
     exclude: ["health", "metrics"],
   });
+
+  registerDriverCompletionJsonMiddleware(app);
 
   app
     .getHttpAdapter()

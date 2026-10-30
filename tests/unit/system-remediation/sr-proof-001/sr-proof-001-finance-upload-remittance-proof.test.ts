@@ -783,7 +783,7 @@ describe("finance proof actual mounted caller command identity", () => {
             call.committedProofId = uploaded.data.proofId;
             data = uploaded;
           } else if (path === "/api/reimbursements")
-            data = controller.listReimbursementBatches();
+            data = await controller.listReimbursementBatches();
           else data = await controller.getReimbursementProof(batch.batchId);
           if (
             faultRemaining &&

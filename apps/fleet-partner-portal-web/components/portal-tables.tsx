@@ -609,7 +609,13 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
       r: (r) => (
         <CanvasPill
           theme={theme}
-          tone={r.sla === "breached" ? "danger" : "success"}
+          tone={
+            r.sla === "breached"
+              ? "danger"
+              : r.sla === "unknown"
+                ? "neutral"
+                : "success"
+          }
           dot
         >
           {formatFleetCodeLabel(locale, "case.sla", r.sla)}

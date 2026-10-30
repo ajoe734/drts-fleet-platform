@@ -468,11 +468,8 @@ export class RegulatoryRegistryRepository {
     if (!normalized) {
       return this.withLazyPromise([], async () => []);
     }
-    const list =
-      typeof emails === "string" ? emails.split(/[,;\s]+/) : emails;
-    const cleaned = [
-      ...new Set(list.map((e) => e.trim()).filter(Boolean)),
-    ];
+    const list = typeof emails === "string" ? emails.split(/[,;\s]+/) : emails;
+    const cleaned = [...new Set(list.map((e) => e.trim()).filter(Boolean))];
     const previousInMemory = this.inMemoryPartnerContacts.has(normalized)
       ? [...(this.inMemoryPartnerContacts.get(normalized) ?? [])]
       : undefined;
@@ -798,15 +795,15 @@ export class RegulatoryRegistryRepository {
 
   async findDriverPublicRegistrationCredential(
     driverId: string,
-    executor: RegulatoryRegistryQueryExecutor | undefined = this.databaseService,
+    executor: RegulatoryRegistryQueryExecutor | undefined = this
+      .databaseService,
     lock = false,
   ): Promise<DriverPublicRegistrationCredential | null> {
     if (!this.isEnabled() || !executor) return null;
-    const result =
-      await executor.query<DriverPublicRegistrationCredentialRow>(
-        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
-        [driverId],
-      );
+    const result = await executor.query<DriverPublicRegistrationCredentialRow>(
+      `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
+      [driverId],
+    );
     return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
   }
 
@@ -869,6 +866,33 @@ export class RegulatoryRegistryRepository {
 
   async resetLiveMapTestDriver() {
     return resetLiveMapFixture(this.databaseService);
+  }
+
+  async listCommittedContracts(): Promise<VehicleContractRecord[]> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM reg.phase1_registry_contracts ORDER BY updated_at DESC, created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<VehicleContractRecord>(
+        row.record,
+        "reg.phase1_registry_contracts",
+      ),
+    );
+  }
+
+  async findCommittedContract(
+    contractId: string,
+  ): Promise<VehicleContractRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM reg.phase1_registry_contracts WHERE contract_id = $1`,
+      [contractId],
+    );
+    if (!result.rows[0]) return null;
+    const contract = this.parseRecord<VehicleContractRecord>(
+      result.rows[0].record,
+      "reg.phase1_registry_contracts",
+    );
+    return contract.contractId === contractId ? contract : null;
   }
 
   async loadState(): Promise<RegulatoryRegistryState> {
@@ -2252,8 +2276,7 @@ export class RegulatoryRegistryRepository {
     );
     const row = result.rows[0];
     this.extendedExpirySqlSupported = Boolean(
-      row &&
-        ("preexpiry_policy_id" in row || "preexpiry_contract_id" in row),
+      row && ("preexpiry_policy_id" in row || "preexpiry_contract_id" in row),
     );
     return {
       driverId: row?.driver_id ?? null,
@@ -3107,7 +3130,10 @@ export class RegulatoryRegistryRepository {
         [eventId],
       );
       if (result.rows.length === 0) return null;
-      let eventBase: Omit<RegistryExpiryEventWithIntent, "intent" | "intents"> | null = null;
+      let eventBase: Omit<
+        RegistryExpiryEventWithIntent,
+        "intent" | "intents"
+      > | null = null;
       const intents: RegistryExpiryDeliveryIntentRow[] = [];
       for (const row of result.rows) {
         const {

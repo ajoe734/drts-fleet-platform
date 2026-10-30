@@ -18,7 +18,11 @@ export function resolveCopyByLocale(
 }
 
 function getSeedEnterpriseDraft(activeLang: Locale) {
-  const costCenterName = translate("fixture.costCenter.prd07", undefined, activeLang);
+  const costCenterName = translate(
+    "fixture.costCenter.prd07",
+    undefined,
+    activeLang,
+  );
   return {
     bookedBy: "林宜君",
     passenger: translate("fixture.passenger.guestSato", undefined, activeLang),
@@ -42,6 +46,9 @@ export type EnterpriseVehiclePreference = "sedan" | "business" | "van";
 export type EnterpriseBookingDraftForm = {
   passengerMode: EnterprisePassengerMode;
   passenger: string;
+  passengerId?: string | undefined;
+  pickupAddressId?: string | undefined;
+  dropoffAddressId?: string | undefined;
   bookedBy: string;
   pickup: string;
   dropoff: string;
@@ -78,6 +85,9 @@ export const MIN_LEAD_TIME_MINUTES = 15;
 const QUERY_KEYS = {
   passengerMode: "pm",
   passenger: "passenger",
+  passengerId: "passengerId",
+  pickupAddressId: "pickupAddressId",
+  dropoffAddressId: "dropoffAddressId",
   bookedBy: "bookedBy",
   pickup: "pickup",
   dropoff: "dropoff",
@@ -373,16 +383,14 @@ export function createEnterpriseBookingDraft(
   const passenger = isSelf ? seed.bookedBy : seed.passenger;
   const defaultPlacard = formatDefaultPlacard(passenger);
 
-  const hasExplicitEntry = Boolean(
-    options && options.entry !== undefined,
-  );
+  const hasExplicitEntry = Boolean(options && options.entry !== undefined);
 
   return {
     passengerMode,
     passenger,
     bookedBy: seed.bookedBy,
-    pickup: isAirport ? seed.pickup : (isSelf ? seed.dropoff : seed.pickup),
-    dropoff: isAirport ? seed.dropoff : (isSelf ? seed.pickup : seed.dropoff),
+    pickup: isAirport ? seed.pickup : isSelf ? seed.dropoff : seed.pickup,
+    dropoff: isAirport ? seed.dropoff : isSelf ? seed.pickup : seed.dropoff,
     reservationDate: defaultReservation,
     reservationTime: "10:00",
     onsiteContactPhone: seed.onsiteContact,
@@ -450,13 +458,24 @@ export function parseEnterpriseBookingDraft(
 
   const defaultPlacard = formatDefaultPlacard(passenger);
   const placard = hasQueryKey(params, QUERY_KEYS.placard)
-    ? parseEditableText(params, QUERY_KEYS.placard, defaultPlacard) || defaultPlacard
+    ? parseEditableText(params, QUERY_KEYS.placard, defaultPlacard) ||
+      defaultPlacard
     : entry
       ? fallback.placard
       : undefined;
 
+  const passengerId = firstParam(params[QUERY_KEYS.passengerId])?.trim();
+  const pickupAddressId = firstParam(
+    params[QUERY_KEYS.pickupAddressId],
+  )?.trim();
+  const dropoffAddressId = firstParam(
+    params[QUERY_KEYS.dropoffAddressId],
+  )?.trim();
   const draft: EnterpriseBookingDraftForm = {
     passengerMode,
+    ...(passengerId ? { passengerId } : {}),
+    ...(pickupAddressId ? { pickupAddressId } : {}),
+    ...(dropoffAddressId ? { dropoffAddressId } : {}),
     passenger,
     bookedBy,
     pickup: parseEditableText(params, QUERY_KEYS.pickup, fallback.pickup),
@@ -524,6 +543,13 @@ export function serializeEnterpriseBookingDraft(
 
   params.set(QUERY_KEYS.passengerMode, draft.passengerMode);
   params.set(QUERY_KEYS.passenger, draft.passenger);
+  for (const key of [
+    "passengerId",
+    "pickupAddressId",
+    "dropoffAddressId",
+  ] as const) {
+    if (draft[key]) params.set(QUERY_KEYS[key], draft[key]);
+  }
   params.set(QUERY_KEYS.bookedBy, draft.bookedBy);
   params.set(QUERY_KEYS.pickup, draft.pickup);
   params.set(QUERY_KEYS.dropoff, draft.dropoff);
@@ -608,7 +634,9 @@ export function isCustomPlacard(draft: EnterpriseBookingDraftForm): boolean {
     return false;
   }
   const effectivePassenger =
-    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
+    draft.passengerMode === "self"
+      ? draft.bookedBy.trim()
+      : draft.passenger.trim();
   const defaultPlacard = formatDefaultPlacard(effectivePassenger);
   const trimmed = draft.placard.trim();
 
@@ -646,16 +674,24 @@ export function buildEnterpriseBookingCommand(
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
   const passengerName =
-    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
+    draft.passengerMode === "self"
+      ? draft.bookedBy.trim()
+      : draft.passenger.trim();
   const onsiteContactPhone = draft.onsiteContactPhone.trim();
-  const customPlacard = isCustomPlacard(draft) ? draft.placard?.trim() : undefined;
-  const finalNotes = formatBookingNotesWithPlacard(
-    draft.notes,
-    customPlacard,
-  );
+  const customPlacard = isCustomPlacard(draft)
+    ? draft.placard?.trim()
+    : undefined;
+  const finalNotes = formatBookingNotesWithPlacard(draft.notes, customPlacard);
 
   return {
     businessDispatchSubtype: "enterprise_dispatch",
+    ...(draft.passengerId ? { passengerId: draft.passengerId } : {}),
+    ...(draft.pickupAddressId
+      ? { pickupAddressId: draft.pickupAddressId }
+      : {}),
+    ...(draft.dropoffAddressId
+      ? { dropoffAddressId: draft.dropoffAddressId }
+      : {}),
     pickup: {
       address: draft.pickup,
       addressName: inferAddressName(draft.pickup),
@@ -697,9 +733,18 @@ export function buildEnterpriseBookingUpdateCommand(
   now = new Date(),
   options?: { validateTime?: boolean },
 ): UpdateTenantBookingCommand {
-  return buildEnterpriseBookingCommand(draft, now, {
+  const command = buildEnterpriseBookingCommand(draft, now, {
     validateTime: options?.validateTime ?? false,
   });
+  return {
+    ...command,
+    ...(draft.flight.trim() === "" ? { flightNo: null } : {}),
+    ...(draft.terminal.trim() === "" ? { terminal: null } : {}),
+    ...(draft.luggageCount.trim() === "" ? { luggageCount: null } : {}),
+    ...(draft.notes.trim() === "" && command.notes === undefined
+      ? { notes: null }
+      : {}),
+  };
 }
 
 export function createEnterpriseBookingDraftFromRecord(
@@ -716,6 +761,15 @@ export function createEnterpriseBookingDraftFromRecord(
   return {
     passengerMode,
     passenger: record.passenger.name,
+    ...(record.passenger.passengerId
+      ? { passengerId: record.passenger.passengerId }
+      : {}),
+    ...(record.pickup.addressId
+      ? { pickupAddressId: record.pickup.addressId }
+      : {}),
+    ...(record.dropoff.addressId
+      ? { dropoffAddressId: record.dropoff.addressId }
+      : {}),
     bookedBy: record.bookedBy?.name ?? record.passenger.name,
     pickup: record.pickup.address,
     dropoff: record.dropoff.address,

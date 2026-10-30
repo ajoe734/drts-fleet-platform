@@ -1,5 +1,113 @@
+import { OWNED_ORDER_STATUSES, type OwnedOrderStatus } from "@drts/contracts";
+
 export type BookingDirection = "outbound" | "inbound";
-export type BookingState = "assigned" | "en_route" | "completed" | "cancelled";
+export type BookingState = OwnedOrderStatus | "en_route";
+
+// Keep canonical order states distinct; en_route remains a legacy query group.
+export const BOOKING_STATE_PRESENTATION = {
+  created: { labelKey: "bookings.state.created", tone: "info" },
+  recording_pending: {
+    labelKey: "bookings.state.recording_pending",
+    tone: "warn",
+  },
+  ready_for_dispatch: {
+    labelKey: "bookings.state.ready_for_dispatch",
+    tone: "info",
+  },
+  preassigned: { labelKey: "bookings.state.preassigned", tone: "warn" },
+  assigned: { labelKey: "bookings.state.assigned", tone: "info" },
+  driver_accepted: { labelKey: "bookings.state.driver_accepted", tone: "info" },
+  enroute_pickup: { labelKey: "bookings.state.enroute_pickup", tone: "warn" },
+  arrived_pickup: { labelKey: "bookings.state.arrived_pickup", tone: "warn" },
+  on_trip: { labelKey: "bookings.state.on_trip", tone: "warn" },
+  proof_pending: { labelKey: "bookings.state.proof_pending", tone: "warn" },
+  completed: { labelKey: "bookings.state.completed", tone: "success" },
+  cancelled: { labelKey: "bookings.state.cancelled", tone: "danger" },
+  redispatch_required: {
+    labelKey: "bookings.state.redispatch_required",
+    tone: "warn",
+  },
+  dispatch_failed: {
+    labelKey: "bookings.state.dispatch_failed",
+    tone: "danger",
+  },
+  dispatch_timeout: {
+    labelKey: "bookings.state.dispatch_timeout",
+    tone: "danger",
+  },
+  no_supply: { labelKey: "bookings.state.no_supply", tone: "danger" },
+  delayed_queue: { labelKey: "bookings.state.delayed_queue", tone: "warn" },
+  exception_hold: { labelKey: "bookings.state.exception_hold", tone: "danger" },
+  en_route: { labelKey: "bookings.state.en_route", tone: "warn" },
+} as const satisfies Record<
+  BookingState,
+  {
+    labelKey: `bookings.state.${BookingState}`;
+    tone: "info" | "warn" | "success" | "danger";
+  }
+>;
+
+const DRIVER_TRIP_STATES: readonly BookingState[] = [
+  "driver_accepted",
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+];
+export const BOOKING_STATE_TABS: readonly BookingState[] = [
+  "assigned",
+  "en_route",
+  "completed",
+  "cancelled",
+];
+export function matchesBookingState(state: BookingState, filter: BookingState) {
+  return (
+    state === filter ||
+    (filter === "en_route" && DRIVER_TRIP_STATES.includes(state))
+  );
+}
+export function isActiveBookingState(state: BookingState) {
+  return (
+    state === "assigned" ||
+    state === "en_route" ||
+    DRIVER_TRIP_STATES.includes(state)
+  );
+}
+export function bookingStateTabs(bookings: readonly BookingListItem[]) {
+  return [
+    ...BOOKING_STATE_TABS,
+    ...OWNED_ORDER_STATUSES.filter(
+      (state) =>
+        !BOOKING_STATE_TABS.includes(state) &&
+        bookings.some((item) => item.state === state),
+    ),
+  ];
+}
+
+const taipeiBookingDate = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+function bookingDateParts(value: string) {
+  const parts = Object.fromEntries(
+    taipeiBookingDate
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    month: `${parts.year}-${parts.month}`,
+    display: `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`,
+  };
+}
+export function formatBookingDateTime(value: string) {
+  return bookingDateParts(value).display;
+}
+
 export type BookingActorRealm = "tenant" | "ops" | "system" | "driver";
 export type BookingOpsLinkState =
   | "allowed"
@@ -512,7 +620,7 @@ export const bookingDetails: BookingDetailRecord[] =
 
 export function deriveBookingPeriods(bookings: readonly BookingListItem[]) {
   return Array.from(
-    new Set(bookings.map((item) => item.scheduledAt.slice(0, 7))),
+    new Set(bookings.map((item) => bookingDateParts(item.scheduledAt).month)),
   ).sort((left, right) => right.localeCompare(left));
 }
 
@@ -531,10 +639,13 @@ export function filterBookingItems(
     if (filters.direction && item.direction !== filters.direction) {
       return false;
     }
-    if (filters.state && item.state !== filters.state) {
+    if (filters.state && !matchesBookingState(item.state, filters.state)) {
       return false;
     }
-    if (filters.period && item.scheduledAt.slice(0, 7) !== filters.period) {
+    if (
+      filters.period &&
+      bookingDateParts(item.scheduledAt).month !== filters.period
+    ) {
       return false;
     }
     if (

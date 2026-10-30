@@ -93,7 +93,10 @@ import {
   type PaymentRecoveryPort,
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
-import { RemittanceProofService } from "./remittance-proof.service";
+import {
+  RemittanceProofService,
+  type MarkRemittanceProofPaidInput,
+} from "./remittance-proof.service";
 import { renderBillingDocumentPdf } from "./billing-document-pdf.renderer";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
@@ -129,6 +132,19 @@ import {
 } from "../owned-mobility/owned-mobility-events";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
+
+type ReimbursementBatchCommandContext = {
+  batch: ReimbursementBatchRecord;
+  statement: DriverStatementRecord | null;
+  currentBatch: () => ReimbursementBatchRecord;
+  persist: (
+    changes: PersistBillingSettlementChanges,
+    operation: string,
+  ) => Promise<void>;
+  pay: (
+    input: MarkRemittanceProofPaidInput,
+  ) => Promise<RemittanceProofPaymentReceipt>;
+};
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
@@ -2806,7 +2822,26 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   listReimbursementBatches(filters: ReimbursementBatchFilters = {}) {
-    return this.reimbursementBatches
+    return this.listReimbursementBatchesFrom(
+      this.reimbursementBatches,
+      filters,
+    );
+  }
+
+  async listReimbursementBatchesFresh(filters: ReimbursementBatchFilters = {}) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.listReimbursementBatches(filters);
+    }
+    const batches =
+      await this.billingSettlementRepository.listCommittedReimbursementBatches();
+    return this.listReimbursementBatchesFrom(batches, filters);
+  }
+
+  private listReimbursementBatchesFrom(
+    batches: ReimbursementBatchRecord[],
+    filters: ReimbursementBatchFilters,
+  ) {
+    return batches
       .filter((batch) => {
         if (filters.status && batch.status !== filters.status) {
           return false;
@@ -3183,7 +3218,18 @@ export class BillingSettlementService implements OnModuleInit {
     command: ApproveReimbursementBatchCommand,
     requestId?: string,
   ) {
-    const batch = this.requireReimbursementBatch(batchId);
+    return this.withReimbursementBatchCommand(batchId, (context) =>
+      this.approveReimbursementBatchFrom(context, batchId, command, requestId),
+    );
+  }
+
+  private async approveReimbursementBatchFrom(
+    context: ReimbursementBatchCommandContext,
+    batchId: string,
+    command: ApproveReimbursementBatchCommand,
+    requestId?: string,
+  ) {
+    const batch = context.batch;
     if (batch.statementId !== command.statementId) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -3206,7 +3252,7 @@ export class BillingSettlementService implements OnModuleInit {
       batch.workflowState,
       "approved",
     );
-    await this.persistChanges(
+    await context.persist(
       {
         reimbursementBatches: [this.cloneReimbursementBatch(batch)],
       },
@@ -3269,6 +3315,19 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
+  async getReimbursementBatchFresh(batchId: string) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.getReimbursementBatch(batchId);
+    }
+    const batch =
+      await this.billingSettlementRepository.findCommittedReimbursementBatch(
+        batchId,
+      );
+    return this.cloneReimbursementBatch(
+      this.requireReimbursementBatchFrom(batchId, batch ? [batch] : []),
+    );
+  }
+
   // ── Remittance Proof: both payment routes share the gate below. ──
 
   /** Test seam for scripted scan outcomes; HTTP callers cannot submit verdicts. */
@@ -3285,7 +3344,7 @@ export class BillingSettlementService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ): Promise<RemittanceProofRecord> {
-    const batch = this.requireReimbursementBatch(command.batchId);
+    const batch = await this.getReimbursementBatchFresh(command.batchId);
     const callerDriverId = identity?.actorId?.trim() || null;
     if (
       identity?.realm === "driver" &&
@@ -3441,7 +3500,25 @@ export class BillingSettlementService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ): Promise<RemittanceProofPaymentReceipt> {
-    const batch = this.requireReimbursementBatch(batchId);
+    return this.withReimbursementBatchCommand(batchId, (context) =>
+      this.markReimbursementPaidWithProofFrom(
+        context,
+        batchId,
+        command,
+        identity,
+        requestId,
+      ),
+    );
+  }
+
+  private async markReimbursementPaidWithProofFrom(
+    context: ReimbursementBatchCommandContext,
+    batchId: string,
+    command: MarkReimbursementPaidWithProofCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<RemittanceProofPaymentReceipt> {
+    const batch = context.batch;
     if (!batch.approvedAt) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -3473,7 +3550,7 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    const receipt = await this.remittanceProofService.markPaidWithProof({
+    const receipt = await context.pay({
       batchId: batch.batchId,
       proofId: command.proofId,
       idempotencyKey: command.idempotencyKey,
@@ -3491,9 +3568,7 @@ export class BillingSettlementService implements OnModuleInit {
         updatedBatch.workflowState,
         "paid",
       );
-      const relatedStatement = this.driverStatements.find(
-        (statement) => statement.statementId === batch.statementId,
-      );
+      const relatedStatement = context.statement;
       const updatedStatement = relatedStatement
         ? this.cloneStatement(relatedStatement)
         : null;
@@ -3504,15 +3579,14 @@ export class BillingSettlementService implements OnModuleInit {
 
       // Publish in-memory state only after persistence succeeds. A durable
       // receipt can then recover a failed batch write on an idempotent retry.
-      await this.persistChanges(
+      await context.persist(
         {
           reimbursementBatches: [updatedBatch],
           ...(updatedStatement ? { driverStatements: [updatedStatement] } : {}),
         },
         "mark_reimbursement_paid_with_proof",
       );
-      if (this.requireReimbursementBatch(batchId).status === "paid")
-        return receipt;
+      if (context.currentBatch().status === "paid") return receipt;
       Object.assign(batch, updatedBatch);
       if (relatedStatement && updatedStatement)
         Object.assign(relatedStatement, updatedStatement);
@@ -3562,7 +3636,18 @@ export class BillingSettlementService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ): Promise<ReimbursementBatchExportReceipt> {
-    const batch = this.requireReimbursementBatch(batchId);
+    return this.withReimbursementBatchCommand(batchId, (context) =>
+      this.exportReimbursementBatchFrom(context, batchId, identity, requestId),
+    );
+  }
+
+  private async exportReimbursementBatchFrom(
+    context: ReimbursementBatchCommandContext,
+    batchId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReimbursementBatchExportReceipt> {
+    const batch = context.batch;
     if (!batch.approvedAt) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -3592,7 +3677,7 @@ export class BillingSettlementService implements OnModuleInit {
         });
         const refreshed = this.cloneReimbursementBatch(batch);
         refreshed.exportDownloadMetadata = download;
-        await this.persistChanges(
+        await context.persist(
           { reimbursementBatches: [refreshed] },
           "reissue_reimbursement_batch_export_artifact",
         );
@@ -3611,9 +3696,7 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    const relatedStatement = this.driverStatements.find(
-      (statement) => statement.statementId === batch.statementId,
-    );
+    const relatedStatement = context.statement;
     const artifactRecord = await this.documentArtifactStore.put({
       kind: "report",
       subjectId: batch.batchId,
@@ -3653,7 +3736,7 @@ export class BillingSettlementService implements OnModuleInit {
     // Publish in-memory state only after persistence succeeds, matching
     // `markReimbursementPaidWithProof`'s rationale: a durable receipt lets a
     // failed batch write recover on retry rather than silently diverging.
-    await this.persistChanges(
+    await context.persist(
       { reimbursementBatches: [updatedBatch] },
       "export_reimbursement_batch",
     );
@@ -3706,7 +3789,25 @@ export class BillingSettlementService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ): Promise<ReimbursementBatchReconciliationReceipt> {
-    const batch = this.requireReimbursementBatch(batchId);
+    return this.withReimbursementBatchCommand(batchId, (context) =>
+      this.markReimbursementBatchReconciledFrom(
+        context,
+        batchId,
+        command,
+        identity,
+        requestId,
+      ),
+    );
+  }
+
+  private async markReimbursementBatchReconciledFrom(
+    context: ReimbursementBatchCommandContext,
+    batchId: string,
+    command: MarkReimbursementBatchReconciledCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReimbursementBatchReconciliationReceipt> {
+    const batch = context.batch;
 
     if (batch.reconciledAt && batch.reconciliationReceiptId) {
       return {
@@ -3755,7 +3856,7 @@ export class BillingSettlementService implements OnModuleInit {
       "reconciled",
     );
 
-    await this.persistChanges(
+    await context.persist(
       { reimbursementBatches: [updatedBatch] },
       "mark_reimbursement_batch_reconciled",
     );
@@ -3765,8 +3866,8 @@ export class BillingSettlementService implements OnModuleInit {
     // -- including a concurrent call's own `Object.assign` that may have
     // landed on it while the above `persistChanges` await was in flight,
     // exactly as `markReimbursementPaidWithProof` relies on below.
-    if (this.requireReimbursementBatch(batchId).reconciledAt) {
-      const concurrentWinner = this.requireReimbursementBatch(batchId);
+    if (context.currentBatch().reconciledAt) {
+      const concurrentWinner = context.currentBatch();
       return {
         receiptId: concurrentWinner.reconciliationReceiptId!,
         batchId: concurrentWinner.batchId,
@@ -4736,10 +4837,90 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
-  private requireReimbursementBatch(batchId: string) {
-    const batch = this.reimbursementBatches.find(
-      (candidate) => candidate.batchId === batchId,
+  private async withReimbursementBatchCommand<T>(
+    batchId: string,
+    execute: (context: ReimbursementBatchCommandContext) => Promise<T>,
+  ): Promise<T> {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      const batch = this.requireReimbursementBatch(batchId);
+      return execute({
+        batch,
+        statement:
+          this.driverStatements.find(
+            (row) => row.statementId === batch.statementId,
+          ) ?? null,
+        currentBatch: () => this.requireReimbursementBatch(batchId),
+        persist: (changes, operation) =>
+          this.persistChanges(changes, operation),
+        pay: (input) => this.remittanceProofService.markPaidWithProof(input),
+      });
+    }
+    return this.billingSettlementRepository.withReimbursementBatchTarget(
+      batchId,
+      async (target) => {
+        const batch = this.cloneReimbursementBatch(
+          this.requireReimbursementBatchFrom(
+            batchId,
+            target.batch ? [target.batch] : [],
+          ),
+        );
+        const statement = target.statement
+          ? this.cloneStatement(target.statement)
+          : null;
+        const result = await execute({
+          batch,
+          statement,
+          currentBatch: () => batch,
+          persist: async (changes, operation) => {
+            try {
+              await target.persist(changes);
+            } catch (error) {
+              this.billingSettlementRepository!.reportPersistenceFailure(
+                error,
+                operation,
+              );
+              throw error;
+            }
+          },
+          pay: (input) =>
+            this.remittanceProofService.markPaidWithProof(
+              input,
+              target.markProofPaid,
+            ),
+        });
+        // Publish only this acknowledged command's own batch and related statement.
+        const existingBatch = this.reimbursementBatches.find(
+          (row) => row.batchId === batchId,
+        );
+        if (existingBatch)
+          Object.assign(existingBatch, this.cloneReimbursementBatch(batch));
+        else
+          this.reimbursementBatches.push(this.cloneReimbursementBatch(batch));
+        if (statement) {
+          const existingStatement = this.driverStatements.find(
+            (row) => row.statementId === statement.statementId,
+          );
+          if (existingStatement)
+            Object.assign(existingStatement, this.cloneStatement(statement));
+          else this.driverStatements.push(this.cloneStatement(statement));
+        }
+        return result;
+      },
     );
+  }
+
+  private requireReimbursementBatch(batchId: string) {
+    return this.requireReimbursementBatchFrom(
+      batchId,
+      this.reimbursementBatches,
+    );
+  }
+
+  private requireReimbursementBatchFrom(
+    batchId: string,
+    batches: ReimbursementBatchRecord[],
+  ) {
+    const batch = batches.find((candidate) => candidate.batchId === batchId);
     if (!batch) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,

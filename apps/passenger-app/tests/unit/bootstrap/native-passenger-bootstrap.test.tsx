@@ -33,6 +33,14 @@ vi.mock("expo-linking", () => ({ openURL: vi.fn(async () => {}) }));
 vi.mock("expo-modules-core", () => ({
   uuid: { v4: vi.fn(() => "bootstrap-platform-request") },
 }));
+vi.mock("expo-file-system", () => ({
+  Paths: { cache: { uri: "file:///bootstrap-cache" } },
+  File: vi.fn(),
+}));
+vi.mock("expo-sharing", () => ({
+  isAvailableAsync: vi.fn(async () => false),
+  shareAsync: vi.fn(async () => {}),
+}));
 import PassengerAppEntry from "../../../app/index";
 import { NativePassengerRuntime } from "../../../lib/native-passenger-runtime";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

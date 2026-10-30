@@ -514,10 +514,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
   // 6. Controller Endpoints & API Envelopes
   // ==========================================================================
   describe("6. Controller Endpoints & API Envelopes", () => {
-    it("serves operational-view via controller with valid envelope and meta", () => {
+    it("serves operational-view via controller with valid envelope and meta", async () => {
       const { controller } = setupServices();
 
-      const response = controller.getContractOperationalView(
+      const response = await controller.getContractOperationalView(
         "contract-demo-004",
         undefined,
         undefined,
@@ -535,10 +535,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       expect(response.meta.timestamp).toBeDefined();
     });
 
-    it("serves operational-terms via controller with valid envelope", () => {
+    it("serves operational-terms via controller with valid envelope", async () => {
       const { controller } = setupServices();
 
-      const response = controller.getContractOperationalTerms(
+      const response = await controller.getContractOperationalTerms(
         "contract-demo-004",
         undefined,
         undefined,
@@ -556,10 +556,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       expect(response.meta.requestId).toBe("req-ops-test-002");
     });
 
-    it("serves single contract via GET contracts/:contractId with scope enforcement", () => {
+    it("serves single contract via GET contracts/:contractId with scope enforcement", async () => {
       const { controller } = setupServices();
 
-      const response = controller.getContract(
+      const response = await controller.getContract(
         "contract-demo-001",
         undefined,
         "partner-demo-001",
@@ -575,9 +575,9 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       expect(response.meta.requestId).toBe("req-ops-test-003");
 
       // Mismatched scope in controller must throw 403
-      expect(() =>
+      await expect(
         controller.getContract("contract-demo-001", undefined, "partner-wrong"),
-      ).toThrow(ApiRequestError);
+      ).rejects.toThrow(ApiRequestError);
     });
   });
 
@@ -636,7 +636,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       expect(validateTermsEnvelope).toBeDefined();
     });
 
-    it("validates all service-generated ContractOperationalViewRecords against OpenAPI schema", () => {
+    it("validates all service-generated ContractOperationalViewRecords against OpenAPI schema", async () => {
       const { opViewService, controller } = setupServices();
       const contracts = [
         "contract-demo-001",
@@ -653,7 +653,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
         expect(valid).toBe(true);
 
         // Envelope validation
-        const viewEnv = controller.getContractOperationalView(cid);
+        const viewEnv = await controller.getContractOperationalView(cid);
         const validEnv = validateViewEnvelope(viewEnv);
         if (!validEnv) {
           console.error(
@@ -665,7 +665,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       }
     });
 
-    it("validates all service-generated ContractOperationalTerms against OpenAPI schema", () => {
+    it("validates all service-generated ContractOperationalTerms against OpenAPI schema", async () => {
       const { opViewService, controller } = setupServices();
       const contracts = [
         "contract-demo-001",
@@ -682,7 +682,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
         expect(valid).toBe(true);
 
         // Envelope validation
-        const termsEnv = controller.getContractOperationalTerms(cid);
+        const termsEnv = await controller.getContractOperationalTerms(cid);
         const validEnv = validateTermsEnvelope(termsEnv);
         if (!validEnv) {
           console.error(

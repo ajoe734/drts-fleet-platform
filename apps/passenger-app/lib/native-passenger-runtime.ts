@@ -32,6 +32,7 @@ import type {
   PassengerAccount,
   PassengerRideAuthorityView,
   PassengerReceiptResponse,
+  PassengerRideContactOption,
   RatePassengerRideCommand,
 } from "@drts/contracts";
 import type { PassengerOAuthBrowserPort } from "../components/auth/passenger-login-screen";
@@ -122,6 +123,12 @@ export class NativePassengerRuntime {
   private push: NativePassengerPushLifecycle | null = null;
   private downloads: NativePassengerReceiptDownloads | null = null;
   private receiptMetadata: PassengerReceiptResponse | null = null;
+  private driverContact: {
+    orderId: string;
+    assignmentId: string | null;
+    assignmentVersion: number | null;
+    option: PassengerRideContactOption;
+  } | null = null;
   private rideRevision = 0;
   private navigationEpoch = 0;
   private state: NativePassengerApplicationState = {
@@ -384,6 +391,7 @@ export class NativePassengerRuntime {
     this.downloads?.dispose();
     this.downloads = null;
     this.receiptMetadata = null;
+    this.driverContact = null;
     this.publish({
       ride: null,
       presentation: null,
@@ -603,6 +611,53 @@ export class NativePassengerRuntime {
       throw error;
     }
   }
+  async contactDriver(): Promise<PassengerRideContactOption> {
+    if (
+      this.state.route.kind !== "ride" ||
+      !this.state.ride?.actions.canContact
+    )
+      throw new Error("目前無法聯絡這筆行程的司機，請重新讀取行程。");
+    const orderId = this.state.route.orderId;
+    const epoch = this.epoch;
+    const navigationEpoch = this.navigationEpoch;
+    this.driverContact = null;
+    const assignmentId = this.state.ride.assignment?.assignmentId ?? null;
+    const assignmentVersion =
+      this.state.ride.assignment?.assignmentVersion ?? null;
+    const option = await this.passenger.contactRide(orderId);
+    if (
+      this.disposed ||
+      epoch !== this.epoch ||
+      navigationEpoch !== this.navigationEpoch ||
+      this.state.route.kind !== "ride" ||
+      this.state.route.orderId !== orderId ||
+      (this.state.ride?.assignment?.assignmentId ?? null) !== assignmentId ||
+      (this.state.ride?.assignment?.assignmentVersion ?? null) !==
+        assignmentVersion
+    )
+      throw new Error("行程已變更，請重新確認聯絡資料。");
+    this.driverContact = { orderId, assignmentId, assignmentVersion, option };
+    return option;
+  }
+  async openDriverContact() {
+    const contact = this.driverContact;
+    if (
+      !contact ||
+      this.state.route.kind !== "ride" ||
+      this.state.route.orderId !== contact.orderId ||
+      !this.state.ride?.actions.canContact ||
+      (this.state.ride.assignment?.assignmentId ?? null) !==
+        contact.assignmentId ||
+      (this.state.ride.assignment?.assignmentVersion ?? null) !==
+        contact.assignmentVersion
+    )
+      throw new Error("請重新取得這筆行程的聯絡資料。");
+    if (contact.option.mode === "unavailable" || !contact.option.contactUri)
+      throw new Error("目前無法直接聯絡司機，請改聯絡客服協助。");
+    if (!this.options.telephone)
+      throw new Error("電話功能尚未提供，請改聯絡客服協助。");
+    await this.options.telephone.open(contact.option.contactUri);
+  }
   async contactSupport() {
     if (!this.options.telephone)
       throw new Error("電話功能尚未提供，請撥客服 02-2944-0985。");
@@ -622,6 +677,8 @@ export class NativePassengerRuntime {
       submitRating: (command) => this.submitRating(command),
       downloadReceipt: ({ format }) => this.downloadReceipt(format),
       contactSupport: () => this.contactSupport(),
+      contactDriver: () => this.contactDriver(),
+      openDriverContact: () => this.openDriverContact(),
       openSupport: (category) => this.openSupport(category),
       openHistory: () => this.navigate("history"),
     };

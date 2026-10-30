@@ -156,14 +156,14 @@ export class IncidentController {
     @Body() command: RecordServiceRecoveryActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.recordServiceRecoveryAction(
-        incidentId,
-        command,
-        requestId,
-      ),
+    const result = this.incidentService.recordServiceRecoveryActionForCommit(
+      incidentId,
+      command,
       requestId,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Post(":incidentId/matching-suppression/extend")
@@ -189,19 +189,22 @@ export class IncidentController {
     @Param("incidentId") incidentId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelList(
-        this.incidentService.getServiceRecoveryActions(incidentId),
-        {
+    const respond = (
+      items: ReturnType<IncidentService["getServiceRecoveryActions"]>,
+    ) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelList(items, {
           staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
           emptyState: buildEmptyStateEnvelope(
             "no_data",
             "incidents.service_recovery.empty",
           ),
-        },
-      ),
-      requestId,
-    );
+        }),
+        requestId,
+      );
+    const items =
+      this.incidentService.getServiceRecoveryActionsForReadback(incidentId);
+    return items instanceof Promise ? items.then(respond) : respond(items);
   }
 
   @Post(":incidentId/link-complaint")

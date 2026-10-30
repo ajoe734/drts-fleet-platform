@@ -1,3 +1,4 @@
+import type { TenantMasterDirectoryContext } from "./tenant-partner.repository";
 import { deepToSnakeCase } from "../../common/snake-case.interceptor";
 import {
   createHash,
@@ -249,6 +250,7 @@ import {
 } from "./referral-embed-handoff.repository";
 import {
   TenantPartnerRepository,
+  TenantMasterDirectoryOwnershipConflict,
   mergeCanonicalTenantApiKeyRecord,
   type IdentityGovernanceChanges,
   type PersistTenantPartnerChanges,
@@ -2075,15 +2077,76 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .filter((notification) => notification.tenantId === tenantId);
   }
 
-  listPassengers(tenantId: string) {
-    return this.passengers
+  async readTenantMasterDirectory(
+    tenantId: string,
+  ): Promise<TenantMasterDirectoryContext> {
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const directory =
+        await this.tenantPartnerRepository.readTenantMasterDirectory(tenantId);
+      return {
+        passengers: directory.passengers.map((record) =>
+          this.clonePassenger(record),
+        ),
+        addresses: directory.addresses.map((record) =>
+          this.cloneAddress(record),
+        ),
+        costCenters: directory.costCenters.map((record) =>
+          this.cloneCostCenter(record),
+        ),
+      };
+    }
+    return {
+      passengers: this.listPassengers(tenantId),
+      addresses: this.listAddresses(tenantId),
+      costCenters: this.listCostCenters(tenantId),
+    };
+  }
+
+  async listPassengersForRead(tenantId: string) {
+    return this.listPassengers(
+      tenantId,
+      await this.readTenantMasterDirectory(tenantId),
+    );
+  }
+
+  async listAddressesForRead(tenantId: string) {
+    return this.listAddresses(
+      tenantId,
+      await this.readTenantMasterDirectory(tenantId),
+    );
+  }
+
+  async listCostCentersForRead(
+    tenantId: string,
+    query: ListTenantCostCentersQuery = {},
+  ) {
+    return this.listCostCenters(
+      tenantId,
+      query,
+      await this.readTenantMasterDirectory(tenantId),
+    );
+  }
+
+  async listAddressExportViewForRead(tenantId: string) {
+    return this.listAddressExportView(
+      tenantId,
+      await this.readTenantMasterDirectory(tenantId),
+    );
+  }
+
+  listPassengers(tenantId: string, directory?: TenantMasterDirectoryContext) {
+    return (directory?.passengers ?? this.passengers)
       .filter((passenger) => passenger.tenantId === tenantId)
       .map((passenger) => this.clonePassenger(passenger));
   }
 
-  getPassengerMasterRecord(tenantId: string, passengerId: string) {
+  getPassengerMasterRecord(
+    tenantId: string,
+    passengerId: string,
+    directory?: TenantMasterDirectoryContext,
+  ) {
     const normalizedPassengerId = passengerId.trim();
-    const passenger = this.passengers.find(
+    const passenger = (directory?.passengers ?? this.passengers).find(
       (candidate) =>
         candidate.tenantId === tenantId &&
         candidate.passengerId === normalizedPassengerId,
@@ -2110,6 +2173,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.withTenantBookWriteLock(
       `passenger:${command.passengerId?.trim() || randomUUID()}`,
       async () => {
+        const directory = this.isPersistenceEnabled()
+          ? await this.readTenantMasterDirectory(tenantId)
+          : undefined;
         this.assertNonBlank(command.fullName, "fullName");
 
         const passengerId = command.passengerId?.trim() || null;
@@ -2133,7 +2199,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
         const now = new Date().toISOString();
         const existing = passengerId
-          ? (this.passengers.find(
+          ? ((directory?.passengers ?? this.passengers).find(
               (passenger) =>
                 passenger.tenantId === tenantId &&
                 passenger.passengerId === passengerId,
@@ -2187,6 +2253,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         passenger.qualityIssues = this.buildPassengerQualityIssues(
           tenantId,
           passenger,
+          directory,
         );
 
         await this.persistChangesRequired(
@@ -2220,15 +2287,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  listAddresses(tenantId: string) {
-    return this.addresses
+  listAddresses(tenantId: string, directory?: TenantMasterDirectoryContext) {
+    return (directory?.addresses ?? this.addresses)
       .filter((address) => address.tenantId === tenantId)
       .map((address) => this.cloneAddress(address));
   }
 
-  listAddressExportView(tenantId: string): TenantAddressExportViewRecord[] {
+  listAddressExportView(
+    tenantId: string,
+    directory?: TenantMasterDirectoryContext,
+  ): TenantAddressExportViewRecord[] {
     const generatedAt = new Date().toISOString();
-    return this.addresses
+    return (directory?.addresses ?? this.addresses)
       .filter((address) => address.tenantId === tenantId)
       .map((address) => ({
         addressId: address.addressId,
@@ -2246,9 +2316,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }));
   }
 
-  getAddressMasterRecord(tenantId: string, addressId: string) {
+  getAddressMasterRecord(
+    tenantId: string,
+    addressId: string,
+    directory?: TenantMasterDirectoryContext,
+  ) {
     const normalizedAddressId = addressId.trim();
-    const address = this.addresses.find(
+    const address = (directory?.addresses ?? this.addresses).find(
       (candidate) =>
         candidate.tenantId === tenantId &&
         candidate.addressId === normalizedAddressId,
@@ -2275,6 +2349,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.withTenantBookWriteLock(
       `address:${command.addressId?.trim() || randomUUID()}`,
       async () => {
+        const directory = this.isPersistenceEnabled()
+          ? await this.readTenantMasterDirectory(tenantId)
+          : undefined;
         this.assertNonBlank(command.addressName, "addressName");
         this.assertNonBlank(command.addressText, "addressText");
 
@@ -2299,7 +2376,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         const ownerPassengerId = command.ownerPassengerId ?? null;
         if (
           ownerPassengerId !== null &&
-          !this.passengers.some(
+          !(directory?.passengers ?? this.passengers).some(
             (passenger) =>
               passenger.tenantId === tenantId &&
               passenger.passengerId === ownerPassengerId,
@@ -2317,7 +2394,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
         const now = new Date().toISOString();
         const existing = addressId
-          ? (this.addresses.find(
+          ? ((directory?.addresses ?? this.addresses).find(
               (address) =>
                 address.tenantId === tenantId &&
                 address.addressId === addressId,
@@ -2382,6 +2459,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         address.qualityIssues = this.buildAddressQualityIssues(
           tenantId,
           address,
+          directory,
         );
 
         await this.persistChangesRequired(
@@ -2415,11 +2493,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  listCostCenters(tenantId: string, query: ListTenantCostCentersQuery = {}) {
+  listCostCenters(
+    tenantId: string,
+    query: ListTenantCostCentersQuery = {},
+    directory?: TenantMasterDirectoryContext,
+  ) {
     const search = this.normalizeNullableText(query.search)?.toLowerCase();
     const ownerUserId = this.normalizeNullableText(query.ownerUserId);
 
-    return this.costCenters
+    return (directory?.costCenters ?? this.costCenters)
       .filter((costCenter) => costCenter.tenantId === tenantId)
       .filter((costCenter) => {
         if (query.activeOnly && !costCenter.activeFlag) {
@@ -4655,11 +4737,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.normalizeCostCenterCode(command.code),
       ]),
       async () => {
+        const directory = this.isPersistenceEnabled()
+          ? await this.readTenantMasterDirectory(tenantId)
+          : undefined;
         this.assertNonBlank(command.code, "code");
         this.assertNonBlank(command.name, "name");
 
         const code = this.normalizeCostCenterCode(command.code);
-        const existing = this.costCenters.find(
+        const existing = (directory?.costCenters ?? this.costCenters).find(
           (candidate) =>
             candidate.tenantId === tenantId && candidate.code === code,
         );
@@ -4847,12 +4932,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   validateBookingCostCenter(
     tenantId: string,
     rawCode: string | null | undefined,
+    directory?: TenantMasterDirectoryContext,
   ): { value: string | null; matchedDirectory: boolean } {
     const trimmed = this.normalizeNullableText(rawCode);
     if (trimmed === null) {
       return { value: null, matchedDirectory: false };
     }
-    const tenantDirectory = this.costCenters.filter(
+    const tenantDirectory = (directory?.costCenters ?? this.costCenters).filter(
       (candidate) => candidate.tenantId === tenantId,
     );
     // Grandfather tenants that have not yet seeded a cost-center directory:
@@ -5161,6 +5247,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   listPlatformPartnerEntries() {
     return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  /** Detached contract reads must not republish snapshots into command state. */
+  async listPlatformPartnerEntriesFromPersistence(): Promise<
+    PartnerChannelEntryRecord[]
+  > {
+    if (!this.tenantPartnerRepository?.isEnabled()) {
+      return this.listPlatformPartnerEntries();
+    }
+    const entries = await this.tenantPartnerRepository.listPartnerEntries();
+    return entries
+      .filter(
+        (entry) =>
+          !isStrictAuthEnvironment() || entry.tenantId !== DEMO_TENANT_ID,
+      )
+      .map((entry) => this.clonePartnerEntry(entry));
   }
 
   async resolvePlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
@@ -10815,10 +10917,57 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return { ...this.getOrCreateSlaProfile(tenantId) };
   }
 
+  /** Read the exact committed profile without replacing a newer local command. */
+  async getSlaProfileFromPersistence(
+    tenantId: string,
+  ): Promise<TenantSlaProfile | null> {
+    this.assertConfigurationReadable(tenantId);
+    if (!this.tenantPartnerRepository?.isEnabled()) {
+      return this.getSlaProfile(tenantId);
+    }
+    const profile = await this.tenantPartnerRepository.findSlaProfile(tenantId);
+    return profile ? this.cloneSlaProfile(profile) : null;
+  }
+
+  async getSlaProfileForRead(tenantId: string): Promise<TenantSlaProfile> {
+    const profile = await this.getSlaProfileFromPersistence(tenantId);
+    return profile ?? this.createDefaultSlaProfile(tenantId);
+  }
+
+  async getSlaProfileViewFromPersistence(
+    tenantId: string,
+  ): Promise<TenantSlaProfileView> {
+    if (!this.tenantPartnerRepository?.isEnabled()) {
+      return this.getSlaProfileView(tenantId);
+    }
+    const profile = await this.getSlaProfileFromPersistence(tenantId);
+    const view = this.projectSlaProfileView(tenantId, profile);
+    const local = this.slaProfiles.get(tenantId);
+    const matchesKnownLocalVersion =
+      profile &&
+      local &&
+      profile.tenantId === local.tenantId &&
+      profile.updatedAt === local.updatedAt &&
+      profile.waitThresholdMin === local.waitThresholdMin &&
+      profile.arrivalThresholdMin === local.arrivalThresholdMin &&
+      profile.completionThresholdMin === local.completionThresholdMin;
+    return matchesKnownLocalVersion
+      ? view
+      : { ...view, updatedBy: null, lastRecalculationAt: null };
+  }
+
   getSlaProfileView(tenantId: string): TenantSlaProfileView {
     this.assertConfigurationReadable(tenantId);
-    const profile = this.slaProfiles.get(tenantId);
-    const availableActions = this.buildTenantSlaAvailableActions(profile);
+    return this.projectSlaProfileView(tenantId, this.slaProfiles.get(tenantId));
+  }
+
+  private projectSlaProfileView(
+    tenantId: string,
+    profile: TenantSlaProfile | null | undefined,
+  ): TenantSlaProfileView {
+    const availableActions = this.buildTenantSlaAvailableActions(
+      profile ?? undefined,
+    );
     const refreshMetadata: UiRefreshMetadata = {
       generatedAt: new Date().toISOString(),
       staleAfterMs: 30_000,
@@ -15375,6 +15524,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private buildPassengerQualityIssues(
     tenantId: string,
     passenger: TenantPassengerRecord,
+    directory?: TenantMasterDirectoryContext,
   ): TenantPassengerQualityIssue[] {
     const issues: TenantPassengerQualityIssue[] = [];
     if (!passenger.mobile && !passenger.email) {
@@ -15388,7 +15538,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
     if (
       passenger.employeeNo &&
-      this.passengers.some(
+      (directory?.passengers ?? this.passengers).some(
         (candidate) =>
           candidate.tenantId === tenantId &&
           candidate.passengerId !== passenger.passengerId &&
@@ -15426,6 +15576,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private buildAddressQualityIssues(
     tenantId: string,
     address: TenantAddressRecord,
+    directory?: TenantMasterDirectoryContext,
   ): TenantAddressQualityIssue[] {
     const issues: TenantAddressQualityIssue[] = [];
     const hasCoordinates =
@@ -15435,7 +15586,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
     if (
       address.normalizedAddressText &&
-      this.addresses.some(
+      (directory?.addresses ?? this.addresses).some(
         (candidate) =>
           candidate.tenantId === tenantId &&
           candidate.addressId !== address.addressId &&
@@ -17540,6 +17691,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.tenantPartnerRepository.persistChanges(changes);
     } catch (error) {
+      if (error instanceof TenantMasterDirectoryOwnershipConflict) {
+        const passenger = error.kind === "passenger";
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          passenger ? "PASSENGER_NOT_FOUND" : "ADDRESS_NOT_FOUND",
+          passenger
+            ? "The tenant passenger could not be found."
+            : "The tenant address could not be found.",
+          { [passenger ? "passengerId" : "addressId"]: error.recordId },
+        );
+      }
       if (
         typeof (this.tenantPartnerRepository as any)
           .reportPersistenceFailure === "function"
