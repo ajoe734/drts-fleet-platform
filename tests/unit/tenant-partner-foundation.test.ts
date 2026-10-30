@@ -1413,6 +1413,20 @@ describe("tenant partner foundation service", () => {
         ],
         apiKeys: [persistedApiKey],
       })),
+      readTenantMasterDirectory: vi.fn(async (tenantId: string) => {
+        const state = clonePartnerState(await repository.loadState());
+        return {
+          passengers: state.passengers.filter(
+            (record) => record.tenantId === tenantId,
+          ),
+          addresses: state.addresses.filter(
+            (record) => record.tenantId === tenantId,
+          ),
+          costCenters: (state.costCenters ?? []).filter(
+            (record) => record.tenantId === tenantId,
+          ),
+        };
+      }),
       persistChanges,
       reportPersistenceFailure: vi.fn(),
     } as unknown as TenantPartnerRepository;
