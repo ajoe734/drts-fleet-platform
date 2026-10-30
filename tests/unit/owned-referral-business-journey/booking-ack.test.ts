@@ -820,6 +820,21 @@ describe("actual main and supplemental booking callers keep a failed guard until
     ts.isArrowFunction,
     "supplemental original booking ACK custody",
   ).getText(specSource);
+  // The guard is absent in the immutable original source used for the RED
+  // regression; all actual caller nodes above remain mandatory.
+  const stableSupplementalBookingGuard = (() => {
+    let initializer: string | undefined;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.name.getText(specSource) === "stableSupplementalBookingGuard"
+      )
+        initializer = node.initializer?.getText(specSource);
+      ts.forEachChild(node, visit);
+    };
+    visit(specSource);
+    return initializer;
+  })();
 
   const origin = "https://referral.example.test";
   const bookingUrl = `${origin}/api/referral/booking`;
@@ -849,6 +864,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
       fulfills: 0,
       unroutes: 0,
       offs: 0,
+      routeAdds: 0,
     };
     const fulfilledBodies: Buffer[] = [];
     let routes: { url: string; handler: Handler }[] = [];
@@ -863,10 +879,14 @@ describe("actual main and supplemental booking callers keep a failed guard until
     // Optional controlled settlement of the actual Playwright release/drain
     // ports; unset, each settles at once as before.
     const holds: Partial<
-      Record<"fulfill" | "dispose" | "unroute", () => Promise<void>>
+      Record<
+        "fulfill" | "dispose" | "unroute" | "emptyUnroute",
+        () => Promise<void>
+      >
     > = {};
     const page = {
       route: async (url: string, handler: Handler) => {
+        counts.routeAdds += 1;
         routes.push({ url, handler });
       },
       unroute: async (url: string, handler?: Handler) => {
@@ -874,6 +894,10 @@ describe("actual main and supplemental booking callers keep a failed guard until
         routes = routes.filter(
           (r) => !(r.url === url && (!handler || r.handler === handler)),
         );
+        // Playwright 1.59.1 removes the local handler before awaiting its
+        // channel operation. Model an external wait only when no route pattern
+        // remains; unconditional holds.unroute still covers the old boundary.
+        if (routes.length === 0) await holds.emptyUnroute?.();
         await holds.unroute?.();
       },
       on: (_event: string, listener: (response: unknown) => void) =>
@@ -906,16 +930,21 @@ describe("actual main and supplemental booking callers keep a failed guard until
       };
     };
     // One browser POST of the frozen UI command, as the click would emit it.
-    async function post(raw: string, key: string) {
+    async function post(
+      raw: string,
+      key: string,
+      targetUrl = bookingUrl,
+      method = "POST",
+    ) {
       if (closed) throw new Error("page closed");
-      const target = [...routes].reverse().find((r) => r.url === bookingUrl);
+      const target = [...routes].reverse().find((r) => r.url === targetUrl);
       if (!target) {
         counts.network += 1;
         return;
       }
       const request = {
-        url: () => bookingUrl,
-        method: () => "POST",
+        url: () => targetUrl,
+        method: () => method,
         postData: () => raw,
         headers: () => ({ "idempotency-key": key }),
       };
@@ -975,6 +1004,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
       post,
       quoteResponse,
       routes: () => routes.length,
+      routeUrls: () => routes.map((r) => r.url),
       close: () => {
         closed = true;
         routes = [];
@@ -1338,6 +1368,10 @@ describe("actual main and supplemental booking callers keep a failed guard until
       BookingWriteJournal,
       evidence,
     };
+    if (stableSupplementalBookingGuard)
+      bindings.stableSupplementalBookingGuard = compile<
+        (url: string) => Promise<unknown>
+      >(stableSupplementalBookingGuard, bindings);
     const book = compile<(name: string) => Promise<Record<string, unknown>>>(
       bookExtraFromUI,
       bindings,
@@ -1377,7 +1411,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
         await turns();
         vi.advanceTimersByTime(25_000);
         await rejected;
-        expect(h.routes()).toBe(1);
+        expect(h.routes()).toBe(2);
         await h.post(h.raw("quote-extra", "extra-key"), "extra-key");
         click.resolve();
         await turns();
@@ -1458,7 +1492,101 @@ describe("actual main and supplemental booking callers keep a failed guard until
       // The successful operation unrouted its own handler; the old closed
       // guard remains and was never invoked.
       expect(h.counts).toMatchObject({ fetches: 1, aborts: 0, unroutes: 1 });
-      expect(h.routes()).toBe(1);
+      expect(h.routes()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supplemental: an exact stable guard keeps the route channel live while each actual owner drains", async () => {
+    budgetClock();
+    try {
+      const unhandled = await collectUnhandled(async () => {
+        const h = supplementalHarness();
+        const emptyChannel = deferred<void>();
+        h.holds.emptyUnroute = () => emptyChannel.promise;
+        for (const [name, orderId, key] of [
+          ["reservation-1", "order-extra-1", "extra-key-1"],
+          ["reservation-2", "order-extra-2", "extra-key-2"],
+        ] as const) {
+          const raw = h.raw("quote-extra", key);
+          h.setResponder(async () => ack(orderId, "quote-extra"));
+          h.setClick(async () => {
+            h.quoteResponse(Promise.resolve({ data: proposal("quote-extra") }));
+            void h.post(raw, key);
+          });
+          const outcome = h.book(name).then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+          await turns();
+          // A zero-pattern channel hold makes the old actual caller reach its
+          // original 25s deadline at unroute; a baseline guard lets the exact
+          // active owner unroute and its quote drain settle before that budget.
+          vi.advanceTimersByTime(25_000);
+          const result = await outcome;
+          if ("error" in result) {
+            expect((result.error as JourneyFailure).stage).toBe(
+              "supplemental-original-booking-timeout",
+            );
+            expect(pendingStages(h.evidence)).toEqual([
+              "supplemental-original-booking-expired-pending:unroute",
+            ]);
+          }
+          expect(result).toHaveProperty("value");
+          if (!("value" in result)) return;
+          expect(result.value).toMatchObject({
+            name,
+            orderId,
+            actions: ["booking"],
+          });
+          expect(
+            (result.value.journal as BookingWriteJournal).current,
+          ).toMatchObject({
+            state: "acknowledged",
+            body: raw,
+            idempotencyKey: key,
+          });
+          expect(h.operations.at(-1)?.phases()).toMatchObject({
+            frozenBy: "closed",
+            pending: [],
+          });
+          expect(
+            h.operations
+              .at(-1)
+              ?.phases()
+              .transitions.map((t) => t.transition),
+          ).toContain("quote-drain-completed");
+          expect(h.routeUrls()).toEqual([bookingUrl]);
+          expect(h.counts.routeAdds).toBe(h.operations.length + 1);
+          expect(h.counts.unroutes).toBe(h.operations.length);
+          const sent = h.counts.fetches;
+          await h.post(raw, key);
+          expect(h.counts).toMatchObject({
+            fetches: sent,
+            aborts: h.operations.length,
+            network: 0,
+          });
+        }
+        expect(h.controlledOrderIds).toEqual([
+          "order-extra-1",
+          "order-extra-2",
+        ]);
+        // The permanent route is exact and lets a non-POST booking read pass.
+        await h.post("{}", "unrelated-key", `${origin}/api/referral/rating/x`);
+        await h.post("", "", bookingUrl, "GET");
+        expect(h.counts).toMatchObject({
+          fetches: 2,
+          network: 1,
+          continues: 1,
+          routeAdds: 3,
+          unroutes: 2,
+        });
+        h.close();
+        expect(h.routes()).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+      expect(unhandled).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1665,7 +1793,7 @@ describe("actual main and supplemental booking callers keep a failed guard until
           expect(transitions(h.evidence)).toContain("ack-rejected");
           expect(transitions(h.evidence)).not.toContain("ack-durable");
           expect(h.controlledOrderIds).toEqual([]);
-          expect(h.routes()).toBe(1);
+          expect(h.routes()).toBe(2);
           expect(h.counts).toMatchObject({
             fetches: 1,
             fulfills: 1,
