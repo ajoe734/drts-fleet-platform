@@ -908,6 +908,7 @@ export async function settleRoutedOriginalBookingAck<T>(
   );
   // The observer resolves only after its journal ACK is durable.
   if (result.ok) noteTransition(mark, "ack-durable");
+  else noteTransition(mark, "ack-rejected");
   let releaseError: unknown;
   try {
     // Deliver those exact server bytes even if the observer rejected them.
@@ -1074,6 +1075,7 @@ export async function settleOriginalBookingOperation<T>(
 export type OriginalBookingTransition =
   | "armed"
   | "ack-durable"
+  | "ack-rejected"
   | "release-completed"
   | "release-failed"
   | "dispose-completed"
@@ -1187,7 +1189,7 @@ export class OriginalBookingOperation {
       if (!handlerEnded) {
         // ACK durability precedes exact byte release, then the original
         // response disposal and the route handler's own finish.
-        if (!has("ack-durable")) pending.push("ack");
+        if (!has("ack-durable") && !has("ack-rejected")) pending.push("ack");
         else if (!has("release-completed") && !has("release-failed"))
           pending.push("release");
         else if (!has("dispose-completed")) pending.push("dispose");
