@@ -10,6 +10,7 @@ import {
   type Request as PlaywrightRequest,
   type Response as PlaywrightResponse,
   type Route,
+  type Page,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
@@ -99,6 +100,14 @@ import {
   recoverOriginalUnknownBookingAck,
 } from "./original-journal-recovery";
 import { R08ExistingFull } from "./r08-callcenter";
+import {
+  captureUiPost,
+  installVerifiedRoleRoute,
+  readBrowserRoleSession,
+  runR04CurrentMonthGovernance,
+  type UiPostIntent,
+} from "./r04-current-month-governance";
+import { runR09OwnComplaintLifecycle } from "./r09-own-complaint-lifecycle";
 import {
   RunFinalizer,
   cancellationCleanupNeeded,
@@ -294,6 +303,14 @@ test(journeyName, async ({ browser, request }) => {
   };
   Object.values(invocation).forEach(mask);
   const evidence = new Evidence();
+  const uiMutationAttempts: Array<
+    UiPostIntent & {
+      action: string;
+      role: "admin" | "ops";
+      subjectId: string;
+      custody: "durable-before-forward";
+    }
+  > = [];
   const nonce = `owned-referral-${process.env.GITHUB_RUN_ID}-${randomUUID()}`;
   const phone = `090000${String(process.env.GITHUB_RUN_ID).slice(-4).padStart(4, "0")}`;
   // Closures below are only invoked after registration before the main try.
@@ -468,6 +485,7 @@ test(journeyName, async ({ browser, request }) => {
           idempotencyKey: string;
           responseStatus?: number;
           caseNo?: string;
+          submittedAt?: string;
           recovery: string;
         }
       | undefined;
@@ -1852,6 +1870,10 @@ test(journeyName, async ({ browser, request }) => {
       requireFact(first.score === 2, "browser rating original score ACK");
       assertRatingReplay(first, first, completedOrderId);
       const caseNo = text(first.complaintCaseNo);
+      browserRatingState.current = {
+        ...browserRatingState.current,
+        submittedAt: text(first.submittedAt),
+      };
       browserRatingState.current = {
         ...browserRatingState.current,
         state: "acknowledged",
@@ -3646,6 +3668,497 @@ test(journeyName, async ({ browser, request }) => {
         },
         redispatchResult.completedTask,
       );
+      // Existing normal FULL only: the four low-score and three selected
+      // manual category cases already have durable own ACKs. These pages use
+      // the original Admin/Ops JWTs and this run's BrowserContext.
+      const runExistingR04R09 = async () => {
+        requireFact(
+          opsControlRole === "ops" &&
+            browserRatingState.current?.state === "acknowledged" &&
+            displayObservations?.manualComplaint.result === "observed" &&
+            lowRatings.every(
+              (rating) =>
+                rating.result === "observed" &&
+                rating.state === "acknowledged" &&
+                !!rating.caseNo &&
+                !!rating.orderId,
+            ),
+          "R04/R09 original normal own cases and real Ops BFF required",
+        );
+        const mainRating = browserRatingState.current;
+        const manualCases = displayObservations.manualComplaint.categories;
+        requireFact(
+          manualCases.length === 3 &&
+            manualCases.every(
+              (item) =>
+                item.result === "observed" &&
+                item.orderId === completedOrderId &&
+                !!item.caseNo,
+            ),
+          "R09 exact original manual service/fare/lost_item ACKs",
+        );
+        const ownCases = [
+          ...lowRatings.map((rating) => ({
+            caseNo: text(rating.caseNo),
+            orderId: text(rating.orderId),
+            source: "lowRatingAuto" as const,
+          })),
+          ...manualCases.map((item) => ({
+            caseNo: item.caseNo,
+            orderId: item.orderId,
+            source: "manual" as const,
+            category: (
+              {
+                service: "driver_service",
+                fare: "fare_dispute",
+                lost_item: "lost_and_found",
+              } as const
+            )[item.category],
+          })),
+        ];
+        const adminRole = {
+          realm: "platform" as const,
+          actorType: "platform_admin" as const,
+          principalId,
+          membershipId: text(identity.membershipId),
+          sessionId: text(adminSessionId),
+          scopes: Array.isArray(identity.scopes)
+            ? (identity.scopes as string[])
+            : [],
+        };
+        const opsRole = {
+          realm: "ops" as const,
+          actorType: "ops_user" as const,
+          principalId: opsPrincipalId,
+          membershipId: opsMembershipId,
+          sessionId: text(opsSessionId),
+          scopes: Array.isArray(opsScopes) ? (opsScopes as string[]) : [],
+        };
+        requireFact(
+          identity.actorId === principalId &&
+            adminRole.scopes.includes("reports:read") &&
+            adminRole.scopes.includes("reports:write") &&
+            adminRole.scopes.includes("audit:read") &&
+            opsRole.scopes.includes("complaints:read") &&
+            opsRole.scopes.includes("complaints:write") &&
+            opsRole.scopes.includes("reports:read") &&
+            opsRole.scopes.includes("audit:read"),
+          "R04/R09 actual canonical Admin/Ops write and report scopes",
+        );
+        const readAdmin = (path: string) =>
+          call("admin", `/control-plane-proxy${path}`);
+        const readOps = (path: string) =>
+          call("ops", `/control-plane-proxy${path}`);
+        const auditItems = async (
+          reader: (path: string) => Promise<ObjectData>,
+          auditId: string,
+        ) =>
+          records(
+            (await reader(`/audit?auditId=${encodeURIComponent(auditId)}`))
+              .items,
+          );
+        const custodyBeforeForward =
+          (role: "admin" | "ops", action: string, subjectId: string) =>
+          async (intent: UiPostIntent, forward: () => Promise<void>) => {
+            requireFact(
+              intent.url.startsWith(origins[role] + "/control-plane-proxy/") &&
+                intent.method === "POST" &&
+                !!intent.requestId &&
+                /^[a-f0-9]{64}$/.test(intent.bodySha256),
+              "R04/R09 exact original same-realm POST intent before forwarding",
+            );
+            await finalizer.guardOperation(async (assertOpen) => {
+              assertOpen();
+              uiMutationAttempts.push({
+                ...intent,
+                action,
+                role,
+                subjectId,
+                custody: "durable-before-forward",
+              });
+              // Reuse the existing journey evidence artifact and atomic writer.
+              // A failed durable write aborts this exact route before its JWT
+              // handler can forward the POST.
+              await persistPrivateJson(
+                `${DIRECTORY}/journey-evidence.json`,
+                journeyEvidence({ status: "running", wholeRunPassed: false }),
+              );
+              assertOpen();
+              await forward();
+            });
+          };
+        const openPage = async (
+          role: "admin" | "ops",
+          url: string,
+        ): Promise<Page> => {
+          const ownPage = await context.newPage();
+          try {
+            const ownOrigin = role === "admin" ? origins.admin : origins.ops;
+            await installVerifiedRoleRoute(ownPage, ownOrigin, role, tx);
+            const navigation = await ownPage.goto(url, { timeout: 15_000 });
+            requireFact(
+              navigation?.status() === 200 &&
+                navigation.headers()["x-drts-candidate-sha"] === runtime,
+              "R04/R09 original page served runtime",
+            );
+            return ownPage;
+          } catch (error) {
+            await ownPage.close();
+            throw error;
+          }
+        };
+        const adminPage = await openPage(
+          "admin",
+          `${origins.admin}/p5-ratings/referral-monthly`,
+        );
+        try {
+          await finalizer.checkpoint("r04-existing-current-month-governance");
+          const adminSession = () => readBrowserRoleSession(adminPage, runtime);
+          const governanceQuery = (month: string, ownDriver: string) =>
+            new URLSearchParams({ periodMonth: month, driverId: ownDriver });
+          const coachingRow = () =>
+            adminPage
+              .getByRole("table", {
+                name: /coaching and termination handling records|司機月評分輔導與終止處理紀錄/,
+              })
+              .getByRole("row")
+              .filter({ hasText: text(driverId) })
+              .filter({ hasText: /Monthly average below|月平均低於/ });
+          const governance = await runR04CurrentMonthGovernance({
+            runtimeSha: runtime,
+            role: adminRole,
+            orderId: completedOrderId,
+            driverId: text(driverId),
+            caseNo: text(mainRating.caseNo),
+            submittedAt: text(mainRating.submittedAt),
+            score: 2,
+            browserSession: adminSession,
+            readReport: async (month, ownDriver) =>
+              (await readAdmin(
+                `/reports/referral-monthly-ratings?${governanceQuery(month, ownDriver)}`,
+              )) as unknown as Awaited<
+                ReturnType<
+                  Parameters<
+                    typeof runR04CurrentMonthGovernance
+                  >[0]["readReport"]
+                >
+              >,
+            readGovernance: async (month, ownDriver) =>
+              (await readAdmin(
+                `/reports/referral-monthly-ratings/governance?${governanceQuery(month, ownDriver)}`,
+              )) as unknown as Awaited<
+                ReturnType<
+                  Parameters<
+                    typeof runR04CurrentMonthGovernance
+                  >[0]["readGovernance"]
+                >
+              >,
+            readAudit: (auditId) => auditItems(readAdmin, auditId),
+            open: async (month, ownDriver) => {
+              await adminPage.getByLabel(/^(Month|月份)$/).fill(month);
+              await adminPage
+                .getByLabel(/^(Driver ID|駕駛 ID)$/)
+                .fill(ownDriver);
+              await adminPage
+                .getByRole("button", {
+                  name: /Search \/ refresh|查詢／重新整理/,
+                })
+                .click();
+              await expect(
+                adminPage.getByRole("region", {
+                  name: /Monthly rating results|月評價結果/,
+                }),
+              ).toBeVisible();
+              await expect(
+                adminPage
+                  .getByRole("row")
+                  .filter({ hasText: completedOrderId }),
+              ).toHaveCount(1);
+            },
+            evaluate: async () => {
+              const receipt = await captureUiPost(
+                adminPage,
+                origins.admin,
+                "/reports/referral-monthly-ratings/governance/evaluate",
+                runtime,
+                () =>
+                  adminPage
+                    .getByRole("button", {
+                      name: /Evaluate \/ load|評估／載入/,
+                    })
+                    .click(),
+                custodyBeforeForward(
+                  "admin",
+                  "referral-monthly-rating-governance.evaluate",
+                  text(driverId),
+                ),
+              );
+              await expect(coachingRow()).toHaveCount(1);
+              return receipt;
+            },
+            dismiss: async (_recordId, reason) => {
+              const row = coachingRow();
+              await expect(row).toHaveCount(1);
+              await row
+                .getByRole("combobox", { name: /Handling outcome|處置結果/ })
+                .selectOption("dismissed");
+              await row
+                .getByRole("textbox", { name: /Handling reason|處置原因/ })
+                .fill(reason);
+              return captureUiPost(
+                adminPage,
+                origins.admin,
+                "/reports/referral-monthly-ratings/governance/outcomes",
+                runtime,
+                () =>
+                  row
+                    .getByRole("button", { name: /Save handling|儲存處置/ })
+                    .click(),
+                custodyBeforeForward(
+                  "admin",
+                  "referral-monthly-rating-governance.dismissed",
+                  _recordId,
+                ),
+              );
+            },
+          });
+          evidence.record({
+            stage: "r04-own-current-month-ui-governance",
+            ...governance,
+            result: "observed",
+          });
+        } finally {
+          await adminPage.close();
+        }
+        const opsPage = await openPage(
+          "ops",
+          `${origins.ops}/complaints?caseNo=${encodeURIComponent(manualCases.find((item) => item.category === "service")!.caseNo)}`,
+        );
+        try {
+          await finalizer.checkpoint("r09-existing-own-complaint-lifecycle");
+          const reportMetrics = async (dimension: {
+            businessArea: string;
+            serviceProductCode: string;
+          }) => {
+            const subtitle = `${dimension.businessArea} · ${dimension.serviceProductCode}`;
+            const card = opsPage
+              .getByText(subtitle, { exact: true })
+              .locator("xpath=ancestor::section[1]");
+            await expect(card).toHaveCount(1);
+            const metrics = card
+              .getByText(
+                /^(Monthly complaint statistics \(Bureau R09, Asia\/Taipei months\)|客訴每月統計（交通局 R09，Asia\/Taipei 月份）)$/,
+              )
+              .locator("..");
+            await expect(metrics).toHaveCount(1);
+            return metrics;
+          };
+          const assertOwnDrill = async (
+            metrics: ReturnType<typeof opsPage.locator>,
+            caseNo: string,
+          ) => {
+            const detail = metrics
+              .getByText(/^(Drill-down:|明細：)/)
+              .locator("xpath=ancestor::div[2]");
+            await expect(detail).toHaveCount(1);
+            await expect(
+              detail.getByRole("list").getByText(caseNo, { exact: true }),
+            ).toBeVisible();
+            await detail
+              .getByRole("button", { name: /^(Close|關閉)$/ })
+              .click();
+          };
+          const lifecycle = await runR09OwnComplaintLifecycle({
+            runtimeSha: runtime,
+            role: opsRole,
+            completedOrderId,
+            cases: ownCases,
+            browserSession: () => readBrowserRoleSession(opsPage, runtime),
+            readCase: async (caseNo) =>
+              (await readOps(
+                `/complaints/${encodeURIComponent(caseNo)}`,
+              )) as unknown as Awaited<
+                ReturnType<
+                  Parameters<typeof runR09OwnComplaintLifecycle>[0]["readCase"]
+                >
+              >,
+            readOrder: (ownOrderId) =>
+              readOps(`/orders/${encodeURIComponent(ownOrderId)}`),
+            readTimeline: async (caseNo) =>
+              records(
+                (
+                  await readOps(
+                    `/complaints/${encodeURIComponent(caseNo)}/timeline`,
+                  )
+                ).items,
+              ) as unknown as Awaited<
+                ReturnType<
+                  Parameters<
+                    typeof runR09OwnComplaintLifecycle
+                  >[0]["readTimeline"]
+                >
+              >,
+            readAudit: (auditId) => auditItems(readOps, auditId),
+            openCase: async (caseNo) => {
+              requireFact(
+                new URL(opsPage.url()).searchParams.get("caseNo") === caseNo,
+                "R09 original Ops page exact own case selector",
+              );
+              await expect(
+                opsPage.getByTestId("complaint-list-actions"),
+              ).toBeVisible();
+              await expect(
+                opsPage.getByText(caseNo, { exact: true }).last(),
+              ).toBeVisible();
+            },
+            action: async (action, caseNo, fields) => {
+              const labels = {
+                assign: /Assign \/ reassign|指派 \/ 重新指派/,
+                notes: /Add note|新增備註/,
+                resolve: /Resolve|結案處理/,
+                close: /^Close$|關閉案件/,
+              };
+              await opsPage
+                .getByTestId("complaint-list-actions")
+                .getByRole("button", { name: labels[action] })
+                .click();
+              if (action === "assign") {
+                await opsPage
+                  .getByLabel(/Assignee ID|負責人 ID/)
+                  .fill(text(fields.assigneeId));
+                await opsPage
+                  .getByLabel(/Assignment note|指派備註/)
+                  .fill(text(fields.note));
+              } else if (action === "notes") {
+                await opsPage
+                  .getByLabel(/Investigation note|調查備註/)
+                  .fill(text(fields.note));
+              } else {
+                await opsPage
+                  .getByLabel(/Resolution code|處理代碼/)
+                  .selectOption(text(fields.resolutionCode));
+                await opsPage
+                  .getByLabel(/Closing note|結案備註/)
+                  .fill(text(fields.closingNote));
+              }
+              const receipt = await captureUiPost(
+                opsPage,
+                origins.ops,
+                `/complaints/${encodeURIComponent(caseNo)}/${action}`,
+                runtime,
+                () =>
+                  opsPage
+                    .getByRole("button", { name: /^(Confirm|確認)$/ })
+                    .last()
+                    .click(),
+                custodyBeforeForward("ops", `complaint.${action}`, caseNo),
+              );
+              await expect(
+                opsPage.getByTestId("complaint-action-audit-link"),
+              ).toBeVisible();
+              return receipt;
+            },
+            openReport: async (from, to) => {
+              const navigation = await opsPage.goto(`${origins.ops}/reports`, {
+                timeout: 15_000,
+              });
+              requireFact(
+                navigation?.status() === 200 &&
+                  navigation.headers()["x-drts-candidate-sha"] === runtime,
+                "R09 actual reports page runtime",
+              );
+              await opsPage
+                .getByText(/^(Report type|報表類型)$/)
+                .locator("..")
+                .locator("select")
+                .selectOption("six_month_operations_summary");
+              await opsPage
+                .getByText(/^(Period from|期間起)$/)
+                .locator("..")
+                .locator('input[type="month"]')
+                .fill(from);
+              await opsPage
+                .getByText(/^(Period to|期間迄)$/)
+                .locator("..")
+                .locator('input[type="month"]')
+                .fill(to);
+              const previewUrl = `${origins.ops}/control-plane-proxy/reports/operations-summary/preview`;
+              const responsePromise = opsPage.waitForResponse(
+                (response) =>
+                  response.url().startsWith(previewUrl) &&
+                  response.request().method() === "GET",
+                { timeout: 15_000 },
+              );
+              await opsPage
+                .getByRole("button", { name: /Load preview|載入預覽/ })
+                .click();
+              const response = await responsePromise;
+              requireFact(
+                response.status() === 200 &&
+                  response.headers()["x-drts-candidate-sha"] === runtime,
+                "R09 original Ops UI preview runtime",
+              );
+              await expect(
+                opsPage
+                  .getByText(/Monthly complaint statistics|客訴每月統計/)
+                  .first(),
+              ).toBeVisible();
+            },
+            preview: async (from, to) =>
+              records(
+                (
+                  await readOps(
+                    `/reports/operations-summary/preview?${new URLSearchParams({ from, to })}`,
+                  )
+                ).items,
+              ) as unknown as Awaited<
+                ReturnType<
+                  Parameters<typeof runR09OwnComplaintLifecycle>[0]["preview"]
+                >
+              >,
+            inspectDrilldown: async (caseNo, month, source, dimension) => {
+              const metrics = await reportMetrics(dimension);
+              const row = metrics
+                .getByRole("table")
+                .first()
+                .getByRole("row")
+                .filter({ hasText: month });
+              await expect(row).toHaveCount(1);
+              await row
+                .getByRole("button")
+                .nth(source === "lowRatingAuto" ? 0 : 3)
+                .click();
+              await assertOwnDrill(metrics, caseNo);
+            },
+            inspectClosure: async (caseNo, month, dimension) => {
+              const metrics = await reportMetrics(dimension);
+              const monthly = metrics.getByRole("table").first();
+              const monthRow = monthly
+                .getByRole("row")
+                .filter({ hasText: month });
+              await expect(monthRow).toHaveCount(1);
+              await monthRow.getByRole("button").nth(4).click();
+              await assertOwnDrill(metrics, caseNo);
+              const categoryTable = metrics.getByRole("table").nth(1);
+              const categoryRow = categoryTable
+                .getByRole("row")
+                .filter({ hasText: month })
+                .filter({ hasText: /Driver Service|司機服務/ });
+              await expect(categoryRow).toHaveCount(1);
+              await categoryRow.getByRole("button").nth(1).click();
+              await assertOwnDrill(metrics, caseNo);
+            },
+          });
+          evidence.record({
+            stage: "r09-own-seven-case-ui-lifecycle-monthly-statistics",
+            ...lifecycle,
+            result: "observed",
+          });
+        } finally {
+          await opsPage.close();
+        }
+      };
+      await runExistingR04R09();
       // Restore the original completed positive filter/page/readback last.
       await finalizer.checkpoint("final-daily-report-readback");
       dailyReportDownloads = await runOwnedDailyReportDownloads({
@@ -4140,7 +4653,9 @@ test(journeyName, async ({ browser, request }) => {
     };
   }
 
-  function journeyEvidence(summary: FinalizationSummary) {
+  function journeyEvidence(
+    summary: FinalizationSummary | { status: "running"; wholeRunPassed: false },
+  ) {
     return {
       definitionSha: definition,
       runtimeSha: runtime,
@@ -4174,6 +4689,7 @@ test(journeyName, async ({ browser, request }) => {
           }
         : null,
       browserRatingWrite: browserRatingState.current ?? null,
+      uiMutationAttempts,
       r08: r08Run?.snapshot() ?? null,
       lowRatingMatrix: RECOVERY_ONLY
         ? null
