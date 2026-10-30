@@ -210,40 +210,58 @@ describe.skipIf(!testDbUrl)(
     });
 
     afterEach(async () => {
-      if (createdOutboxIds.length > 0) {
-        await pool.query(
-          "DELETE FROM ops.phase1_push_delivery_claims WHERE outbox_id = ANY($1)",
-          [createdOutboxIds],
-        );
-        await pool.query(
-          "DELETE FROM ops.phase1_push_delivery_receipts WHERE outbox_id = ANY($1)",
-          [createdOutboxIds],
-        );
-        await pool.query(
-          "DELETE FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = ANY($1)",
-          [createdOutboxIds],
-        );
-        await pool.query(
-          "DELETE FROM ops.consumer_notification_outbox WHERE outbox_id = ANY($1)",
-          [createdOutboxIds],
-        );
+      if (createdOutboxIds.length === 0 && createdOrderIds.length === 0) return;
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        if (createdOutboxIds.length > 0) {
+          // Block the claimer's parent lock while allowing an existing claim's
+          // context transaction to finish its foreign-key check before deletion.
+          await client.query(
+            "SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id = ANY($1) ORDER BY outbox_id FOR NO KEY UPDATE",
+            [createdOutboxIds],
+          );
+          await client.query(
+            "DELETE FROM ops.phase1_push_delivery_claims WHERE outbox_id = ANY($1)",
+            [createdOutboxIds],
+          );
+          await client.query(
+            "DELETE FROM ops.phase1_push_delivery_receipts WHERE outbox_id = ANY($1)",
+            [createdOutboxIds],
+          );
+          await client.query(
+            "DELETE FROM mobility.phase1_partner_notification_delivery_contexts WHERE outbox_id = ANY($1)",
+            [createdOutboxIds],
+          );
+          await client.query(
+            "DELETE FROM ops.consumer_notification_outbox WHERE outbox_id = ANY($1)",
+            [createdOutboxIds],
+          );
+        }
+        if (createdOrderIds.length > 0) {
+          await client.query(
+            "DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = ANY($1)",
+            [createdOrderIds],
+          );
+          await client.query(
+            "DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = ANY($1)",
+            [createdOrderIds],
+          );
+          await client.query(
+            "DELETE FROM ops.phase1_owned_orders WHERE order_id = ANY($1)",
+            [createdOrderIds],
+          );
+        }
+        await client.query("COMMIT");
+        createdOutboxIds.length = 0;
+        createdOrderIds.length = 0;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
       }
-      if (createdOrderIds.length > 0) {
-        await pool.query(
-          "DELETE FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = ANY($1)",
-          [createdOrderIds],
-        );
-        await pool.query(
-          "DELETE FROM mobility.phase1_order_partner_notification_routes WHERE order_id = ANY($1)",
-          [createdOrderIds],
-        );
-        await pool.query(
-          "DELETE FROM ops.phase1_owned_orders WHERE order_id = ANY($1)",
-          [createdOrderIds],
-        );
-      }
-      createdOutboxIds.length = 0;
-      createdOrderIds.length = 0;
     });
 
     afterAll(async () => {
