@@ -281,29 +281,51 @@ describe("actual Deploy Dev Bash → argv → original payment readers", () => {
   });
 
   it.each(["absent", "partial", "complete"] as const)(
-    "keeps the original %s optional provider-group behavior",
+    "keeps the original %s OTP group behavior and the public payment profile",
     (group) => {
       const result = transport({ group });
       expect(result.transported).toBe(result.payload);
       const complete = group === "complete";
-      expect(Boolean(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME)).toBe(!complete);
       expect(Boolean(result.env.PASSENGER_OTP_PEPPER)).toBe(!complete);
-      expect(
-        result.mounts.includes(
-          "PSP_TOKEN_ENCRYPTION_KEY_NAME=synthetic-dev-psp-token-encryption-key-name:latest",
-        ),
-      ).toBe(complete);
-      expect(result.mounts.includes("PSP_MERCHANT_ID=")).toBe(complete);
       expect(result.mounts.includes("PASSENGER_OTP_PEPPER=")).toBe(complete);
+      // The rehearsal forces the fake provider, so payment references never
+      // mount, even when every one exists.
+      expect(result.mounts).not.toContain("PSP_");
+      expect(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME).toBeTruthy();
       expect(flag(result.args, "--set-secrets")).toBe(
         `BASE=synthetic-reference:latest${result.mounts ? `,${result.mounts}` : ""}`,
       );
-      if (!complete)
-        expect(paymentRuntimeFromEnv(result.env).cipher).not.toBeNull();
+      expect(paymentRuntimeFromEnv(result.env).cipher).not.toBeNull();
       // Complete groups mount references; the CLI stub never reads secret values.
       // Real provider runtime availability remains the original external gate.
     },
   );
+
+  it("still decrypts cards bound with the public profile when payment secrets exist", () => {
+    // Shared dev, 2026-10-25: complete ECPay secrets mounted their key ring
+    // under the fake provider and every existing rehearsal card failed capture.
+    const bound = paymentRuntimeFromEnv(transport({ group: "absent" }).env);
+    const envelope = bound.cipher!.encrypt(
+      "synthetic-token",
+      "synthetic-passenger",
+      "synthetic-method",
+    );
+    const runtime = paymentRuntimeFromEnv(transport({ group: "complete" }).env);
+    expect(runtime.provider.name).toBe("fake");
+    expect(
+      runtime.cipher!.decrypt(envelope, "synthetic-passenger", "synthetic-method"),
+    ).toBe("synthetic-token");
+  });
+
+  it("mounts complete payment references outside the rehearsal", () => {
+    const result = transport({ review: false, group: "complete" });
+    expect(result.mounts).toContain(
+      "PSP_TOKEN_ENCRYPTION_KEY_NAME=synthetic-dev-psp-token-encryption-key-name:latest",
+    );
+    expect(result.mounts).toContain("PSP_HASH_KEY=");
+    expect(result.env.PSP_PROVIDER).toBe("ecpay");
+    expect(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME).toBeUndefined();
+  });
 
   it("keeps ordinary non-rehearsal values and unavailable payment behavior", () => {
     const result = transport({ review: false });

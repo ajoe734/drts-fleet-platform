@@ -743,7 +743,10 @@ describe("deploy-dev.yml ECPay 5-secret all-or-nothing contract", () => {
       .split(/\n(?= {2}[a-z][a-z-]+:)/)[0]!;
   }
 
-  function runOptionalSecretsStep(presentSecrets: readonly string[]) {
+  function runOptionalSecretsStep(
+    presentSecrets: readonly string[],
+    review = false,
+  ) {
     const stepRun = extractWorkflowStep(
       workflowRaw,
       "Resolve passenger app optional secret mounts",
@@ -779,6 +782,7 @@ exit 1
           SECRET_PREFIX: "drts-dev",
           PROJECT_ID: "drts-dev-proj",
           GITHUB_OUTPUT: output,
+          DEV_PAX_REVIEW_DEMO_ENABLED: String(review),
         },
         encoding: "utf8",
       });
@@ -817,6 +821,12 @@ exit 1
     expect(res.githubOutput).toContain(
       "PSP_TOKEN_ENCRYPTION_KEY_NAME=drts-dev-psp-token-encryption-key-name:latest",
     );
+  });
+
+  it("mounts zero payment secrets in the review rehearsal, which forces the fake provider", () => {
+    const res = runOptionalSecretsStep(allFiveEcpaySecrets, true);
+    expect(res.githubOutput).toContain("payment_mounts_complete=false");
+    expect(res.githubOutput).not.toContain("PSP_");
   });
 
   it.each(allFiveEcpaySecrets)(
