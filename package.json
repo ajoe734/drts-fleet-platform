@@ -111,6 +111,7 @@
       "ip-address@<10.7.4": "10.7.4",
       "proxy-addr@<2.0.8": "2.0.8",
       "source-map-js@<1.2.2": "1.2.2",
+      "node-forge@<1.4.1": "1.4.1",
       "openclaw>zod": "^4.6.6",
       "openclaw>undici": "^8.12.2",
       "jsdom>undici": "^8.12.2",
