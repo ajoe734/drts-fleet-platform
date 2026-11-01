@@ -389,7 +389,11 @@ describe("actual Deploy Dev Bash → argv → original payment readers", () => {
     );
     expect(paymentRuntimeFromEnv(result.env).provider.name).toBe("fake");
     // The interim revision keeps the remaining references, without a merchant.
-    const interim = { ...result.env, PSP_HASH_KEY: "ref", PSP_HASH_IV: "ref" };
+    const interim: NodeJS.ProcessEnv = {
+      ...result.env,
+      PSP_HASH_KEY: "ref",
+      PSP_HASH_IV: "ref",
+    };
     for (const name of [
       "PSP_MERCHANT_ID",
       "PSP_SANDBOX",
