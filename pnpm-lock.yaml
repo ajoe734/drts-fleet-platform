@@ -11,6 +11,7 @@ overrides:
   ip-address@<10.7.4: 10.7.4
   proxy-addr@<2.0.8: 2.0.8
   source-map-js@<1.2.2: 1.2.2
+  node-forge@<1.4.1: 1.4.1
   openclaw>zod: ^4.6.6
   openclaw>undici: ^8.12.2
   jsdom>undici: ^8.12.2
@@ -10597,10 +10598,10 @@ packages:
       }
     engines: { node: ^12.20.0 || ^14.13.1 || >=16.0.0 }
 
-  node-forge@1.4.0:
+  node-forge@1.4.1:
     resolution:
       {
-        integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==,
+        integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==,
       }
     engines: { node: ">= 6.13.0" }
 
@@ -15139,7 +15140,7 @@ snapshots:
       glob: 13.0.6
       lan-network: 0.2.1
       minimatch: 9.0.9
-      node-forge: 1.4.0
+      node-forge: 1.4.1
       npm-package-arg: 11.0.3
       ora: 3.4.0
       picomatch: 4.0.7
@@ -15176,7 +15177,7 @@ snapshots:
 
   "@expo/code-signing-certificates@0.0.6":
     dependencies:
-      node-forge: 1.4.0
+      node-forge: 1.4.1
 
   "@expo/config-plugins@54.0.5":
     dependencies:
@@ -20382,7 +20383,7 @@ snapshots:
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
 
-  node-forge@1.4.0: {}
+  node-forge@1.4.1: {}
 
   node-gyp-build@4.8.4: {}
 
