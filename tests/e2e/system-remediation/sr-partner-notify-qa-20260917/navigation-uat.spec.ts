@@ -321,7 +321,9 @@ test.describe("Hosted navigation and session boundaries", () => {
         via,
         "//untrusted.invalid/stolen",
       );
-      expect(response.status()).toBe(via === "json" ? 200 : 307);
+      expect(response.status()).toBe(
+        via === "json" ? 200 : via === "form" ? 303 : 307,
+      );
       if (via !== "json") {
         const destination = new URL(response.headers().location!);
         expect(destination.origin).toBe(EMBED_ORIGIN);
@@ -373,7 +375,7 @@ test.describe("Hosted navigation and session boundaries", () => {
       "form",
       returnTo,
     );
-    expect(form.status()).toBe(307);
+    expect(form.status()).toBe(303);
     expect(form.headers().location).toBe(`${EMBED_ORIGIN}${returnTo}`);
     await navFixture.activate(page.context(), safe);
     await page.goto(form.headers().location!);

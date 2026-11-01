@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
+  AgencyBootstrapSession,
   IamCallbackSessionExchangeCommand,
   IdentityContext,
   PartnerBootstrapSession,
@@ -13,13 +14,21 @@ import type {
   TenantPortalProfile,
 } from "@drts/contracts";
 
+import { getIamFleetRoleScopes } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
-import { getTenantRoleScopes } from "../../common/auth/auth.constants";
+import {
+  getAgencyRoleScopes,
+  getTenantRoleScopes,
+} from "../../common/auth/auth.constants";
+import { AgencyDirectoryRepository } from "../agency-access/agency-directory.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
-import { IdentityRepository } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  parseAgencyScopeRef,
+} from "../identity/identity.repository";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import {
@@ -45,6 +54,8 @@ export interface OidcStateRecord {
   tenantId: string | null;
   partnerId: string | null;
   invitationTokenHash?: string;
+  /** BUREAU-R13: agency named by an agency invitation login. */
+  agencyId?: string | null;
   createdAt: number;
   expiresAt: number;
 }
@@ -88,6 +99,8 @@ export class OidcPkceService {
     private readonly consumedStateRepo: ConsumedOidcStateRepository = new ConsumedOidcStateRepository(),
     @Optional()
     private readonly identityRepository?: IdentityRepository,
+    @Optional()
+    private readonly agencyDirectoryRepository?: AgencyDirectoryRepository,
   ) {}
 
   /**
@@ -243,6 +256,7 @@ export class OidcPkceService {
       tenantId?: string | null;
       partnerId?: string | null;
       invitationToken?: string;
+      agencyId?: string | null;
     },
   ): OidcLoginUrlResult {
     if (process.env.OIDC_ENABLED === "false") {
@@ -272,12 +286,15 @@ export class OidcPkceService {
       redirectUri: validatedRedirectUri,
       tenantId: options?.tenantId?.trim() || null,
       partnerId: options?.partnerId?.trim() || null,
-      ...(realm === "tenant" && options?.invitationToken
+      ...((realm === "tenant" || realm === "agency") && options?.invitationToken
         ? {
             invitationTokenHash: createHash("sha256")
               .update(options.invitationToken)
               .digest("hex"),
           }
+        : {}),
+      ...(realm === "agency"
+        ? { agencyId: options?.agencyId?.trim() || null }
         : {}),
       createdAt: now,
       expiresAt,
@@ -714,6 +731,349 @@ export class OidcPkceService {
   }
 
   /**
+   * BUREAU-R13 §3: exchange an agency callback. The state token must have
+   * been issued for the `agency` realm (validateAndExchangeCode), so a
+   * tenant/partner state can never mint an agency session.
+   */
+  public async exchangeAgencyCallbackSession(
+    command: IamCallbackSessionExchangeCommand,
+    meta?: {
+      sourceIp?: string;
+      userAgent?: string;
+      requestId?: string;
+      stateToken?: string;
+    },
+  ): Promise<AgencyBootstrapSession> {
+    const { claims, stateRecord } = await this.validateAndExchangeCode(
+      command,
+      "agency",
+      meta,
+    );
+    return this.issueVerifiedAgencySession(
+      claims,
+      {
+        agencyId: stateRecord.agencyId ?? null,
+        invitationTokenHash: stateRecord.invitationTokenHash,
+      },
+      meta,
+    );
+  }
+
+  private denyAgencySession(
+    reasonCode: string,
+    claims: Pick<OidcClaims, "sub">,
+    meta:
+      | { sourceIp?: string; userAgent?: string; requestId?: string }
+      | undefined,
+    message: string,
+  ): never {
+    this.recordSecurityEvent({
+      eventType: "agency_oidc_session.denied",
+      outcome: "denied",
+      realm: "agency",
+      subjectId: claims.sub ?? null,
+      reasonCode,
+      meta,
+    });
+    throw new ApiRequestError(403, "AUTH_SESSION_EXCHANGE_DENIED", message);
+  }
+
+  private async issueVerifiedAgencySession(
+    claims: OidcClaims,
+    options: {
+      agencyId: string | null;
+      invitationTokenHash?: string | undefined;
+    },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<AgencyBootstrapSession> {
+    // Same dev-waiver contract as tenant: never an MFA assertion, and
+    // forbidden outright in staging/production (D2: no new MFA setting).
+    const waiverConfigured = process.env.DRTS_DEV_MFA_WAIVED === "true";
+    const environment = detectAuthEnvironment();
+    if (
+      waiverConfigured &&
+      (environment === "staging" || environment === "production")
+    ) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_CONFIGURATION_INVALID",
+        "DRTS_DEV_MFA_WAIVED is forbidden in staging and production.",
+      );
+    }
+    if (!this.identityRepository || !this.agencyDirectoryRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_AGENCY_UNAVAILABLE",
+        "Agency identity authority is not available.",
+      );
+    }
+    if (
+      typeof claims.email !== "string" ||
+      !claims.email.trim() ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim() ||
+      typeof claims.iss !== "string" ||
+      !claims.iss.trim()
+    ) {
+      this.denyAgencySession(
+        "OIDC_CLAIMS_MISSING",
+        claims,
+        meta,
+        "OIDC issuer, subject and email are required.",
+      );
+    }
+    if (claims.email_verified !== true) {
+      this.denyAgencySession(
+        "EMAIL_NOT_VERIFIED",
+        claims,
+        meta,
+        "Subject email is not verified by OIDC provider.",
+      );
+    }
+    const subject = claims.sub.trim();
+    const issuer = claims.iss.trim();
+    const email = claims.email.trim().toLowerCase();
+
+    if (options.invitationTokenHash) {
+      // Check the invited agency before the proof can be consumed.
+      const pending = await this.identityRepository.findInvitationByTokenHash(
+        options.invitationTokenHash,
+      );
+      const invitedAgencyId =
+        pending?.realm === "agency"
+          ? parseAgencyScopeRef(pending.scopeRef)
+          : null;
+      const invitedAgency = invitedAgencyId
+        ? await this.agencyDirectoryRepository.findById(invitedAgencyId)
+        : null;
+      if (!invitedAgency || invitedAgency.status !== "active") {
+        this.denyAgencySession(
+          "AGENCY_INVITATION_INVALID",
+          claims,
+          meta,
+          "The agency invitation is not valid.",
+        );
+      }
+      const accepted = await this.identityRepository.acceptAgencyOidcInvitation(
+        options.invitationTokenHash,
+        { issuer, subject, email, agencyId: options.agencyId },
+      );
+      if (!accepted) {
+        this.denyAgencySession(
+          "AGENCY_INVITATION_INVALID",
+          claims,
+          meta,
+          "The agency invitation is not valid.",
+        );
+      }
+      this.recordSecurityEvent({
+        eventType: "agency_oidc_invitation.bound",
+        outcome: "success",
+        realm: "agency",
+        actorType: "agency_user",
+        actorId: accepted.principal.principalId,
+        subjectId: subject,
+        meta,
+      });
+    }
+
+    // Login binds strictly to the verified (issuer, sub); never by email.
+    const principal = await this.identityRepository.findPrincipalBySubject(
+      issuer,
+      subject,
+    );
+    if (!principal || principal.status !== "active") {
+      this.denyAgencySession(
+        principal ? "IAM_PRINCIPAL_NOT_ACTIVE" : "USER_NOT_FOUND",
+        claims,
+        meta,
+        "Subject does not correspond to an active agency user.",
+      );
+    }
+    const snapshot =
+      await this.identityRepository.findAgencyMembershipForPrincipal(
+        principal.principalId,
+      );
+    if (!snapshot) {
+      this.denyAgencySession(
+        "IAM_MEMBERSHIP_NOT_ACTIVE",
+        claims,
+        meta,
+        "Subject has no active agency membership.",
+      );
+    }
+    if (options.agencyId && options.agencyId !== snapshot.agencyId) {
+      this.denyAgencySession(
+        "CROSS_AGENCY_SESSION_FORBIDDEN",
+        claims,
+        meta,
+        "Subject is not a member of the requested agency.",
+      );
+    }
+    const agency = await this.agencyDirectoryRepository.findById(
+      snapshot.agencyId,
+    );
+    if (!agency || agency.status !== "active") {
+      this.denyAgencySession(
+        "AGENCY_NOT_ACTIVE",
+        claims,
+        meta,
+        "The agency is not active.",
+      );
+    }
+    const now = Date.now();
+    const binding = snapshot.roleBindings.find(
+      (candidate) =>
+        Boolean(getAgencyRoleScopes(candidate.roleCode)) &&
+        Boolean(candidate.validTo) &&
+        Date.parse(candidate.validFrom) <= now &&
+        now < Date.parse(candidate.validTo!),
+    );
+    if (!binding) {
+      this.denyAgencySession(
+        "AGENCY_ACCESS_EXPIRED",
+        claims,
+        meta,
+        "The agency access period is not active.",
+      );
+    }
+    const scopes = [...(getAgencyRoleScopes(binding.roleCode) ?? [])];
+
+    const amr = claims.amr ?? [];
+    const acr = claims.acr ?? "";
+    const authTime = claims.auth_time ?? Math.floor(now / 1000);
+    const mfaVerified = hasTrustedMfa({ amr, acr });
+    // D2: the existing ordinary-login policy applies unchanged; production
+    // enforcement for agencies remains an open decision.
+    const mfaRequired = isOrdinaryLoginMfaRequired();
+    const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
+    const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
+    if (mfaWaived) {
+      if (!this.securityEventsService)
+        throw new ApiRequestError(
+          503,
+          "AUTH_AUDIT_UNAVAILABLE",
+          "Security events are required for a dev MFA waiver.",
+        );
+      await this.recordSecurityEvent({
+        eventType: "agency_oidc_session.mfa_waived",
+        requirePersistence: true,
+        outcome: "success",
+        realm: "agency",
+        actorType: "agency_user",
+        actorId: principal.principalId,
+        subjectId: subject,
+        reasonCode: "DEV_MFA_WAIVED",
+        afterSummary: {
+          flag: "DRTS_DEV_MFA_WAIVED",
+          environment,
+          mfaVerified: false,
+        },
+        meta,
+      });
+    }
+    if (mfaRequired && !mfaVerified && !mfaWaived) {
+      this.denyAgencySession(
+        "IAM_MFA_REQUIRED",
+        claims,
+        meta,
+        "Subject authentication claims lack required multi-factor authentication (MFA) proof.",
+      );
+    }
+
+    // Same fingerprint JwtAuthService.validateAgencyDurableState recomputes.
+    const tokenVersion = Math.max(
+      ...[
+        principal.updatedAt,
+        snapshot.membership.updatedAt,
+        ...snapshot.roleBindings.map((candidate) => candidate.updatedAt),
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "agency_user",
+        actorId: principal.principalId,
+        principalId: principal.principalId,
+        membershipId: snapshot.membership.membershipId,
+        subject,
+        realm: "agency",
+        tenantId: null,
+        agencyId: snapshot.agencyId,
+        roleFamilies: ["agency"],
+        roles: [binding.roleCode],
+        scopes,
+        tokenVersion,
+        authTime: new Date(authTime * 1000).toISOString(),
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta?.requestId ?? null,
+      },
+      {
+        expiresIn: "8h",
+        ensurePrincipal: false,
+        tokenVersion,
+      },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "agency_user",
+      actorId: principal.principalId,
+      principalId: principal.principalId,
+      membershipId: snapshot.membership.membershipId,
+      realm: "agency",
+      tenantId: null,
+      agencyId: snapshot.agencyId,
+      roleFamilies: ["agency"],
+      roles: [binding.roleCode],
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordSecurityEvent({
+      eventType: "agency_oidc_session.issued",
+      outcome: "success",
+      realm: "agency",
+      actorType: "agency_user",
+      actorId: principal.principalId,
+      subjectId: subject,
+      tokenId: issued.tokenId,
+      afterSummary: {
+        agencyId: snapshot.agencyId,
+        roleCode: binding.roleCode,
+        amr,
+        acr,
+        authTime,
+        mfaVerified,
+        mfaPolicy,
+      },
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      identity,
+      agency: { agencyId: agency.agencyId, displayName: agency.displayName },
+      roleCode: binding.roleCode,
+      accessValidTo: binding.validTo!,
+    };
+  }
+
+  /**
    * 3. Exchange callback code & PKCE verifier for Partner Session
    */
   public async exchangePartnerCallbackSession(
@@ -894,7 +1254,80 @@ export class OidcPkceService {
       );
     }
 
-    const scopes = ["partner:read", "partner:write"];
+    // An active Referral link is not a Fleet staff grant. Resolve only the
+    // exact linked canonical human and its manager-created bounded membership.
+    const principal = await this.identityRepository?.findPrincipalById(
+      linkRecord.drtsPassengerId,
+    );
+    if (principal && principal.status !== "active") {
+      throw new ApiRequestError(
+        403,
+        "IAM_PRINCIPAL_NOT_ACTIVE",
+        "Linked principal is not active.",
+      );
+    }
+    const memberships =
+      matchedEntry.partnerType === "fleet_partner" &&
+      principal?.status === "active" &&
+      principal.principalType === "human" &&
+      principal.sourceRef ===
+        `jwt_principal:partner:${linkRecord.drtsPassengerId}`
+        ? await this.identityRepository?.findMembershipsByPrincipalId(
+            principal.principalId,
+          )
+        : [];
+    const managedMembership = memberships?.find(
+      (candidate) =>
+        candidate.realm === "partner" &&
+        candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
+        candidate.partnerId === matchedEntry.partnerId &&
+        candidate.sourceRef ===
+          `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`,
+    );
+    // A disabled membership never silently falls back to a fresh human grant.
+    const roleBindings =
+      managedMembership?.status === "active"
+        ? await this.identityRepository!.findRoleBindingsByMembershipId(
+            managedMembership.membershipId,
+          )
+        : [];
+    const now = Date.now();
+    const activeRoles = roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
+    const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
+    const scopes = managedRole
+      ? [...getIamFleetRoleScopes(managedRole.roleCode)!]
+      : ["partner:read", "partner:write"];
+    // The entry slug identifies the linked subject; a Fleet entry's persisted
+    // partner ID is the business selector regardless of managed-role status.
+    // Other entry kinds retain the restricted slug selector.
+    const canonicalPartnerId =
+      matchedEntry.partnerType === "fleet_partner"
+        ? matchedEntry.partnerId
+        : matchedEntry.entrySlug;
+    // Preserve the legacy restricted entry role label for existing consumers;
+    // it is not a Fleet human grant and has no business scopes.
+    const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];
+    const managedVersion =
+      managedRole && principal && managedMembership
+        ? Math.max(
+            ...[
+              matchedEntry.updatedAt,
+              principal.updatedAt,
+              managedMembership.updatedAt,
+              ...roleBindings.map((binding) => binding.updatedAt),
+            ].map((stamp) => Date.parse(stamp)),
+          )
+        : Date.parse(matchedEntry.updatedAt);
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "partner_user",
@@ -902,35 +1335,71 @@ export class OidcPkceService {
       realm: "partner",
       tenantId:
         matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
-      partnerId: matchedEntry.entrySlug,
+      partnerId: canonicalPartnerId,
       partnerEntrySlug: matchedEntry.entrySlug,
       roleFamilies: ["partner"],
-      roles: ["partner_admin"],
+      roles,
       scopes,
+      ...(managedRole && principal && managedMembership
+        ? {
+            principalId: principal.principalId,
+            membershipId: managedMembership.membershipId,
+          }
+        : {}),
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
       ],
     };
 
-    const token = this.jwtAuthService.sign(
+    // The partner entry version is the durable-state fingerprint checked by
+    // JwtAuthService.verifyAccessToken. A bare signed JWT lacks the canonical
+    // session claims and cannot be read back via /api/auth/session.
+    const issued = await this.jwtAuthService.issueSessionToken(
       {
         authMode: "jwt_bearer",
         actorType: "partner_user",
         actorId: identity.actorId,
+        principalId: identity.actorId,
+        // The verified IdP sub selects the entry-scoped link above and stays
+        // in the OIDC audit. Canonical principals use the link's stable ID:
+        // two valid entries for one IdP sub must not collide on the global
+        // identity_principals UNIQUE(issuer, subject) constraint.
+        subject: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,
-        partnerId: matchedEntry.entrySlug,
+        partnerId: canonicalPartnerId,
+        partnerEntrySlug: matchedEntry.entrySlug,
         roleFamilies: ["partner"],
-        roles: ["partner_admin"],
+        roles,
         scopes,
+        membershipId: managedRole ? managedMembership!.membershipId : null,
         requestId: meta?.requestId ?? null,
       },
-      { expiresIn: "8h" },
+      {
+        expiresIn: "8h",
+        ensurePrincipal: !managedRole,
+        tokenVersion: managedVersion,
+        authTime: new Date(
+          (claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000,
+        ).toISOString(),
+        amr,
+        acr: claims.acr ?? "",
+        policyVersion: "v1",
+      },
     );
+    identity.principalId = identity.actorId;
+    identity.partnerEntrySlug = matchedEntry.entrySlug;
+    identity.sessionId = issued.sessionId;
+    identity.tokenId = issued.tokenId;
+    identity.tokenVersion = issued.tokenVersion;
+    identity.authTime = issued.authTime;
+    identity.amr = issued.amr;
+    identity.acr = issued.acr;
+    identity.policyVersion = issued.policyVersion;
 
     const session: PartnerBootstrapSession = {
-      accessToken: token,
+      accessToken: issued.token,
       tokenType: "Bearer",
       expiresIn: "8h",
       partnerEntry: matchedEntry,
@@ -945,7 +1414,7 @@ export class OidcPkceService {
       actorId: identity.actorId,
       actorType: "partner_user",
       subjectId: claims.sub,
-      tokenId: token,
+      tokenId: issued.tokenId,
       afterSummary: {
         sub: claims.sub,
         amr,
@@ -1571,7 +2040,9 @@ export class OidcPkceService {
       (params.actorId
         ? params.realm === "partner"
           ? "partner_user"
-          : "tenant_admin"
+          : params.realm === "agency"
+            ? "agency_user"
+            : "tenant_admin"
         : "system");
 
     const write = params.requirePersistence

@@ -67,4 +67,15 @@ export const AUTH_REALM_PATH_MATRIX: AuthRealmPathRecord[] = [
     productionNotes:
       "Driver app identity is device-bound and refreshable through direct API auth; revoked bindings must fail even if the JWT still parses.",
   },
+  {
+    realm: "agency",
+    plane: "business_plane",
+    primaryPath: "agency_oidc_bearer",
+    bearerHeader: "authorization",
+    defaultIapProtected: false,
+    tokenIssuancePath: "/api/auth/agency/callback-session",
+    refreshPath: null,
+    productionNotes:
+      "External regulatory agency users sign in with Google OIDC PKCE bound to an invited agency membership; sessions are read-only, deny-by-default and revalidated against membership, agency status and access expiry on every request.",
+  },
 ];

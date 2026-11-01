@@ -749,17 +749,14 @@ export class ComplaintRepository {
     return draft ? { ...draft, replayed: false } : null;
   }
 
-  /** Keyset pages of these intake sources only; no global CRM snapshot refresh. */
-  async listPassengerCases(
-    afterCaseNo: string,
-  ): Promise<ComplaintCaseRecord[]> {
+  /** Internal Ops reads use CRM as the authority, regardless of intake source.
+   * Referral cases have no passenger-account/ride-token membership. These
+   * queries are not passenger self-service ownership checks. */
+  async listCasesForOps(afterCaseNo: string): Promise<ComplaintCaseRecord[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<JsonRecordRow>(
       `SELECT c.record FROM crm.phase1_complaint_cases c
-       WHERE c.case_no > $1 AND (
-         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = c.case_no)
-         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = c.case_no)
-       ) ORDER BY c.case_no ASC LIMIT $2`,
+       WHERE c.case_no > $1 ORDER BY c.case_no ASC LIMIT $2`,
       [afterCaseNo, 500],
     );
     return result.rows.map((row) =>
@@ -770,13 +767,10 @@ export class ComplaintRepository {
     );
   }
 
-  async getPassengerCase(caseNo: string): Promise<ComplaintCaseRecord | null> {
+  async getCaseForOps(caseNo: string): Promise<ComplaintCaseRecord | null> {
     if (!this.isEnabled()) return null;
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT c.record FROM crm.phase1_complaint_cases c WHERE c.case_no = $1 AND (
-         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = c.case_no)
-         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = c.case_no)
-       )`,
+      `SELECT c.record FROM crm.phase1_complaint_cases c WHERE c.case_no = $1`,
       [caseNo],
     );
     return result.rows[0]
@@ -787,15 +781,11 @@ export class ComplaintRepository {
       : null;
   }
 
-  async getPassengerTimeline(
-    caseNo: string,
-  ): Promise<ComplaintTimelineEntry[]> {
+  async getTimelineForOps(caseNo: string): Promise<ComplaintTimelineEntry[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT t.record FROM crm.phase1_complaint_timelines t WHERE t.case_no = $1 AND (
-         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = t.case_no)
-         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = t.case_no)
-       ) ORDER BY t.created_at ASC, t.entry_id ASC`,
+      `SELECT t.record FROM crm.phase1_complaint_timelines t WHERE t.case_no = $1
+       ORDER BY t.created_at ASC, t.entry_id ASC`,
       [caseNo],
     );
     return result.rows.map((row) =>

@@ -55,6 +55,7 @@ import type {
   ReportJobRecord,
   ReportJobType,
   SettlementMatrixRecord,
+  SixMonthMonthlyOperationsSummary,
   SixMonthOperationsSummary,
   TenantCostCenterRecord,
   TenantMonthlyTripReportRowRecord,
@@ -156,6 +157,9 @@ type DailyDispatchRecordProvider = (
   filters: DailyDispatchRecordQuery,
 ) => Promise<DispatchDailyRecord[]> | DispatchDailyRecord[];
 type SixMonthOperationsSummaryProvider = (filters: {
+  periodMonth?: string;
+  periodMonthFrom?: string;
+  periodMonthTo?: string;
   from?: string;
   to?: string;
   businessArea?: string;
@@ -188,6 +192,7 @@ const REGULATORY_REPORT_JOB_TYPE_SET: ReadonlySet<string> = new Set(
 
 const MULTI_TAXI_TRIP_EXPORT_JOB_TYPE = "multi_taxi_trip_records";
 const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
+const AGENCY_TRIP_EXPORT_SCOPE = "agency:trip_records:export";
 const MAX_EXPORT_PURPOSE_LENGTH = 500;
 const MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_EXPORT_QUERY_LENGTH = 200;
@@ -648,7 +653,8 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     existingJob?: StoredReportJob | null,
   ): { job: StoredReportJob; idempotentReplay: boolean } {
-    const { actorId } = this.assertMultiTaxiTripExportAccess(identity);
+    const { actorId, agencyId } =
+      this.assertMultiTaxiTripExportAccess(identity);
     const scope = this.normalizeMultiTaxiTripExportScope(command.scope ?? {});
     const purpose = this.normalizeRequiredText(
       command.purpose,
@@ -676,7 +682,8 @@ export class ReportingFilingService
       if (
         this.stableSerialize(existingMetadata.scope) !==
           this.stableSerialize(scope) ||
-        existingMetadata.purpose !== purpose
+        existingMetadata.purpose !== purpose ||
+        (existingMetadata.agencyId ?? null) !== (agencyId ?? null)
       ) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -697,6 +704,7 @@ export class ReportingFilingService
       idempotencyKey,
       requestedByActorId: actorId,
       recordCount: rows.length,
+      ...(agencyId ? { agencyId } : {}),
     };
     const job: StoredReportJob = {
       jobId: `JOB-${randomUUID()}`,
@@ -767,8 +775,10 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportJobView {
-    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const access = this.assertMultiTaxiTripExportAccess(identity);
+    const { policy } = access;
     const job = this.requireMultiTaxiTripExportJob(jobId);
+    this.assertMultiTaxiTripExportOwnership(job, access);
     const view = this.toMultiTaxiTripExportView(job);
     this.recordArtifactAccessAudit(
       {
@@ -794,8 +804,10 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportDownload {
-    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const access = this.assertMultiTaxiTripExportAccess(identity);
+    const { policy } = access;
     const job = this.requireMultiTaxiTripExportJob(jobId);
+    this.assertMultiTaxiTripExportOwnership(job, access);
     const metadata = this.requireMultiTaxiTripExportMetadata(job);
     if (job.status !== "completed" || !job.artifact) {
       throw new ApiRequestError(
@@ -2306,17 +2318,50 @@ export class ReportingFilingService
     return rows.map((row) => ({ ...row }));
   }
 
-  private async buildSixMonthOperationsSummaryRows(job: StoredReportJob) {
+  private async buildSixMonthOperationsSummaryRows(
+    job: StoredReportJob,
+  ): Promise<
+    Array<SixMonthOperationsSummary | SixMonthMonthlyOperationsSummary>
+  > {
     const filters = this.extractSixMonthOperationsSummaryFilters(job.filters);
     const rows = await this.sixMonthOperationsSummaryProvider(filters);
-    // File exports carry the scalar figures; the source id lists stay on the
-    // preview API / JSON export, where each figure is drilled down.
+    // CSV exports carry the six monthly detail rows per observed
+    // businessArea/serviceProductCode from the same preview generation; PDF
+    // exports remain six-month aggregate summaries. Source id lists stay on
+    // the preview API / JSON export.
+    if (job.format === "csv") {
+      const monthlyRows = rows.flatMap((source) =>
+        (source.monthlySummaries ?? []).map((monthly) => ({
+          ...monthly,
+          averageDispatchableVehicleCount:
+            monthly.validSnapshotCount === 0
+              ? null
+              : monthly.averageDispatchableVehicleCount,
+          complaintsByCategory: { ...monthly.complaintsByCategory },
+        })),
+      );
+      if (monthlyRows.length > 0) {
+        return monthlyRows.sort(
+          (left, right) =>
+            left.periodMonth.localeCompare(right.periodMonth) ||
+            (left.businessArea ?? "").localeCompare(right.businessArea ?? "") ||
+            (left.serviceProductCode ?? "").localeCompare(
+              right.serviceProductCode ?? "",
+            ),
+        );
+      }
+    }
     return rows.map((source) => {
       const row = {
         ...source,
+        averageDispatchableVehicleCount:
+          source.validSnapshotCount === 0
+            ? null
+            : source.averageDispatchableVehicleCount,
         complaintsByCategory: { ...source.complaintsByCategory },
       };
       delete row.drilldown;
+      delete row.monthlySummaries;
       return row;
     });
   }
@@ -2458,21 +2503,44 @@ export class ReportingFilingService
   private extractSixMonthOperationsSummaryFilters(
     filters: Record<string, unknown>,
   ) {
-    const readText = (key: string) => {
-      const value = filters[key];
-      return typeof value === "string" && value.trim() ? value.trim() : null;
+    const readText = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = filters[key];
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      }
+      return null;
     };
     const query: {
+      periodMonth?: string;
+      periodMonthFrom?: string;
+      periodMonthTo?: string;
       from?: string;
       to?: string;
       businessArea?: string;
       serviceProductCode?: string;
     } = {};
+    const periodMonth = readText("periodMonth", "period_month");
+    const periodMonthFrom = readText("periodMonthFrom", "period_month_from");
+    const periodMonthTo = readText("periodMonthTo", "period_month_to");
     const from = readText("from");
     const to = readText("to");
-    const businessArea = readText("businessArea");
-    const serviceProductCode = readText("serviceProductCode");
+    const businessArea = readText("businessArea", "business_area");
+    const serviceProductCode = readText(
+      "serviceProductCode",
+      "service_product_code",
+    );
 
+    if (periodMonth) {
+      query.periodMonth = periodMonth;
+    }
+    if (periodMonthFrom) {
+      query.periodMonthFrom = periodMonthFrom;
+    }
+    if (periodMonthTo) {
+      query.periodMonthTo = periodMonthTo;
+    }
     if (from) {
       query.from = from;
     }
@@ -2786,6 +2854,7 @@ export class ReportingFilingService
       purpose: metadata.purpose,
       recordCount: metadata.recordCount,
       requestedByActorId: metadata.requestedByActorId,
+      ...(metadata.agencyId ? { agencyId: metadata.agencyId } : {}),
       downloadAvailable: job.status === "completed" && Boolean(job.artifact),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
@@ -2811,8 +2880,37 @@ export class ReportingFilingService
 
   private assertMultiTaxiTripExportAccess(
     identity: EvidenceAccessIdentity | null,
-  ) {
+  ): {
+    actorId: string;
+    agencyId: string | null;
+    policy: ReturnType<typeof assertEvidenceAccess>;
+  } {
     const actorId = identity?.actorId?.trim();
+    // BUREAU-R13 §4.1: an agency exporter may create and read only its own
+    // agency-bound jobs; the platform path below is unchanged.
+    if (identity?.realm === "agency") {
+      const agencyId = identity.agencyId?.trim();
+      if (
+        identity.actorType !== "agency_user" ||
+        !actorId ||
+        !agencyId ||
+        !identity.scopes.includes(AGENCY_TRIP_EXPORT_SCOPE)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "MULTI_TAXI_EXPORT_FORBIDDEN",
+          "An agency actor with agency:trip_records:export is required.",
+        );
+      }
+      return {
+        actorId,
+        agencyId,
+        policy: assertEvidenceAccess({
+          family: "report_artifact",
+          identity,
+        }),
+      };
+    }
     if (
       identity?.realm !== "platform" ||
       identity.actorType !== "platform_admin" ||
@@ -2827,11 +2925,40 @@ export class ReportingFilingService
     }
     return {
       actorId,
+      agencyId: null,
       policy: assertEvidenceAccess({
         family: "report_artifact",
         identity,
       }),
     };
+  }
+
+  /**
+   * Platform callers keep reading any multi-taxi export job (route-level
+   * `@RequireRealms("platform")`). An agency caller only sees a job it created
+   * for its own agency; anything else is indistinguishable from a missing job.
+   */
+  private assertMultiTaxiTripExportOwnership(
+    job: StoredReportJob,
+    access: { actorId: string; agencyId: string | null },
+  ) {
+    if (!access.agencyId) {
+      return;
+    }
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
+    if (
+      metadata.requestedByActorId !== access.actorId ||
+      metadata.agencyId !== access.agencyId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MULTI_TAXI_EXPORT_JOB_NOT_FOUND",
+        "Multi-taxi trip export job was not found.",
+        {
+          jobId: job.jobId,
+        },
+      );
+    }
   }
 
   private normalizeMultiTaxiTripExportScope(
@@ -2859,6 +2986,54 @@ export class ReportingFilingService
         );
       }
       normalized.q = query;
+    }
+    for (const field of ["reservedFrom", "reservedTo"] as const) {
+      const value = scope[field]?.trim();
+      if (!value) {
+        continue;
+      }
+      if (
+        !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value) ||
+        !Number.isFinite(Date.parse(`${value}T00:00:00.000Z`))
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_DATE_INVALID",
+          `Export ${field} must use YYYY-MM-DD.`,
+        );
+      }
+      normalized[field] = value;
+    }
+    if (
+      normalized.reservedFrom &&
+      normalized.reservedTo &&
+      normalized.reservedFrom > normalized.reservedTo
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_EXPORT_DATE_RANGE_INVALID",
+        "Export reservedFrom must not be after reservedTo.",
+      );
+    }
+    for (const field of [
+      "plateNo",
+      "orderNo",
+      "orderId",
+      "tripId",
+      "recordId",
+    ] as const) {
+      const value = scope[field]?.trim();
+      if (!value) {
+        continue;
+      }
+      if (value.length > MAX_EXPORT_QUERY_LENGTH) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_QUERY_TOO_LONG",
+          `Export ${field} must not exceed ${MAX_EXPORT_QUERY_LENGTH} characters.`,
+        );
+      }
+      normalized[field] = value;
     }
     return normalized;
   }

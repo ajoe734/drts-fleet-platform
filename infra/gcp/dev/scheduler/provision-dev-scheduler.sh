@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Provision Cloud Scheduler for the two scale-to-zero-safe internal trigger
-# routes added by SR-MAIL-RETRY-SCHEDULE-20261001:
+# Provision Cloud Scheduler for the scale-to-zero-safe internal trigger
+# routes added by SR-MAIL-RETRY-SCHEDULE-20261001 and
+# BUREAU-R14-EXPIRY-REMINDERS-SCHEDULER-20261024:
 #   POST /api/internal/scheduled-tasks/mail-outbox/drain
 #   POST /api/internal/scheduled-tasks/approval-timeout-reminders/run
+#   POST /api/internal/scheduled-tasks/regulatory-expiry/run
 #
 # This is step 3 of the operator sequence in
 # docs/03-runbooks/dev-scheduled-tasks-20261001.md: deploy the two
@@ -51,6 +53,10 @@ MAIL_OUTBOX_URI="${API_ORIGIN}/api/internal/scheduled-tasks/mail-outbox/drain"
 APPROVAL_REMINDER_JOB="${APPROVAL_REMINDER_JOB:-drts-dev-approval-timeout-reminders-run}"
 APPROVAL_REMINDER_SCHEDULE="${APPROVAL_REMINDER_SCHEDULE:-*/5 * * * *}"
 APPROVAL_REMINDER_URI="${API_ORIGIN}/api/internal/scheduled-tasks/approval-timeout-reminders/run"
+
+REGULATORY_EXPIRY_JOB="${REGULATORY_EXPIRY_JOB:-drts-dev-regulatory-expiry-run}"
+REGULATORY_EXPIRY_SCHEDULE="${REGULATORY_EXPIRY_SCHEDULE:-*/15 * * * *}"
+REGULATORY_EXPIRY_URI="${API_ORIGIN}/api/internal/scheduled-tasks/regulatory-expiry/run"
 
 say() { printf '\n=== %s\n' "$*"; }
 gc() { gcloud --project "$PROJECT_ID" "$@"; }
@@ -133,11 +139,20 @@ create_or_update_job() { # create_or_update_job <name> <schedule> <uri>
 #     negligible; the sweep is idempotent either way, so this is a cost
 #     trade (5x fewer Cloud Run wake-ups than matching the retired
 #     in-process 60s poll literally), not a correctness one.
+#   - regulatory-expiry/run every 15 minutes (BUREAU-R14): Cloud Run scales to
+#     zero when idle, so an in-process timer (ENABLE_EXPIRY_RECONCILIATION_LOOP)
+#     cannot guarantee periodic execution. A 15-minute Cloud Scheduler trigger
+#     evaluates T-30/T-7 pre-expiry reminders (driver credentials, vehicle
+#     contracts, insurance policies) and post-expiry dispatch blocks via the
+#     same WIF Entry C OIDC pattern.
 say "Cloud Scheduler job: ${MAIL_OUTBOX_JOB} (${MAIL_OUTBOX_SCHEDULE})"
 create_or_update_job "$MAIL_OUTBOX_JOB" "$MAIL_OUTBOX_SCHEDULE" "$MAIL_OUTBOX_URI"
 
 say "Cloud Scheduler job: ${APPROVAL_REMINDER_JOB} (${APPROVAL_REMINDER_SCHEDULE})"
 create_or_update_job "$APPROVAL_REMINDER_JOB" "$APPROVAL_REMINDER_SCHEDULE" "$APPROVAL_REMINDER_URI"
+
+say "Cloud Scheduler job: ${REGULATORY_EXPIRY_JOB} (${REGULATORY_EXPIRY_SCHEDULE})"
+create_or_update_job "$REGULATORY_EXPIRY_JOB" "$REGULATORY_EXPIRY_SCHEDULE" "$REGULATORY_EXPIRY_URI"
 
 # ---------------------------------------------------------------- handoff
 cat <<EOF
@@ -158,6 +173,7 @@ cat <<EOF
    reliably attributed to this specific attempt:
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${MAIL_OUTBOX_JOB} internal/scheduled-tasks/mail-outbox/drain
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${APPROVAL_REMINDER_JOB} internal/scheduled-tasks/approval-timeout-reminders/run
+     infra/gcp/dev/scheduler/confirm-job-attempt.sh ${REGULATORY_EXPIRY_JOB} internal/scheduled-tasks/regulatory-expiry/run
    Exit 0 = confirmed completed successfully; exit 1 = confirmed completed
    but failed (script prints the status code); exit 2 = no completion
    evidence within the timeout, which means unconfirmed, not success. Then

@@ -1,4 +1,10 @@
-import { PLATFORM_CURRENCY } from "@drts/contracts";
+import { PLATFORM_CURRENCY, getIamFleetRoleScopes } from "@drts/contracts";
+import type { ManageFleetHumanRoleCommand, FleetHumanRoleRecord } from "@drts/contracts";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import { IdentityRepository } from "../identity/identity.repository";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
+import { SecurityEventsService } from "../security-events/security-events.service";
 
 import { randomUUID } from "node:crypto";
 
@@ -115,7 +121,83 @@ export class FleetPartnerService implements OnModuleInit {
     private readonly fleetPartnerRepository?: FleetPartnerRepository,
     @Optional()
     private readonly statementDecisions?: FleetStatementDecisionRepository,
+    @Optional() private readonly identityRepository?: IdentityRepository,
+    @Optional() private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional() private readonly partnerLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional() private readonly securityEventsService?: SecurityEventsService,
   ) {}
+
+  private async requireManagedFleetEntry(fleetPartnerId: string, entrySlug: string) {
+    if (!this.fleetPartnerRepository?.isEnabled() || !this.tenantPartnerService ||
+        !this.identityRepository?.isEnabled() || !this.partnerLinkRepository?.isEnabled() ||
+        !this.securityEventsService?.isEnabled()) {
+      throw new ApiRequestError(503, "FLEET_ROLE_AUTHORITY_UNAVAILABLE", "Canonical Fleet, entry, link, IAM and audit storage are required.");
+    }
+    const fleet = await this.fleetPartnerRepository.findActiveFleetPartnerById(fleetPartnerId);
+    const entries = await this.tenantPartnerService.resolvePartnerEntries(entrySlug);
+    const entry = entries.find((candidate) => candidate.entrySlug === entrySlug &&
+      candidate.partnerType === "fleet_partner" && candidate.partnerId === fleetPartnerId);
+    if (!fleet || !entry) throw new ApiRequestError(404, "FLEET_ENTRY_NOT_FOUND", "Active Fleet entry not found for this Fleet.");
+    return entry;
+  }
+
+  async listFleetHumanRoles(fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
+    await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
+    const rows = await this.identityRepository!.listFleetHumanRoles(entrySlug, fleetPartnerId);
+    return rows.map(({ membership, binding }) => ({
+      entrySlug, principalId: membership.principalId, membershipId: membership.membershipId,
+      roleCode: binding.roleCode as FleetHumanRoleRecord["roleCode"],
+      status: membership.status, validTo: binding.validTo,
+    }));
+  }
+
+  async manageFleetHumanRole(fleetPartnerId: string, command: ManageFleetHumanRoleCommand,
+    manager: BootstrapRequestIdentity | null): Promise<FleetHumanRoleRecord> {
+    if (!manager || !["platform", "ops"].includes(manager.realm) ||
+        !["platform_admin", "ops_user"].includes(manager.actorType) ||
+        !manager.scopes?.includes("foundation:write") || !manager.principalId) {
+      throw new ApiRequestError(403, "FLEET_ROLE_MANAGER_DENIED", "A verified platform Fleet manager is required.");
+    }
+    if (!command || typeof command.entrySlug !== "string" || !command.entrySlug.trim() ||
+        typeof command.partnerUserRef !== "string" || !command.partnerUserRef.trim() ||
+        typeof command.enabled !== "boolean" || !getIamFleetRoleScopes(command.roleCode)) {
+      throw new ApiRequestError(400, "FLEET_ROLE_INVALID", "Entry, linked subject, enabled state and Fleet role are required.");
+    }
+    if (command.validTo != null && (!Number.isFinite(Date.parse(command.validTo)) ||
+        Date.parse(command.validTo) <= Date.now())) {
+      throw new ApiRequestError(400, "FLEET_ROLE_EXPIRY_INVALID", "Expiry must be in the future.");
+    }
+    const entrySlug = command.entrySlug.trim();
+    await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
+    const link = await this.partnerLinkRepository!.find(entrySlug, command.partnerUserRef.trim());
+    if (!link || link.status !== "active" || !link.drtsPassengerId ||
+        link.drtsPassengerId === manager.principalId) {
+      throw new ApiRequestError(409, "FLEET_ROLE_LINK_INVALID", "Target needs an existing active linked human account.");
+    }
+    const records = await this.identityRepository!.manageFleetHumanRole({
+      entrySlug, fleetPartnerId, principalId: link.drtsPassengerId, roleCode: command.roleCode,
+      enabled: command.enabled, validTo: command.validTo ?? null,
+      managerPrincipalId: manager.principalId,
+      audit: async (client) => {
+        await this.securityEventsService!.recordEventRequired({
+          actorId: manager.actorId, actorType: manager.actorType, realm: manager.realm,
+          tenantId: null, partnerId: entrySlug, eventType: "fleet_human_role.managed",
+          eventFamily: "role", outcome: "success", severity: "medium",
+          targetType: "user", targetId: link.drtsPassengerId,
+          sessionId: manager.sessionId ?? null, tokenId: manager.tokenId ?? null,
+          authMethods: manager.amr ?? [], sourceIp: null, userAgent: null,
+          requestId: null, traceId: null, reasonCode: null, approvalId: null,
+          beforeSummary: null,
+          afterSummary: { fleetPartnerId, entrySlug, roleCode: command.roleCode,
+            enabled: command.enabled, validTo: command.validTo ?? null },
+        }, client);
+      },
+    });
+    return { entrySlug, principalId: records.membership.principalId,
+      membershipId: records.membership.membershipId,
+      roleCode: records.binding.roleCode as FleetHumanRoleRecord["roleCode"],
+      status: records.membership.status, validTo: records.binding.validTo };
+  }
 
   async onModuleInit() {
     if (!this.fleetPartnerRepository) {

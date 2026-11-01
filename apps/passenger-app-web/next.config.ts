@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import path from "path";
+import { ECPAY_HOSTED_FIELDS_CSP } from "./components/payment/ecpay-csp";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -36,6 +37,7 @@ const nextConfig: NextConfig = {
       process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
     const contentSecurityPolicy =
       "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';";
+    const paymentMethodsContentSecurityPolicy = ECPAY_HOSTED_FIELDS_CSP;
     return [
       {
         source: "/:path*",
@@ -59,6 +61,33 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             value: contentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/account/payment-methods",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/account/payment-methods/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/api/passenger-app/payment-methods/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
           },
         ],
       },

@@ -790,6 +790,21 @@ export interface MultiTaxiElectronicReceiptRegenerationResult {
 // §14 Two-year multi-taxi operational record
 // ===========================================================================
 
+export type MultiTaxiTripRouteSource =
+  | "driver_gps"
+  | "provider_route"
+  | "mixed"
+  | "pickup_dropoff_summary"
+  | "unavailable";
+
+export type MultiTaxiTripPaymentStatus = PassengerPaymentStatus | "unknown";
+
+export type MultiTaxiTripTollSource =
+  | "driver_proof"
+  | "electronic_receipt"
+  | "none"
+  | "unavailable";
+
 export interface MultiTaxiTripOperationalRecord {
   recordId: string;
   orderId: string;
@@ -807,12 +822,16 @@ export interface MultiTaxiTripOperationalRecord {
     pointCount: number;
     distanceMeters: number | null;
     durationSeconds: number | null;
-    source: "driver_gps" | "provider_route" | "mixed";
+    source: MultiTaxiTripRouteSource;
+    routeSummary?: string | null;
   };
 
   payableFareMinor: number;
   actualFareMinor: number;
-  tollMinor: number;
+  collectedFareMinor?: number | null;
+  paymentStatus?: MultiTaxiTripPaymentStatus;
+  tollMinor: number | null;
+  tollSource?: MultiTaxiTripTollSource;
   currency: typeof PLATFORM_CURRENCY;
 
   farePolicyVersion: string;
@@ -826,6 +845,15 @@ export interface MultiTaxiTripOperationalRecordQuery {
   month?: string;
   q?: string;
   legalHold?: MultiTaxiTripOperationalLegalHoldFilter;
+  /** BUREAU-R13: inclusive YYYY-MM-DD bounds compared against `reservedAt`. */
+  reservedFrom?: string;
+  reservedTo?: string;
+  /** BUREAU-R11: exact authorized plate & order/trip identifiers. */
+  plateNo?: string;
+  orderNo?: string;
+  orderId?: string;
+  tripId?: string;
+  recordId?: string;
 }
 
 export type MultiTaxiTripOperationalLegalHoldFilter = "all" | "active" | "none";
@@ -857,14 +885,25 @@ export interface MultiTaxiTripOperationalAdminView extends MultiTaxiTripOperatio
 }
 
 export interface MultiTaxiTripOperationalExportRow {
+  recordId?: string;
+  orderId?: string;
+  tripId?: string;
   orderNoMasked: string;
+  plateNo?: string;
   plateNoMasked: string;
   reservedAt: string;
   pickupAt: string | null;
   dropoffAt: string | null;
+  routeSummary?: string | null;
+  routeSource?: MultiTaxiTripRouteSource;
+  distanceMeters?: number | null;
+  durationSeconds?: number | null;
   payableFareMinor: number;
   actualFareMinor: number;
-  tollMinor: number;
+  collectedFareMinor?: number | null;
+  paymentStatus?: MultiTaxiTripPaymentStatus;
+  tollMinor: number | null;
+  tollSource?: MultiTaxiTripTollSource;
   currency: typeof PLATFORM_CURRENCY;
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";
@@ -905,6 +944,8 @@ export interface MultiTaxiTripOperationalExportJobView {
   purpose: string;
   recordCount: number;
   requestedByActorId: string;
+  /** BUREAU-R13: set only for jobs created by an agency session. */
+  agencyId?: string;
   downloadAvailable: boolean;
   createdAt: string;
   updatedAt: string;

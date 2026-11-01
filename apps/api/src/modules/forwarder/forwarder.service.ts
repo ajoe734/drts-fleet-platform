@@ -720,17 +720,45 @@ export class ForwarderService implements OnModuleInit {
         canonical.payload,
         canonical.authoritativeSnapshot,
       );
+      const operatorContext = this.extractForwardedOperatorContext(canonical);
+      if (operatorContext.operatingAuthorizationId) {
+        await this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
+          operatorContext.operatingAuthorizationId,
+        );
+      }
       const eligibleDrivers = new Set(
         (this.vehicleEligibilityService
           ? this.vehicleEligibilityService.listEligibleSupply(
               "third_party_forwarded_order",
               {
                 serviceBucketOverride: serviceBucket,
+                ...(operatorContext.hasOperatorContext
+                  ? {
+                      requestingOperatorId:
+                        operatorContext.requestingOperatorId,
+                      operatingAuthorizationId:
+                        operatorContext.operatingAuthorizationId,
+                      auditRefusal: true,
+                      ...(requestId ? { requestId } : {}),
+                    }
+                  : {}),
               },
             )
-          : this.regulatoryRegistryService.getEligibleCandidates(
-              serviceBucket,
-            )
+          : operatorContext.hasOperatorContext
+            ? this.regulatoryRegistryService.getEligibleCandidates(
+                serviceBucket,
+                null,
+                {
+                  requestingOperatorId: operatorContext.requestingOperatorId,
+                  operatingAuthorizationId:
+                    operatorContext.operatingAuthorizationId,
+                  auditRefusal: true,
+                  ...(requestId ? { requestId } : {}),
+                },
+              )
+            : this.regulatoryRegistryService.getEligibleCandidates(
+                serviceBucket,
+              )
         ).map((candidate) => candidate.driverId),
       );
       const requestedDrivers =
@@ -808,6 +836,59 @@ export class ForwarderService implements OnModuleInit {
           status: forwardedOrder.status,
         },
       );
+    }
+    const operatorContext =
+      this.extractForwardedOperatorContext(forwardedOrder);
+    if (
+      operatorContext.hasOperatorContext &&
+      typeof this.regulatoryRegistryService
+        .evaluateVehicleOperatorExclusivity === "function"
+    ) {
+      if (operatorContext.operatingAuthorizationId) {
+        await this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
+          operatorContext.operatingAuthorizationId,
+        );
+      }
+      const pairedVehicles =
+        typeof this.regulatoryRegistryService.listSupplyPairs === "function"
+          ? this.regulatoryRegistryService
+              .listSupplyPairs()
+              .filter((pair) => pair.driverId === command.driverId)
+          : [];
+      for (const pair of pairedVehicles) {
+        const decision =
+          this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
+            pair.vehicleId,
+            {
+              requestingOperatorId: operatorContext.requestingOperatorId,
+              operatingAuthorizationId:
+                operatorContext.operatingAuthorizationId,
+              auditRefusal: true,
+              ...(requestId ? { requestId } : {}),
+            },
+          );
+        if (!decision.allowed) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            decision.reasonCode === "exclusivity_other_operator"
+              ? "FORWARDER_VEHICLE_EXCLUSIVITY_OTHER_OPERATOR"
+              : "FORWARDER_VEHICLE_EXCLUSIVITY_OPERATOR_UNBOUND",
+            decision.reasonCode === "exclusivity_other_operator"
+              ? "Driver paired vehicle is exclusively bound to another operator."
+              : "Driver paired vehicle exclusivity declaration is not yet bound to an operator ID.",
+            {
+              orderId,
+              driverId: command.driverId,
+              vehicleId: pair.vehicleId,
+              reasonCode: decision.reasonCode,
+              reasonCodes: decision.reasonCode ? [decision.reasonCode] : [],
+              requestingOperatorId: decision.requestingOperatorId,
+              boundOperatorId: decision.boundOperatorId,
+              evaluatedAt: decision.evaluatedAt,
+            },
+          );
+        }
+      }
     }
     if (!forwardedOrder.candidateDriverIds.includes(command.driverId)) {
       throw new ApiRequestError(
@@ -1255,7 +1336,8 @@ export class ForwarderService implements OnModuleInit {
           newValuesSummary: {
             status: committed.status,
             nativeStatus: committed.lastNativeStatus,
-            reconciliationJobId: committed.reconciliationJob!.reconciliationJobId,
+            reconciliationJobId:
+              committed.reconciliationJob!.reconciliationJobId,
           },
         },
         requestId,
@@ -1530,7 +1612,11 @@ export class ForwarderService implements OnModuleInit {
     draft.updatedAt = failedAt;
     const adapterHealth = this.updateAdapterHealth(
       draft.platformCode,
-      this.buildFailureAdapterHealthPatch(draft.platformCode, command, failedAt),
+      this.buildFailureAdapterHealthPatch(
+        draft.platformCode,
+        command,
+        failedAt,
+      ),
     );
 
     let persisted = true;
@@ -1581,7 +1667,8 @@ export class ForwarderService implements OnModuleInit {
           errorCode: lastSyncError.code,
           retryable: lastSyncError.retryable,
           persisted,
-          reconciliationJobId: draft.reconciliationJob?.reconciliationJobId ?? null,
+          reconciliationJobId:
+            draft.reconciliationJob?.reconciliationJobId ?? null,
         },
       },
       requestId,
@@ -2448,6 +2535,30 @@ export class ForwarderService implements OnModuleInit {
     return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
   }
 
+  private extractForwardedOperatorContext(order: ForwardedOrderRecord): {
+    requestingOperatorId: string | null;
+    operatingAuthorizationId: string | null;
+    hasOperatorContext: boolean;
+  } {
+    const requestingOperatorId = this.extractForwardedSummary(order, [
+      "requestingOperatorId",
+      "operatorId",
+      "operator.operatorId",
+    ]);
+    const operatingAuthorizationId = this.extractForwardedSummary(order, [
+      "operatingAuthorizationId",
+      "authorizationId",
+      "operatingAuthorization.authorizationId",
+    ]);
+    return {
+      requestingOperatorId,
+      operatingAuthorizationId,
+      hasOperatorContext: Boolean(
+        requestingOperatorId || operatingAuthorizationId,
+      ),
+    };
+  }
+
   private extractForwardedSummary(
     order: ForwardedOrderRecord,
     keys: readonly string[],
@@ -2627,8 +2738,9 @@ export class ForwarderService implements OnModuleInit {
     if (!response || typeof response !== "object") {
       return false;
     }
-    const details = (response as { error?: { details?: Record<string, unknown> } })
-      .error?.details;
+    const details = (
+      response as { error?: { details?: Record<string, unknown> } }
+    ).error?.details;
     return details?.persisted === false;
   }
 

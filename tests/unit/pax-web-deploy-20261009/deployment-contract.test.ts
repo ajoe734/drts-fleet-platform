@@ -503,4 +503,157 @@ printf '%s' "$MOCK_STATUS"
       ),
     ).toContain('output: "standalone"');
   });
+
+  it.each([
+    ["", 0],
+    ["drts-dev-agency-portal-web", 0],
+    ["drts-agency-portal-web", 1],
+    ["rogue-agency-service", 1],
+  ])("resolves agency portal target '%s' with exit %i", (target, status) => {
+    const result = run(step(deploy, "Resolve dev config"), {
+      DEV_GCP_PROJECT_ID: "test-project",
+      DEV_GCP_REGION: "us-central1",
+      DEV_GCP_CLOUDSQL_INSTANCE: "test-project:us-central1:db",
+      DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR:
+        "runtime@test-project.iam.gserviceaccount.com",
+      DEV_WIF_SERVICE_ACCOUNT: "deployer@test-project.iam.gserviceaccount.com",
+      DEV_WIF_PROVIDER: "test-provider",
+      DEV_WORKLOAD_IDENTITY_ISSUER: "issuer",
+      DEV_WORKLOAD_IDENTITY_AUDIENCE: "audience",
+      GITHUB_EVENT_NAME: "push",
+      GITHUB_SHA: sha,
+      DEV_GCP_AGENCY_PORTAL_SERVICE: target,
+      DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED: "",
+      DEV_AGENCY_PORTAL_ORIGIN: "",
+    });
+    expect(result.status, result.stderr).toBe(status);
+    if (status === 0) {
+      expect(result.outputs.agency_portal_service).toBe(
+        "drts-dev-agency-portal-web",
+      );
+      expect(result.outputs.agency_portal_exposure_flag).toBe(
+        "--no-allow-unauthenticated",
+      );
+      expect(result.outputs.agency_portal_origin).toBe("");
+    }
+  });
+
+  it.each([
+    ["200", sha, 0],
+    ["302", sha, 1],
+    ["200", "b".repeat(40), 1],
+    ["404", sha, 1],
+  ])(
+    "checks agency portal /login and /invite using exact 200 and candidate headers (%s, %s)",
+    (status, servedSha, expectedExit) => {
+      const dir = directory();
+      const log = path.join(dir, "commands");
+      executable(
+        dir,
+        "curl",
+        `
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+while (($#)); do
+  if [[ "$1" == '--dump-header' ]]; then
+    printf 'HTTP/2 %s\\r\\nx-drts-candidate-sha: %s\\r\\n' "$MOCK_STATUS" "$MOCK_SHA" > "$2"
+  fi
+  shift
+done
+printf '%s' "$MOCK_STATUS"
+`,
+      );
+      const result = run(
+        step(deploy, "Verify agency portal endpoints"),
+        {
+          AGENCY_PORTAL_ID_TOKEN: "test-agency-token",
+          AGENCY_PORTAL_URL: "https://agency.test",
+          CANDIDATE_SHA: sha,
+          MOCK_STATUS: status,
+          MOCK_SHA: servedSha,
+          COMMAND_LOG: log,
+        },
+        dir,
+      );
+      expect(result.status, result.stderr).toBe(expectedExit);
+      const commands = readFileSync(log, "utf8");
+      expect(commands).toContain("Authorization: Bearer test-agency-token");
+      expect(commands).not.toContain("--location");
+      if (expectedExit === 0) {
+        expect(commands).toContain("https://agency.test/login");
+        expect(commands).toContain("https://agency.test/invite");
+      }
+    },
+  );
+
+  it("maps optional agency custom domain only when DEV_AGENCY_PORTAL_HOST or DEV_AGENCY_PORTAL_ORIGIN is configured", () => {
+    const dir = directory();
+    const log = path.join(dir, "commands");
+    mkdirSync(path.join(dir, "operations/deployment"), { recursive: true });
+    executable(
+      dir,
+      "operations/deployment/map-domain-service.sh",
+      readFileSync(
+        path.join(root, "operations/deployment/map-domain-service.sh"),
+        "utf8",
+      ),
+    );
+    executable(
+      dir,
+      "gcloud",
+      `
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+if [[ "$*" == *'domain-mappings create'* ]]; then exit 0; fi
+[[ "$*" == *'domain-mappings describe'* ]] || exit 90
+while (($#)); do
+  if [[ "$1" == '--domain' ]]; then domain="$2"; break; fi
+  shift
+done
+echo "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Cannot find domain mapping '$domain'." >&2
+exit 1
+`,
+    );
+    const script = step(domain, "Create domain mappings")
+      .replaceAll("${{ env.DEV_GCP_PROJECT_ID }}", "test-project")
+      .replaceAll("${{ env.DEV_GCP_REGION }}", "us-central1");
+
+    const skipped = run(
+      script,
+      {
+        DEV_PARTNER_BOOKING_STATE: "paused",
+        DEV_GCP_PASSENGER_APP_SERVICE: "",
+        DEV_GCP_AGENCY_PORTAL_SERVICE: "",
+        DEV_AGENCY_PORTAL_ORIGIN: "",
+        DEV_AGENCY_PORTAL_HOST: "",
+        COMMAND_LOG: log,
+      },
+      dir,
+      dir,
+    );
+    expect(skipped.status, skipped.stderr).toBe(0);
+    expect(skipped.stdout).toContain(
+      "skipping optional Agency Portal domain mapping for drts-dev-agency-portal-web",
+    );
+    expect(readFileSync(log, "utf8")).not.toContain(
+      "--service drts-dev-agency-portal-web",
+    );
+
+    writeFileSync(log, "");
+    const mapped = run(
+      script,
+      {
+        DEV_PARTNER_BOOKING_STATE: "paused",
+        DEV_GCP_PASSENGER_APP_SERVICE: "",
+        DEV_GCP_AGENCY_PORTAL_SERVICE: "drts-dev-agency-portal-web",
+        DEV_AGENCY_PORTAL_ORIGIN: "https://agency.smarttransport.tw",
+        DEV_AGENCY_PORTAL_HOST: "",
+        COMMAND_LOG: log,
+      },
+      dir,
+      dir,
+    );
+    expect(mapped.status, mapped.stderr).toBe(0);
+    expect(readFileSync(log, "utf8")).toContain(
+      "--service drts-dev-agency-portal-web --domain agency.smarttransport.tw --region us-central1 --project test-project",
+    );
+  });
 });

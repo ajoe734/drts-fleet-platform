@@ -7,10 +7,11 @@ import { t } from "../../lib/auth/translations";
 import { AuthScreen, AuthAlert, P5Btn, P5 } from "./ui";
 import { isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
-import { useReviewDemo } from "../review-demo/review-context";
+import { useReviewDemo, useTrialMode } from "../review-demo/review-context";
 import { t as reviewText } from "../review-demo/translations";
+import { trialT } from "../trial/translations";
 
-function legalConfig(review: boolean) {
+function legalConfig(review: boolean, trial = false) {
   if (isDemoMode())
     return {
       termsUrl: "/demo/terms",
@@ -22,8 +23,10 @@ function legalConfig(review: boolean) {
     };
   if (review)
     return {
-      termsUrl: "/review/terms",
-      privacyUrl: "/review/terms",
+      // The trial presents the same review terms version without the
+      // rehearsal wording.
+      termsUrl: trial ? "/trial/terms" : "/review/terms",
+      privacyUrl: trial ? "/trial/terms" : "/review/terms",
       termsVersion: "review-terms-v1",
       privacyVersion: "review-privacy-v1",
       ready: true,
@@ -63,12 +66,13 @@ export function ConsentGate({
   onRefused: () => void;
 }) {
   const review = useReviewDemo();
+  const trial = useTrialMode();
   const [account, setAccount] = useState<PassengerAccount | null>(null);
   const [checked, setChecked] = useState(false);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const [error, setError] = useState("");
-  const config = legalConfig(review);
+  const config = legalConfig(review, trial);
   const load = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
@@ -146,7 +150,9 @@ export function ConsentGate({
     <AuthScreen title={t("firstLogin")}>
       {config.demo && <AuthAlert kind="warn">{DEMO_T.consentNotice}</AuthAlert>}
       {review && (
-        <AuthAlert kind="warn">{reviewText.ordinaryConsentNotice}</AuthAlert>
+        <AuthAlert kind="warn">
+          {trial ? trialT.consentNotice : reviewText.ordinaryConsentNotice}
+        </AuthAlert>
       )}
       <div style={{ fontSize: 16, fontWeight: 700 }}>{t("consentHeading")}</div>
       <div style={{ flex: 1, fontSize: 14, lineHeight: 1.6 }}>

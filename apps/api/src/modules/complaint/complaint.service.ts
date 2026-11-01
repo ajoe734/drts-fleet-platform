@@ -1290,7 +1290,7 @@ export class ComplaintService implements OnModuleInit {
     };
   }
 
-  private mergePassengerCase(record: ComplaintCaseRecord) {
+  private mergeOpsCase(record: ComplaintCaseRecord) {
     const local = this.complaintCases.find(
       (item) => item.caseNo === record.caseNo,
     );
@@ -1324,8 +1324,8 @@ export class ComplaintService implements OnModuleInit {
     if (this.complaintRepository?.isEnabled()) {
       let cursor = "";
       while (true) {
-        const page = await this.complaintRepository.listPassengerCases(cursor);
-        for (const record of page) this.mergePassengerCase(record);
+        const page = await this.complaintRepository.listCasesForOps(cursor);
+        for (const record of page) this.mergeOpsCase(record);
         if (page.length < 500) break;
         cursor = page[page.length - 1]!.caseNo;
       }
@@ -1369,8 +1369,8 @@ export class ComplaintService implements OnModuleInit {
     }
     this.ensureComplaintReadbackAvailable(caseNo);
     if (this.complaintRepository?.isEnabled()) {
-      const record = await this.complaintRepository.getPassengerCase(caseNo);
-      if (record) this.mergePassengerCase(record);
+      const record = await this.complaintRepository.getCaseForOps(caseNo);
+      if (record) this.mergeOpsCase(record);
     }
     return this.getComplaintCase(caseNo);
   }
@@ -1387,7 +1387,7 @@ export class ComplaintService implements OnModuleInit {
     await this.getComplaintCaseForOps(caseNo);
     if (this.complaintRepository?.isEnabled()) {
       const persisted =
-        await this.complaintRepository.getPassengerTimeline(caseNo);
+        await this.complaintRepository.getTimelineForOps(caseNo);
       const entries = new Map(
         (this.complaintTimelines.get(caseNo) ?? []).map((entry) => [
           entry.entryId,
