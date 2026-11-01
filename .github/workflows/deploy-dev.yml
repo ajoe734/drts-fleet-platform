@@ -1032,7 +1032,14 @@ jobs:
           optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
           optional_group otp PASSENGER_OTP_PEPPER
           optional_group sms TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER
-          if gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
+          if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            # The rehearsal forces PSP_PROVIDER=fake, so payment references
+            # would only swap the token key ring under cards already bound
+            # with the public synthetic profile (every capture then fails).
+            # The public profile always owns payment in this mode.
+            echo "::notice::Passenger review rehearsal uses the public synthetic payment profile; no payment credentials are mounted."
+            echo "payment_mounts_complete=false" >> "$GITHUB_OUTPUT"
+          elif gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || gcloud secrets describe "${SECRET_PREFIX}-psp-hash-iv" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || ! gcloud secrets describe "${SECRET_PREFIX}-psp-api-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             optional_group payment PSP_MERCHANT_ID PSP_HASH_KEY PSP_HASH_IV PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
@@ -1168,8 +1175,9 @@ jobs:
           env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
             env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
-            # Existing complete groups keep their references. Absent groups
-            # receive the explicit PUBLIC synthetic profile; never generate a
+            # A complete OTP group keeps its references (payment never mounts
+            # in this mode). Absent groups receive the explicit PUBLIC
+            # synthetic profile; never generate a
             # new key at boot or require a real SMS/financial account. The
             # original OTP/provider/cipher readers validate these env values.
             review_simulation_env="$(python3 - '${{ steps.passenger_secrets.outputs.otp_mounts_complete }}' '${{ steps.passenger_secrets.outputs.payment_mounts_complete }}' <<'PY_REVIEW'

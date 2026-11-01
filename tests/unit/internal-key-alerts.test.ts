@@ -32,6 +32,8 @@ const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
   envVar: "DRTS_INTERNAL_KEY",
   status: "active",
 };
+// The retired fixture expired 2026-10-31; evaluate it while it was active.
+const FIXTURE_ACTIVE_AT = new Date("2026-10-15T00:00:00Z");
 
 const workspaceRoot = process.cwd();
 const alertsPath = path.resolve(
@@ -114,6 +116,7 @@ describe("internal key alert rules", () => {
       requestPath: "/api/tenants",
       requestMethod: "GET",
       registry: [RETIRED_CONTROL_PLANE_PROXY],
+      now: FIXTURE_ACTIVE_AT,
     });
     expect(validEval.valid).toBe(true);
 
@@ -131,6 +134,7 @@ describe("internal key alert rules", () => {
       requestPath: "/api/tenants",
       requestMethod: "GET",
       registry: [RETIRED_CONTROL_PLANE_PROXY],
+      now: FIXTURE_ACTIVE_AT,
     });
 
     const driftEvent = internalKeyAuditRecorder.recordDrift(invalidEval, {

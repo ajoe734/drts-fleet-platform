@@ -154,7 +154,10 @@ export class PaymentMethodRepository {
       !/^[0-9]{4}$/.test(row.last4)
     )
       return null;
-    return `${row.card_type.trim()} ••••${row.last4}`;
+    // The nonproduction fake PSP binds cards of type "synthetic"; print a
+    // passenger-readable label on the certificate instead of the internal type.
+    const cardType = row.card_type.trim();
+    return `${cardType === "synthetic" ? "測試卡" : cardType} ••••${row.last4}`;
   }
 
   async claimBinding(
