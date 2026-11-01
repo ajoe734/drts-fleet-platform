@@ -127,9 +127,11 @@ describe("Cloud Run deploy quota retry", () => {
       "utf8",
     );
 
+    // 11 services, plus the API release of secret references that become
+    // literals.
     expect(
       workflow.match(/operations\/deployment\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(11);
+    ).toHaveLength(12);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     // Retired surfaces must never be built or deployed. The candidate-bound
     // acceptance job may still derive their former service URLs to prove the

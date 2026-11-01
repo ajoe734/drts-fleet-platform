@@ -1266,6 +1266,40 @@ jobs:
             api_secrets="${api_secrets},${passenger_secrets}"
           fi
 
+          # gcloud applies literal env changes before secret changes, so one
+          # deploy cannot turn a secret reference into a literal (2026-11-01:
+          # the rehearsal's public payment profile replacing mounted payment
+          # references). Release those references first; the payment readers
+          # treat the interim revision as unconfigured. A missing service
+          # (fresh project) has nothing to release.
+          live_api_service="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format=json 2>/dev/null || true)"
+          released_secrets="$(LIVE_API_SERVICE="$live_api_service" python3 - <<'PY_RELEASE'
+          import json
+          import os
+          live = os.environ['LIVE_API_SERVICE'].strip()
+          if live:
+              env = json.loads(live)['spec']['template']['spec']['containers'][0].get('env', [])
+              secret = {entry['name'] for entry in env if 'valueFrom' in entry}
+              pairs = os.environ['API_ENV_VARS']
+              delimiter = ','
+              if pairs.startswith('^'):
+                  delimiter, pairs = pairs[1:].split('^', 1)
+              literal = {entry.split('=', 1)[0] for entry in pairs.split(delimiter)}
+              print(','.join(sorted(secret & literal)))
+          PY_RELEASE
+          )"
+          if [[ -n "$released_secrets" ]]; then
+            echo "::notice::Releasing secret references that this deploy sets as literals: ${released_secrets}"
+            operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --image "$IMAGE" \
+              --remove-secrets "$released_secrets" \
+              --project "${{ needs.prepare.outputs.project_id }}"
+          fi
+
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
