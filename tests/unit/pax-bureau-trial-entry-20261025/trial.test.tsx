@@ -259,6 +259,56 @@ describe("TrialEntry", () => {
     expect(state.bindMethod).not.toHaveBeenCalled();
   });
 
+  function readiness(...answers: boolean[]) {
+    state.fetch.mockImplementation(async (url: string) => {
+      if (url !== "/api/passenger-app/review-demo/trial/readiness")
+        return json({}, 404);
+      return json({ data: { can_book: answers.shift() ?? true } });
+    });
+  }
+
+  it("signs in with another phone when the account cannot book", async () => {
+    // Shared dev, 2026-11-01: synthetic accounts with an unsettled test
+    // charge refused every booking; one in thirty trials landed on one.
+    state.sms.mockResolvedValue({
+      success: true,
+      challenge: "challenge-1",
+      code: "123456",
+    });
+    state.login.mockResolvedValue({ result: "logged_in" });
+    state.getMethods.mockResolvedValue({
+      methods: [{ paymentMethodId: "pm-1" }],
+    });
+    readiness(false, true);
+    render(<TrialEntry />);
+    fireEvent.click(screen.getByRole("button", { name: "開始試用" }));
+    await waitFor(() => expect(state.push).toHaveBeenCalledWith("/"));
+    const targets = state.sms.mock.calls.map(([target]) => target as string);
+    expect(targets).toHaveLength(2);
+    expect(new Set(targets).size).toBe(2);
+    expect(state.login).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: targets[1] }),
+    );
+    expect(isTrialMode()).toBe(true);
+  });
+
+  it("gives up after five accounts that cannot book", async () => {
+    state.sms.mockResolvedValue({
+      success: true,
+      challenge: "challenge-1",
+      code: "123456",
+    });
+    state.login.mockResolvedValue({ result: "logged_in" });
+    readiness(false, false, false, false, false, false);
+    render(<TrialEntry />);
+    fireEvent.click(screen.getByRole("button", { name: "開始試用" }));
+    await screen.findByText("無法開始試用，請稍後再試。");
+    expect(state.sms).toHaveBeenCalledTimes(5);
+    expect(state.push).not.toHaveBeenCalled();
+    expect(isTrialMode()).toBe(false);
+    await act(async () => {});
+  });
+
   it("stays on the entry with a retry when sign-in fails", async () => {
     state.sms.mockRejectedValue(new Error("down"));
     render(<TrialEntry />);
