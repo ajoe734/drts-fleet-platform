@@ -1269,9 +1269,11 @@ jobs:
           # gcloud applies literal env changes before secret changes, so one
           # deploy cannot turn a secret reference into a literal (2026-11-01:
           # the rehearsal's public payment profile replacing mounted payment
-          # references). Release those references first; the payment readers
-          # treat the interim revision as unconfigured. A missing service
-          # (fresh project) has nothing to release.
+          # references). Release those references first. The interim revision
+          # has no usable payment configuration, so it also turns capture off;
+          # enabled capture refuses to start without it (revision 00173). The
+          # deploy below sets every literal again. A missing service (fresh
+          # project) has nothing to release.
           live_api_service="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
@@ -1297,6 +1299,7 @@ jobs:
               --region "${{ needs.prepare.outputs.region }}" \
               --image "$IMAGE" \
               --remove-secrets "$released_secrets" \
+              --update-env-vars PAX_PAYMENT_CAPTURE_ENABLED=false \
               --project "${{ needs.prepare.outputs.project_id }}"
           fi
 

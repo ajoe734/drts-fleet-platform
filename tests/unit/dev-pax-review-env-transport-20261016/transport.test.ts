@@ -136,8 +136,8 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
 } else if (args[0] === 'run' && args[1] === 'deploy') {
   fs.appendFileSync(process.env.DEPLOY_LOG, JSON.stringify(args) + '\\n');
   let secrets = fs.existsSync(state) ? JSON.parse(fs.readFileSync(state, 'utf8')) : [];
-  const clash = args.includes('--set-env-vars') &&
-    names(value('--set-env-vars')).find((name) => secrets.includes(name));
+  const literal = ['--set-env-vars', '--update-env-vars'].filter((name) => args.includes(name));
+  const clash = literal.flatMap((name) => names(value(name))).find((name) => secrets.includes(name));
   if (clash) {
     console.error('ERROR: (gcloud.run.deploy) Cannot update environment variable [' + clash + '] to string literal because it has already been set with a different type.');
     process.exit(1);
@@ -388,19 +388,23 @@ describe("actual Deploy Dev Bash → argv → original payment readers", () => {
       false,
     );
     expect(paymentRuntimeFromEnv(result.env).provider.name).toBe("fake");
-    // The interim revision keeps the remaining references, without a merchant.
+    // The interim revision keeps the remaining references, without a merchant,
+    // and must still pass both startup readers (revision 00173 did not).
     const interim: NodeJS.ProcessEnv = {
       ...result.env,
       PSP_HASH_KEY: "ref",
       PSP_HASH_IV: "ref",
     };
-    for (const name of [
-      "PSP_MERCHANT_ID",
-      "PSP_SANDBOX",
-      "PSP_TOKEN_ENCRYPTION_KEY_NAME",
-    ])
+    for (const name of flag(release!, "--remove-secrets").split(","))
       delete interim[name];
-    expect(paymentRuntimeFromEnv(interim).provider.available).toBe(false);
+    const interimRuntime = paymentRuntimeFromEnv(interim);
+    expect(interimRuntime.provider.available).toBe(false);
+    expect(() => paymentCapturePolicyFromEnv(interim, interimRuntime)).toThrow(
+      "payment_capture_configuration_unavailable",
+    );
+    const [name, setting] = flag(release!, "--update-env-vars").split("=");
+    interim[name!] = setting;
+    expect(paymentCapturePolicyFromEnv(interim, interimRuntime)).toBeNull();
   });
 
   it("deploys once when no secret reference becomes a literal", () => {
