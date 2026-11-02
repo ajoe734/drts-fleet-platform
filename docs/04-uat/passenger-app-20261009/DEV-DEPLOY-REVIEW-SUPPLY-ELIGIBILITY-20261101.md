@@ -68,15 +68,16 @@
 
 依 VM／雲端限制，本 session 沒有啟動 server、DB、瀏覽器或 Docker。
 
-## 未驗證項目（待本機端追蹤）
+## deploy-dev 驗收證據（本機端補記，2026-11-02）
 
-- **deploy-dev 兩個驗收 job 尚未驗證。** 雲端 session 無法觸發或觀察 GitHub Actions。合併到 `dev` 後，由 push 觸發的 deploy-dev run 中的 `Candidate SHA operational acceptance`（`Exercise three new shared-dev review orders`）與 `Candidate SHA quote-expiry acceptance`（`Exercise real shared-dev quote expiry and recovery`）結果，以及 run URL 與 head SHA，需由本機端補記在下表。
-- 同一 candidate SHA 的 CI 與獨立 reviewer 審查尚未進行（未開 PR，依任務規則）。
-- 若修正後 prepare 改出現其他錯誤（例如 driver 資格或其他 lifecycle 阻擋），應如實記錄為 blocker。現在 400 會帶 `reason`，可以直接分類。
+PR #3176 已合併（squash）為 `origin/dev` HEAD `ebe5172c3ec9a20f2935025fd7dac0375965d67a`（`git merge-base --is-ancestor` 已驗證此 commit 是以下三次 run 的 head SHA 的祖先，修正確實包含在每次部署中）。
 
-| 項目                                  | 結果 |
-| ------------------------------------- | ---- |
-| deploy-dev run URL                    | 待補 |
-| head SHA                              | 待補 |
-| Candidate SHA operational acceptance  | 待補 |
-| Candidate SHA quote-expiry acceptance | 待補 |
+| run（databaseId / event / 時間）                                                                                            | head SHA   | Candidate SHA operational acceptance                                                                      | Candidate SHA quote-expiry acceptance                                                                     | 備註 |
+| ----------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ---- |
+| [41420751837](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41420751837)（workflow_dispatch, 2026-11-02 09:27Z） | `89f0c6d4` | failure — 卡在 `A Ops assign then reassign while Passenger offline`（`data-ops-task-id` locator 30s timeout） | success                                                                                                       | prepare／訂車步驟皆 passed；失敗點是 Ops console 派遣 UI 的 e2e flake，與本 task 的 `VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT` 無關 |
+| [41428807349](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41428807349)（push, 2026-11-02 10:26Z）              | `89f0c6d4` | failure — 卡在 `A Ops create dispatch` 收尾斷言（`data-drt-operation=ops-dispatch-create` toHaveCount(0) 收到 1，30s timeout 殘留 DOM） | success                                                                                                       | 建立 dispatch 本身已 passed，才在收尾斷言失敗；仍是 Ops console UI 的殘留元素 flake |
+| [41432666557](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41432666557)（workflow_dispatch, 2026-11-02 10:55Z） | `a8fcc02dc8` | [success](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41432666557/job/125242781323)         | [success](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41432666557/job/125242781084)         | 兩個驗收 job 全部通過；`Deploy outcome` job 亦 success |
+
+- 三次 run 的 `Ops prepare real persisted rehearsal supply`、`A Passenger book` 步驟皆 passed，代表本 task 修正的 review-demo prepare 資格判斷在實際部署環境穩定生效，三次皆未再出現 `VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT`。
+- 前兩次 run 的 operational job failure 是 Ops console 派遣 UI 的 e2e 時序/殘留元素 flake（兩次失敗點不同，皆與本 task write_scopes `review-demo/`、`vehicle-eligibility/` 無關），第三次 run 兩個 job 皆通過，確認該 flake 並非本修正造成且非持續性阻擋。
+- 同一 candidate SHA（`6022d6b5db2095a9977540e2bd7358d9efa494af`）CI 於 PR #3176 通過（[run 41365541413](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41365541413)），並由獨立 reviewer `Claude` 審查通過後合併。
