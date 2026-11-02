@@ -112,6 +112,13 @@ const EXPIRY_YEAR = /year|\byy\b|年|cc-exp-year/;
  * CVV placeholder "000" is far shorter).
  */
 const CARD_NUMBER_PLACEHOLDER_MASK = /^[0\s]{10,}$/;
+/**
+ * Confirmed from live Stage evidence (sdk-controls.json dump on the second
+ * hosted run, before this fix): the holder-name field has `id="CardholderName"`,
+ * unlike the card-number/expiry/CVV fields which carry no identifying
+ * attributes at all.
+ */
+const HOLDER_NAME = /持卡人姓名|持卡人|cardholder|holder.?name|姓名/;
 
 export function isEcpayFrame(frame: Frame): boolean {
   try {
@@ -183,7 +190,7 @@ export async function fillStageCard(
   page: Page,
   redactor: Redactor,
   timeoutMs = 60_000,
-): Promise<{ frameHost: string; layout: string }> {
+): Promise<{ frameHost: string; layout: string; holderNameFilled: boolean }> {
   const deadline = Date.now() + timeoutMs;
   let lastInventory: ControlDescriptor[] = [];
   while (Date.now() < deadline) {
@@ -269,7 +276,36 @@ export async function fillStageCard(
         }
       }
       await typeInto(controlLocator(frame, cvvField), STAGE_TEST_CARD.cvv);
-      return { frameHost: cvvField.frameHost, layout };
+
+      const consumed = new Set<ControlDescriptor>([
+        ...cardFields,
+        cvvField,
+        ...(combined ? [combined] : []),
+        ...(month ? [month] : []),
+        ...(year ? [year] : []),
+      ]);
+      const holderNameField =
+        controls.find(
+          (c) =>
+            c.tag === "input" &&
+            !consumed.has(c) &&
+            HOLDER_NAME.test(haystack(c)),
+        ) ??
+        controls.find(
+          (c) =>
+            c.tag === "input" &&
+            !consumed.has(c) &&
+            ["", "text"].includes(c.type),
+        );
+      let holderNameFilled = false;
+      if (holderNameField) {
+        await typeInto(
+          controlLocator(frame, holderNameField),
+          STAGE_TEST_CARD.holderName,
+        );
+        holderNameFilled = true;
+      }
+      return { frameHost: cvvField.frameHost, layout, holderNameFilled };
     }
     await page.waitForTimeout(1_000);
   }

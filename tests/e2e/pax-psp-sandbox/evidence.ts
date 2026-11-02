@@ -33,6 +33,9 @@ export const STAGE_TEST_CARD = Object.freeze({
   cvv: "222",
   otp: "1234",
   last4: "2222",
+  // Synthetic cardholder name for the SDK's required #CardholderName field;
+  // not a real person, so it is never registered with the redactor.
+  holderName: "PSPTEST",
 });
 
 export function digest12(value: string): string {

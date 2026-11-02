@@ -281,6 +281,7 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
       outcome.frameHost = filled.frameHost;
       outcome.layout = filled.layout;
       outcome.card_last4 = STAGE_TEST_CARD.last4;
+      outcome.holderNameFilled = filled.holderNameFilled;
       await screenshot(page, "02-card-entered-masked");
     });
 
