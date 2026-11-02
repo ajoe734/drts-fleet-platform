@@ -40,6 +40,7 @@ import {
   Redactor,
   STAGE_TEST_CARD,
   createRecordingFetch,
+  describeCallbackBodyShape,
   digest12,
   maskInLog,
   writeEvidence,
@@ -368,6 +369,13 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
         await screenshot(page, "04-order-result-captured");
         outcome.orderResultMethod = orderResultMethod;
         threeDPerformed = true;
+        // Structural-only (no values) diagnosis of the real ECPay wire
+        // shape, captured before verifyNotification so a decrypt/envelope
+        // failure still leaves this in the evidence artifact.
+        for (const [key, value] of Object.entries(
+          describeCallbackBodyShape(orderResultBody!),
+        ))
+          outcome[key] = value;
 
         const notification = provider.verifyNotification(orderResultBody!);
         outcome.verified = true;

@@ -173,6 +173,65 @@ export function maskedResponseFields(
   return fields;
 }
 
+/**
+ * Describes the *structure* of a raw OrderResultURL/ReturnURL callback body
+ * without reading any field value: only key names, nesting kind, and
+ * lengths. Used to diagnose `verifyNotification` failures against the real
+ * ECPay Stage wire format (which the merged adapter has never observed
+ * outside its own synthetic unit-test fixtures) without risking a PAN,
+ * token, or HashKey/HashIV leak into evidence artifacts.
+ */
+export function describeCallbackBodyShape(raw: string): Record<string, Scalar> {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    let keys: string[] | null = null;
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        keys = Object.keys(parsed as Record<string, unknown>);
+    } catch {
+      keys = null;
+    }
+    return {
+      callbackBodyKind: "json",
+      callbackBodyLength: trimmed.length,
+      callbackTopLevelKeys: keys ? keys.sort().join(",") : "unparseable",
+    };
+  }
+  const params = new URLSearchParams(trimmed);
+  const formKeys = [...params.keys()].sort();
+  const resultData = params.get("ResultData");
+  const rpHeaderRaw = params.get("RpHeader") ?? params.get("RqHeader");
+  let resultDataKind: Scalar = null;
+  if (resultData !== null) {
+    const rd = resultData.trim();
+    if (rd.startsWith("{")) {
+      try {
+        JSON.parse(rd);
+        resultDataKind = "json_object";
+      } catch {
+        resultDataKind = "json_parse_failed";
+      }
+    } else {
+      resultDataKind = /^[A-Za-z0-9+/]+=*$/.test(rd) ? "base64_like" : "other";
+    }
+  }
+  return {
+    callbackBodyKind: "form",
+    callbackBodyLength: trimmed.length,
+    callbackFormKeys: formKeys.join(","),
+    callbackHasResultData: resultData !== null,
+    callbackResultDataKind: resultDataKind,
+    // Confirms/refutes the adapter's assumption that a flat form always
+    // carries RpHeader/RqHeader as an already-structured value: a bare
+    // top-level form field is always a *string*, so if ECPay sends the
+    // header this way (not nested inside a ResultData JSON envelope),
+    // verifyAndUnwrapEcpayEnvelope's `typeof headerRaw !== "object"` check
+    // rejects it even though the envelope is genuine.
+    callbackHasFlatHeaderField: rpHeaderRaw !== null,
+  };
+}
+
 export function createRecordingFetch(params: {
   merchantId: string;
   hashKey: string;
