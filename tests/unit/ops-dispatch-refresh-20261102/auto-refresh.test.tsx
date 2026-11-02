@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const { router, navigation } = vi.hoisted(() => {
   const router = {
     pending: [] as Array<() => void>,
-    show: (_payload: Promise<void>) => {},
+    show: (() => {}) as (payload: Promise<void>) => void,
   };
   const navigation = () => ({
     useRouter: () => ({
