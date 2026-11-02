@@ -206,6 +206,25 @@ export class ReviewSupplyService {
             },
           ],
         });
+      } else {
+        // Rehearsal supply prepared before BUREAU-R02 (V0131) has an active
+        // exclusivity declaration without an operator ID, which normal
+        // dispatch eligibility now blocks as `exclusivity_operator_unbound`.
+        // Complete only that missing binding with this synthetic operator;
+        // never rebind a declaration that already names an operator.
+        const declaration = state.exclusivities.find(
+          (e) => e.vehicleId === fixture.vehicleId,
+        );
+        if (declaration && !declaration.exclusiveOperatorId?.trim())
+          await repository.persistChanges({
+            exclusivities: [
+              {
+                ...declaration,
+                exclusiveOperatorId: operatorId,
+                updatedAt: now,
+              },
+            ],
+          });
       }
       await this.profiles.prepareProfileAuthority(fixture.driverId);
       await this.profiles.updateProfile(fixture.driverId, {
