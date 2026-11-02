@@ -36,7 +36,14 @@ export interface ControlDescriptor {
   optionCount: number;
 }
 
-const CONTROL_SELECTOR = "input, select, button, textarea, a[role=button]";
+/**
+ * The Stage 3D verification page's two actions ("取得OTP服務密碼" /
+ * "取消") render as plain `<a>` elements with no `role="button"` attribute
+ * (confirmed from live Stage evidence: three-d-controls.json stayed empty
+ * for the whole 90s wait because `a[role=button]` matched nothing on that
+ * page). Match every anchor, not just ones explicitly marked as a button.
+ */
+const CONTROL_SELECTOR = "input, select, button, textarea, a";
 
 export async function describeControls(
   frame: Frame,
