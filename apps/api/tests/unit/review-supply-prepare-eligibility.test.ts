@@ -316,6 +316,8 @@ function createReviewSupply() {
     {
       findFleetPartnerForMultiTaxiOperator: vi.fn(async () => ({
         fleetPartnerId: "fleet-review",
+        legalName: "智行",
+        displayName: "智行",
       })),
     } as never,
     {
