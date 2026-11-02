@@ -1190,7 +1190,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
         (await authority(pax, orderId)).receipt?.record?.e04Snapshot
           ?.fleetOperatorName,
     )
-    .toBe("虛構演練派遣業者（合成・非正式）");
+    .toBe("智行");
   const ride = await authority(pax, orderId);
   const snapshot = ride.receipt.record.e04Snapshot;
   expect(ride.receipt.orderId).toBe(orderId);
@@ -1218,7 +1218,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
   const e04 = await pax.request.get(`${PAX}${metadata.htmlUrl}`);
   expect(e04.status()).toBe(200);
   const e04Html = await e04.text();
-  expect(e04Html).toContain("合成・非正式");
+  expect(e04Html).toContain(snapshot.fleetOperatorName);
   expect(e04Html).toContain(snapshot.driverRegistrationMasked);
   await info.attach(`same-order-${orderId}-e04`, {
     body: e04Html,
