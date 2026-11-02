@@ -304,23 +304,26 @@ describe("R18: rehearsal prepares the native reservation product before real boo
     ).toHaveLength(2);
   });
 
-  it("names the rehearsal fleet 智行 and renames one an earlier preparation made", async () => {
+  it("names the rehearsal fleet 智行車隊 and renames one an earlier preparation made", async () => {
     const p = productPeers();
     await rehearsal(p).prepare();
     const fleets = p.supply.get("admin.phase1_fleet_partners")!;
     const [fleetPartnerId, fleet] = [...fleets][0]!;
     // Ride certificates show the legal name.
-    expect(fleet).toMatchObject({ legalName: "智行", displayName: "智行" });
+    expect(fleet).toMatchObject({
+      legalName: "智行車隊",
+      displayName: "智行車隊",
+    });
     fleets.set(fleetPartnerId, {
       ...(fleet as object),
-      legalName: "虛構演練派遣業者（合成・非正式）",
-      displayName: "虛構演練車隊",
+      legalName: "智行",
+      displayName: "智行",
     });
     await rehearsal(p).prepare();
     expect(fleets.size).toBe(1);
     expect(fleets.get(fleetPartnerId)).toMatchObject({
-      legalName: "智行",
-      displayName: "智行",
+      legalName: "智行車隊",
+      displayName: "智行車隊",
       multiTaxiOperatorIds: ["review-synthetic-operator"],
     });
   });

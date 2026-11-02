@@ -1190,7 +1190,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
         (await authority(pax, orderId)).receipt?.record?.e04Snapshot
           ?.fleetOperatorName,
     )
-    .toBe("智行");
+    .toBe("智行車隊");
   const ride = await authority(pax, orderId);
   const snapshot = ride.receipt.record.e04Snapshot;
   expect(ride.receipt.orderId).toBe(orderId);
