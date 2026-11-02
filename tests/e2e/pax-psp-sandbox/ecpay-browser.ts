@@ -104,6 +104,14 @@ const CVV =
 const EXPIRY_COMBINED = /mm\s*\/\s*yy|expir|valid|有效|cc-exp$|cc-exp\s/;
 const EXPIRY_MONTH = /month|\bmm\b|月|cc-exp-month/;
 const EXPIRY_YEAR = /year|\byy\b|年|cc-exp-year/;
+/**
+ * The Stage SDK's real card-number input carries no name/id/aria-label at
+ * all — only a digit/space placeholder mask (e.g. "0000 0000 0000 0000",
+ * confirmed from live Stage evidence). Long enough masks of only digits and
+ * whitespace are unambiguous: nothing else on the form uses that shape (the
+ * CVV placeholder "000" is far shorter).
+ */
+const CARD_NUMBER_PLACEHOLDER_MASK = /^[0\s]{10,}$/;
 
 export function isEcpayFrame(frame: Frame): boolean {
   try {
@@ -187,7 +195,10 @@ export async function fillStageCard(
       );
       if (controls.length) lastInventory = controls;
       const cardFields = controls.filter(
-        (c) => c.tag === "input" && CARD_NUMBER.test(haystack(c)),
+        (c) =>
+          c.tag === "input" &&
+          (CARD_NUMBER.test(haystack(c)) ||
+            CARD_NUMBER_PLACEHOLDER_MASK.test(c.placeholder.trim())),
       );
       const cvvField = controls.find(
         (c) =>
