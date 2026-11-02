@@ -307,6 +307,20 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertTrue(supervisor._approval_is_routine_safe(approval))
 
+    def test_unparseable_bash_approval_is_not_routine_safe(self) -> None:
+        # 2026-11-02: a quoted phrase with an apostrophe inside a heredoc
+        # commit message made shlex.split raise in every tick until the
+        # supervisor stopped itself.
+        approval = {
+            "tool_name": "Bash",
+            "risk_class": "needs_review",
+            "tool_input": {
+                "command": "git commit -m \"$(cat <<'EOF'\nsdkError \"請輸入英文字母或符號（/ - ' ,）\"\nEOF\n)\"",
+            },
+        }
+
+        self.assertFalse(supervisor._approval_is_routine_safe(approval))
+
     def test_chair_review_reason_prioritizes_provider_health_triage(self) -> None:
         reason = supervisor.chair_review_reason(
             {
