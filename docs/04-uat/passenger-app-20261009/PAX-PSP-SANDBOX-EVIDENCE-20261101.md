@@ -97,3 +97,10 @@ Provider 由已合併的 `paymentRuntimeFromEnv({ PSP_PROVIDER: "ecpay", ... })`
 3. **OrderResultURL 傳送方式**：預期是瀏覽器 form POST `ResultData`；若是 GET，改用 query string 解析，結果記錄在 `orderResultMethod`。
 4. **退款**：依規則如實記錄；Stage 若不支援，正式特店的退款證據仍待取得（不在本 task 範圍）。
 5. **adapter 缺陷**：目前靜態閱讀沒有發現需要修改產品程式的缺陷。若 run 發現缺陷，只用 blocker 回報，由 Supervisor 另開修正 task。
+
+## 7. 選擇器修正紀錄（第一次 hosted run 後）
+
+- 第一次 hosted run（candidate `ba76979199aa`，[run 41366014918](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41366014918)）在 `03_enter_stage_card_in_ecpay_iframe` 失敗：`ecpay_sdk_card_fields_not_found`，`sdk-controls.json` 全空，`mount=ready` 已成功、遮罩截圖可見「信用卡號／有效期限／安全碼／持卡人姓名」欄位確實已渲染。
+- 直接下載 Stage SDK (`https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js`) 讀原始碼確認：綠界 WEB JS SDK 的綁卡元件**不是**跨網域 iframe，而是用 `$("#ECPayPayment").html(responseHtml)` 把表單直接寫進 host 頁面本身的 DOM，再載入 `actions.bindcard.min.js` 掛上行為；原本 `fillStageCard` 只掃描 `ecpay.com.tw` 網域的 iframe，因此永遠找不到欄位。
+- 修正：`ecpay-browser.ts` 新增 `isEligibleCardFrame`，除了真正的 `ecpay.com.tw` iframe 外，也接受「SDK 已把 `.ecpay-JsType` 標記寫入 `#ECPayPayment`」的主 frame；3D 驗證（`completeStageThreeD`）本就掃描所有 frame，未變動。
+- 驗證：`pnpm exec eslint`／`pnpm exec prettier --check`／`NODE_OPTIONS=--max-old-space-size=8192 pnpm exec tsc -p tsconfig.json --noEmit` 皆通過（tsc 既有錯誤集中在 `tenant-console-web`／`api-client`／`fleet-partners` 等與本次改動無關的模組，推定是本機 workspace 套件未重建的既有現象，不在本任務 write scope 內；hosted runner CI 於候選 `ba76979199aa` 的 `typecheck`／`lint` 皆為 SUCCESS，確認非本次改動造成）。

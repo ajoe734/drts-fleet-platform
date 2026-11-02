@@ -1,9 +1,20 @@
 /**
- * Browser helpers that act only inside ECPay-hosted documents: the WEB JS SDK
- * card iframe and the Stage 3D verification page. The SDK DOM is owned by
- * ECPay and not contractually documented, so fields are located by attribute
- * heuristics; on a miss, a value-free inventory of controls is written to the
- * artifact so the selector can be corrected from real evidence.
+ * Browser helpers that act only inside documents owned by the ECPay WEB JS
+ * SDK: its card-entry markup and the Stage 3D verification page.
+ *
+ * The add-card widget (sdk-1.0.0.js) is not isolated in a cross-origin
+ * iframe — it calls `$("#ECPayPayment").html(responseHtml)` and injects its
+ * form directly into the host page's own DOM (confirmed from the live Stage
+ * script), then loads `actions.bindcard.min.js` to wire it up. So the
+ * eligible card-entry frame is either a genuine ecpay.com.tw-hosted iframe
+ * (if ECPay ever changes this) or the page's own main frame when the SDK
+ * marker (`#ECPayPayment .ecpay-JsType`) is present — never an arbitrary
+ * frame. The Stage 3D verification step, by contrast, is a real navigation
+ * to an ECPay/issuer page, so `completeStageThreeD` keeps scanning every
+ * frame. The SDK DOM is owned by ECPay and not contractually documented, so
+ * fields are located by attribute heuristics; on a miss, a value-free
+ * inventory of controls is written to the artifact so the selector can be
+ * corrected from real evidence.
  */
 import type { Frame, Locator, Page } from "@playwright/test";
 import { STAGE_TEST_CARD, type Redactor, writeJsonArtifact } from "./evidence";
@@ -102,6 +113,25 @@ export function isEcpayFrame(frame: Frame): boolean {
   }
 }
 
+/**
+ * True for a genuine ecpay.com.tw iframe, or for the page's own main frame
+ * once the SDK has injected its widget markup into `#ECPayPayment` (the
+ * `.ecpay-JsType` marker element the SDK's own `actions.bindcard.min.js`
+ * loader keys off). Never true for a main frame that has not been written to
+ * by the SDK, so unrelated host-page controls are never in scope.
+ */
+async function isEligibleCardFrame(page: Page, frame: Frame): Promise<boolean> {
+  if (isEcpayFrame(frame)) return true;
+  if (frame !== page.mainFrame()) return false;
+  try {
+    return await frame.evaluate(
+      () => document.querySelector("#ECPayPayment .ecpay-JsType") !== null,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function controlLocator(frame: Frame, control: ControlDescriptor): Locator {
   return frame.locator(CONTROL_SELECTOR).nth(control.index);
 }
@@ -150,7 +180,7 @@ export async function fillStageCard(
   let lastInventory: ControlDescriptor[] = [];
   while (Date.now() < deadline) {
     for (const frame of page.frames()) {
-      if (!isEcpayFrame(frame)) continue;
+      if (!(await isEligibleCardFrame(page, frame))) continue;
       const controls = (await describeControls(frame)).filter(
         (control) =>
           control.visible && control.tag !== "button" && control.tag !== "a",
