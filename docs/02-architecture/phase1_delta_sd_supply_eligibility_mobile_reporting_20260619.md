@@ -146,7 +146,13 @@ export type SupplySubmissionType =
   | "insurance_update"
   | "contract_update"
   | "driver_affiliation"
-  | "vehicle_affiliation";
+  | "vehicle_affiliation"
+  | "profile_correction";
+
+export type SupplyRenewalSubmissionType =
+  | "insurance_update"
+  | "contract_update"
+  | "profile_correction";
 
 export type SupplySubmissionStatus =
   | "draft"
@@ -562,6 +568,20 @@ POST /api/fleet-partner/supply-submissions/vehicles
 ```http
 PUT /api/fleet-partner/supply-submissions/{submissionId}/vehicle
 ```
+
+### Existing-Supply Renewal Targets & Renewal Drafts (BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025)
+
+```http
+GET  /api/fleet-partner/supply-renewals/targets
+POST /api/fleet-partner/supply-submissions/renewals
+PUT  /api/fleet-partner/supply-submissions/{submissionId}/renewal
+```
+
+- 對齊 SA §4.1 概念 `document_update` 與 §4.2 具型別 `SupplyRenewalSubmissionType`：
+  - `insurance_update`：針對該車行既有已核准 canonical 車輛（`subjectVehicleId` / `canonicalVehicleId`）建立保險續保送審，必附有效 `insurance_policy` 文件與效期。
+  - `contract_update`：針對該車行既有已核准 canonical 車輛（`subjectVehicleId` / `canonicalVehicleId`）建立車隊契約續約送審，必附有效契約文件與效期。
+  - `profile_correction`：針對該車行既有已核准 canonical 司機（`subjectDriverId` / `canonicalDriverId`）建立職業駕照／計程車執業登記證續期送審，更新到期日並附有效證明文件。
+- 若車行於 `POST /api/fleet-partner/supply-submissions/vehicles` 輸入已存在於 canonical registry 且屬同車行之車牌，回傳 `409 PLATE_ALREADY_EXISTS` 並攜帶 `existingCanonicalVehicleId` 與 `renewalPath`（`/supply/renewals/new`），導引改走續期送審。
 
 ### Upload Document
 
@@ -1177,6 +1197,16 @@ async function approveSubmission(
 }
 ```
 
+### 5.1.1 Approved-Supply Renewal Atomic Provisioning & Multi-Submission Readiness Aggregation
+
+1. **禁止更新送審早返繞過**：`provisionFromSubmission` 僅對已佈建完成之 onboarding 送審維持冪等早返；當 `submissionType` 為 `insurance_update`、`contract_update` 或 `profile_correction` 時，必須鎖定既有 `canonicalVehicleId` / `canonicalDriverId` 並執行原地續期更新，不得產生重複 `vehicleId` / `driverId`，亦不得早返跳過更新。
+2. **歷史保單／契約保留與 R14 事件取代**：
+   - `insurance_update` 核准時建立新 `InsurancePolicyRecord`（新 `policyId`），保留 `reg.phase1_registry_policies` 中該車舊保單紀錄並標記 `supersededByPolicyId` / `supersededAt`，同時取代（`superseded`）該車舊保單之 R14 到期／預警事件。
+   - `contract_update` 核准時建立新 `VehicleContractRecord`（新 `contractId`）與新有效 `VehicleFleetAffiliationRecord`，保留 `reg.phase1_registry_contracts` 中該車舊契約紀錄並標記 `supersededByContractId` / `supersededAt`，同時取代該車舊契約之 R14 預警事件。
+   - `profile_correction` 核准時原地更新既有 canonical 司機之駕照／執業登記證到期日與 `licensesValid`（以及 `reg.driver_public_registration_credentials`），同時取代該司機已過時之 R14 到期／預警事件。
+3. **Readiness 跨送審文件聚合**：`SupplyReadinessService` 針對同一 `canonicalVehicleId` / `canonicalDriverId` 聚合歷次 `approved` 送審之最新有效文件與草稿快照，確保局部續期（如單獨 `insurance_update` 或 `contract_update`）保留既有有效之 `vehicle_registration` 或未變更司機證件。
+4. **派遣恢復與獨立阻斷保留**：續期核准後自動重算車輛 `supplyLifecycle` 與司機資格，在所有條件滿足時自動恢復 `ready = true` 與 `dispatchableFlag = true`，同時嚴格保留 R02 `exclusiveOperatorId` 綁定及任何獨立阻斷（`manual_hold`、`offboarding`、`exclusivity_*`、`lifecycle_suspended`、`lifecycle_retired` 或其他未續期過期項目）。
+
 ---
 
 ## 5.2 Eligibility Evaluation
@@ -1326,6 +1356,7 @@ AND exact product eligible
 /supply
 /supply/drivers/new
 /supply/vehicles/new
+/supply/renewals/new
 /supply/submissions
 /supply/submissions/[submissionId]
 /documents

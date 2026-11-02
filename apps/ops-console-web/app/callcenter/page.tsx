@@ -1770,9 +1770,9 @@ export default function CallcenterPage() {
     }
 
     setBusyKey(key);
+    setError(null);
     try {
       await action(guard.reason);
-      setError(null);
     } catch (nextError) {
       setError(resolveErrorMessage(nextError));
     } finally {

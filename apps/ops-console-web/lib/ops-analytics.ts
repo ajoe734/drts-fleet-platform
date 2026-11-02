@@ -301,10 +301,11 @@ export function formatMinorCurrency(
     return new Intl.NumberFormat("zh-TW", {
       style: "currency",
       currency,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
     }).format(amountMinor / 100);
   } catch {
-    return `${currency} ${(amountMinor / 100).toFixed(0)}`;
+    return `${currency} ${(amountMinor / 100).toFixed(2).replace(/\.?0+$/, "")}`;
   }
 }
 

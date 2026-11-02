@@ -493,23 +493,43 @@ describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: registry doc documents a p
     expect(doc).toMatch(/only \*\*Entry A\*\*'s[\s\S]*must switch/);
     expect(doc).toMatch(/\*\*Entry B\*\* must stay on the live API origin/);
 
-    // Lock the premise the corrected instruction depends on: both CI mint
-    // steps stay keyed to the health-check API output, not an IAP client id.
+    // Lock each original CI mint step independently. The referral first-visit
+    // consumer now also mints an API token; a global count cannot identify
+    // whether the Tenant Admin or Tenant Ops audience changed.
+    const step = (name: string): string => {
+      const marker = `      - name: ${name}\n`;
+      expect(
+        workflow.split(marker),
+        `unique workflow step: ${name}`,
+      ).toHaveLength(2);
+      const start = workflow.indexOf(marker);
+      expect(start, `missing workflow step: ${name}`).toBeGreaterThanOrEqual(0);
+      const end = workflow.indexOf("\n      - ", start + marker.length);
+      return workflow.slice(start, end === -1 ? undefined : end);
+    };
+    const adminMint = step(
+      "Mint identity token — API operational acceptance (Tenant Admin)",
+    );
+    const opsMint = step(
+      "Mint identity token — API operational acceptance (Tenant Ops)",
+    );
+    const referralMint = step(
+      "Mint identity token — referral first-visit evidence (operational candidate)",
+    );
     // The Tenant Admin mint still sets `id_token_audience` directly on the
     // auth@v2 action; the Tenant Ops mint (CI-DEPLOY-DEV-WIF-ASSERTION-
     // COLLISION-20261002) instead passes the same value through to its
     // `gcloud auth print-identity-token --audiences=` call via an
     // OPS_TOKEN_AUDIENCE env var -- same audience, different plumbing.
-    const adminMintAudiences = workflow.match(
-      /id_token_audience: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
-    );
-    const opsMintAudiences = workflow.match(
-      /OPS_TOKEN_AUDIENCE: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
-    );
-    expect(adminMintAudiences).not.toBeNull();
-    expect(adminMintAudiences).toHaveLength(1);
-    expect(opsMintAudiences).not.toBeNull();
-    expect(opsMintAudiences).toHaveLength(1);
+    for (const mint of [adminMint, referralMint]) {
+      expect(
+        mint.match(/^ +id_token_audience:.*$/gm)?.map((line) => line.trim()),
+      ).toEqual(["id_token_audience: ${{ needs.health-check.outputs.api }}"]);
+    }
+    expect(
+      opsMint.match(/^ +OPS_TOKEN_AUDIENCE:.*$/gm)?.map((line) => line.trim()),
+    ).toEqual(["OPS_TOKEN_AUDIENCE: ${{ needs.health-check.outputs.api }}"]);
+    expect(opsMint).toContain('--audiences="$OPS_TOKEN_AUDIENCE"');
     expect(workflow).not.toMatch(/id_token_audience:.*DEV_IAP_CLIENT_ID/);
     expect(workflow).not.toMatch(/OPS_TOKEN_AUDIENCE:.*DEV_IAP_CLIENT_ID/);
   });

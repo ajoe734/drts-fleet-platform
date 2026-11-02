@@ -74,6 +74,7 @@ function transport(
     old?: boolean;
     review?: boolean;
     group?: "absent" | "partial" | "complete";
+    liveSecrets?: string[];
   } = {},
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), "drts-api-env-transport-"));
@@ -96,6 +97,8 @@ function transport(
   );
   // Execute the real deploy wrapper; only external gcloud is replaced. The stub
   // answers metadata/origin queries and captures final argv, with no sockets.
+  // It keeps the live service's secret-backed names and, like gcloud, applies
+  // literal env changes before secret changes.
   copyFileSync(
     path.join(root, "operations/deployment/deploy-cloud-run-service.sh"),
     path.join(directory, "operations/deployment/deploy-cloud-run-service.sh"),
@@ -115,9 +118,36 @@ if (args[0] === 'secrets' && args[1] === 'describe') {
     (process.env.TEST_GROUP === 'partial' && args[2].endsWith('-psp-merchant-id'));
   process.exit(present ? 0 : 1);
 }
+const state = process.env.LIVE_SERVICE_STATE;
+const value = (name) => args[args.indexOf(name) + 1];
+const names = (list) => {
+  let delimiter = ',';
+  if (list.startsWith('^')) [delimiter, list] = list.slice(1).split(/\\^(.*)/s);
+  return list.split(delimiter).map((entry) => entry.split('=')[0]);
+};
 if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
-  console.log('https://' + args[3] + '.example.invalid');
+  if (!args.includes('--format=json')) {
+    console.log('https://' + args[3] + '.example.invalid');
+  } else if (fs.existsSync(state)) {
+    const env = JSON.parse(fs.readFileSync(state, 'utf8')).map((name) =>
+      ({ name, valueFrom: { secretKeyRef: { name: 'synthetic', key: 'latest' } } }));
+    console.log(JSON.stringify({ spec: { template: { spec: { containers: [{ env }] } } } }));
+  } else { process.exit(1); }
 } else if (args[0] === 'run' && args[1] === 'deploy') {
+  fs.appendFileSync(process.env.DEPLOY_LOG, JSON.stringify(args) + '\\n');
+  let secrets = fs.existsSync(state) ? JSON.parse(fs.readFileSync(state, 'utf8')) : [];
+  const literal = ['--set-env-vars', '--update-env-vars'].filter((name) => args.includes(name));
+  const clash = literal.flatMap((name) => names(value(name))).find((name) => secrets.includes(name));
+  if (clash) {
+    console.error('ERROR: (gcloud.run.deploy) Cannot update environment variable [' + clash + '] to string literal because it has already been set with a different type.');
+    process.exit(1);
+  }
+  if (args.includes('--remove-secrets')) {
+    const removed = value('--remove-secrets').split(',');
+    secrets = secrets.filter((name) => !removed.includes(name));
+  }
+  if (args.includes('--set-secrets')) secrets = names(value('--set-secrets'));
+  fs.writeFileSync(state, JSON.stringify(secrets));
   fs.writeFileSync(process.env.ARGV_CAPTURE, JSON.stringify(args));
 } else { throw new Error('Unexpected external CLI call: ' + args.join(' ')); }
 `,
@@ -164,6 +194,8 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
   const env: NodeJS.ProcessEnv = {
     PATH: `${path.join(directory, "bin")}:${process.env.PATH ?? ""}`,
     ARGV_CAPTURE: path.join(directory, "argv.json"),
+    DEPLOY_LOG: path.join(directory, "deploys.jsonl"),
+    LIVE_SERVICE_STATE: path.join(directory, "live-secrets.json"),
     TEST_GROUP: options.group ?? "absent",
     SECRET_PREFIX: "synthetic-dev",
     PROJECT_ID: "synthetic-project",
@@ -172,6 +204,8 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
     DEV_WORKLOAD_IDENTITY_AUDIENCE: "synthetic-audience",
     ARTIFACT_PROVIDER_ENV_SUFFIX: "@ARTIFACT_PROVIDER=synthetic",
   };
+  if (options.liveSecrets)
+    writeFileSync(env.LIVE_SERVICE_STATE!, JSON.stringify(options.liveSecrets));
   function execute(script: string, outputName: string) {
     env.GITHUB_OUTPUT = path.join(directory, outputName);
     const result = spawnSync(
@@ -223,6 +257,13 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
     env: decodeEnv(transported),
     args,
     mounts,
+    deploys: readFileSync(env.DEPLOY_LOG!, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]),
+    liveSecrets: JSON.parse(
+      readFileSync(env.LIVE_SERVICE_STATE!, "utf8"),
+    ) as string[],
   };
 }
 
@@ -281,29 +322,110 @@ describe("actual Deploy Dev Bash → argv → original payment readers", () => {
   });
 
   it.each(["absent", "partial", "complete"] as const)(
-    "keeps the original %s optional provider-group behavior",
+    "keeps the original %s OTP group behavior and the public payment profile",
     (group) => {
       const result = transport({ group });
       expect(result.transported).toBe(result.payload);
       const complete = group === "complete";
-      expect(Boolean(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME)).toBe(!complete);
       expect(Boolean(result.env.PASSENGER_OTP_PEPPER)).toBe(!complete);
-      expect(
-        result.mounts.includes(
-          "PSP_TOKEN_ENCRYPTION_KEY_NAME=synthetic-dev-psp-token-encryption-key-name:latest",
-        ),
-      ).toBe(complete);
-      expect(result.mounts.includes("PSP_MERCHANT_ID=")).toBe(complete);
       expect(result.mounts.includes("PASSENGER_OTP_PEPPER=")).toBe(complete);
+      // The rehearsal forces the fake provider, so payment references never
+      // mount, even when every one exists.
+      expect(result.mounts).not.toContain("PSP_");
+      expect(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME).toBeTruthy();
       expect(flag(result.args, "--set-secrets")).toBe(
         `BASE=synthetic-reference:latest${result.mounts ? `,${result.mounts}` : ""}`,
       );
-      if (!complete)
-        expect(paymentRuntimeFromEnv(result.env).cipher).not.toBeNull();
+      expect(paymentRuntimeFromEnv(result.env).cipher).not.toBeNull();
       // Complete groups mount references; the CLI stub never reads secret values.
       // Real provider runtime availability remains the original external gate.
     },
   );
+
+  it("still decrypts cards bound with the public profile when payment secrets exist", () => {
+    // Shared dev, 2026-10-25: complete ECPay secrets mounted their key ring
+    // under the fake provider and every existing rehearsal card failed capture.
+    const bound = paymentRuntimeFromEnv(transport({ group: "absent" }).env);
+    const envelope = bound.cipher!.encrypt(
+      "synthetic-token",
+      "synthetic-passenger",
+      "synthetic-method",
+    );
+    const runtime = paymentRuntimeFromEnv(transport({ group: "complete" }).env);
+    expect(runtime.provider.name).toBe("fake");
+    expect(
+      runtime.cipher!.decrypt(
+        envelope,
+        "synthetic-passenger",
+        "synthetic-method",
+      ),
+    ).toBe("synthetic-token");
+  });
+
+  it("releases payment references a rehearsal deploy turns into literals", () => {
+    // Shared dev, 2026-11-01: the live API still mounted payment references
+    // and gcloud refused to set the public profile literals over them.
+    const result = transport({
+      group: "complete",
+      liveSecrets: [
+        "BASE",
+        "PSP_MERCHANT_ID",
+        "PSP_HASH_KEY",
+        "PSP_HASH_IV",
+        "PSP_SANDBOX",
+        "PSP_TOKEN_ENCRYPTION_KEY_NAME",
+      ],
+    });
+    expect(result.deploys).toHaveLength(2);
+    const [release, deploy] = result.deploys;
+    expect(flag(release!, "--remove-secrets")).toBe(
+      "PSP_MERCHANT_ID,PSP_SANDBOX,PSP_TOKEN_ENCRYPTION_KEY_NAME",
+    );
+    expect(release).not.toContain("--set-env-vars");
+    expect(release).not.toContain("--set-secrets");
+    expect(flag(release!, "--image")).toBe(flag(deploy!, "--image"));
+    expect(result.liveSecrets.some((name) => name.startsWith("PSP_"))).toBe(
+      false,
+    );
+    expect(paymentRuntimeFromEnv(result.env).provider.name).toBe("fake");
+    // The interim revision keeps the remaining references, without a merchant,
+    // and must still pass both startup readers (revision 00173 did not).
+    const interim: NodeJS.ProcessEnv = {
+      ...result.env,
+      PSP_HASH_KEY: "ref",
+      PSP_HASH_IV: "ref",
+    };
+    for (const name of flag(release!, "--remove-secrets").split(","))
+      delete interim[name];
+    const interimRuntime = paymentRuntimeFromEnv(interim);
+    expect(interimRuntime.provider.available).toBe(false);
+    expect(() => paymentCapturePolicyFromEnv(interim, interimRuntime)).toThrow(
+      "payment_capture_configuration_unavailable",
+    );
+    const [name, setting] = flag(release!, "--update-env-vars").split("=");
+    interim[name!] = setting;
+    expect(paymentCapturePolicyFromEnv(interim, interimRuntime)).toBeNull();
+  });
+
+  it("deploys once when no secret reference becomes a literal", () => {
+    const result = transport({
+      review: false,
+      group: "complete",
+      liveSecrets: ["BASE", "PSP_MERCHANT_ID", "PSP_HASH_KEY"],
+    });
+    expect(result.deploys).toHaveLength(1);
+    expect(result.liveSecrets).toContain("PSP_HASH_KEY");
+  });
+
+  it("mounts complete payment references outside the rehearsal", () => {
+    const result = transport({ review: false, group: "complete" });
+    expect(result.mounts).toContain(
+      "PSP_TOKEN_ENCRYPTION_KEY_NAME=synthetic-dev-psp-token-encryption-key-name:latest",
+    );
+    expect(result.mounts).toContain("PSP_HASH_KEY=");
+    expect(result.env.PSP_PROVIDER).toBe("ecpay");
+    expect(result.env.PSP_TOKEN_ENCRYPTION_KEY_NAME).toBeUndefined();
+  });
 
   it("keeps ordinary non-rehearsal values and unavailable payment behavior", () => {
     const result = transport({ review: false });

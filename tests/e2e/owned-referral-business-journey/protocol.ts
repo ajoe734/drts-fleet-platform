@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, rename } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { Page } from "@playwright/test";
 
 export type ObjectData = Record<string, unknown>;
 export type Role =
@@ -261,6 +262,133 @@ export async function captureOriginalUiCancellation<
   return captured;
 }
 
+export type OriginalCancellationResponseFacts = {
+  orderId: string;
+  requestMethod: "POST";
+  command: { idempotencyKey: string };
+  commandSha256: string;
+  status: number;
+  runtimeSha: string;
+  responseBytes: number;
+  responseSha256: string;
+  envelopeOk: boolean;
+  responseOrderMatches: boolean;
+  responseCancelled: boolean;
+  cancelledAt: string | null;
+  refusal: "ORDER_NOT_CANCELABLE" | "OTHER" | null;
+};
+
+/** Project only the original product command and bounded response facts. Raw
+ * headers, payload strings, URLs and exception messages never enter artifacts.
+ */
+export function originalCancellationResponseFacts(
+  captured: CallResult & { command: ObjectData; payload: ObjectData },
+  expected: { orderId: string; runtime: string },
+): OriginalCancellationResponseFacts {
+  const key = captured.command.idempotencyKey;
+  requireFact(
+    typeof key === "string" &&
+      key.length > 0 &&
+      key.length <= 255 &&
+      Object.keys(captured.command).length === 1,
+    "bounded original UI cancellation command",
+  );
+  const data = captured.status === 200 ? object(captured.data) : null;
+  const cancelledAt = data?.cancelledAt;
+  const code = captured.payload.error
+    ? object(captured.payload.error).code
+    : null;
+  requireFact(
+    captured.headers.get("x-drts-candidate-sha") === expected.runtime,
+    "retained original cancellation runtime binding",
+  );
+  return {
+    orderId: expected.orderId,
+    requestMethod: "POST",
+    command: { idempotencyKey: key },
+    commandSha256: hash(Buffer.from(JSON.stringify(captured.command))),
+    status: captured.status,
+    runtimeSha: expected.runtime,
+    responseBytes: captured.bytes.length,
+    responseSha256: hash(captured.bytes),
+    envelopeOk: captured.payload.ok === true,
+    responseOrderMatches: data?.orderId === expected.orderId,
+    responseCancelled: data?.status === "cancelled",
+    cancelledAt:
+      typeof cancelledAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        cancelledAt,
+      ) &&
+      Number.isFinite(Date.parse(cancelledAt))
+        ? cancelledAt
+        : null,
+    refusal:
+      code === null ? null : code === "ORDER_NOT_CANCELABLE" ? code : "OTHER",
+  };
+}
+
+export type OriginalCancellationTerminalFacts = {
+  phase: "before-wait" | "url-ready" | "rendered" | "failed";
+  sameOrigin: boolean;
+  samePath: boolean;
+  sameOrder: boolean;
+  screen: "cancelled" | "trip" | "OTHER";
+  cancelledVisible: boolean | null;
+  ownRouteVisible: boolean | null;
+};
+
+export type OriginalCancellationCheckpoint = {
+  response: OriginalCancellationResponseFacts;
+  terminal?: OriginalCancellationTerminalFacts;
+};
+
+export function originalCancellationTerminalFacts(
+  actualURL: string,
+  expected: { tripURL: string; orderId: string },
+  dom: Pick<
+    OriginalCancellationTerminalFacts,
+    "cancelledVisible" | "ownRouteVisible"
+  >,
+  phase: OriginalCancellationTerminalFacts["phase"],
+): OriginalCancellationTerminalFacts {
+  const actual = new URL(actualURL),
+    trip = new URL(expected.tripURL);
+  const screen = actual.searchParams.get("screen");
+  return {
+    phase,
+    sameOrigin: actual.origin === trip.origin,
+    samePath: actual.pathname === trip.pathname,
+    sameOrder: actual.searchParams.get("orderId") === expected.orderId,
+    screen: screen === "cancelled" || screen === "trip" ? screen : "OTHER",
+    cancelledVisible: dom.cancelledVisible,
+    ownRouteVisible: dom.ownRouteVisible,
+  };
+}
+
+/** DOMContentLoaded is native document readiness, not the unrelated full load
+ * event. The selected-order URL and independent rendered outcome both remain
+ * mandatory; neither an API ACK nor a navigation commit is a UI PASS.
+ */
+export async function waitForOriginalCancellationTerminalUI(
+  page: Pick<Page, "waitForURL" | "url">,
+  orderId: string,
+  assertRendered: () => Promise<void>,
+): Promise<void> {
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("screen") === "cancelled" &&
+      url.searchParams.get("orderId") === orderId,
+    { waitUntil: "domcontentloaded", timeout: 30_000 },
+  );
+  await assertRendered();
+  const url = new URL(page.url());
+  requireFact(
+    url.searchParams.get("screen") === "cancelled" &&
+      url.searchParams.get("orderId") === orderId,
+    "rendered cancellation retains exact selected-order URL",
+  );
+}
+
 export function object(value: unknown): ObjectData {
   requireFact(
     value && typeof value === "object" && !Array.isArray(value),
@@ -405,6 +533,9 @@ export type BookingJournalContext = {
   passengerPhone: string;
   vehicleType: string | null;
   feeDisclosureVersion?: string;
+  // Only new reservation callers set this, from the actual UI quote intent.
+  // Historical immediate journals and their recovery parser remain unchanged.
+  expectedScheduledAt?: string;
 };
 export type BookingJournalSnapshot = Readonly<{
   version: 1;
@@ -519,10 +650,23 @@ export class BookingWriteJournal {
         body.partnerUserRef === this.expected.partnerUserRef,
       "booking fixed Demo subject binding",
     );
-    requireFact(
-      body.scheduledAt === undefined,
-      "booking immediate intent required",
-    );
+    if (this.expected.expectedScheduledAt === undefined) {
+      requireFact(
+        body.scheduledAt === undefined,
+        "booking immediate intent required",
+      );
+    } else {
+      const scheduled = this.expected.expectedScheduledAt;
+      requireFact(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(scheduled) &&
+          Number.isFinite(Date.parse(scheduled)) &&
+          new Date(scheduled).toISOString() === scheduled &&
+          body.scheduledAt === scheduled &&
+          Boolean(this.expected.quoteId.trim()) &&
+          Boolean(this.expected.feeDisclosureVersion?.trim()),
+        "booking exact quoted scheduled intent and fee confirmation required",
+      );
+    }
     const key = text(body.idempotencyKey, "booking idempotency key required");
     requireFact(
       /^[a-zA-Z0-9_-]{1,255}$/.test(key) && key === headerKey,
@@ -578,7 +722,8 @@ type BookingObservationPhase =
   | "booking-response-body"
   | "booking-response-release"
   | "booking-original-route"
-  | "booking-ack-persist";
+  | "booking-ack-persist"
+  | "booking-operation-drain";
 
 function bookingObservationFailure(
   phase: BookingObservationPhase,
@@ -740,6 +885,7 @@ export async function settleRoutedOriginalBookingAck<T>(
   request: ReturnType<BookingAckResponse["request"]>,
   observe: (original: BookingAckResponse) => Promise<T>,
   release: (bytes: Buffer) => Promise<void>,
+  mark?: OriginalBookingMark,
 ): Promise<T> {
   let bytes: Buffer;
   try {
@@ -760,13 +906,18 @@ export async function settleRoutedOriginalBookingAck<T>(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
+  // The observer resolves only after its journal ACK is durable.
+  if (result.ok) noteTransition(mark, "ack-durable");
+  else noteTransition(mark, "ack-rejected");
   let releaseError: unknown;
   try {
     // Deliver those exact server bytes even if the observer rejected them.
     // A refused or malformed ACK must not become a fabricated browser success.
     await release(bytes);
+    noteTransition(mark, "release-completed");
   } catch (error) {
     releaseError = error;
+    noteTransition(mark, "release-failed");
   }
   if (!result.ok) throw result.error;
   if (releaseError)
@@ -774,10 +925,42 @@ export async function settleRoutedOriginalBookingAck<T>(
   return result.value;
 }
 
-/** A failed click stays failed; settle its one observer before owned cleanup. */
+/** Resolve once the caller's existing operation budget expires; never rejects. */
+function operationExpiry(
+  expired: AbortSignal | undefined,
+  phase: BookingObservationPhase,
+) {
+  let onExpired: (() => void) | undefined;
+  const reached = new Promise<{ kind: "expired"; failure: JourneyFailure }>(
+    (resolve) => {
+      if (!expired) return;
+      onExpired = () =>
+        resolve({
+          kind: "expired",
+          failure: bookingObservationFailure(phase, expired.reason),
+        });
+      if (expired.aborted) onExpired();
+      else expired.addEventListener("abort", onExpired, { once: true });
+    },
+  );
+  return {
+    reached,
+    dispose: () => {
+      if (onExpired) expired?.removeEventListener("abort", onExpired);
+    },
+  };
+}
+
+/**
+ * A failed click stays failed; settle its one observer before owned cleanup.
+ * An observation that already failed, or the caller's own existing operation
+ * deadline (`expired`), ends the wait for a UI click that never settles.
+ */
 export async function clickAndSettleOriginalBookingAck<T>(
   click: () => Promise<void>,
   observation: Promise<T>,
+  expired?: AbortSignal,
+  mark?: OriginalBookingMark,
 ): Promise<T> {
   // Attach the rejection handler immediately, before waiting for the UI action.
   // Keep the failure as data until this same observation is awaited below.
@@ -785,16 +968,355 @@ export async function clickAndSettleOriginalBookingAck<T>(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
-  let clickFailure: JourneyFailure | undefined;
+  // The click's own late outcome stays observed after this join has returned.
+  const clicked = new Promise<void>((resolve) => resolve(click())).then(
+    () => {
+      noteTransition(mark, "click-settled");
+      return { kind: "clicked" as const };
+    },
+    (error: unknown) => {
+      noteTransition(mark, "click-failed");
+      return {
+        kind: "click-failed" as const,
+        failure: bookingObservationFailure("booking-ui-click", error),
+      };
+    },
+  );
+  const observationFailed = settled.then((result) =>
+    result.ok
+      ? new Promise<never>(() => undefined)
+      : { kind: "observation-failed" as const, error: result.error },
+  );
+  const deadline = operationExpiry(expired, "booking-ui-click");
   try {
-    await click();
+    const first = await Promise.race([
+      clicked,
+      observationFailed,
+      deadline.reached,
+    ]);
+    if (first.kind === "observation-failed") throw first.error;
+    // The operation deadline already expired with the click still pending. A
+    // received ACK stays durable through its own observer; it is not success.
+    if (first.kind === "expired") throw first.failure;
+    const result = await Promise.race([settled, deadline.reached]);
+    if (first.kind === "click-failed") throw first.failure;
+    if ("kind" in result) throw result.failure;
+    if (!result.ok) throw result.error;
+    noteTransition(mark, "join-completed");
+    return result.value;
   } catch (error) {
-    clickFailure = bookingObservationFailure("booking-ui-click", error);
+    noteTransition(mark, "join-failed");
+    throw error;
+  } finally {
+    deadline.dispose();
   }
-  const result = await settled;
-  if (clickFailure) throw clickFailure;
-  if (!result.ok) throw result.error;
-  return result.value;
+}
+
+/**
+ * Await an owned route/quote drain only within the same existing operation
+ * budget. An abandoned drain keeps running observed; the caller is not held.
+ */
+export async function drainWithinOperationBudget(
+  drain: Promise<unknown>,
+  expired: AbortSignal,
+): Promise<void> {
+  const drained = drain.then(
+    () => ({ kind: "drained" as const }),
+    (error: unknown) => ({ kind: "drain-failed" as const, error }),
+  );
+  const deadline = operationExpiry(expired, "booking-operation-drain");
+  try {
+    const first = await Promise.race([drained, deadline.reached]);
+    if (first.kind === "drain-failed") throw first.error;
+    if (first.kind === "expired") throw first.failure;
+  } finally {
+    deadline.dispose();
+  }
+}
+
+/** Main booking click/ACK join plus its original route drain, one budget. */
+export async function settleOriginalBookingOperation<T>(
+  click: () => Promise<void>,
+  observation: Promise<T>,
+  expired: AbortSignal,
+  routeDrain: () => Promise<unknown> | undefined,
+): Promise<T> {
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    outcome = {
+      ok: true,
+      value: await clickAndSettleOriginalBookingAck(
+        click,
+        observation,
+        expired,
+      ),
+    };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  const pending = routeDrain();
+  if (pending) {
+    try {
+      await drainWithinOperationBudget(pending, expired);
+    } catch (error) {
+      // The join's own failure stays primary; an abandoned drain is still
+      // reported when the join itself had succeeded.
+      if (outcome.ok) throw error;
+    }
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
+}
+
+/**
+ * Finite, credential-free transitions of one original booking operation. They
+ * are diagnostics only: no transition gates, retries or relaxes any wait.
+ */
+export type OriginalBookingTransition =
+  | "armed"
+  | "ack-durable"
+  | "ack-rejected"
+  | "release-completed"
+  | "release-failed"
+  | "dispose-completed"
+  | "handler-finished"
+  | "handler-failed"
+  | "click-settled"
+  | "click-failed"
+  | "join-completed"
+  | "join-failed"
+  | "drain-started"
+  | "unroute-completed"
+  | "quote-drain-completed"
+  | "drain-completed"
+  | "drain-failed";
+/** A real await still outstanding, in causal order (earliest window first). */
+export type OriginalBookingPending =
+  | "ack"
+  | "release"
+  | "dispose"
+  | "handler"
+  | "click"
+  | "join"
+  | "unroute"
+  | "quote-drain"
+  | "drain";
+export type OriginalBookingMark = (
+  transition: OriginalBookingTransition,
+) => void;
+export type OriginalBookingPhases = {
+  frozenBy: "open" | "expired" | "closed";
+  transitions: { transition: OriginalBookingTransition; elapsedMs?: number }[];
+  pending: OriginalBookingPending[];
+};
+const PHASE_ELAPSED_LIMIT_MS = 3_600_000;
+
+/** An observer never throws into, delays or reorders the observed operation. */
+function noteTransition(
+  mark: OriginalBookingMark | undefined,
+  transition: OriginalBookingTransition,
+) {
+  try {
+    mark?.(transition);
+  } catch {
+    // Diagnostic only; the observed outcome stays the original one.
+  }
+}
+
+/**
+ * One original booking operation: armed with the caller's existing budget,
+ * closed on every exit and never reopened. A closed operation sends nothing.
+ *
+ * It also keeps a bounded phase trace (each finite transition at most once,
+ * with elapsed ms since construction). The trace freezes when the budget
+ * expires or the operation closes; any later transition is not retained.
+ */
+export class OriginalBookingOperation {
+  private readonly controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly marks = new Map<
+    OriginalBookingTransition,
+    number | undefined
+  >();
+  private frozen: OriginalBookingPhases | undefined;
+  private readonly startedAt: number | undefined;
+  constructor(
+    private readonly label: string,
+    private readonly clock: () => number = () => Date.now(),
+  ) {
+    this.startedAt = this.elapsedBase();
+  }
+
+  private elapsedBase(): number | undefined {
+    try {
+      const now = this.clock();
+      return Number.isFinite(now) ? now : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Record one transition while the trace is live; never throws. */
+  readonly mark: OriginalBookingMark = (transition) => {
+    if (this.frozen || this.marks.has(transition)) return;
+    const now = this.elapsedBase();
+    const elapsed =
+      now === undefined || this.startedAt === undefined
+        ? undefined
+        : Math.round(now - this.startedAt);
+    this.marks.set(
+      transition,
+      elapsed !== undefined && elapsed >= 0 && elapsed <= PHASE_ELAPSED_LIMIT_MS
+        ? elapsed
+        : undefined,
+    );
+  };
+
+  private freeze(frozenBy: "expired" | "closed") {
+    if (this.frozen) return;
+    try {
+      this.frozen = { ...this.livePhases(), frozenBy };
+    } catch {
+      this.frozen = { frozenBy, transitions: [], pending: [] };
+    }
+  }
+
+  private livePhases(): OriginalBookingPhases {
+    const has = (t: OriginalBookingTransition) => this.marks.has(t);
+    const pending: OriginalBookingPending[] = [];
+    if (has("armed")) {
+      const handlerEnded = has("handler-finished") || has("handler-failed");
+      if (!handlerEnded) {
+        // ACK durability precedes exact byte release, then the original
+        // response disposal and the route handler's own finish.
+        if (!has("ack-durable") && !has("ack-rejected")) pending.push("ack");
+        else if (!has("release-completed") && !has("release-failed"))
+          pending.push("release");
+        else if (!has("dispose-completed")) pending.push("dispose");
+        else pending.push("handler");
+      }
+      const clickEnded = has("click-settled") || has("click-failed");
+      if (!clickEnded) pending.push("click");
+      else if (handlerEnded && !has("join-completed") && !has("join-failed"))
+        pending.push("join");
+    }
+    if (
+      has("drain-started") &&
+      !has("drain-completed") &&
+      !has("drain-failed")
+    ) {
+      if (!has("unroute-completed")) pending.push("unroute");
+      else if (!has("quote-drain-completed")) pending.push("quote-drain");
+      else pending.push("drain");
+    }
+    return {
+      frozenBy: "open",
+      transitions: [...this.marks].map(([transition, elapsedMs]) =>
+        elapsedMs === undefined ? { transition } : { transition, elapsedMs },
+      ),
+      pending,
+    };
+  }
+
+  /** The frozen trace, or the live one while the operation is still open. */
+  phases(): OriginalBookingPhases {
+    const phases = this.frozen ?? this.livePhases();
+    return {
+      ...phases,
+      transitions: phases.transitions.map((t) => ({ ...t })),
+      pending: [...phases.pending],
+    };
+  }
+
+  /** Safe evidence for the existing allowlisted journey evidence. */
+  phaseEvents(): SafeEvent[] {
+    const phases = this.phases();
+    return [
+      ...phases.transitions.map(
+        ({ transition, elapsedMs }): SafeEvent => ({
+          stage: `${this.label}-phase:${transition}`,
+          ...(elapsedMs === undefined ? {} : { phaseElapsedMs: elapsedMs }),
+          result: "observed",
+        }),
+      ),
+      ...phases.pending.map(
+        (pending): SafeEvent => ({
+          stage: `${this.label}-${phases.frozenBy}-pending:${pending}`,
+        }),
+      ),
+    ];
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  get open(): boolean {
+    return !this.controller.signal.aborted;
+  }
+
+  /** Arm the existing budget; `onExpire` runs that budget's own failure first. */
+  arm(ms: number, onExpire?: (failure: JourneyFailure) => void) {
+    requireFact(
+      this.open && this.timer === undefined,
+      `${this.label} budget armed once while open`,
+    );
+    this.mark("armed");
+    this.timer = setTimeout(() => {
+      // Freeze first: the outstanding stages are those at the deadline itself.
+      this.freeze("expired");
+      const failure = new JourneyFailure(`${this.label}-timeout`);
+      onExpire?.(failure);
+      this.controller.abort(failure);
+    }, ms);
+  }
+
+  close() {
+    clearTimeout(this.timer);
+    this.freeze("closed");
+    if (this.open)
+      this.controller.abort(new JourneyFailure(`${this.label}-closed`));
+  }
+
+  /** Recheck immediately before the one real send, after every earlier await. */
+  async send<T>(send: () => Promise<T>): Promise<T> {
+    requireFact(this.open, `${this.label} within its operation budget`);
+    return send();
+  }
+}
+
+/**
+ * End an operation on every exit. A successful one drains (unroute and its
+ * observed quote work) within its armed budget, then closes.
+ *
+ * A failed one is closed and its drain is never run: no UI-side signal proves
+ * the page can no longer emit that first POST (a settled click does not), so
+ * its closed route guard stays registered and aborts any late POST until the
+ * page itself closes and drops it. Abandoned quote work is already observed;
+ * the caller is not held and its own failure stays primary.
+ */
+export async function closeOriginalBookingOperation(
+  operation: OriginalBookingOperation,
+  succeeded: boolean,
+  drain: () => Promise<unknown>,
+): Promise<void> {
+  if (!succeeded) {
+    operation.close();
+    return;
+  }
+  operation.mark("drain-started");
+  try {
+    await drainWithinOperationBudget(
+      new Promise<unknown>((resolve) => resolve(drain())),
+      operation.signal,
+    );
+    operation.mark("drain-completed");
+  } catch (error) {
+    operation.mark("drain-failed");
+    throw error;
+  } finally {
+    operation.close();
+  }
 }
 
 export type SafeEvent = {
@@ -822,6 +1344,7 @@ export type SafeEvent = {
   nativeCauseCode?: string;
   requestAborted?: boolean;
   requestDurationMs?: number;
+  phaseElapsedMs?: number;
   requestMethod?: string;
   requestRoute?: "/" | "OTHER";
   result?: "observed" | "retained" | "unexecuted" | "failed" | "cleaned";
@@ -851,6 +1374,7 @@ const eventFields = new Set([
   "nativeCauseCode",
   "requestAborted",
   "requestDurationMs",
+  "phaseElapsedMs",
   "requestMethod",
   "requestRoute",
   "result",
@@ -894,7 +1418,18 @@ export type CallOptions = {
   headers?: Record<string, string>;
   expected?: number[];
   raw?: boolean;
+  purpose?: "own-fleet-pre-supply-html-readiness";
 };
+const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
+// TEN02 reads all committed orders, including historical/sibling rows, in RAM.
+// 8 MiB gives this growing source bounded headroom; chunks and the concatenated
+// buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
+// Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
+const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
+export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
+// Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
+// not a business deadline). No retry is added; one request, one deadline.
+const HTML_READINESS_TIMEOUT_MS = 30_000;
 export class NativeTransport {
   private readonly sessions = new Map<Role, string>();
   constructor(
@@ -976,7 +1511,38 @@ export class NativeTransport {
       !Object.keys(extra).some((key) => key.toLowerCase() === "origin"),
       "caller cannot replace browser origin",
     );
-    const requestSignal = AbortSignal.timeout(15_000);
+    // Only the startup served-runtime GET of the raw Ops dashboard HTML, before
+    // any Ops application session exists, uses the existing deploy-dev
+    // curl_ready_auth Ops readiness budget (30s per request). Every business,
+    // POST/ACK or variant keeps 15s, except the explicitly marked Fleet
+    // pre-supply HTML readiness call below.
+    const preSessionOpsStartupProbe =
+      role === "ops" &&
+      path === "/dashboard" &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      options.raw === true &&
+      options.expected?.length === 1 &&
+      options.expected[0] === 200 &&
+      !this.sessions.has("ops");
+    // The original consumer marks its one root read only after the normal
+    // OwnFleet session producer succeeds and before provisioning any supply.
+    // This purpose selects a readiness budget, never authority or a retry.
+    // headers() still requires the normal Fleet helper and isolates its origin.
+    const ownFleetPreSupplyHtmlReadiness =
+      options.purpose === "own-fleet-pre-supply-html-readiness" &&
+      role === "fleet" &&
+      path === "/" &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      options.raw === true &&
+      options.expected?.length === 1 &&
+      options.expected[0] === 200;
+    const requestSignal = AbortSignal.timeout(
+      preSessionOpsStartupProbe || ownFleetPreSupplyHtmlReadiness
+        ? HTML_READINESS_TIMEOUT_MS
+        : NATIVE_REQUEST_TIMEOUT_MS,
+    );
     const requestStartedAt = performance.now();
     let response: Response;
     try {
@@ -1008,6 +1574,22 @@ export class NativeTransport {
         ),
       );
     }
+    const canonicalOrdersRead =
+      ((role === "ops" && path === "/control-plane-proxy/orders") ||
+        (role === "opsApi" && path === "/api/orders")) &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      !options.raw &&
+      response.status === 200 &&
+      /^application\/json(?:\s*;|$)/i.test(
+        response.headers.get("content-type") ?? "",
+      );
+    // headers() has already enforced the role's exact configured origin before
+    // fetch. These are the existing Ops BFF and same-session direct API caller;
+    // literal paths exclude sibling routes, queries and URL-normalized aliases.
+    const responseByteLimit = canonicalOrdersRead
+      ? CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT
+      : DEFAULT_RESPONSE_BYTE_LIMIT;
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];
     let length = 0;
@@ -1017,7 +1599,7 @@ export class NativeTransport {
           const part = await reader.read();
           if (part.done) break;
           length += part.value.length;
-          requireFact(length <= 1024 * 1024, "bounded response exceeded");
+          requireFact(length <= responseByteLimit, "bounded response exceeded");
           chunks.push(part.value);
         }
     } finally {
@@ -1384,4 +1966,277 @@ export async function adoptReferralSession(
       },
     ]);
   }
+}
+
+/** Real future instants; never dependent on browser/runner local time. */
+export function futureTaipeiReservationIntents(
+  nowMs = Date.now(),
+): readonly string[] {
+  requireFact(Number.isFinite(nowMs), "reservation real clock required");
+  const day = new Date(nowMs + 2 * 86_400_000 + 8 * 3600_000)
+    .toISOString()
+    .slice(0, 10);
+  const next = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return Object.freeze([`${day}T23:55:00+08:00`, `${next}T00:05:00+08:00`]);
+}
+
+export async function verifyOwnedReservationCancellation(p: {
+  intendedInput: string;
+  journal: BookingWriteJournal;
+  quote: ObjectData;
+  orderId: string;
+  readOrder: () => Promise<ObjectData>;
+  readWindow: () => Promise<ObjectData>;
+  cancel: () => Promise<ObjectData>;
+  persist: (facts: ObjectData) => Promise<void>;
+}) {
+  const scheduled = new Date(p.intendedInput).toISOString();
+  requireFact(
+    p.intendedInput.endsWith("+08:00"),
+    "explicit Taipei offset input required",
+  );
+  const snapshot = p.journal.current;
+  requireFact(
+    snapshot?.state === "acknowledged" && snapshot.orderId === p.orderId,
+    "scheduled original independent acknowledged journal required",
+  );
+  const command = object(JSON.parse(snapshot.body));
+  const before = await p.readOrder();
+  requireFact(
+    command.scheduledAt === scheduled &&
+      command.quoteId === p.quote.quoteId &&
+      p.quote.requestedScheduledAt === scheduled &&
+      p.quote.timingMode === "scheduled" &&
+      before.orderId === p.orderId &&
+      before.reservationWindowStart === scheduled &&
+      object(object(before.referralPassengerLifecycle).quote).quoteId ===
+        p.quote.quoteId,
+    "scheduled exact UI quote canonical reservation binding",
+  );
+  const window = await p.readWindow();
+  const facts: ObjectData = {
+    orderId: p.orderId,
+    intendedInput: p.intendedInput,
+    scheduledAt: scheduled,
+    quoteId: p.quote.quoteId,
+    journalBodySha256: snapshot.bodySha256,
+    before: {
+      status: before.status,
+      reservationWindowStart: before.reservationWindowStart,
+      cancelableUntil: before.cancelableUntil,
+    },
+    window,
+    observedAt: new Date().toISOString(),
+    terminal: false,
+  };
+  // Persist before policy-dependent action. A closed window retains custody;
+  // no early completion, fake clock or replacement order is permitted.
+  await p.persist(facts);
+  requireFact(
+    window.canCancel === true &&
+      typeof window.cancelableUntil === "string" &&
+      window.cancelableUntil === before.cancelableUntil &&
+      Date.parse(window.cancelableUntil) > Date.now(),
+    "scheduled cancellation window closed; retain unresolved custody",
+  );
+  const ack = await p.cancel();
+  const after = await p.readOrder();
+  requireFact(
+    ack.orderId === p.orderId &&
+      ack.status === "cancelled" &&
+      after.orderId === p.orderId &&
+      after.status === "cancelled" &&
+      typeof ack.cancelledAt === "string" &&
+      after.cancelledAt === ack.cancelledAt,
+    "scheduled same-order cancellation ACK canonical readback",
+  );
+  await p.persist({
+    ...facts,
+    cancelACK: ack,
+    terminal: true,
+    after: { status: after.status, cancelledAt: after.cancelledAt },
+  });
+  return after;
+}
+
+/** Actual redispatch endpoint; each Driver port belongs to a different actor. */
+export async function runOwnedRedispatchToSecond(p: {
+  orderId: string;
+  nonce: string;
+  first: { driverId: string; vehicleId: string };
+  second: { driverId: string; vehicleId: string };
+  ops: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  firstDriver: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  secondDriver: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  completeSecond: (task: ObjectData) => Promise<ObjectData>;
+  persist: (facts: ObjectData) => Promise<void>;
+}) {
+  requireFact(
+    p.first.driverId !== p.second.driverId &&
+      p.first.vehicleId !== p.second.vehicleId,
+    "redispatch requires two distinct owned approved pairs",
+  );
+  const firstJob = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/dispatch`,
+    {
+      method: "POST",
+      body: { mode: "auto" },
+      headers: { "Idempotency-Key": `${p.nonce}-dispatch` },
+    },
+  );
+  const firstJobId = text(firstJob.dispatchJobId);
+  const candidates = records(
+    (
+      await p.ops(
+        `/dispatch/tasks/${encodeURIComponent(firstJobId)}/candidates?includeIneligible=true`,
+      )
+    ).items,
+  );
+  // Prove BOTH available candidates before redispatch; a quote is not supply proof.
+  for (const pair of [p.first, p.second]) {
+    const candidate = candidates.find(
+      (c) => c.driverId === pair.driverId && c.vehicleId === pair.vehicleId,
+    );
+    requireFact(
+      candidate,
+      "both approved available owned candidates required before redispatch",
+    );
+    assertOwnPair(candidate, pair);
+    requireFact(
+      candidate.eligibilityDecision === "eligible",
+      "explicit actual owned candidate eligibility required",
+    );
+  }
+  const firstAck = await p.ops("/dispatch/assign", {
+    method: "POST",
+    body: { dispatchJobId: firstJobId, ...p.first },
+    headers: { "Idempotency-Key": `${p.nonce}-assign-first` },
+  });
+  const firstTask = await p.firstDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(firstAck.taskId))}`,
+  );
+  requireFact(
+    firstTask.orderId === p.orderId &&
+      firstTask.driverId === p.first.driverId &&
+      firstTask.vehicleId === p.first.vehicleId &&
+      firstTask.taskId === firstAck.taskId &&
+      firstTask.dispatchJobId === firstJobId &&
+      firstTask.assignmentId === firstAck.assignmentId &&
+      firstTask.status === "pending_acceptance",
+    "redispatch original first assignment/task binding",
+  );
+  // The normal enterprise task contract exposes no assignmentVersion. This is
+  // the sole original assignment in this journaled sequence; guard against any
+  // newer assignment with version 1, never omit the guard or invent a readback.
+  const version = 1;
+  const command = {
+    reasonCode: "synthetic_owned_second_supply",
+    reasonNote: "合成同單真重派驗證",
+    expectedAssignmentVersion: version,
+    idempotencyKey: `${p.nonce}-redispatch`,
+  };
+  await p.persist({
+    phase: "before-redispatch",
+    orderId: p.orderId,
+    firstAck,
+    firstTask,
+    secondPair: p.second,
+    command,
+    traceAuthority: "instance-local-memory-only",
+    assignmentVersionProvenance:
+      "version 1 guard from this sole original assignment ACK; task API has no assignmentVersion field",
+  });
+  const redispatched = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/redispatch`,
+    {
+      method: "POST",
+      body: command,
+      headers: { "Idempotency-Key": command.idempotencyKey },
+    },
+  );
+  const nextJobId = text(redispatched.dispatchJobId);
+  requireFact(
+    nextJobId !== firstJobId,
+    "redispatch distinct new dispatch job required",
+  );
+  const nextCandidate = records(
+    (
+      await p.ops(
+        `/dispatch/tasks/${encodeURIComponent(nextJobId)}/candidates?includeIneligible=true`,
+      )
+    ).items,
+  ).find(
+    (c) =>
+      c.driverId === p.second.driverId && c.vehicleId === p.second.vehicleId,
+  );
+  requireFact(
+    nextCandidate,
+    "second candidate required after actual redispatch",
+  );
+  assertOwnPair(nextCandidate, p.second);
+  const secondAck = await p.ops("/dispatch/assign", {
+    method: "POST",
+    body: { dispatchJobId: nextJobId, ...p.second },
+    headers: { "Idempotency-Key": `${p.nonce}-assign-second` },
+  });
+  const secondTask = await p.secondDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(secondAck.taskId))}`,
+  );
+  const oldTask = await p.firstDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(firstTask.taskId))}`,
+  );
+  requireFact(
+    oldTask.orderId === p.orderId &&
+      oldTask.assignmentId === firstTask.assignmentId &&
+      oldTask.taskId === firstTask.taskId &&
+      oldTask.driverId === p.first.driverId &&
+      oldTask.vehicleId === p.first.vehicleId &&
+      oldTask.dispatchJobId === firstJobId &&
+      oldTask.status === "cancelled" &&
+      secondTask.orderId === p.orderId &&
+      secondTask.driverId === p.second.driverId &&
+      secondTask.vehicleId === p.second.vehicleId &&
+      secondTask.assignmentId === secondAck.assignmentId &&
+      secondTask.taskId === secondAck.taskId &&
+      secondTask.status === "pending_acceptance" &&
+      secondTask.dispatchJobId === nextJobId &&
+      secondTask.taskId !== firstTask.taskId &&
+      secondTask.assignmentId !== firstTask.assignmentId,
+    "redispatch old/new same-order task assignment readback",
+  );
+  const completedTask = await p.completeSecond(secondTask);
+  const trace = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/dispatch-trace`,
+  );
+  const events = records(trace.items).filter((e) => e.orderId === p.orderId);
+  await p.persist({
+    phase: "completed",
+    orderId: p.orderId,
+    command,
+    firstAck,
+    oldTask,
+    secondAck,
+    completedTask,
+    trace: events,
+    traceAuthority: "instance-local-memory-only; durable completeness pending",
+  });
+  requireFact(
+    completedTask.status === "completed" &&
+      completedTask.orderId === p.orderId &&
+      completedTask.taskId === secondTask.taskId &&
+      completedTask.assignmentId === secondTask.assignmentId &&
+      completedTask.dispatchJobId === nextJobId &&
+      completedTask.driverId === p.second.driverId &&
+      completedTask.vehicleId === p.second.vehicleId,
+    "redispatch second driver normal completion readback",
+  );
+  // Missing per-instance events are diagnostic, never proof of global absence.
+  return {
+    completedTask,
+    traceObservedRedispatchCount: events.filter(
+      (e) => e.eventType === "dispatch.redispatch_required",
+    ).length,
+  };
 }

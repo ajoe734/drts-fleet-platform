@@ -302,6 +302,12 @@ export async function fetchPassengerReceipt(
   }
 }
 
+// Passenger copy for known fare-change rules; the server's display text is
+// the fallback for rules this client does not know yet.
+const FARE_CHANGE_RULE_TEXT: Record<string, string> = {
+  multi_taxi_passenger_confirmation: "車資如需變更，會先向您說明並經您確認。",
+};
+
 function arrivalClock(
   calculatedAt: string,
   durationSeconds: number,
@@ -496,7 +502,10 @@ export function mapPassengerRideAuthorityToFixture(
       : view.order.status !== "cancelled" &&
           assignment?.routeFare?.fareChangeRuleDisplayText
         ? {
-            routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
+            routeFareHint:
+              FARE_CHANGE_RULE_TEXT[
+                assignment.routeFare.fareChangeRuleId ?? ""
+              ] ?? assignment.routeFare.fareChangeRuleDisplayText,
           }
         : {}),
     pickupLabel:

@@ -18,6 +18,7 @@ import {
   type OtpHttpRequest,
 } from "../otp/passenger-otp.controller";
 import { PaymentChargeService } from "../payment/payment-charge.service";
+import { assertNoUnpaidPassengerRides } from "../payment/unpaid-payment.guard";
 import { reviewDemoEnabled } from "./review-demo.config";
 import { ReviewSmsPort } from "./review-sms.port";
 import { ReviewSupplyService } from "./review-supply.service";
@@ -95,6 +96,35 @@ export class ReviewDemoController {
       code: this.sms.collect(`+886${target.slice(1)}`),
       simulatedDelivery: true,
     });
+  }
+
+  /** Whether booking would admit this account now. The trial signs in with a
+   * random synthetic phone, and one whose earlier test charge ended in
+   * manual_recovery can never book again, so the trial picks another phone.
+   * Read only; booking still runs the same guard under the account lock.
+   */
+  @Get("trial/readiness")
+  @RequireRealms("passenger")
+  async trialReadiness(@CurrentIdentity() identity: RequestIdentity | null) {
+    this.enabled();
+    const { account } = await this.accounts.getMe(identity);
+    try {
+      await this.database.withTransaction((client) =>
+        assertNoUnpaidPassengerRides(
+          client,
+          account.drtsPassengerId,
+          "booking",
+        ),
+      );
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.code === "pending_payment_block"
+      )
+        return toApiSuccessEnvelope({ canBook: false });
+      throw error;
+    }
+    return toApiSuccessEnvelope({ canBook: true });
   }
 
   @Post("rides/:id/retry-payment")

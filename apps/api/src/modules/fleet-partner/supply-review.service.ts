@@ -613,6 +613,34 @@ export class SupplyReviewService implements OnModuleInit {
       artifacts.documents.length === 0
     ) {
       missingDocuments.push("行照 registration", "保險保單 insurance_policy");
+    } else if (
+      submission.submissionType === "insurance_update" &&
+      !artifacts.documents.some((d) => d.documentType === "insurance_policy")
+    ) {
+      missingDocuments.push("保險保單 insurance_policy");
+    } else if (
+      submission.submissionType === "contract_update" &&
+      !artifacts.documents.some((d) =>
+        [
+          "fleet_participation_contract",
+          "driver_management_contract",
+          "vehicle_management_contract",
+        ].includes(d.documentType),
+      )
+    ) {
+      missingDocuments.push("車隊管理／參與契約 contract");
+    } else if (
+      submission.submissionType === "profile_correction" &&
+      !artifacts.documents.some((d) =>
+        [
+          "professional_driver_license",
+          "taxi_driver_registration",
+        ].includes(d.documentType),
+      )
+    ) {
+      missingDocuments.push(
+        "職業駕駛執照或執業登記證 professional_driver_license / taxi_driver_registration",
+      );
     }
 
     const isComplete =
@@ -632,6 +660,12 @@ export class SupplyReviewService implements OnModuleInit {
             supportedServiceBuckets: canonicalDriver.supportedServiceBuckets,
             workState: canonicalDriver.workState,
             licensesValid: canonicalDriver.licensesValid,
+            lifecycleStatus: canonicalDriver.lifecycleStatus,
+            licenseExpiry: canonicalDriver.licenseExpiry ?? null,
+            professionalDriverLicenseExpiry:
+              canonicalDriver.professionalDriverLicenseExpiry ?? null,
+            taxiDriverRegistrationExpiry:
+              canonicalDriver.taxiDriverRegistrationExpiry ?? null,
           }
         : null,
       canonicalVehicle: canonicalVehicle
@@ -643,6 +677,7 @@ export class SupplyReviewService implements OnModuleInit {
             supportedServiceBuckets: canonicalVehicle.supportedServiceBuckets,
             dispatchableFlag: canonicalVehicle.dispatchableFlag,
             insuranceStatus: canonicalVehicle.insuranceStatus,
+            supplyLifecycle: canonicalVehicle.supplyLifecycle,
           }
         : null,
       validationSummary: {
@@ -835,14 +870,21 @@ export class SupplyReviewService implements OnModuleInit {
           );
           return {
             updated,
+            canonical,
             vehicleAffiliation: canonical?.vehicleAffiliation ?? null,
             supplyPair: canonical?.supplyPair ?? null,
           };
         },
       );
-      this.regulatoryRegistryService?.publishCommittedSupplyPair(
-        result.supplyPair,
-      );
+      if (result.canonical) {
+        await this.regulatoryRegistryService?.publishCommittedProvisioning(
+          result.canonical,
+        );
+      } else {
+        this.regulatoryRegistryService?.publishCommittedSupplyPair(
+          result.supplyPair,
+        );
+      }
       if (result.vehicleAffiliation) {
         this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
           result.vehicleAffiliation,
@@ -938,9 +980,13 @@ export class SupplyReviewService implements OnModuleInit {
           ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
           : {}),
       });
-      this.regulatoryRegistryService?.publishCommittedSupplyPair(
-        canonical?.supplyPair ?? null,
-      );
+      if (canonical) {
+        await this.regulatoryRegistryService?.publishCommittedProvisioning(
+          canonical,
+        );
+      } else {
+        this.regulatoryRegistryService?.publishCommittedSupplyPair(null);
+      }
       if (canonical?.vehicleAffiliation) {
         this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
           canonical.vehicleAffiliation,
@@ -1037,9 +1083,13 @@ export class SupplyReviewService implements OnModuleInit {
       );
     }
 
-    this.regulatoryRegistryService?.publishCommittedSupplyPair(
-      canonical?.supplyPair ?? null,
-    );
+    if (canonical) {
+      await this.regulatoryRegistryService?.publishCommittedProvisioning(
+        canonical,
+      );
+    } else {
+      this.regulatoryRegistryService?.publishCommittedSupplyPair(null);
+    }
 
     return { ...updated };
   }
@@ -1102,7 +1152,10 @@ export class SupplyReviewService implements OnModuleInit {
       return null;
     }
 
-    const reference = artifacts.vehicleDraft?.currentDriverSubmissionId;
+    const reference =
+      submission.submissionType === "vehicle_onboarding"
+        ? artifacts.vehicleDraft?.currentDriverSubmissionId
+        : null;
     let referencedDriverSubmission: SupplySubmissionRecord | null = null;
     if (reference) {
       if (executor && this.supplySubmissionRepository?.isEnabled()) {
@@ -1127,6 +1180,7 @@ export class SupplyReviewService implements OnModuleInit {
       documents: artifacts.documents,
       approvedAt: new Date().toISOString(),
       reviewerId,
+      deferVolatileCommit: !executor,
     });
   }
 

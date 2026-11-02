@@ -15,7 +15,7 @@ import { ReviewRideControls } from "../../../apps/passenger-app-web/components/r
 
 vi.mock(
   "../../../apps/passenger-app-web/components/review-demo/review-context",
-  () => ({ useReviewDemo: () => true }),
+  () => ({ useReviewDemo: () => true, useTrialMode: () => false }),
 );
 
 const orderId = "d9c8050d-bfac-49c5-b718-3bf3c066d312";

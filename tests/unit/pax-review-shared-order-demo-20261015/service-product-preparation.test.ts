@@ -162,6 +162,7 @@ function productPeers() {
     a: make(),
     b: make(),
     records,
+    supply,
     policy,
     database,
     hidePolicy: () => {
@@ -301,6 +302,27 @@ describe("R18: rehearsal prepares the native reservation product before real boo
         .listDrivers()
         .filter((d) => d.driverId.startsWith("pax-review-driver-")),
     ).toHaveLength(2);
+  });
+
+  it("names the rehearsal fleet 智行 and renames one an earlier preparation made", async () => {
+    const p = productPeers();
+    await rehearsal(p).prepare();
+    const fleets = p.supply.get("admin.phase1_fleet_partners")!;
+    const [fleetPartnerId, fleet] = [...fleets][0]!;
+    // Ride certificates show the legal name.
+    expect(fleet).toMatchObject({ legalName: "智行", displayName: "智行" });
+    fleets.set(fleetPartnerId, {
+      ...(fleet as object),
+      legalName: "虛構演練派遣業者（合成・非正式）",
+      displayName: "虛構演練車隊",
+    });
+    await rehearsal(p).prepare();
+    expect(fleets.size).toBe(1);
+    expect(fleets.get(fleetPartnerId)).toMatchObject({
+      legalName: "智行",
+      displayName: "智行",
+      multiTaxiOperatorIds: ["review-synthetic-operator"],
+    });
   });
 
   it("preserves the established master and other product configuration across repeated preparation", async () => {

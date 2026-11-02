@@ -1246,6 +1246,68 @@ export async function uploadOperationalDocument(
     "confirm fleet_partner_id must match authoritative readback",
   ).toBe(authoritativeFleetId);
 
+  // R5: Canonical submission readback verifying the persisted document
+  // metadata, not only the confirm response.
+  const canonicalSubmissionResponse = await boundedFetch(
+    new URL(parentPrefix, origin).toString(),
+    {
+      method: "GET",
+      headers: lifecycleHeaders,
+    },
+  );
+  checkDeadline();
+  expect(
+    canonicalSubmissionResponse.status,
+    `canonical submission readback ${parentPrefix}`,
+  ).toBe(200);
+  expectCandidateRevision(
+    canonicalSubmissionResponse.headers,
+    `canonical submission readback ${parentPrefix}`,
+  );
+  const canonicalSubmissionData = JSON.parse(
+    canonicalSubmissionResponse.body.toString("utf8"),
+  ) as any;
+  const canonicalDocuments = Array.isArray(
+    canonicalSubmissionData?.data?.documents,
+  )
+    ? (canonicalSubmissionData.data.documents as Array<Record<string, unknown>>)
+    : [];
+  const canonicalDocument = canonicalDocuments.find(
+    (item) => (item.document_id || item.documentId) === documentId,
+  );
+  expect(
+    canonicalDocument,
+    `canonical submission ${expectedSubmissionId} documents must include confirmed ${documentId}`,
+  ).toBeTruthy();
+  expect(
+    canonicalDocument?.submission_id || canonicalDocument?.submissionId,
+    "canonical document submission_id must match",
+  ).toBe(expectedSubmissionId);
+  expect(
+    canonicalDocument?.fleet_partner_id || canonicalDocument?.fleetPartnerId,
+    "canonical document fleet_partner_id must match authoritative readback",
+  ).toBe(authoritativeFleetId);
+  expect(
+    canonicalDocument?.document_type || canonicalDocument?.documentType,
+    "canonical document document_type must match",
+  ).toBe(confirmDocType);
+  expect(
+    canonicalDocument?.file_object_key || canonicalDocument?.fileObjectKey,
+    "canonical document file_object_key must match",
+  ).toBe(objectKey);
+  expect(
+    canonicalDocument?.checksum_sha256 || canonicalDocument?.checksumSha256,
+    "canonical document checksum_sha256 must match",
+  ).toBe(sha256);
+  expect(
+    canonicalDocument?.file_size ?? canonicalDocument?.fileSize,
+    "canonical document file_size must match",
+  ).toBe(fileSize);
+  expect(
+    canonicalDocument?.content_type || canonicalDocument?.contentType,
+    "canonical document content_type must match",
+  ).toBe(contentType);
+
   // 4. Download READBACK
   const downloadPath = `${parentPrefix}/documents/${documentId}/download`;
   const parsedDownloadUrl = new URL(downloadPath, origin);
@@ -1300,6 +1362,7 @@ export async function uploadOperationalDocument(
     ...(confirmSubmissionId ? { confirmSubmissionId } : {}),
     ...(confirmFleetId ? { confirmFleetPartnerId: confirmFleetId } : {}),
     ...(confirmDocType ? { confirmDocumentType: confirmDocType } : {}),
+    canonicalReadbackStatus: canonicalSubmissionResponse.status,
     downloadStatus: downloadResponse.status,
     readbackSha256,
     readbackFileSize: readbackBuffer.length,
@@ -1775,23 +1838,53 @@ export async function prepareOperationalFleetSession(
     });
   }
 
+  // The normal first key is an explicitly declared own-Fleet read/write credential,
+  // not a legacy billing-only key or an implicit human/finance grant.
+  const ownFleetScopes = ["billing:read", "partner:read", "partner:write"];
+  const hasExactOwnScopes = (scopes: unknown) =>
+    Array.isArray(scopes) &&
+    scopes.length === ownFleetScopes.length &&
+    ownFleetScopes.every((scope) => scopes.includes(scope));
+
   const verifyIdentity = (
     data: Record<string, unknown>,
     issued: boolean,
     activeSession = true,
   ) => {
     const identity = objectValue(data.identity);
+    const grantedScopes = identity.scopes;
+    // Issued first keys must echo exactly our declared grants. A supplied key
+    // belongs to its caller: accept equivalent explicit own-Fleet read/write
+    // grants, but never augment the token or mistake finance-only for supply.
+    // Mirror the backend Fleet dashboard/read/driver scope boundary: legacy
+    // partner aliases require an unlinked credential and partner:read, whereas
+    // direct fleet:* grants may satisfy their respective routes independently.
+    const hasSuppliedFleetAccess = (scopes: string[]) => {
+      const legacyRead =
+        !identity.membershipId && scopes.includes("partner:read");
+      return (
+        scopes.includes("billing:read") &&
+        (scopes.includes("fleet:read") || legacyRead) &&
+        (scopes.includes("fleet:finance:read") || legacyRead) &&
+        (scopes.includes("fleet:supply:write") ||
+          (legacyRead && scopes.includes("partner:write")))
+      );
+    };
     requireValue(
       (!activeSession || data.active === true) &&
         identity.realm === "partner" &&
+        identity.authMode === "jwt_bearer" &&
+        identity.tenantId === configuration.tenantId &&
         ["partner_user", "partner_api_key"].includes(
           String(identity.actorType),
         ) &&
         typeof identity.actorId === "string" &&
         identity.actorId.trim() &&
         identity.partnerId === configuration.fleetPartnerId &&
-        Array.isArray(identity.scopes) &&
-        identity.scopes.includes("billing:read"),
+        Array.isArray(grantedScopes) &&
+        (issued
+          ? hasExactOwnScopes(grantedScopes)
+          : hasSuppliedFleetAccess(grantedScopes)),
       "verified session",
     );
     if (issued) {
@@ -1801,8 +1894,7 @@ export async function prepareOperationalFleetSession(
           identity.partnerEntrySlug === entrySlug &&
           identity.tenantId === configuration.tenantId &&
           identity.partnerProgramId === programId &&
-          Array.isArray(identity.scopes) &&
-          identity.scopes.length === 1 &&
+          hasExactOwnScopes(identity.scopes) &&
           (!activeSession || identity.principalId === ownKeyId),
         "issued session binding",
       );
@@ -2053,6 +2145,7 @@ export async function prepareOperationalFleetSession(
     entryHasUnownedCredentials =
       !Array.isArray(credentials.items) || credentials.items.length !== 0;
     requireValue(!entryHasUnownedCredentials, "no existing keys to rotate");
+    const keyExpiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
     const issued = await adminMutation(
       "first key issue",
       `${entryPath}/credentials/issue`,
@@ -2062,8 +2155,8 @@ export async function prepareOperationalFleetSession(
         ownerName: "Synthetic operational worker",
         ownerType: "operational_acceptance",
         purpose: "Original operational document lifecycle acceptance",
-        scopes: ["billing:read"],
-        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        scopes: ownFleetScopes,
+        expiresAt: keyExpiresAt,
       },
       deadline,
       (ack) => {
@@ -2085,10 +2178,11 @@ export async function prepareOperationalFleetSession(
         typeof plaintextKey === "string" &&
         plaintextKey &&
         credential.realm === "partner" &&
+        credential.ownerRef === requestId &&
+        credential.ownerType === "operational_acceptance" &&
         credential.resourceScope === `partner_entry:${entrySlug}` &&
-        Array.isArray(credential.scopes) &&
-        credential.scopes.length === 1 &&
-        credential.scopes[0] === "billing:read" &&
+        hasExactOwnScopes(credential.scopes) &&
+        credential.expiresAt === keyExpiresAt &&
         credential.status === "active" &&
         credential.revokedAt === null &&
         issued.revokedCredentialId === null &&
@@ -2115,7 +2209,7 @@ export async function prepareOperationalFleetSession(
           configuration.fleetPartnerId,
       "bootstrap receipt",
     );
-    verifyIdentity(bootstrap, true, false);
+    const bootstrapIdentity = verifyIdentity(bootstrap, true, false);
     applicationToken = bootstrap.accessToken as string;
     const session = await request(
       "issued session",
@@ -2134,6 +2228,20 @@ export async function prepareOperationalFleetSession(
       },
     );
     const identity = verifyIdentity(session, true);
+    requireValue(
+      [
+        "realm",
+        "actorType",
+        "actorId",
+        "partnerId",
+        "partnerEntrySlug",
+        "tenantId",
+        "partnerProgramId",
+      ].every((field) => identity[field] === bootstrapIdentity[field]) &&
+        hasExactOwnScopes(bootstrapIdentity.scopes) &&
+        hasExactOwnScopes(identity.scopes),
+      "issued session echo",
+    );
     requireValue(
       typeof identity.sessionId === "string" && identity.sessionId,
       "owned session receipt",
@@ -2386,6 +2494,7 @@ export function operationalRoleRequestHeaders(
   baseUrlEnv: string,
   requestUrl: string,
   suppliedHeaders: Record<string, string> = {},
+  invocationToken?: string,
 ): Record<string, string> {
   const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
   const target = new URL(requestUrl, origin);
@@ -2401,7 +2510,11 @@ export function operationalRoleRequestHeaders(
   }
   rejectSpoofedIdentityHeaders(suppliedHeaders);
   const headers = { ...suppliedHeaders };
-  const setupIdToken = getIdentityToken(baseUrlEnv)?.trim();
+  // First-visit evidence supplies its own API proof per call. Other consumers
+  // retain their original environment contract; no process-wide API injection.
+  const setupIdToken = (
+    invocationToken ?? getIdentityToken(baseUrlEnv)
+  )?.trim();
   const isDirectApiOrigin =
     baseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
     baseUrlEnv === "DRTS_DEV_API_BASE_URL";
@@ -2475,10 +2588,248 @@ export function operationalRoleRequestHeaders(
   return headers;
 }
 
+export type OperationalReferralSubject = {
+  drtsPassengerId: string; // Issuer authority, RAM only; never recoveryScope.
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  entrySlug: string;
+  entryHost: string;
+};
+
+export class OperationalReferralEvidenceError extends Error {}
+
+/** Native fetch keeps WIF, artifacts and unrelated order rows out of Playwright
+ * request snapshots. Errors expose only fixed paths/status, never payloads. */
+async function referralEvidenceApi(
+  apiPath: string,
+  method: "GET" | "POST",
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<Record<string, any>> {
+  const sha = process.env.DRTS_CANDIDATE_SHA?.trim();
+  if (!sha || !/^[a-f0-9]{40}$/.test(sha))
+    throw new Error("Referral evidence requires immutable candidate SHA");
+  let failure = "transport or JSON unavailable";
+  try {
+    const response = await fetch(
+      new URL(apiPath, requiredOrigin("DRTS_DEV_API_BASE_URL")),
+      {
+        method,
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    failure = `HTTP ${response.status}`;
+    // Nest's unchanged @Post handoff issuer returns 201; canonical GETs 200.
+    if (response.status !== (method === "POST" ? 201 : 200))
+      throw new Error(failure);
+    failure = "candidate mismatch";
+    if (response.headers.get("x-drts-candidate-sha") !== sha)
+      throw new Error("candidate mismatch");
+    failure = "invalid envelope or JSON";
+    const payload = await response.json();
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      payload.error ||
+      !payload.data ||
+      typeof payload.data !== "object" ||
+      Array.isArray(payload.data)
+    )
+      throw new Error("invalid envelope");
+    return payload.data;
+  } catch {
+    throw new OperationalReferralEvidenceError(
+      `Referral evidence ${method} ${apiPath} failed: ${failure}`,
+    );
+  }
+}
+
+export async function prepareOperationalReferralHandoff(
+  entrySlug: string,
+  entryHost: string,
+) {
+  const base = "DRTS_DEV_API_BASE_URL";
+  const origin = requiredOrigin(base);
+  const token =
+    process.env.DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN?.trim();
+  if (!token) throw new Error("Referral issuer requires API-audience WIF");
+  const target = new URL(origin);
+  if (
+    target.protocol !== "https:" ||
+    target.username ||
+    target.password ||
+    target.hash ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(entrySlug) ||
+    !entryHost
+  )
+    throw new Error("Invalid referral issuer target");
+  const entryPath = `/api/partner/entries/${entrySlug}`;
+  const entry = await referralEvidenceApi(
+    entryPath,
+    "GET",
+    {}, // Public entry lookup: WIF is not an application Bearer.
+  );
+  const validId = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 200;
+  if (
+    entry.entry_slug !== entrySlug ||
+    entry.entry_host !== entryHost ||
+    !validId(entry.tenant_id) ||
+    !validId(entry.partner_id) ||
+    !validId(entry.program_id)
+  )
+    throw new Error("Referral canonical entry binding invalid");
+  const issuePath = "/api/partner/ingress/referral-embed-handoff";
+  const issued = await referralEvidenceApi(
+    issuePath,
+    "POST",
+    {
+      "content-type": "application/json",
+      "x-drts-google-id-token": token,
+    },
+    {
+      entrySlug,
+      entryHost,
+      partnerUserRef: `operational-refusal-${randomUUID()}`,
+      consentBundle: null,
+    },
+  );
+  if (
+    issued.partner_entry_slug !== entrySlug ||
+    issued.entry_host !== entryHost ||
+    !validId(issued.drts_passenger_id) ||
+    typeof issued.handoff_id !== "string" ||
+    !/^ref_handoff_[0-9a-f-]{36}$/i.test(issued.handoff_id) ||
+    typeof issued.artifact !== "string" ||
+    !/^[A-Za-z0-9_-]{32}$/.test(issued.artifact) ||
+    issued.token_type !== "SingleUse" ||
+    issued.expires_in !== "120s" ||
+    typeof issued.expires_at !== "string" ||
+    !(Date.parse(issued.expires_at) > Date.now()) ||
+    issued.consent_required !== true ||
+    issued.consent_bundle_version !== null
+  )
+    throw new Error("Referral handoff issuance contract invalid");
+  return {
+    artifact: issued.artifact as string,
+    handoffId: issued.handoff_id as string,
+    subject: {
+      drtsPassengerId: issued.drts_passenger_id,
+      tenantId: entry.tenant_id,
+      partnerId: entry.partner_id,
+      partnerProgramId: entry.program_id,
+      entrySlug,
+      entryHost,
+    } as OperationalReferralSubject,
+  };
+}
+
+export async function observeOperationalReferralZeroOrders(
+  subject: OperationalReferralSubject,
+  phase: "before-refusal" | "after-refusal",
+) {
+  const token =
+    process.env.DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN?.trim();
+  if (!token)
+    throw new Error("Referral zero-orders requires API invocation proof");
+  // Independent live canonical session check on each side of refusal. A Cloud
+  // Run invocation token cannot stand in for Ops application authority.
+  const identity = await verifyOperationalRoleSession(
+    "ops_non_reviewer",
+    "DRTS_DEV_API_BASE_URL",
+    undefined,
+    token,
+  );
+  if (
+    !Array.isArray(identity.scopes) ||
+    !identity.scopes.includes("owned:read")
+  )
+    throw new Error("Referral zero-orders requires live Ops owned:read");
+  const url = new URL(
+    "/api/orders",
+    requiredOrigin("DRTS_DEV_API_BASE_URL"),
+  ).toString();
+  const data = await referralEvidenceApi(
+    "/api/orders",
+    "GET",
+    operationalRoleRequestHeaders(
+      "ops_non_reviewer",
+      "DRTS_DEV_API_BASE_URL",
+      url,
+      {},
+      token,
+    ),
+  );
+  // This canonical endpoint returns the complete list, with no pagination.
+  // Reject partial/paged substitutes instead of calling an absent list empty.
+  if (Object.keys(data).length !== 1 || !Array.isArray(data.items))
+    throw new Error("Referral canonical orders list incomplete");
+  const nonempty = (v: unknown): v is string =>
+    typeof v === "string" && v.trim().length > 0;
+  if (!Object.values(subject).every(nonempty))
+    throw new Error("Referral issued subject binding missing");
+  let count = 0;
+  for (const row of data.items) {
+    if (
+      !row ||
+      typeof row !== "object" ||
+      Array.isArray(row) ||
+      !nonempty(row.order_id) ||
+      !row.passenger ||
+      typeof row.passenger !== "object" ||
+      Array.isArray(row.passenger) ||
+      !(
+        // Partner bookings can have an explicitly unlinked passenger. Phone
+        // and first-party bookings (entry=null) also permit an omitted ID.
+        (
+          row.passenger.passenger_id === null ||
+          nonempty(row.passenger.passenger_id) ||
+          (row.partner_entry_slug === null &&
+            row.passenger.passenger_id === undefined)
+        )
+      ) ||
+      ![
+        "tenant_id",
+        "partner_id",
+        "partner_program_id",
+        "partner_entry_slug",
+      ].every((key) => row[key] === null || nonempty(row[key]))
+    )
+      throw new Error("Referral canonical orders row malformed");
+    // Reject ANY order for this legally issued fresh subject, including one
+    // incorrectly stamped with a different entry/partner/tenant.
+    if (row.passenger.passenger_id === subject.drtsPassengerId) count++;
+  }
+  if (count !== 0)
+    throw new Error("Referral controlled subject has canonical orders");
+  return {
+    kind: "referral-first-refusal-zero-orders",
+    phase,
+    subjectKey: createHash("sha256")
+      .update(JSON.stringify(subject))
+      .digest("hex"),
+    path: "/api/orders",
+    sessionPath: "/api/auth/session",
+    status: 200,
+    sessionStatus: 200,
+    count,
+    observation: "bounded-controlled-subject",
+    durableSourceProof: "pending-original-deployment-record",
+  };
+}
+
 export async function verifyOperationalRoleSession(
   role: Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
   baseUrlEnv: string,
   expectedOwnFleetId = "fleet-demo-001",
+  invocationToken?: string,
 ): Promise<Record<string, unknown>> {
   const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
   const sessionPath =
@@ -2487,7 +2838,13 @@ export async function verifyOperationalRoleSession(
       ? "/api/auth/session"
       : "/control-plane-proxy/auth/session";
   const sessionUrl = new URL(sessionPath, origin).toString();
-  const headers = operationalRoleRequestHeaders(role, baseUrlEnv, sessionUrl);
+  const headers = operationalRoleRequestHeaders(
+    role,
+    baseUrlEnv,
+    sessionUrl,
+    {},
+    invocationToken,
+  );
   const response = await fetch(sessionUrl, {
     method: "GET",
     headers,

@@ -1,6 +1,28 @@
 /* Global styles */
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   font-family: sans-serif;
+}
+
+/* The ride and history screens draw a device frame for desktop previews.
+   On an actual phone the page is the device: drop the bezel and the drawn
+   status bar instead of nesting a phone inside the phone. */
+@media (max-width: 480px) {
+  .pax-device-stage {
+    padding: 0 !important;
+  }
+  .pax-device {
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .pax-statusbar {
+    display: none !important;
+  }
 }

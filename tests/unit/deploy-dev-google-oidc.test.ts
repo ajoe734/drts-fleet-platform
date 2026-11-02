@@ -63,4 +63,125 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
       }
     },
   );
+
+  it("mounts tenant_auth secrets on agency-portal-web and wires agency origin + invitation base in API env and post-deploy reconciliation", () => {
+    const deployAgencyStart = workflow.indexOf(
+      "      - name: Deploy — agency-portal-web\n",
+    );
+    const enforceAgencyStart = workflow.indexOf(
+      "      - name: Enforce no public access — agency-portal-web\n",
+    );
+    const reconcileStart = workflow.indexOf(
+      "      - name: Reconcile API agency portal origin and invitation base\n",
+    );
+    expect(deployAgencyStart).toBeGreaterThan(0);
+    expect(enforceAgencyStart).toBeGreaterThan(deployAgencyStart);
+    expect(reconcileStart).toBeGreaterThan(enforceAgencyStart);
+
+    const deployAgencyBlock = workflow.slice(
+      deployAgencyStart,
+      enforceAgencyStart,
+    );
+    expect(deployAgencyBlock).toContain(
+      '--set-secrets "${{ steps.api_secrets.outputs.tenant_auth }}"',
+    );
+    expect(deployAgencyBlock).toContain("--port 3012");
+    expect(deployAgencyBlock).toContain(
+      "DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}",
+    );
+    expect(deployAgencyBlock).toContain(
+      "${{ needs.prepare.outputs.agency_portal_exposure_flag }}",
+    );
+
+    const reconcileBlock = workflow
+      .slice(
+        reconcileStart,
+        workflow.indexOf("\n  paused-partner-booking-cleanup:", reconcileStart),
+      )
+      .split("        run: |\n")[1]!
+      .split("\n")
+      .map((line) => (line.startsWith("          ") ? line.slice(10) : line))
+      .join("\n");
+
+    const dir = mkdtempSync(join(tmpdir(), "drts-agency-reconcile-"));
+    try {
+      const output = join(dir, "output");
+      const renderedReconcile = reconcileBlock
+        .replaceAll(
+          "${{ needs.prepare.outputs.agency_portal_service }}",
+          "drts-dev-agency-portal-web",
+        )
+        .replaceAll("${{ needs.prepare.outputs.region }}", "us-central1")
+        .replaceAll("${{ needs.prepare.outputs.project_id }}", "test-project")
+        .replaceAll(
+          "${{ needs.prepare.outputs.agency_portal_origin }}",
+          "${MOCK_CONFIGURED_ORIGIN:-}",
+        )
+        .replaceAll("${{ needs.prepare.outputs.api_service }}", "drts-dev-api");
+
+      const updateLog = join(dir, "updates");
+      const runReconcile = (
+        cloudRunUrl: string,
+        configuredOrigin: string,
+        currentAllowedOrigins: string,
+        currentInviteBase: string,
+      ) => {
+        const script = `
+set -euo pipefail
+gcloud() {
+  if [[ "$*" == *"services describe drts-dev-agency-portal-web"* ]]; then
+    printf '%s' "$MOCK_AGENCY_URL"
+    return 0
+  fi
+  if [[ "$*" == *"services describe drts-dev-api"* ]]; then
+    printf '{"spec":{"template":{"spec":{"containers":[{"env":[{"name":"AUTH_ALLOWED_ORIGINS","value":"%s"},{"name":"AGENCY_INVITATION_ACCEPT_URL_BASE","value":"%s"}]}]}}}}' "$MOCK_CURRENT_ORIGINS" "$MOCK_CURRENT_INVITE"
+    return 0
+  fi
+  if [[ "$*" == *"services update drts-dev-api"* ]]; then
+    printf '%s\\n' "$*" >> "$UPDATE_LOG"
+    return 0
+  fi
+  return 99
+}
+${renderedReconcile}
+`;
+        return spawnSync("bash", ["-c", script], {
+          env: {
+            ...process.env,
+            GITHUB_OUTPUT: output,
+            UPDATE_LOG: updateLog,
+            MOCK_AGENCY_URL: cloudRunUrl,
+            MOCK_CONFIGURED_ORIGIN: configuredOrigin,
+            MOCK_CURRENT_ORIGINS: currentAllowedOrigins,
+            MOCK_CURRENT_INVITE: currentInviteBase,
+          },
+          encoding: "utf8",
+        });
+      };
+
+      // First activation: API initially deployed before agency service existed
+      const firstActivation = runReconcile(
+        "https://drts-dev-agency-portal-web-xyz.a.run.app",
+        "",
+        "https://tenant.smarttransport.tw",
+        "",
+      );
+      expect(firstActivation.status, firstActivation.stderr).toBe(0);
+      const updates = readFileSync(updateLog, "utf8");
+      expect(updates).toContain(
+        "--update-env-vars ^@^AUTH_ALLOWED_ORIGINS=https://tenant.smarttransport.tw,https://drts-dev-agency-portal-web-xyz.a.run.app@AGENCY_INVITATION_ACCEPT_URL_BASE=https://drts-dev-agency-portal-web-xyz.a.run.app/invite",
+      );
+
+      // Fails closed on invalid resolved URL
+      const invalidUrl = runReconcile(
+        "http://insecure-agency.example.test",
+        "",
+        "https://tenant.smarttransport.tw",
+        "",
+      );
+      expect(invalidUrl.status).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -114,6 +114,7 @@ const actorRealm: Record<(typeof AUTH_ACTOR_TYPES)[number], AuthRealm> = {
   partner_api_key: "partner",
   partner_user: "partner",
   referral_passenger: "partner",
+  agency_user: "agency",
 };
 
 describe.each(["development", "staging", "production"])(

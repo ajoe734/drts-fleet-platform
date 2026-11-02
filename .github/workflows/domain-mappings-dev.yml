@@ -36,6 +36,9 @@ env:
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
+  DEV_GCP_AGENCY_PORTAL_SERVICE: ${{ vars.DEV_GCP_AGENCY_PORTAL_SERVICE }}
+  DEV_AGENCY_PORTAL_ORIGIN: ${{ vars.DEV_AGENCY_PORTAL_ORIGIN }}
+  DEV_AGENCY_PORTAL_HOST: ${{ vars.DEV_AGENCY_PORTAL_HOST }}
   # Hostname for the Cloud IAP public front door in front of passenger-app-web
   # (see operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh).
   # Separate from, and not a replacement for, the ride.smarttransport.tw
@@ -92,6 +95,12 @@ jobs:
             exit 1
           fi
 
+          agency_portal_service="${DEV_GCP_AGENCY_PORTAL_SERVICE:-drts-dev-agency-portal-web}"
+          if [[ "$agency_portal_service" != drts-dev-agency-portal-web ]]; then
+            echo "::error::Agency Portal domain target is outside the reviewed active dev inventory."
+            exit 1
+          fi
+
           ./operations/deployment/map-domain-service.sh fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-dev-platform-admin-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-dev-ops-console-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-dev-fleet-partner-portal-web}" "$REGION" "$PROJECT"
@@ -102,6 +111,18 @@ jobs:
           ./operations/deployment/map-domain-service.sh refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-dev-referral-embed-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-dev-api}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh ride.smarttransport.tw       "$passenger_app_service" "$REGION" "$PROJECT"
+
+          agency_portal_origin="${DEV_AGENCY_PORTAL_ORIGIN:-}"
+          agency_portal_host="${DEV_AGENCY_PORTAL_HOST:-${agency_portal_origin#https://}}"
+          if [[ -n "$agency_portal_host" ]]; then
+            if [[ ! "$agency_portal_host" =~ ^[a-z0-9.-]+$ ]]; then
+              echo "::error::Agency Portal domain mapping host must be a bare hostname: ${agency_portal_host}"
+              exit 1
+            fi
+            ./operations/deployment/map-domain-service.sh "$agency_portal_host" "$agency_portal_service" "$REGION" "$PROJECT"
+          else
+            echo "::notice::DEV_AGENCY_PORTAL_HOST and DEV_AGENCY_PORTAL_ORIGIN are not set; skipping optional Agency Portal domain mapping for ${agency_portal_service} (suggested custom domain per D5: agency.smarttransport.tw)."
+          fi
 
           if [[ -n "${DEV_PAX_BUREAU_ENTRY_HOST:-}" ]]; then
             ./operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh \

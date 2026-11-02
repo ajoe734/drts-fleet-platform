@@ -1,11 +1,20 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { describe, expect, it, beforeEach } from "vitest";
 import * as jwt from "jsonwebtoken";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { PartnerUserIdentityLinkRepository } from "../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
+
+const { Reflector } = createRequire(
+  new URL("../../apps/api/package.json", import.meta.url),
+)("@nestjs/core");
 
 describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   let oidcService: OidcPkceService;
@@ -516,7 +525,308 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
   });
 
-  describe("6. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
+  describe("6. Partner canonical session issuance and readback", () => {
+    it("issues a durable partner session bound to the real entry version, verifies it and rejects revocation, invalid JWT and entry changes", async () => {
+      const repository = new IdentityRepository(); // in-memory fallback; no PG or live issuer
+      const auth = new JwtAuthService(repository, tenantPartnerService);
+      const service = new OidcPkceService(auth, tenantPartnerService);
+      const code = "partner_canonical_valid_code";
+      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      await (service as any).partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: sub,
+      });
+      const login = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const command = {
+        provider: "oidc" as const,
+        code,
+        state: login.state,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+        partnerId: "yuhe-residence",
+      };
+      const session = await service.exchangePartnerCallbackSession(command, {
+        stateToken: login.stateToken,
+      });
+      const payload = auth.verify(session.accessToken)!;
+      const entry = tenantPartnerService.getPartnerEntry("yuhe-residence");
+      expect(payload).toMatchObject({
+        realm: "partner",
+        actorType: "partner_user",
+        partnerId: entry.entrySlug,
+        partnerEntrySlug: entry.entrySlug,
+        roles: ["partner_admin"],
+        scopes: ["partner:read", "partner:write"],
+        tokenVersion: Date.parse(entry.updatedAt),
+      });
+      expect(payload.sid).toBeTruthy();
+      expect(payload.jti).toBeTruthy();
+      expect(payload.auth_time).toBeGreaterThan(0);
+      expect(payload.acr).toBeTypeOf("string");
+      expect(payload.policyVersion).toBeTruthy();
+      expect(await repository.getSession(payload.sid!)).toMatchObject({
+        status: "active",
+        currentTokenId: payload.jti,
+        partnerEntrySlug: entry.entrySlug,
+        tokenVersion: payload.tokenVersion,
+      });
+      expect(await auth.verifyAccessToken(session.accessToken)).toMatchObject({
+        sid: payload.sid,
+        sub: payload.sub,
+      });
+      const controller = new AuthController(
+        auth,
+        tenantPartnerService,
+        {} as never,
+      );
+      const guard = new BootstrapAuthGuard(new Reflector(), auth);
+      const request = {
+        method: "GET",
+        url: "/api/auth/session",
+        headers: { authorization: `Bearer ${session.accessToken}` },
+        identity: null as ReturnType<
+          JwtAuthService["toRequestIdentity"]
+        > | null,
+      };
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => AuthController.prototype.getAuthSession,
+        getClass: () => AuthController,
+      } as never;
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(controller.getAuthSession(request.identity).data).toMatchObject({
+        active: true,
+        identity: {
+          realm: "partner",
+          actorType: "partner_user",
+          partnerEntrySlug: entry.entrySlug,
+          sessionId: payload.sid,
+        },
+      });
+      expect(
+        await auth.verifyAccessToken(`${session.accessToken}forged`),
+      ).toBeNull();
+      request.headers.authorization = `Bearer ${session.accessToken}forged`;
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: "JWT_INVALID",
+      });
+      request.headers.authorization = `Bearer ${session.accessToken}`;
+      // Mutate only the in-memory entry fixture; production verifier still
+      // calls getPartnerEntry and compares its real updatedAt fingerprint.
+      const entries = (
+        tenantPartnerService as unknown as {
+          partnerEntries: { entrySlug: string; updatedAt: string }[];
+        }
+      ).partnerEntries;
+      const storedEntry = entries.find(
+        (item) => item.entrySlug === entry.entrySlug,
+      )!;
+      const originalVersion = storedEntry.updatedAt;
+      storedEntry.updatedAt = new Date(
+        Date.parse(originalVersion) + 1000,
+      ).toISOString();
+      try {
+        expect(await auth.verifyAccessToken(session.accessToken)).toBeNull();
+      } finally {
+        storedEntry.updatedAt = originalVersion;
+      }
+      await auth.revokeCurrentSession(payload.sid!);
+      expect(await auth.verifyAccessToken(session.accessToken)).toBeNull();
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: "JWT_INVALID",
+      });
+    });
+
+    it("denies mismatched partner scope, wrong state and replay without minting a session", async () => {
+      const repo = new IdentityRepository();
+      const auth = new JwtAuthService(repo, tenantPartnerService);
+      const service = new OidcPkceService(auth, tenantPartnerService);
+      const login = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const base = {
+        provider: "oidc" as const,
+        code: "partner_canonical_valid_code",
+        state: login.state,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+      };
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, state: "wrong" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, partnerId: "other-entry" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, code: "invalid_code", partnerId: "yuhe-residence" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, partnerId: "yuhe-residence" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { message: expect.stringContaining("already been used") },
+        },
+      });
+
+      const expiredLogin = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const stateRecord = service.verifyStateToken(expiredLogin.stateToken)!;
+      const expiredToken = service.createSignedStateToken({
+        ...stateRecord,
+        expiresAt: Date.now() - 1,
+      });
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, state: expiredLogin.state, partnerId: "yuhe-residence" },
+          { stateToken: expiredToken },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { message: expect.stringContaining("invalid or expired") },
+        },
+      });
+    });
+  });
+
+  describe("7. Two existing partner entry links for one verified OIDC subject", () => {
+    it("issues separate durable canonical principals with stable linked subjects and keeps external-sub audit", async () => {
+      // In-memory repository only; production link resolution, OIDC callback,
+      // canonical JWT issuance, principal persistence and self reader are real.
+      // The PG UNIQUE(issuer, subject) constraint is not emulated here.
+      const repository = new IdentityRepository();
+      const auth = new JwtAuthService(repository, tenantPartnerService);
+      const links = new PartnerUserIdentityLinkRepository();
+      const auditEvents: Array<{
+        eventType: string;
+        subjectId: string | null;
+        actorId: string | null;
+      }> = [];
+      // Observe only the external audit sink; real OIDC and JWT behavior is
+      // exercised below, with an independent entry-scoped link repository.
+      const audit = {
+        recordEvent: (event: (typeof auditEvents)[number]) => {
+          auditEvents.push(event);
+        },
+      };
+      const service = new OidcPkceService(
+        auth,
+        tenantPartnerService,
+        audit as never,
+        links,
+      );
+      const code = "partner_two_entries_same_subject";
+      const externalSub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      const entries = ["yuhe-residence", "referral-demo-community"];
+      const linked = await Promise.all(
+        entries.map((entrySlug) =>
+          links.resolveOrCreate({ entrySlug, partnerUserRef: externalSub }),
+        ),
+      );
+      expect(linked[0]!.drtsPassengerId).not.toBe(linked[1]!.drtsPassengerId);
+      const controller = new AuthController(
+        auth,
+        tenantPartnerService,
+        {} as never,
+      );
+      const guard = new BootstrapAuthGuard(new Reflector(), auth);
+      const keys: string[] = [];
+      const issuers: string[] = [];
+      for (const [index, entrySlug] of entries.entries()) {
+        const entry = tenantPartnerService.getPartnerEntry(entrySlug!);
+        expect(entry).toMatchObject({ status: "active", activeFlag: true });
+        const login = service.generateLoginParameters("partner", {
+          partnerId: entrySlug,
+        });
+        const session = await service.exchangePartnerCallbackSession(
+          {
+            provider: "oidc",
+            code,
+            state: login.state,
+            callbackUrl: "http://localhost:3000/api/auth/callback",
+            partnerId: entrySlug,
+          },
+          { stateToken: login.stateToken },
+        );
+        const payload = auth.verify(session.accessToken)!;
+        const passengerId = linked[index]!.drtsPassengerId;
+        expect(payload).toMatchObject({
+          sub: passengerId,
+          principalId: passengerId,
+          partnerEntrySlug: entrySlug,
+          roles: ["partner_admin"],
+          scopes: ["partner:read", "partner:write"],
+          tokenVersion: Date.parse(entry.updatedAt),
+        });
+        expect(session.identity.actorId).toBe(passengerId);
+        expect(await auth.verifyAccessToken(session.accessToken)).toMatchObject(
+          {
+            sid: payload.sid,
+            sub: passengerId,
+          },
+        );
+        const principal = await repository.findPrincipalById(passengerId);
+        expect(principal).toMatchObject({
+          sourceRef: `jwt_principal:partner:${passengerId}`,
+          subject: passengerId,
+          status: "active",
+        });
+        keys.push(`${principal!.issuer}:${principal!.subject}`);
+        issuers.push(principal!.issuer);
+        const request = {
+          method: "GET",
+          url: "/api/auth/session",
+          headers: { authorization: `Bearer ${session.accessToken}` },
+          identity: null as ReturnType<
+            JwtAuthService["toRequestIdentity"]
+          > | null,
+        };
+        const context = {
+          switchToHttp: () => ({ getRequest: () => request }),
+          getHandler: () => AuthController.prototype.getAuthSession,
+          getClass: () => AuthController,
+        } as never;
+        expect(await guard.canActivate(context)).toBe(true);
+        expect(controller.getAuthSession(request.identity).data).toMatchObject({
+          active: true,
+          identity: { actorId: passengerId, partnerEntrySlug: entrySlug },
+        });
+        // Raw IdP subject remains the trusted link lookup and audit subject;
+        // it is not the canonical API-issued subject shared across entries.
+        expect(
+          (await links.find(entrySlug!, externalSub))?.drtsPassengerId,
+        ).toBe(passengerId);
+        expect(await repository.getSession(payload.sid!)).toMatchObject({
+          subject: passengerId,
+          principalId: passengerId,
+          partnerEntrySlug: entrySlug,
+        });
+        expect(auditEvents).toContainEqual(
+          expect.objectContaining({
+            eventType: "partner_oidc_session.issued",
+            subjectId: externalSub,
+            actorId: passengerId,
+          }),
+        );
+      }
+      expect(new Set(issuers).size).toBe(1);
+      expect(new Set(keys).size).toBe(2);
+    });
+  });
+
+  describe("8. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
     it("exchanges code with external OIDC token and userinfo endpoints via HTTP fetch and verifies JWT signature", async () => {
       const originalFetch = globalThis.fetch;
       const secret = "test_jwt_secret_key_32_characters_long_min!";

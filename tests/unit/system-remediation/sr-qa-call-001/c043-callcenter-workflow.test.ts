@@ -106,7 +106,7 @@ describe("C043: Callcenter Workflow & Order/Case Linking (SR-QA-CALL-001)", () =
       expect(reloaded.callbackTask?.linkedOrderId).toBe("order-test-9901");
     });
 
-    it("links a complaint case to the same call ID and verifies bidirectional correlation", () => {
+    it("links a complaint case to the same call ID and verifies bidirectional correlation", async () => {
       const { complaintService, callcenterService } = setupServices();
 
       const session = callcenterService.openCallSession({
@@ -132,7 +132,7 @@ describe("C043: Callcenter Workflow & Order/Case Linking (SR-QA-CALL-001)", () =
       expect(complaintCase.caseNo).toMatch(/^C-\d{8}-\d{6}$/);
 
       // Link the case to the call session
-      const linkedSession = callcenterService.linkCaseToCallSession(
+      const linkedSession = await callcenterService.linkCaseToCallSession(
         session.callId,
         complaintCase.caseNo,
         "req-c043-link-case",

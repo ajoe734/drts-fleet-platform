@@ -30,6 +30,7 @@ const intendedServices = [
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
   "drts-dev-passenger-app-web",
+  "drts-dev-agency-portal-web",
 ] as const;
 const optionalServices = ["drts-dev-scanner"] as const;
 const retiredService = "drts-passenger-web";
@@ -129,7 +130,7 @@ describe("retired Cloud Run service cleanup", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',

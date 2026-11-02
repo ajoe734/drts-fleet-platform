@@ -5,12 +5,21 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BookingWriteJournal,
+  NativeTransport,
+  futureTaipeiReservationIntents,
+  verifyOwnedReservationCancellation,
+  runOwnedRedispatchToSecond,
+  type ObjectData,
+  type CallOptions,
   hash,
   persistPrivateJson,
   requireFact,
   type BookingJournalContext,
   type BookingJournalSnapshot,
 } from "../../e2e/owned-referral-business-journey/protocol";
+
+import { parseOriginalUnknownBookingJournal } from "../../e2e/owned-referral-business-journey/original-journal-recovery";
+import { ownedSupplementalArtifactPaths } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
 
 const context: BookingJournalContext = {
   definitionSha: "a".repeat(40),
@@ -258,5 +267,531 @@ describe("new fee intent journal retains exact original business bytes", () => {
     await expect(
       journal.beforeSend(feeBody(), "replacement", async () => undefined),
     ).rejects.toThrow("one frozen booking send");
+  });
+});
+
+describe("exact scheduled booking custody", () => {
+  const scheduledAt = "2027-01-01T15:55:00.000Z";
+  const expected = {
+    ...context,
+    expectedScheduledAt: scheduledAt,
+    feeDisclosureVersion: "reservation-fee-version",
+  };
+  const body = (patch: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      command({
+        scheduledAt,
+        feeDisclosureVersion: expected.feeDisclosureVersion,
+        feeConfirmed: true,
+        ...patch,
+      }),
+      null,
+      2,
+    );
+
+  it.each(["reservation-1", "reservation-2", "redispatched"] as const)(
+    "retains all three original disk journals when %s loses its ACK",
+    async (unknownCase) => {
+      const directory = await mkdtemp(join(tmpdir(), "owned-three-journals-"));
+      const paths = ownedSupplementalArtifactPaths(directory).bookingJournals;
+      const originals = new Map<
+        string,
+        { body: string; idempotencyKey: string }
+      >();
+      try {
+        for (const name of Object.keys(paths) as (keyof typeof paths)[]) {
+          const scheduled =
+            name === "reservation-1"
+              ? scheduledAt
+              : name === "reservation-2"
+                ? "2027-01-01T16:05:00.000Z"
+                : undefined;
+          const binding = {
+            ...context,
+            feeDisclosureVersion: expected.feeDisclosureVersion,
+            ...(scheduled ? { expectedScheduledAt: scheduled } : {}),
+            quoteId: `quote-${name}`,
+          };
+          const key = `original-key-${name}`;
+          const raw = body({
+            scheduledAt: scheduled,
+            quoteId: binding.quoteId,
+            idempotencyKey: key,
+          });
+          originals.set(name, { body: raw, idempotencyKey: key });
+          const journal = new BookingWriteJournal(binding, (snapshot) =>
+            persistPrivateJson(paths[name], snapshot),
+          );
+          const sent = journal.beforeSend(raw, key, async () => {
+            expect(
+              JSON.parse(await readFile(paths[name], "utf8")),
+            ).toMatchObject({
+              state: "ack_unknown",
+              body: raw,
+              idempotencyKey: key,
+            });
+            if (name === unknownCase) throw new Error("hosted ACK lost");
+          });
+          if (name === unknownCase) {
+            await expect(sent).rejects.toThrow("hosted ACK lost");
+            await expect(
+              journal.beforeSend(raw, key, async () => undefined),
+            ).rejects.toThrow("one frozen booking send");
+          } else {
+            await sent;
+            await journal.acknowledge(`order-${name}`, binding.quoteId);
+          }
+        }
+        // A failure in any independent send cannot replace or erase its own
+        // journal or either sibling's exact original command and key.
+        for (const [name, file] of Object.entries(paths)) {
+          const original = originals.get(name)!;
+          const persisted = JSON.parse(await readFile(file, "utf8"));
+          expect(persisted).toMatchObject({
+            ...original,
+            state: name === unknownCase ? "ack_unknown" : "acknowledged",
+            bodySha256: hash(Buffer.from(original.body)),
+            quoteId: `quote-${name}`,
+          });
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+          if (name === unknownCase) expect(persisted.orderId).toBeUndefined();
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("persists each independent raw scheduled intent before send and retains unknown ACK", async () => {
+    const snapshots: BookingJournalSnapshot[] = [];
+    const first = new BookingWriteJournal(expected, async (s) => {
+      snapshots.push(s);
+    });
+    const second = new BookingWriteJournal(
+      { ...expected, expectedScheduledAt: "2027-01-01T16:05:00.000Z" },
+      async (s) => {
+        snapshots.push(s);
+      },
+    );
+    const raw = body();
+    await first.beforeSend(raw, "own-key-1", async () => {
+      expect(snapshots[0]?.body).toBe(raw);
+      expect(snapshots[0]?.state).toBe("ack_unknown");
+    });
+    await first.acknowledge("reservation-one", context.quoteId);
+    const other = body({
+      scheduledAt: "2027-01-01T16:05:00.000Z",
+      idempotencyKey: "own-key-2",
+    });
+    await expect(
+      second.beforeSend(other, "own-key-2", async () => {
+        throw new Error("lost ACK");
+      }),
+    ).rejects.toThrow("lost ACK");
+    expect(first.current).toMatchObject({
+      state: "acknowledged",
+      orderId: "reservation-one",
+      body: raw,
+    });
+    expect(second.current).toMatchObject({
+      state: "ack_unknown",
+      body: other,
+      idempotencyKey: "own-key-2",
+    });
+    await expect(
+      second.beforeSend(other, "own-key-2", async () => undefined),
+    ).rejects.toThrow("one frozen booking send");
+  });
+
+  it.each([
+    { scheduledAt: undefined },
+    { scheduledAt: "invalid" },
+    { scheduledAt: "2027-01-01T23:55:00+08:00" },
+    { scheduledAt: "2027-01-01T16:05:00.000Z" },
+    { quoteId: undefined },
+    { quoteId: "other" },
+    { entrySlug: "other" },
+    { partnerUserRef: "other" },
+    { passengerPhone: "0999999999" },
+    { idempotencyKey: "other" },
+    { feeConfirmed: false },
+    { feeConfirmed: undefined },
+    { feeDisclosureVersion: "other" },
+  ])(
+    "rejects changed scheduled/subject/quote/key/fee intent before persistence %#",
+    async (patch) => {
+      const persist = vi.fn(),
+        send = vi.fn();
+      await expect(
+        new BookingWriteJournal(expected, persist).beforeSend(
+          body(patch),
+          "own-key-1",
+          send,
+        ),
+      ).rejects.toThrow();
+      expect(persist).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { expectedScheduledAt: "2027-02-30T15:55:00.000Z" },
+    { expectedScheduledAt: "invalid" },
+    { quoteId: "" },
+    { feeDisclosureVersion: undefined },
+  ])(
+    "does not turn an invalid expected context into a scheduled bypass %#",
+    async (patch) => {
+      const persist = vi.fn(),
+        send = vi.fn();
+      const invalid = { ...expected, ...patch };
+      await expect(
+        new BookingWriteJournal(
+          invalid as BookingJournalContext,
+          persist,
+        ).beforeSend(
+          body({
+            scheduledAt: invalid.expectedScheduledAt,
+            quoteId: invalid.quoteId,
+          }),
+          "own-key-1",
+          send,
+        ),
+      ).rejects.toThrow();
+      expect(persist).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("reservation orchestration through public ports", () => {
+  it("uses future Taipei 23:55 and next 00:05 with explicit offsets across UTC year boundary", () => {
+    expect(
+      futureTaipeiReservationIntents(Date.parse("2026-12-29T20:00:00Z")),
+    ).toEqual(["2027-01-01T23:55:00+08:00", "2027-01-02T00:05:00+08:00"]);
+  });
+  it.each([
+    "open",
+    "closed",
+    "mismatched-order",
+    "mismatched-quote",
+    "bad-ACK",
+  ])(
+    "binds real before-window -> original cancel -> canonical terminal readback (%s)",
+    async (scenario) => {
+      const intendedInput = futureTaipeiReservationIntents()[0]!;
+      const scheduled = new Date(intendedInput).toISOString();
+      const expected = {
+        ...context,
+        expectedScheduledAt: scheduled,
+        feeDisclosureVersion: "fee-reservation",
+      };
+      const journal = new BookingWriteJournal(expected, async () => undefined);
+      await journal.beforeSend(
+        JSON.stringify(
+          command({
+            scheduledAt: scheduled,
+            feeDisclosureVersion: "fee-reservation",
+            feeConfirmed: true,
+          }),
+        ),
+        "own-key-1",
+        async () => undefined,
+      );
+      await journal.acknowledge("reservation", context.quoteId);
+      const cutoff = new Date(
+        Date.parse(scheduled) - 30 * 60_000,
+      ).toISOString();
+      const events: string[] = [];
+      const order = {
+        orderId: scenario === "mismatched-order" ? "foreign" : "reservation",
+        status: "created",
+        reservationWindowStart: scheduled,
+        cancelableUntil: cutoff,
+        referralPassengerLifecycle: { quote: { quoteId: context.quoteId } },
+      };
+      let terminal = false;
+      const run = verifyOwnedReservationCancellation({
+        intendedInput,
+        journal,
+        orderId: "reservation",
+        quote: {
+          quoteId:
+            scenario === "mismatched-quote" ? "foreign" : context.quoteId,
+          requestedScheduledAt: scheduled,
+          timingMode: "scheduled",
+        },
+        readOrder: async () => {
+          events.push("read");
+          return terminal
+            ? {
+                ...order,
+                status: "cancelled",
+                cancelledAt: "2026-10-27T00:00:00Z",
+              }
+            : order;
+        },
+        readWindow: async () => ({
+          canCancel: scenario !== "closed",
+          cancelableUntil: cutoff,
+        }),
+        cancel: async () => {
+          events.push("cancel");
+          terminal = true;
+          return {
+            orderId: scenario === "bad-ACK" ? "foreign" : "reservation",
+            status: "cancelled",
+            cancelledAt: "2026-10-27T00:00:00Z",
+          };
+        },
+        persist: async (facts) => {
+          events.push(facts.terminal ? "persist-terminal" : "persist-before");
+        },
+      });
+      if (scenario === "open") {
+        await run;
+        expect(events).toEqual([
+          "read",
+          "persist-before",
+          "cancel",
+          "read",
+          "persist-terminal",
+        ]);
+      } else {
+        await expect(run).rejects.toThrow();
+        expect(events).not.toContain("persist-terminal");
+        if (scenario !== "bad-ACK") expect(events).not.toContain("cancel");
+      }
+    },
+  );
+});
+
+describe("true redispatch orchestration and independent Driver actors", () => {
+  it.each([
+    "normal",
+    "second-ineligible",
+    "old-task-not-cancelled",
+    "wrong-second-actor",
+    "wrong-completed-task",
+  ])(
+    "uses actual redispatch command/guard and separate task readbacks (%s)",
+    async (scenario) => {
+      const first = { driverId: "first-driver", vehicleId: "first-vehicle" };
+      const second = { driverId: "second-driver", vehicleId: "second-vehicle" };
+      const commands: { path: string; options: CallOptions | undefined }[] = [];
+      const firstTask = {
+        taskId: "first-task",
+        assignmentId: "first-assignment",
+        dispatchJobId: "job-1",
+        orderId: "order",
+        ...first,
+        status: "pending_acceptance",
+      };
+      const secondTask = {
+        taskId: "second-task",
+        assignmentId: "second-assignment",
+        dispatchJobId: "job-2",
+        orderId: "order",
+        ...second,
+        status: "pending_acceptance",
+      };
+      let redispatched = false;
+      const ops = async (
+        path: string,
+        options?: CallOptions,
+      ): Promise<ObjectData> => {
+        commands.push({ path, options });
+        if (path.includes("/candidates"))
+          return {
+            items: [first, second].map((pair) => ({
+              ...pair,
+              serviceBuckets: ["business_dispatch"],
+              eligibilityDecision:
+                scenario === "second-ineligible" && pair === second
+                  ? "ineligible"
+                  : "eligible",
+              etaMinutes: 1,
+              hardReasonCodes: [],
+            })),
+          };
+        if (path.endsWith("/redispatch")) {
+          redispatched = true;
+          return { dispatchJobId: "job-2" };
+        }
+        if (path.endsWith("/dispatch")) return { dispatchJobId: "job-1" };
+        if (path === "/dispatch/assign")
+          return redispatched ? secondTask : firstTask;
+        if (path.endsWith("/dispatch-trace")) return { items: [] }; // instance memory absence is qualified, never a PG/global proof
+        throw new Error("unexpected path");
+      };
+      const firstDriver = vi.fn(async () => ({
+        ...firstTask,
+        status:
+          redispatched && scenario !== "old-task-not-cancelled"
+            ? "cancelled"
+            : "pending_acceptance",
+      }));
+      const secondDriver = vi.fn(async () => ({
+        ...secondTask,
+        driverId:
+          scenario === "wrong-second-actor" ? "first-driver" : second.driverId,
+      }));
+      const persist = vi.fn(async () => undefined);
+      const complete = vi.fn(async () => ({
+        ...secondTask,
+        taskId:
+          scenario === "wrong-completed-task"
+            ? "foreign-task"
+            : secondTask.taskId,
+        status: "completed",
+      }));
+      const run = runOwnedRedispatchToSecond({
+        orderId: "order",
+        nonce: "own-rd",
+        first,
+        second,
+        ops,
+        firstDriver,
+        secondDriver,
+        persist,
+        completeSecond: complete,
+      });
+      if (scenario === "normal") {
+        expect(await run).toMatchObject({
+          traceObservedRedispatchCount: 0,
+          completedTask: { driverId: second.driverId },
+        });
+        expect(firstDriver).toHaveBeenCalledWith(
+          "/api/driver/tasks/first-task",
+        );
+        expect(secondDriver).toHaveBeenCalledWith(
+          "/api/driver/tasks/second-task",
+        );
+        expect(
+          commands.find((c) => c.path.endsWith("/redispatch"))?.options,
+        ).toMatchObject({
+          method: "POST",
+          body: {
+            expectedAssignmentVersion: 1,
+            reasonCode: "synthetic_owned_second_supply",
+            idempotencyKey: "own-rd-redispatch",
+          },
+          headers: { "Idempotency-Key": "own-rd-redispatch" },
+        });
+        expect(persist).toHaveBeenCalledTimes(2);
+      } else {
+        await expect(run).rejects.toThrow();
+        if (scenario !== "wrong-completed-task")
+          expect(complete).not.toHaveBeenCalled();
+      }
+      expect(commands.some((c) => c.path.includes("reassign_driver"))).toBe(
+        false,
+      );
+      if (scenario === "second-ineligible")
+        expect(commands.some((c) => c.path.endsWith("/redispatch"))).toBe(
+          false,
+        );
+    },
+  );
+});
+
+describe("two owned Driver transports keep actor authority separate", () => {
+  it("uses each original actor token for its own task and binding revocation", async () => {
+    const requests: { url: string; auth: string | null; body: unknown }[] = [];
+    const fetcher = (async (url, init) => {
+      requests.push({
+        url: String(url),
+        auth: new Headers(init?.headers).get("authorization"),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, data: { accepted: true } }),
+        {
+          status: 200,
+          headers: { "x-drts-candidate-sha": context.runtimeSha },
+        },
+      );
+    }) as typeof fetch;
+    const origins = {
+      api: "https://api.example.test",
+      admin: "https://admin.example.test",
+      ops: "https://ops.example.test",
+      fleet: "https://fleet.example.test",
+      referral: "https://referral.example.test",
+    };
+    const first = new NativeTransport(origins, context.runtimeSha, {}, fetcher);
+    const second = new NativeTransport(
+      origins,
+      context.runtimeSha,
+      {},
+      fetcher,
+    );
+    first.setSession("driver", "first-private-token");
+    second.setSession("driver", "second-private-token");
+    await first.call("driver", "/api/driver/tasks/first");
+    await second.call("driver", "/api/driver/tasks/second");
+    for (const [transport, bindingId, deviceId] of [
+      [first, "first-binding", "first-device"],
+      [second, "second-binding", "second-device"],
+    ] as const)
+      await transport.call("driver", "/api/auth/driver/device/revoke", {
+        method: "POST",
+        body: { bindingId, deviceId },
+      });
+    expect(requests.map((r) => r.auth)).toEqual([
+      "Bearer first-private-token",
+      "Bearer second-private-token",
+      "Bearer first-private-token",
+      "Bearer second-private-token",
+    ]);
+    expect(requests.slice(2).map((r) => r.body)).toEqual([
+      { bindingId: "first-binding", deviceId: "first-device" },
+      { bindingId: "second-binding", deviceId: "second-device" },
+    ]);
+  });
+});
+
+describe("historical recovery remains immediate and immutable", () => {
+  it("does not recover a new scheduled unknown ACK even with an otherwise matching test binding", async () => {
+    const expected = {
+      ...context,
+      nonce: "owned-referral-123-new-reservation",
+      expectedScheduledAt: "2027-01-01T15:55:00.000Z",
+      feeDisclosureVersion: "fee-reservation",
+    };
+    const journal = new BookingWriteJournal(expected, async () => undefined);
+    await expect(
+      journal.beforeSend(
+        JSON.stringify(
+          command({
+            scheduledAt: expected.expectedScheduledAt,
+            feeDisclosureVersion: expected.feeDisclosureVersion,
+            feeConfirmed: true,
+          }),
+        ),
+        "own-key-1",
+        async () => {
+          throw new Error("lost ACK");
+        },
+      ),
+    ).rejects.toThrow("lost ACK");
+    const snapshot = journal.current!;
+    expect(() =>
+      parseOriginalUnknownBookingJournal(snapshot, expected.runtimeSha, {
+        originalRun: 123,
+        definitionSha: expected.definitionSha,
+        runtimeSha: expected.runtimeSha,
+        entrySlug: expected.entrySlug,
+        partnerUserRef: expected.partnerUserRef,
+        quoteId: expected.quoteId,
+        bodySha256: snapshot.bodySha256,
+        keySha256: hash(Buffer.from(snapshot.idempotencyKey)),
+      }),
+    ).toThrow("original exact immediate business command required");
+    expect(journal.current).toMatchObject({
+      state: "ack_unknown",
+      body: snapshot.body,
+      idempotencyKey: "own-key-1",
+    });
   });
 });

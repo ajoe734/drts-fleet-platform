@@ -52,6 +52,24 @@ round_four() {
 " "$1"
 }
 
+oracle_taipei_date() {
+  node -e '
+    const iso = process.argv[1];
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+      process.exit(1);
+    }
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d);
+    const get = (t) => parts.find((p) => p.type === t).value;
+    process.stdout.write(`${get("year")}-${get("month")}-${get("day")}`);
+  ' "$1"
+}
+
 http_call() {
   local method="$1" path="$2" req_file="${3:-}"
 
@@ -155,9 +173,9 @@ run_scenario() {
   local ACTUAL_DATES_INLINE="$(echo "$UNIQUE_SERVICE_DATES" | tr '\n' ',' | sed 's/,$//')"
   assert_equals "UNIQUE_SERVICE_DATES" "$EXPECTED_UNIQUE_DATES" "$ACTUAL_DATES_INLINE"
 
-  export APP_REAL_DATE="${APP_CREATED_AT:0:10}"
-  export PHONE_REAL_DATE="${PHONE_CREATED_AT:0:10}"
-  export PORTAL_REAL_DATE="${PORTAL_WINDOW_START:0:10}"
+  export APP_REAL_DATE="$(oracle_taipei_date "$APP_CREATED_AT")"
+  export PHONE_REAL_DATE="$(oracle_taipei_date "$PHONE_CREATED_AT")"
+  export PORTAL_REAL_DATE="$(oracle_taipei_date "$PORTAL_WINDOW_START")"
   export TMP_DIR="$(mktemp -d)"
 
   aggregate_and_assert_daily_records "$UNIQUE_SERVICE_DATES" "$APP_ORDER_ID" "$PHONE_ORDER_ID" "$PORTAL_ORDER_ID" "$E2E_SEED_TENANT_ID" "$name"
@@ -179,64 +197,78 @@ run_scenario() {
 }
 
 
-# daytime
+# daytime (12:00Z = 20:00 Asia/Taipei on 2026-09-15)
 run_scenario "Daytime" \
   "2026-09-15T12:00:05Z" "2026-09-15T12:00:10Z" "2026-09-15T12:30:00Z" \
   "2026-09-15T12:05:00Z" "2026-09-15T12:15:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
   '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
   "2026-09-15"
-# 23:29:59 portal crosses day (Wait, 23:29:59 portal is 23:59:59. It's same month/day.)
+# post-16:00Z Taipei next day (19:20Z on 2026-10-25 = 03:20 Asia/Taipei on 2026-10-26)
+run_scenario "post-16:00Z Taipei next day" \
+  "2026-10-25T19:20:05Z" "2026-10-25T19:20:10Z" "2026-10-25T19:50:00Z" \
+  "2026-10-25T19:25:00Z" "2026-10-25T19:30:00Z" \
+  '[{"periodMonth": "2026-10", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-10-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-10-26"
+# Taipei 23:29:59 (15:29:59Z): portal at Taipei 23:59:59 (15:59:59Z) stays on same Taipei day/month
 run_scenario "23:29:59" \
-  "2026-09-15T23:29:59Z" "2026-09-15T23:30:05Z" "2026-09-15T23:59:59Z" \
-  "2026-09-15T23:45:00Z" "2026-09-15T23:50:00Z" \
+  "2026-09-15T15:29:59Z" "2026-09-15T15:30:05Z" "2026-09-15T15:59:59Z" \
+  "2026-09-15T15:45:00Z" "2026-09-15T15:50:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
   '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
   "2026-09-15"
-# 23:30:00 portal crosses day
+# Taipei 23:30:00 (15:30:00Z): portal at Taipei 00:00:00 (16:00:00Z) crosses into next Taipei day
 run_scenario "23:30:00" \
-  "2026-09-15T23:30:00Z" "2026-09-15T23:30:05Z" "2026-09-16T00:00:00Z" \
-  "2026-09-15T23:45:00Z" "2026-09-15T23:50:00Z" \
+  "2026-09-15T15:30:00Z" "2026-09-15T15:30:05Z" "2026-09-15T16:00:00Z" \
+  "2026-09-15T15:45:00Z" "2026-09-15T15:50:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
   '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
   "2026-09-15,2026-09-16"
-# same-month midnight (App at 23:59:59, Phone at 00:00:01 next day, Portal 00:29:59)
+# same-month Taipei midnight (App at Taipei 23:59:59 = 15:59:59Z, Phone at Taipei 00:00:01 = 16:00:01Z, Portal at Taipei 00:29:59 = 16:29:59Z)
 run_scenario "same-month midnight" \
-  "2026-09-15T23:59:59Z" "2026-09-16T00:00:01Z" "2026-09-16T00:29:59Z" \
-  "2026-09-16T00:05:00Z" "2026-09-16T00:10:00Z" \
+  "2026-09-15T15:59:59Z" "2026-09-15T16:00:01Z" "2026-09-15T16:29:59Z" \
+  "2026-09-15T16:05:00Z" "2026-09-15T16:10:00Z" \
   '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
   '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
   "2026-09-15,2026-09-16"
-# both orders next month (App/Phone on Oct 1, Portal on Oct 1)
+# explicit +08:00 offset Taipei midnight boundary
+run_scenario "explicit +08:00 offset midnight" \
+  "2026-09-15T23:59:59+08:00" "2026-09-16T00:00:01+08:00" "2026-09-16T00:29:59+08:00" \
+  "2026-09-16T00:05:00+08:00" "2026-09-16T00:10:00+08:00" \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15,2026-09-16"
+# both orders next month in Taipei (2026-09-30T16:00:01Z = Taipei 2026-10-01 00:00:01)
 run_scenario "both orders next month" \
-  "2026-10-01T00:00:01Z" "2026-10-01T00:00:02Z" "2026-10-01T00:29:59Z" \
-  "2026-10-01T00:05:00Z" "2026-10-01T00:10:00Z" \
+  "2026-09-30T16:00:01Z" "2026-09-30T16:00:02Z" "2026-09-30T16:29:59Z" \
+  "2026-09-30T16:05:00Z" "2026-09-30T16:10:00Z" \
   '[{"periodMonth": "2026-10", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
   '{"from": "2026-10-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
   "2026-10-01"
-# split-order month/year
+# split-order Taipei month/year (App at Taipei 2026-12-31 23:59:59 = 15:59:59Z; Phone/Portal at Taipei 2027-01-01 00:00:01 / 00:29:59 = 16:00:01Z / 16:29:59Z)
 run_scenario "split-order month/year" \
-  "2026-12-31T23:59:59Z" "2027-01-01T00:00:01Z" "2027-01-01T00:29:59Z" \
-  "2027-01-01T00:05:00Z" "2027-01-01T00:10:00Z" \
+  "2026-12-31T15:59:59Z" "2026-12-31T16:00:01Z" "2026-12-31T16:29:59Z" \
+  "2026-12-31T16:05:00Z" "2026-12-31T16:10:00Z" \
   '['\
 '{"periodMonth": "2026-12", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 1, "cancelledOrderCount": 0, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}},'\
 '{"periodMonth": "2027-01", "demandRequestCount": 1, "actualDispatchCount": 1, "completedTripCount": 0, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 0, "validSnapshotCount": 0, "expectedSnapshotCount": 8928, "snapshotCoverageRate": 0, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}'\
 ']' \
   '{"from": "2026-12-01", "to": "2027-01-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 17856, "snapshotCoverageRate": 0.0002, "complaintCount": 1, "complaintsByCategory": {"no_arrival": 1}}' \
   "2026-12-31,2027-01-01"
-# one complaint crossing
+# one complaint crossing Taipei month boundary
 run_scenario "one/both complaints crossing (one crossing)" \
-  "2026-09-30T23:30:00Z" "2026-09-30T23:30:05Z" "2026-10-01T00:00:00Z" \
-  "2026-09-30T23:50:00Z" "2026-10-01T00:10:00Z" \
+  "2026-09-30T15:30:00Z" "2026-09-30T15:30:05Z" "2026-09-30T16:00:00Z" \
+  "2026-09-30T15:50:00Z" "2026-09-30T16:10:00Z" \
   '['\
 '{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}'\
 ']' \
   '{"from": "2026-09-01", "to": "2026-10-31", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 1, "complaintsByCategory": {"late_arrival": 1}}' \
   "2026-09-30,2026-10-01"
-# both complaints crossing
+# both complaints crossing Taipei month boundary
 run_scenario "one/both complaints crossing (both crossing)" \
-  "2026-09-30T23:50:00Z" "2026-09-30T23:50:05Z" "2026-10-01T00:20:00Z" \
-  "2026-10-01T00:05:00Z" "2026-10-01T00:10:00Z" \
+  "2026-09-30T15:50:00Z" "2026-09-30T15:50:05Z" "2026-09-30T16:20:00Z" \
+  "2026-09-30T16:05:00Z" "2026-09-30T16:10:00Z" \
   '['\
 '{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 0, "complaintsByCategory": {}}'\
 ']' \
@@ -278,8 +310,6 @@ if ( run_scenario 'negative sparse category' \
   exit 1
 fi
 
-echo "All boundary tests passed!"
-
 # Incorrect/collapsed daily date oracle
 if ( run_scenario 'negative collapsed daily date oracle' \
   '2026-09-15T12:00:05Z' '2026-09-15T12:00:10Z' '2026-09-15T12:30:00Z' \
@@ -290,4 +320,18 @@ if ( run_scenario 'negative collapsed daily date oracle' \
   echo "FAIL: Negative control (incorrect daily date) passed unexpectedly!"
   exit 1
 fi
+
+# UTC substring date expectation after 16:00Z (Taipei next day) must fail
+if ( run_scenario 'negative UTC substring date after 16:00Z' \
+  '2026-09-15T19:20:00Z' '2026-09-15T19:20:05Z' '2026-09-15T19:50:00Z' \
+  '2026-09-15T19:25:00Z' '2026-09-15T19:30:00Z' \
+  '[{"periodMonth": "2026-09", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}]' \
+  '{"from": "2026-09-01", "to": "2026-09-30", "demandRequestCount": 2, "actualDispatchCount": 2, "completedTripCount": 1, "cancelledOrderCount": 1, "averageDispatchableVehicleCount": 1, "validSnapshotCount": 3, "expectedSnapshotCount": 8640, "snapshotCoverageRate": 0.0003, "complaintCount": 2, "complaintsByCategory": {"late_arrival": 1, "no_arrival": 1}}' \
+  "2026-09-15" ) >/dev/null 2>&1; then
+  echo "FAIL: Negative control (UTC substring date after 16:00Z) passed unexpectedly!"
+  exit 1
+fi
+
+echo "All boundary tests passed!"
+
 

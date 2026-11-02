@@ -8,6 +8,7 @@ import type {
 import { ApiRequestError } from "../../src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { resolveRouteAuthPolicy } from "../../src/common/auth/auth.policy";
+import { recordsToCsv } from "../../src/common/csv";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import type {
   ReportingFilingState,
@@ -39,14 +40,25 @@ function createExportRow(
   overrides: Partial<MultiTaxiTripOperationalExportRow> = {},
 ): MultiTaxiTripOperationalExportRow {
   return {
+    recordId: "mtr-order-001",
+    orderId: "order-001",
+    tripId: "trip-001",
     orderNoMasked: "MTX...01",
+    plateNo: "TAA-0001",
     plateNoMasked: "TA...01",
     reservedAt: "2026-07-23T01:00:00.000Z",
     pickupAt: "2026-07-23T01:10:00.000Z",
     dropoffAt: "2026-07-23T01:30:00.000Z",
+    routeSummary: null,
+    routeSource: "unavailable",
+    distanceMeters: null,
+    durationSeconds: null,
     payableFareMinor: 35000,
     actualFareMinor: 35000,
+    collectedFareMinor: null,
+    paymentStatus: "unknown",
     tollMinor: 0,
+    tollSource: "unavailable",
     currency: "NTD",
     farePolicyVersion: "fare-2026-07",
     chargingMode: "platform_quote",
@@ -355,5 +367,114 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
         service.renderReportArtifact(accepted.jobId, undefined, genericIdentity),
       );
     }
+  });
+
+  it("normalizes exact R11 agency scope filters (plateNo, orderNo, orderId, tripId, recordId) and renders statutory CSV columns", async () => {
+    const audit = new AuditNotificationService();
+    const { repository, state } = createPersistingRepository();
+    const service = new ReportingFilingService(audit, repository as never);
+    const agencyExporterIdentity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
+      actorType: "agency_user",
+      actorId: "agency-exporter-001",
+      principalId: "agency-exporter-001",
+      membershipId: "membership-agency-001",
+      realm: "agency",
+      tenantId: null,
+      agencyId: "agency-tpe",
+      roleFamilies: ["agency"],
+      roles: ["agency_exporter"],
+      scopes: ["agency:trip_records:read", "agency:trip_records:export"],
+      requestId: "req-agency-export-001",
+    };
+
+    const preview = service.previewMultiTaxiTripExport(
+      {
+        month: " 2026-07 ",
+        reservedFrom: "2026-07-01",
+        reservedTo: "2026-07-31",
+        plateNo: " BKR-2208 ",
+        orderNo: " MTX-001 ",
+        orderId: " order-001 ",
+        tripId: " trip-001 ",
+        recordId: " mtr-order-001 ",
+      },
+      1,
+      {
+        actorType: agencyExporterIdentity.actorType,
+        actorId: agencyExporterIdentity.actorId,
+        realm: agencyExporterIdentity.realm,
+        scopes: agencyExporterIdentity.scopes,
+        tenantId: null,
+        agencyId: "agency-tpe",
+      },
+      "req-agency-export-001",
+    );
+
+    expect(preview.scope).toEqual({
+      month: "2026-07",
+      reservedFrom: "2026-07-01",
+      reservedTo: "2026-07-31",
+      plateNo: "BKR-2208",
+      orderNo: "MTX-001",
+      orderId: "order-001",
+      tripId: "trip-001",
+      recordId: "mtr-order-001",
+    });
+
+    const row = createExportRow({
+      recordId: "mtr-order-001",
+      orderId: "order-001",
+      tripId: "trip-001",
+      plateNo: "BKR-2208",
+      routeSummary: "台北車站 → 松山機場",
+      routeSource: "pickup_dropoff_summary",
+      distanceMeters: 6800,
+      durationSeconds: 1200,
+      payableFareMinor: 35000,
+      actualFareMinor: 36000,
+      collectedFareMinor: 36000,
+      paymentStatus: "captured",
+      tollMinor: 4000,
+      tollSource: "driver_proof",
+    });
+
+    const accepted = await service.createMultiTaxiTripExportJobDurably(
+      {
+        scope: preview.scope,
+        purpose: "交通局 R11 法定欄位稽核匯出",
+        idempotencyKey: "agency-r11-statutory-csv-v1",
+      },
+      [row],
+      {
+        actorType: agencyExporterIdentity.actorType,
+        actorId: agencyExporterIdentity.actorId,
+        realm: agencyExporterIdentity.realm,
+        scopes: agencyExporterIdentity.scopes,
+        tenantId: null,
+        agencyId: "agency-tpe",
+      },
+      "req-agency-export-002",
+    );
+    await flushBackgroundWork();
+
+    const storedJob = state.reportJobs.find(
+      (candidate) => candidate.jobId === accepted.jobId,
+    );
+    expect(storedJob?.status).toBe("completed");
+    const csvContent = recordsToCsv(
+      (storedJob?.rows ?? []) as unknown as Record<string, unknown>[],
+    );
+    expect(csvContent).toContain(
+      '"recordId","orderId","tripId","orderNoMasked","plateNo","plateNoMasked","reservedAt","pickupAt","dropoffAt","routeSummary","routeSource","distanceMeters","durationSeconds","payableFareMinor","actualFareMinor","collectedFareMinor","paymentStatus","tollMinor","tollSource"',
+    );
+    expect(csvContent).toContain("BKR-2208");
+    expect(csvContent).toContain("台北車站 → 松山機場");
+    expect(csvContent).toContain("pickup_dropoff_summary");
+    expect(csvContent).toContain("6800");
+    expect(csvContent).toContain("36000");
+    expect(csvContent).toContain("captured");
+    expect(csvContent).toContain("4000");
+    expect(csvContent).toContain("driver_proof");
   });
 });

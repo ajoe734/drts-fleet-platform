@@ -659,5 +659,373 @@ def main_with_instance_profile():
     return 1 if document["readFailureCode"] else 0
 
 
+# Separate opt-in profile for one historical client fetch timeout. Nothing above
+# is widened: no status is assumed, and the window is the original job window,
+# not a known request instant. Every matching record is a cohort candidate only.
+OPS_DASHBOARD_PROFILE = "ops-dashboard-timeout-40647433932-v1"
+OPS_DEFINITION_SHA = "8992293d0ceff8aa76a0789e582b670a521ac80f"
+OPS_RUNTIME_SHA = "40bdf7d15da3d1e81ba9aa2bac22f8cc96a12073"
+OPS_SERVICE = "drts-dev-ops-console-web"
+OPS_REVISION = "drts-dev-ops-console-web-00159-qnh"
+OPS_START = "2026-10-28T07:01:35Z"
+OPS_END = "2026-10-28T07:03:28Z"
+OPS_DASHBOARD_PATH = "/dashboard"
+OPS_REQUEST_LOG = ADMIN_REQUEST_LOG
+OPS_CONTEXT_STREAMS = ADMIN_INSTANCE_STREAMS
+OPS_CLIENT_ABORT_MS = 15001
+OPS_ORIGINAL_FAILURE = {
+    "runId": 40647433932, "jobId": 122679411106,
+    "artifact": {
+        "path": "Owned40647433932-original-M899-runtime40b-artifact-12797978311.zip",
+        "bytes": 2549,
+        "sha256": "ed84c51e00be135e0bf38c8745c636c05940970295e798c64933e359e08f722f",
+    },
+    "sourceBinding": {
+        "path": "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+        "sha": OPS_DEFINITION_SHA, "lines": "400-408, 410-423",
+    },
+    "clientObservation": {
+        "stage": "ops:transport", "method": "GET", "path": OPS_DASHBOARD_PATH,
+        "nativeFailureClass": "TimeoutError", "nativeCauseCode": "UNKNOWN",
+        "requestAborted": True, "requestDurationMs": OPS_CLIENT_ABORT_MS,
+        "responseStatus": None,
+    },
+}
+
+
+# Both cases use the same bounded request/observed-context implementation.
+# These are repository constants, never user-supplied query/resource selectors.
+OPS_TIMEOUT_CASE = {
+    "service": OPS_SERVICE, "revision": OPS_REVISION,
+    "start": OPS_START, "end": OPS_END, "path": OPS_DASHBOARD_PATH,
+    "role": "ops-web", "route": "ops-dashboard",
+    "phase": "startup-served-ops-dashboard", "clientAbortMs": OPS_CLIENT_ABORT_MS,
+}
+FLEET_ROOT_TIMEOUT_PROFILE = "fleet-root-timeout-40891070459-v1"
+FLEET_ROOT_DEFINITION_SHA = "1e4c41bd16346c11bcbf3cfc1bcf4b9d238a0989"
+FLEET_ROOT_RUNTIME_SHA = "7796a2bebda614eb8e00f410b945532f5089d9d1"
+FLEET_ROOT_TIMEOUT_CASE = {
+    "service": FLEET_SERVICE,
+    "revision": "drts-dev-fleet-partner-portal-web-00162-x96",
+    "start": "2026-10-29T14:30:45Z", "end": "2026-10-29T14:31:30Z",
+    "path": "/", "role": "fleet-web", "route": "fleet-root",
+    "phase": "authenticated-fleet-root-before-first-supply",
+    "clientAbortMs": 15001,
+}
+FLEET_ROOT_ORIGINAL_FAILURE = {
+    "runId": 40891070459, "jobId": 123507711583,
+    "artifact": {
+        "id": 12904354527,
+        "path": "Owned40891070459-original-D1e4-runtime7796-artifact-12904354527.zip",
+        "bytes": 4412,
+        "sha256": "7604dc669774a0ea14ab0da58c5e66d2725c2cc9248c4e835d91ea0665d15caa",
+    },
+    "sourceBinding": {
+        "path": "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+        "sha": FLEET_ROOT_DEFINITION_SHA, "lines": "964-968",
+    },
+    "clientObservation": {
+        "stage": "fleet:transport", "method": "GET", "path": "/",
+        "nativeFailureClass": "TimeoutError", "nativeCauseCode": "UNKNOWN",
+        "requestAborted": True, "requestDurationMs": 15001,
+        "responseStatus": None,
+    },
+}
+
+
+def timeout_scope_query(case):
+    return (
+        'resource.type="cloud_run_revision" '
+        f'AND resource.labels.project_id="{PROJECT}" '
+        f'AND resource.labels.location="{REGION}" '
+        f'AND resource.labels.service_name="{case["service"]}" '
+        f'AND resource.labels.revision_name="{case["revision"]}" '
+        f'AND timestamp>="{case["start"]}" AND timestamp<="{case["end"]}"'
+    )
+
+
+def timeout_request_query(case):
+    # No status clause: a late 200/4xx/5xx and a record without status are all
+    # facts about this timeout. The path is anchored; its query is never read.
+    pattern = "^https?://[^/?#]+" + re.escape(case["path"]) + r"($|\?)"
+    return (
+        timeout_scope_query(case) + f" AND logName={json.dumps(OPS_REQUEST_LOG)} "
+        f'AND httpRequest.requestMethod="GET" '
+        f"AND httpRequest.requestUrl=~{json.dumps(pattern)}"
+    )
+
+
+def check_timeout_row(row, log_names, case):
+    require(isinstance(row, dict), "INVALID_LOG_ROW")
+    resource = row.get("resource")
+    require(isinstance(resource, dict), "INVALID_LOG_RESOURCE")
+    labels = resource.get("labels")
+    require(
+        resource.get("type") == "cloud_run_revision"
+        and isinstance(labels, dict)
+        and labels.get("project_id") == PROJECT
+        and labels.get("location") == REGION
+        and labels.get("service_name") == case["service"]
+        and labels.get("revision_name") == case["revision"],
+        "LOG_OUTSIDE_FIXED_RESOURCE",
+    )
+    timestamp = row.get("timestamp")
+    require(instant(case["start"]) <= instant(timestamp) <= instant(case["end"]),
+            "LOG_OUTSIDE_FIXED_WINDOW")
+    stream = next((name for name, value in log_names.items()
+                   if row.get("logName") == value), None)
+    require(stream is not None, "LOG_OUTSIDE_FIXED_STREAM")
+    trace = row.get("trace")
+    require(trace is None or (isinstance(trace, str) and TRACE.fullmatch(trace)),
+            "INVALID_LOG_TRACE")
+    severity = row.get("severity")
+    return {
+        "serviceRole": case["role"], "timestamp": timestamp,
+        "severity": severity if isinstance(severity, str) and severity in SEVERITIES else "UNOBSERVED",
+        "traceFingerprint": hashlib.sha256(trace.encode()).hexdigest() if trace else None,
+    }, trace, stream
+
+
+def timeout_latency(request, client_abort_ms):
+    latency = request.get("latency")
+    if not (isinstance(latency, str)
+            and re.fullmatch(r"\d{1,4}(?:\.\d{1,9})?s", latency)):
+        return None, "UNOBSERVED"
+    # Only a recorded server latency is compared; the client duration is not.
+    at_or_above = float(latency[:-1]) * 1000 >= client_abort_ms
+    return latency, ("at-or-above-client-abort" if at_or_above
+                     else "below-client-abort")
+
+
+def project_timeout_request(row, case):
+    safe, trace, _stream = check_timeout_row(row, {"requests": OPS_REQUEST_LOG}, case)
+    request = row.get("httpRequest")
+    require(isinstance(request, dict), "MISSING_REQUEST_METADATA")
+    require(isinstance(request.get("requestUrl"), str), "INVALID_REQUEST_URL")
+    try:
+        url = urlsplit(request["requestUrl"])
+        require(url.scheme in {"http", "https"} and bool(url.hostname)
+                and url.username is None and url.password is None
+                and not url.fragment, "INVALID_REQUEST_URL")
+    except (TypeError, ValueError):
+        raise DiagnosticFailure("INVALID_REQUEST_URL") from None
+    require(request.get("requestMethod") == "GET" and url.path == case["path"],
+            "REQUEST_OUTSIDE_FIXED_ROUTE")
+    status = request.get("status")
+    require(status is None or (type(status) is int and 100 <= status <= 599),
+            "INVALID_REQUEST_STATUS")
+    latency, latency_class = timeout_latency(request, case["clientAbortMs"])
+    instance = admin_observed_instance(row)
+    safe.update({
+        "route": case["route"], "phase": case["phase"],
+        "method": "GET",
+        "status": status,
+        "responseObservation": ("status-recorded" if status is not None
+                                else "no-status-recorded"),
+        "statusClass": f"{status // 100}xx" if status is not None else "UNOBSERVED",
+        "latency": latency, "latencyVersusClientAbort": latency_class,
+        "requestPlatformReason": admin_request_reason(row),
+        "instanceFingerprint": (hashlib.sha256(instance.encode()).hexdigest()
+                                if instance else None),
+        "association": "window-route-cohort-only",
+    })
+    return safe, trace, instance
+
+
+def timeout_context_query(traces, instances, case):
+    require(bool(traces or instances)
+            and len(traces) < REQUEST_LIMIT and len(instances) < REQUEST_LIMIT
+            and all(isinstance(value, str) and TRACE.fullmatch(value) for value in traces)
+            and all(isinstance(value, str) and ADMIN_INSTANCE_ID.fullmatch(value)
+                    for value in instances), "INVALID_OBSERVED_CORRELATION")
+    # Only values actually observed on the fixed request rows, serialized.
+    keys = ["trace=" + json.dumps(value) for value in sorted(traces)]
+    keys += ["labels.instanceId=" + json.dumps(value) for value in sorted(instances)]
+    streams = " OR ".join("logName=" + json.dumps(value)
+                          for value in OPS_CONTEXT_STREAMS.values())
+    return timeout_scope_query(case) + f" AND ({' OR '.join(keys)}) AND ({streams})"
+
+
+def project_timeout_context(row, traces, instances, case):
+    safe, trace, stream = check_timeout_row(row, OPS_CONTEXT_STREAMS, case)
+    instance = admin_observed_instance(row)
+    same_trace = bool(trace) and trace in traces
+    same_instance = instance is not None and instance in instances
+    require(same_trace or same_instance, "LOG_OUTSIDE_OBSERVED_REQUEST_CORRELATION")
+    # Structured error fields only; no message, stack or Admin signature.
+    safe.update(safe_error_facts(row))
+    safe.update({
+        "containerStream": stream,
+        "instanceFingerprint": (hashlib.sha256(instance.encode()).hexdigest()
+                                if instance else None),
+        "sameObservedRequestTrace": same_trace,
+        "sameObservedRequestInstance": same_instance,
+        "association": ("observed-request-trace" if same_trace
+                        else "same-instance-context-only"),
+    })
+    return safe
+
+
+# Retain the existing Ops callable contract and exact output schema.
+def ops_scope_query():
+    return timeout_scope_query(OPS_TIMEOUT_CASE)
+
+
+def ops_request_query():
+    return timeout_request_query(OPS_TIMEOUT_CASE)
+
+
+def check_ops_row(row, log_names):
+    return check_timeout_row(row, log_names, OPS_TIMEOUT_CASE)
+
+
+def ops_latency(request):
+    return timeout_latency(request, OPS_CLIENT_ABORT_MS)
+
+
+def project_ops_request(row):
+    return project_timeout_request(row, OPS_TIMEOUT_CASE)
+
+
+def ops_context_query(traces, instances):
+    return timeout_context_query(traces, instances, OPS_TIMEOUT_CASE)
+
+
+def project_ops_context(row, traces, instances):
+    return project_timeout_context(row, traces, instances, OPS_TIMEOUT_CASE)
+
+
+def collect_ops_dashboard_timeout(environ, runner=subprocess.run):
+    document = {
+        "schema": "dev-ops-dashboard-timeout-readback-v1",
+        "profile": OPS_DASHBOARD_PROFILE,
+        "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "failedSourceSha": OPS_DEFINITION_SHA, "runtimeSha": OPS_RUNTIME_SHA,
+        "project": PROJECT, "region": REGION,
+        "service": OPS_SERVICE, "revision": OPS_REVISION,
+        "start": OPS_START, "end": OPS_END,
+        "method": "GET", "path": OPS_DASHBOARD_PATH,
+        "originalFailure": OPS_ORIGINAL_FAILURE,
+        "definitionSha": None, "readStatus": "unobserved", "readFailureCode": None,
+        "requests": [], "candidateStatus": "unobserved",
+        "responseObservations": {"status-recorded": 0, "no-status-recorded": 0},
+        "context": [], "correlationStatus": "UNOBSERVED", "queryCount": 0,
+        "qualification": (
+            "Historical Ops GET /dashboard client TimeoutError only: no response "
+            "status was received by the client. The window is the original job "
+            "window, not a known request instant, so every matching record is a "
+            "window/route cohort candidate and not proven to be the original "
+            "caller. A recorded late status or latency does not identify a cold "
+            "start, network, SSR, SQL, metadata or auth cause. Missing records, "
+            "missing status and unclassified messages remain UNKNOWN. No replay, "
+            "retry, deadline change, authority change, repair or PASS is implied."
+        ),
+    }
+    return collect_timeout(environ, document, OPS_TIMEOUT_CASE, runner)
+
+
+def collect_fleet_root_timeout(environ, runner=subprocess.run):
+    case = FLEET_ROOT_TIMEOUT_CASE
+    document = {
+        "schema": "dev-fleet-root-timeout-readback-v1",
+        "profile": FLEET_ROOT_TIMEOUT_PROFILE,
+        "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "failedSourceSha": FLEET_ROOT_DEFINITION_SHA,
+        "runtimeSha": FLEET_ROOT_RUNTIME_SHA,
+        "project": PROJECT, "region": REGION,
+        "service": case["service"], "revision": case["revision"],
+        "start": case["start"], "end": case["end"], "method": "GET", "path": "/",
+        "originalFailure": FLEET_ROOT_ORIGINAL_FAILURE,
+        "definitionSha": None, "readStatus": "unobserved", "readFailureCode": None,
+        "requests": [], "candidateStatus": "unobserved",
+        "responseObservations": {"status-recorded": 0, "no-status-recorded": 0},
+        "context": [], "correlationStatus": "UNOBSERVED", "queryCount": 0,
+        "qualification": (
+            "Original authenticated Fleet GET / fetch aborted before response headers "
+            "and before first supply/booking. The conservative fixed window is not "
+            "an exact request instant: all rows are window/route cohort candidates, "
+            "not proof of the original caller. Recorded status/latency and observed "
+            "trace or same-instance context do not identify a unique cause. "
+            "Missing rows/status/correlation and unclassified status reasons/startup "
+            "remain UNKNOWN; elapsed client time or absence is not cold-start proof. "
+            "Only closed structured error facts and existing exact platform reason "
+            "categories are projected; no free-text startup interpretation. "
+            "Original raw FAIL remains FAIL. No replay, warmup, retry, deadline "
+            "change, deployment, product repair or full-journey PASS is implied."
+        ),
+    }
+    return collect_timeout(environ, document, case, runner)
+
+
+def collect_timeout(environ, document, case, runner):
+    try:
+        definition = environ.get("EXPECTED_DEFINITION_SHA", "")
+        require(re.fullmatch(r"[a-f0-9]{40}", definition)
+                and definition == environ.get("GITHUB_SHA"),
+                "IMMUTABLE_DEFINITION_MISMATCH")
+        require(environ.get("DEV_GCP_PROJECT_ID") == PROJECT
+                and environ.get("DEV_GCP_REGION") == REGION, "DEV_TARGET_MISMATCH")
+        document["definitionSha"] = definition
+        document["queryCount"] += 1
+        requests = query_rows(timeout_request_query(case), REQUEST_LIMIT, runner)
+        traces, instances = set(), set()
+        for row in requests:
+            safe, trace, instance = project_timeout_request(row, case)
+            document["requests"].append(safe)
+            document["responseObservations"][safe["responseObservation"]] += 1
+            if trace:
+                traces.add(trace)
+            if instance:
+                instances.add(instance)
+        document["candidateStatus"] = (
+            "no-matching-request-records" if not requests
+            else "single-window-route-candidate" if len(requests) == 1
+            else "multiple-window-route-candidates"
+        )
+        if traces or instances:
+            document["queryCount"] += 1
+            rows = query_rows(timeout_context_query(traces, instances, case),
+                              CORRELATED_LIMIT, runner)
+            for row in rows:
+                document["context"].append(project_timeout_context(row, traces, instances, case))
+            document["correlationStatus"] = (
+                "observed-correlation-context" if rows else "no-matching-context"
+            )
+        document["readStatus"] = (
+            "request-metadata-observed" if requests else "no-matching-request-logs"
+        )
+    except DiagnosticFailure as error:
+        document["readFailureCode"] = str(error)
+    return document
+
+
+def main_with_ops_dashboard_profile():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=("fleet-original-v2", ADMIN_PROFILE,
+                                             ADMIN_INSTANCE_PROFILE,
+                                             OPS_DASHBOARD_PROFILE,
+                                             FLEET_ROOT_TIMEOUT_PROFILE),
+                        default="fleet-original-v2")
+    args = parser.parse_args()
+    if args.profile not in (OPS_DASHBOARD_PROFILE, FLEET_ROOT_TIMEOUT_PROFILE):
+        return main_with_instance_profile()
+    os.umask(0o077)
+    document = (collect_fleet_root_timeout(os.environ)
+                if args.profile == FLEET_ROOT_TIMEOUT_PROFILE
+                else collect_ops_dashboard_timeout(os.environ))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.output.with_suffix(".tmp")
+    temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
+    temporary.chmod(0o600)
+    os.replace(temporary, args.output)
+    print(json.dumps({
+        "readStatus": document["readStatus"],
+        "readFailureCode": document["readFailureCode"],
+        "requestCount": len(document["requests"]),
+    }))
+    return 1 if document["readFailureCode"] else 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main_with_instance_profile())
+    raise SystemExit(main_with_ops_dashboard_profile())
