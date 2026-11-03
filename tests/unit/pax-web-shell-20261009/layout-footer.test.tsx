@@ -5,9 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 import RootLayout from "../../../apps/passenger-app-web/app/layout";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/login" }));
-vi.mock("next/headers", () => ({
+// CI resolves the app's own next install; mock both paths, as the other
+// passenger app tests do for next/navigation.
+const requestHeaders = vi.hoisted(() => () => ({
   headers: async () => new Headers({ host: "ride.smarttransport.tw" }),
 }));
+vi.mock(
+  "../../../apps/passenger-app-web/node_modules/next/headers",
+  requestHeaders,
+);
+vi.mock("next/headers", requestHeaders);
 
 describe("Passenger shared customer footer", () => {
   it("renders the customer phone after page content without exposing the technical contact", async () => {
