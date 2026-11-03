@@ -14,15 +14,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-TW">
       <body>
-        <div
-          id="passenger-app-root"
-          style={{ width: "100%", maxWidth: "390px", margin: "0 auto" }}
-        >
+        <div id="passenger-app-root">
           <ReviewDemoProvider>
             <DemoBanner />
             {children}
           </ReviewDemoProvider>
           <footer
+            id="passenger-root-footer"
             aria-label={BOOK_T.supportPhone(PASSENGER_SUPPORT_PHONE)}
             style={{
               padding: "12px 16px 16px",

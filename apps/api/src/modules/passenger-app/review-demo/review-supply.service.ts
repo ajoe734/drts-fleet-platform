@@ -17,7 +17,7 @@ const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
 export const REVIEW_AUTHORIZATION_ID = AUTHORIZATION_ID;
 export const REVIEW_OPERATOR_ID = "review-synthetic-operator";
 /** Shown as the fleet on ride certificates (its legal name). */
-export const REVIEW_FLEET_NAME = "智行";
+export const REVIEW_FLEET_NAME = "智行車隊";
 export const REVIEW_SUPPLY = ["a", "b"].map((suffix, index) => ({
   driverId: `pax-review-driver-${suffix}`,
   vehicleId: `pax-review-vehicle-${suffix}`,
@@ -112,7 +112,7 @@ export class ReviewSupplyService {
       fleet.legalName !== REVIEW_FLEET_NAME ||
       fleet.displayName !== REVIEW_FLEET_NAME
     ) {
-      // Earlier preparation named it 虛構演練派遣業者（合成・非正式）.
+      // Earlier preparations named it 虛構演練派遣業者（合成・非正式） and 智行.
       fleet = await this.fleets.updateFleetPartner(fleet.fleetPartnerId, {
         legalName: REVIEW_FLEET_NAME,
         displayName: REVIEW_FLEET_NAME,

@@ -38,6 +38,7 @@ import {
 } from "../../lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
 import { ReceiptShareActions } from "./receipt-share-actions";
+import { P5Icon, P5Notice } from "../p5-ui";
 
 const ConnectionContext = React.createContext<{
   connectionState: "connecting" | "connected" | "disconnected";
@@ -114,6 +115,13 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Order numbers are `O-<uuid>`; the header shows its first block, the way
+ * the plan's header shows a short order number. */
+function shortOrderNo(orderNo: string) {
+  const match = /^O-([0-9a-f]{8})-[0-9a-f-]{27}$/i.exec(orderNo);
+  return match ? `O-${match[1]!.toUpperCase()}` : orderNo;
+}
+
 function TopChrome({
   token,
   status,
@@ -166,17 +174,28 @@ function TopChrome({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 13,
-              fontWeight: 700,
               flexShrink: 0,
             }}
           >
-            {t.Vehicle}
+            <P5Icon name="car" size={14} />
           </span>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>{t.AppTitle}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
+            {t.AppTitle}
+          </span>
           <span style={{ flex: 1 }} />
-          <span style={{ fontFamily: monoFont, fontSize: 10.5, opacity: 0.78 }}>
-            {order}
+          <span
+            title={order}
+            style={{
+              fontFamily: monoFont,
+              fontSize: 10.5,
+              opacity: 0.78,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+            }}
+          >
+            {shortOrderNo(order)}
           </span>
         </div>
         <div
@@ -521,10 +540,9 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           color: passengerChrome.muted,
         }}
       >
-        {positions?.targetLabel || t.PickupLabel}
         {positions?.targetLabel === "下車點"
-          ? fixture.dropoffLabel
-          : fixture.pickupLabel}
+          ? `${t.DropoffLabel}${fixture.dropoffLabel}`
+          : `${t.PickupLabel}${fixture.pickupLabel}`}
       </div>
       {_isFresh ? (
         <div
@@ -1860,22 +1878,7 @@ function SeatbeltNotice() {
 }
 
 function FooterNotice() {
-  return (
-    <div
-      style={{
-        margin: "auto 14px 14px",
-        paddingTop: 6,
-        fontSize: 10.5,
-        color: passengerChrome.dim,
-        textAlign: "center",
-        flexShrink: 0,
-      }}
-    >
-      {t.ReservationOnly}
-      <br />
-      {t.AuthoritativeContact}
-    </div>
-  );
+  return <P5Notice />;
 }
 
 function buttonStyle(kind: "primary" | "secondary" | "ghost", danger = false) {

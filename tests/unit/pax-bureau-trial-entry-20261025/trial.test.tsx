@@ -68,7 +68,7 @@ vi.mock("@drts/passenger-client", async (importOriginal) => ({
   },
 }));
 
-import { TrialRideControls } from "../../../apps/passenger-app-web/components/trial/trial-ride-controls";
+import { TrialAutoDriver } from "../../../apps/passenger-app-web/components/trial/trial-auto-driver";
 import { TrialEntry } from "../../../apps/passenger-app-web/components/trial/trial-entry";
 import { isTrialMode } from "../../../apps/passenger-app-web/lib/trial/store";
 
@@ -100,119 +100,93 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("TrialRideControls", () => {
+describe("TrialAutoDriver", () => {
   const ACTION_STATUS: Record<string, string | null> = {
     assign: "enroute_pickup",
-    arrive: "arrived_pickup",
     board: "on_trip",
-    complete: "completed",
     heartbeat: null,
   };
-  function rideStatus(status: string) {
-    // A stateful stand-in for the server: each action moves the ride and the
-    // heartbeat reports wherever it currently is, as the API does.
+  function server(status: string, refuse = false) {
+    // A stateful stand-in for the API: each action moves the ride and the
+    // heartbeat reports wherever it currently is.
     let current = status;
+    const actions: string[] = [];
     state.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === `/api/passenger-app/rides/${ORDER}`)
         return json({ data: { ride: { order: { status: current } } } });
-      const action = init?.method === "POST" ? url.split("/trial/")[1] : "";
-      const next = action ? ACTION_STATUS[action] : undefined;
+      const action = init?.method === "POST" ? url.split("/trial/")[1]! : "";
+      actions.push(action);
+      if (refuse)
+        return json(
+          { error: { code: "PASSENGER_TRIAL_TRIP_SUPPLY_BUSY" } },
+          409,
+        );
+      const next = ACTION_STATUS[action];
       if (next === undefined) return json({}, 404);
       if (next) current = next;
       return json({ data: { status: current } });
     });
+    return actions;
   }
+  const wait = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
-  it("renders nothing outside the trial", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  });
+
+  it("stays idle outside the trial", async () => {
     state.trial = false;
-    const { container } = render(<TrialRideControls orderId={ORDER} />);
+    const { container } = render(<TrialAutoDriver orderId={ORDER} />);
+    await wait(60_000);
     expect(container.innerHTML).toBe("");
     expect(state.fetch).not.toHaveBeenCalled();
   });
 
-  it("assigns a test driver to the passenger's own ride, then reports in", async () => {
-    rideStatus("ready_for_dispatch");
-    render(<TrialRideControls orderId={ORDER} />);
-    const assign = await screen.findByRole("button", { name: "派一台測試車" });
-    fireEvent.click(assign);
-    await screen.findByRole("button", { name: "讓司機立即抵達" });
+  it("dispatches the ride after a short wait and reports in, showing nothing", async () => {
+    const actions = server("ready_for_dispatch");
+    const { container } = render(<TrialAutoDriver orderId={ORDER} />);
+    await wait(0);
+    expect(actions).toEqual([]);
+    await wait(5_000);
+    expect(actions).toEqual(["assign"]);
     expect(state.fetch).toHaveBeenCalledWith(
       `/api/passenger-app/review-demo/rides/${ORDER}/trial/assign`,
       expect.objectContaining({ method: "POST" }),
     );
-    expect(screen.getByText(/測試司機已出發/)).toBeTruthy();
-    await waitFor(() =>
-      expect(state.fetch).toHaveBeenCalledWith(
-        `/api/passenger-app/review-demo/rides/${ORDER}/trial/heartbeat`,
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
+    await wait(5_000);
+    expect(actions).toEqual(["assign", "heartbeat"]);
+    expect(container.innerHTML).toBe("");
   });
 
-  it.each([
-    ["arrived_pickup", "我已上車", "board"],
-    ["on_trip", "立即抵達目的地", "complete"],
-  ])("offers the next driver step at %s", async (status, label, action) => {
-    rideStatus(status);
-    render(<TrialRideControls orderId={ORDER} />);
-    fireEvent.click(await screen.findByRole("button", { name: label }));
-    await waitFor(() =>
-      expect(state.fetch).toHaveBeenCalledWith(
-        `/api/passenger-app/review-demo/rides/${ORDER}/trial/${action}`,
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
+  it("boards the passenger a few seconds after the driver arrives", async () => {
+    const actions = server("arrived_pickup");
+    render(<TrialAutoDriver orderId={ORDER} />);
+    await wait(5_000);
+    expect(actions).toEqual(["heartbeat"]);
+    await wait(5_000);
+    expect(actions).toEqual(["heartbeat", "board"]);
+    // Riding, the driver keeps reporting in; the API ends the ride when the
+    // simulated drive reaches the destination.
+    await wait(10_000);
+    expect(actions).toEqual(["heartbeat", "board", "heartbeat"]);
   });
 
-  it("never drops a tap behind a pending heartbeat, nor lets it roll back", async () => {
-    let releaseHeartbeat: (response: Response) => void = () => {};
-    state.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === `/api/passenger-app/rides/${ORDER}`)
-        return json({
-          data: { ride: { order: { status: "arrived_pickup" } } },
-        });
-      if (url.endsWith("/trial/heartbeat"))
-        return new Promise<Response>((resolve) => {
-          releaseHeartbeat = resolve;
-        });
-      if (init?.method === "POST" && url.endsWith("/trial/board"))
-        return json({ data: { status: "on_trip" } });
-      return json({}, 404);
-    });
-    render(<TrialRideControls orderId={ORDER} />);
-    const board = await screen.findByRole("button", { name: "我已上車" });
-    await waitFor(() =>
-      expect(state.fetch).toHaveBeenCalledWith(
-        `/api/passenger-app/review-demo/rides/${ORDER}/trial/heartbeat`,
-        expect.anything(),
-      ),
-    );
-    fireEvent.click(board);
-    await screen.findByRole("button", { name: "立即抵達目的地" });
-    await act(async () => {
-      releaseHeartbeat(json({ data: { status: "arrived_pickup" } }));
-    });
-    expect(screen.getByRole("button", { name: "立即抵達目的地" })).toBeTruthy();
+  it("stops once the ride is finished", async () => {
+    const actions = server("completed");
+    render(<TrialAutoDriver orderId={ORDER} />);
+    await wait(60_000);
+    expect(actions).toEqual([]);
+    expect(state.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the finished state without further driver buttons", async () => {
-    rideStatus("completed");
-    render(<TrialRideControls orderId={ORDER} />);
-    await screen.findByText(/行程已完成/);
-    expect(screen.queryByRole("button")).toBeNull();
-  });
-
-  it("explains a busy test fleet instead of a generic failure", async () => {
-    state.fetch.mockImplementation(async (url: string, init?: RequestInit) =>
-      init?.method === "POST"
-        ? json({ error: { code: "PASSENGER_TRIAL_TRIP_SUPPLY_BUSY" } }, 409)
-        : json({ data: { ride: { order: { status: "ready_for_dispatch" } } } }),
-    );
-    render(<TrialRideControls orderId={ORDER} />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "派一台測試車" }),
-    );
-    await screen.findByText("測試車輛都在服務其他試用行程，請稍後再試。");
+  it("retries a busy test fleet after another wait", async () => {
+    const actions = server("ready_for_dispatch", true);
+    const { container } = render(<TrialAutoDriver orderId={ORDER} />);
+    await wait(5_000);
+    expect(actions).toEqual(["assign"]);
+    await wait(5_000);
+    expect(actions).toEqual(["assign", "assign"]);
+    expect(container.innerHTML).toBe("");
   });
 });
 
