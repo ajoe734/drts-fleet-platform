@@ -196,7 +196,9 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: grant-passenger-app-iap-invoker.sh"
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("serviceusage.services.enable");
     expect(
-      result.commands.some((c) => c.startsWith("beta services identity create")),
+      result.commands.some((c) =>
+        c.startsWith("beta services identity create"),
+      ),
     ).toBe(false);
     expect(
       result.commands.some((c) => c.includes("add-iam-policy-binding")),
@@ -274,7 +276,9 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: grant-passenger-app-iap-invoker.sh"
     );
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Could not resolve a numeric project number");
+    expect(result.stderr).toContain(
+      "Could not resolve a numeric project number",
+    );
     expect(
       result.commands.some((c) => c.includes("add-iam-policy-binding")),
     ).toBe(false);
@@ -337,7 +341,7 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: grant-passenger-app-iap-invoker.sh"
     expect(stepIndex).toBeGreaterThan(enforceIndex);
 
     expect(source).toContain(
-      'env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"',
+      'env_vars="${env_vars}@PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"',
     );
   });
 });
