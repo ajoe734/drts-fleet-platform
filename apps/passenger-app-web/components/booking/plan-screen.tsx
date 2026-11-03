@@ -179,6 +179,7 @@ export function PlanScreen({
           }}
         >
           <div
+            className="pax-scroll"
             style={{
               flex: 1,
               minHeight: 0,

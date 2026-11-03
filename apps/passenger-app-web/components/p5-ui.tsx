@@ -121,6 +121,7 @@ export function P5Phone({
         <span style={{ fontFamily: P5.mono }}>5G ▮▮▮</span>
       </div>
       <div
+        className="pax-scroll"
         style={{
           flex: 1,
           overflowY: "auto",
