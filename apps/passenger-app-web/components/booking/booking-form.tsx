@@ -213,6 +213,7 @@ export function BookingForm({
                 })
               }
               enableServiceabilityPreview={false}
+              technicalDetails={false}
               {...mapSlot}
             />
           </>
@@ -235,6 +236,7 @@ export function BookingForm({
               })
             }
             enableServiceabilityPreview={false}
+            technicalDetails={false}
             {...mapSlot}
           />
         )}

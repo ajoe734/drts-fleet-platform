@@ -560,6 +560,12 @@ export interface AddressMapPickerProps<
   providerHealth?: AddressProviderHealth | null;
   /** Require a manual-override reason before a manual pin is accepted (default true). */
   requireManualReason?: boolean;
+  /**
+   * Show the operator-facing resolution details: geocode confidence,
+   * coordinate source, raw coordinates and manual coordinate entry (default
+   * true). Passenger screens turn them off; the map pin stays adjustable.
+   */
+  technicalDetails?: boolean;
   /** Replace the CI-safe grid with a surface-owned tile/overlay map. */
   renderMap?: (props: AddressMapRendererProps) => ReactNode;
   id?: string;
@@ -597,6 +603,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     enableServiceabilityPreview = true,
     providerHealth,
     requireManualReason = true,
+    technicalDetails = true,
     renderMap,
   } = props;
 
@@ -1023,13 +1030,15 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           title={labels.providerOutageTitle}
           body={labels.providerOutageBody}
           action={
-            <button
-              type="button"
-              style={buttonStyle(theme, "secondary")}
-              onClick={() => setManualMode(true)}
-            >
-              {labels.manualToggle}
-            </button>
+            technicalDetails ? (
+              <button
+                type="button"
+                style={buttonStyle(theme, "secondary")}
+                onClick={() => setManualMode(true)}
+              >
+                {labels.manualToggle}
+              </button>
+            ) : undefined
           }
         />
       ) : null}
@@ -1200,13 +1209,15 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           title={labels.noMatchTitle}
           body={labels.noMatchBody}
           action={
-            <button
-              type="button"
-              style={buttonStyle(theme, "secondary")}
-              onClick={() => setManualMode(true)}
-            >
-              {labels.manualToggle}
-            </button>
+            technicalDetails ? (
+              <button
+                type="button"
+                style={buttonStyle(theme, "secondary")}
+                onClick={() => setManualMode(true)}
+              >
+                {labels.manualToggle}
+              </button>
+            ) : undefined
           }
         />
       ) : null}
@@ -1293,15 +1304,19 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
               <div style={{ fontSize: 12.5, fontWeight: 600 }}>
                 {selectedAddress.addressName ?? selectedAddress.address}
               </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: theme.textMuted,
-                  overflowWrap: "anywhere",
-                }}
-              >
-                {selectedAddress.address}
-              </div>
+              {technicalDetails ||
+              (selectedAddress.addressName &&
+                selectedAddress.addressName !== selectedAddress.address) ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: theme.textMuted,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {selectedAddress.address}
+                </div>
+              ) : null}
             </div>
             <button
               type="button"
@@ -1311,31 +1326,33 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
               {labels.clearSelection}
             </button>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <TonePill
-              theme={theme}
-              tone={confidenceTone(selectedAddress.geocodeConfidence ?? null)}
-            >
-              {labels.confidenceLabel}:{" "}
-              {selectedAddress.geocodeConfidence ?? "unknown"}
-            </TonePill>
-            <TonePill theme={theme} tone="neutral">
-              {labels.provenanceLabel}:{" "}
-              {selectedAddress.coordinateSource ?? "unknown"}
-            </TonePill>
-            {pinPoint ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  color: theme.textMuted,
-                  fontFamily: theme.monoFamily,
-                }}
+          {technicalDetails ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <TonePill
+                theme={theme}
+                tone={confidenceTone(selectedAddress.geocodeConfidence ?? null)}
               >
-                {labels.coordinatesLabel}: {roundCoord(pinPoint.lat)},{" "}
-                {roundCoord(pinPoint.lng)}
-              </span>
-            ) : null}
-          </div>
+                {labels.confidenceLabel}:{" "}
+                {selectedAddress.geocodeConfidence ?? "unknown"}
+              </TonePill>
+              <TonePill theme={theme} tone="neutral">
+                {labels.provenanceLabel}:{" "}
+                {selectedAddress.coordinateSource ?? "unknown"}
+              </TonePill>
+              {pinPoint ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: theme.textMuted,
+                    fontFamily: theme.monoFamily,
+                  }}
+                >
+                  {labels.coordinatesLabel}: {roundCoord(pinPoint.lat)},{" "}
+                  {roundCoord(pinPoint.lng)}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <div style={{ fontSize: 10.5, color: theme.textMuted }}>
             {labels.mapHint}
           </div>
@@ -1443,7 +1460,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
             </button>
           </div>
         </div>
-      ) : !manualMode &&
+      ) : technicalDetails &&
+        !manualMode &&
         providerAvailable &&
         status !== "provider_unavailable" ? (
         <div>
