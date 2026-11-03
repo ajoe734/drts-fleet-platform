@@ -5,14 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 import RootLayout from "../../../apps/passenger-app-web/app/layout";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/login" }));
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ host: "ride.smarttransport.tw" }),
+}));
 
 describe("Passenger shared customer footer", () => {
-  it("renders the customer phone after page content without exposing the technical contact", () => {
+  it("renders the customer phone after page content without exposing the technical contact", async () => {
     const document = new DOMParser().parseFromString(
       renderToStaticMarkup(
-        <RootLayout>
-          <main id="page-content">乘客頁面內容</main>
-        </RootLayout>,
+        await RootLayout({
+          children: <main id="page-content">乘客頁面內容</main>,
+        }),
       ),
       "text/html",
     );

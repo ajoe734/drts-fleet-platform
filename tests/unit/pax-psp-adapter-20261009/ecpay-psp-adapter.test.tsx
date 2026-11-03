@@ -641,7 +641,7 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
 
     const rootHeaders = await resolveHeadersForUrl("/");
     expect(rootHeaders["Content-Security-Policy"]).toBe(
-      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+      "default-src 'self'; connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://maps.googleapis.com https://maps.gstatic.com; font-src 'self' https://fonts.gstatic.com;",
     );
   });
 

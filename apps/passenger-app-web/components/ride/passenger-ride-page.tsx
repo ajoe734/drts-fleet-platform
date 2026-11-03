@@ -38,7 +38,14 @@ import {
   retainFixtureQuoteAnomaly,
   subscribePassengerRideAuthority,
 } from "../../lib/ride/passenger-live";
+import {
+  googleMapsAuthFailed,
+  onGoogleMapsAuthFailure,
+} from "../../lib/map/google-maps-loader";
+import { getPassengerRideMapPoints } from "../../lib/ride/passenger-map-points";
+import { usePassengerMapConfig } from "../map/map-config-context";
 import { ComplaintForm } from "./complaint-form";
+import { PassengerTripMap } from "./passenger-trip-map";
 import { ReceiptShareActions } from "./receipt-share-actions";
 import { P5Icon, P5Notice } from "../p5-ui";
 
@@ -395,6 +402,32 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
+// Real-map markers: the same driver dot as the schematic, and the target dot
+// outlined so it reads on map tiles.
+const mapDriverMarkerStyle: CSSProperties = {
+  width: 26,
+  height: 26,
+  borderRadius: 13,
+  background: passengerChrome.shell,
+  border: `3px solid ${passengerChrome.invert}`,
+  boxShadow: `0 2px 8px ${passengerChrome.info.border}`,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: passengerChrome.invert,
+  fontSize: 12,
+  fontWeight: 700,
+};
+const mapTargetMarkerStyle: CSSProperties = {
+  boxSizing: "border-box",
+  width: 22,
+  height: 22,
+  borderRadius: 11,
+  background: passengerChrome.danger.fg,
+  border: `3px solid ${passengerChrome.invert}`,
+  boxShadow: `0 2px 8px ${passengerChrome.info.border}`,
+};
+
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   const positions = getPassengerTrackingMapPositions(fixture);
   const {
@@ -402,6 +435,22 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
     connectionState,
     now: observationClock,
   } = React.useContext(ConnectionContext);
+  const mapConfig = usePassengerMapConfig();
+  const [mapFailed, setMapFailed] = useState(googleMapsAuthFailed);
+  const [mapReady, setMapReady] = useState(false);
+  useEffect(() => onGoogleMapsAuthFailure(() => setMapFailed(true)), []);
+  const mapPoints = getPassengerRideMapPoints(fixture);
+  // The real Google map replaces the schematic only when this origin may use
+  // the browser key and there is a real point to show; otherwise (and on any
+  // script or key failure) the schematic below stays exactly as before.
+  const showMap =
+    mapConfig.enabled &&
+    Boolean(mapConfig.browserKey) &&
+    !mapFailed &&
+    (mapPoints.driver !== null || mapPoints.target !== null);
+  useEffect(() => {
+    if (!showMap) setMapReady(false);
+  }, [showMap]);
   const now = Math.max(observationClock ?? 0, Date.now());
 
   const elapsedSeconds =
@@ -418,6 +467,14 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
 
   if (fixture.status === "行程已完成") return null;
 
+  const realMap = showMap && mapReady;
+  const waitingForDriver =
+    !positions &&
+    !(fixture.tracking === undefined && fixture.mapState !== "missing");
+  const showsDropoff = realMap
+    ? mapPoints.targetIsDropoff
+    : positions?.targetLabel === "下車點";
+
   return (
     <div
       style={{
@@ -426,11 +483,130 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
         overflow: "hidden",
         border: `1px solid ${passengerChrome.border}`,
         background: `linear-gradient(140deg, ${passengerChrome.info.bg}, ${passengerChrome.card})`,
-        height: 150,
+        height: showMap ? 180 : 150,
         position: "relative",
         flexShrink: 0,
       }}
     >
+      {showMap && mapConfig.browserKey ? (
+        <PassengerTripMap
+          browserKey={mapConfig.browserKey}
+          driver={mapPoints.driver}
+          target={mapPoints.target}
+          driverMarker={
+            mapPoints.driver ? (
+              <div
+                data-testid="passenger-live-driver-position"
+                style={mapDriverMarkerStyle}
+              >
+                {t.Vehicle}
+              </div>
+            ) : null
+          }
+          targetMarker={
+            mapPoints.target ? (
+              <div aria-hidden="true" style={mapTargetMarkerStyle} />
+            ) : null
+          }
+          label={t.RideMap}
+          visible={realMap}
+          onReady={() => setMapReady(true)}
+          onUnavailable={() => setMapFailed(true)}
+        />
+      ) : null}
+      {realMap ? (
+        waitingForDriver ? (
+          <div
+            style={{
+              position: "absolute",
+              left: 10,
+              top: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 11,
+              background: passengerChrome.invert,
+              padding: "3px 9px",
+              borderRadius: 6,
+              color: passengerChrome.muted,
+              boxShadow: `0 1px 4px ${passengerChrome.info.border}`,
+            }}
+          >
+            <span aria-hidden="true">⌖</span>
+            {t.GettingDriverLocation}
+          </div>
+        ) : null
+      ) : (
+        <SchematicMap fixture={fixture} positions={positions} />
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: 10,
+          // On the real map, stay clear of the Google logo in the corner.
+          bottom: realMap ? 30 : 10,
+          fontSize: 10.5,
+          background: passengerChrome.invert,
+          padding: "3px 9px",
+          borderRadius: 6,
+          color: passengerChrome.muted,
+        }}
+      >
+        {showsDropoff
+          ? `${t.DropoffLabel}${fixture.dropoffLabel}`
+          : `${t.PickupLabel}${fixture.pickupLabel}`}
+      </div>
+      {_isFresh ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 10,
+            fontSize: 10,
+            background: passengerChrome.invert,
+            padding: "3px 8px",
+            borderRadius: 6,
+            color: passengerChrome.success.fg,
+            fontWeight: 700,
+          }}
+        >
+          {`位置更新於 ${elapsedSeconds} 秒前`}
+        </div>
+      ) : null}
+      {_isStale ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 10,
+            fontSize: 10.5,
+            background: passengerChrome.warning.bg,
+            border: `1px solid ${passengerChrome.warning.border}`,
+            padding: "3px 8px",
+            borderRadius: 6,
+            color: passengerChrome.warning.fg,
+            fontWeight: 700,
+          }}
+        >
+          {connectionState !== "connected"
+            ? "連線中斷"
+            : t.DriverLocationDelayed}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The built-in position diagram, used whenever the real map is unavailable. */
+function SchematicMap({
+  fixture,
+  positions,
+}: {
+  fixture: PassengerRideFixture;
+  positions: ReturnType<typeof getPassengerTrackingMapPositions>;
+}) {
+  return (
+    <>
       {positions ||
       (fixture.tracking === undefined && fixture.mapState !== "missing") ? (
         <>
@@ -517,60 +693,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           {t.GettingDriverLocation}
         </div>
       )}
-      <div
-        style={{
-          position: "absolute",
-          left: 10,
-          bottom: 10,
-          fontSize: 10.5,
-          background: passengerChrome.invert,
-          padding: "3px 9px",
-          borderRadius: 6,
-          color: passengerChrome.muted,
-        }}
-      >
-        {positions?.targetLabel === "下車點"
-          ? `${t.DropoffLabel}${fixture.dropoffLabel}`
-          : `${t.PickupLabel}${fixture.pickupLabel}`}
-      </div>
-      {_isFresh ? (
-        <div
-          style={{
-            position: "absolute",
-            right: 10,
-            top: 10,
-            fontSize: 10,
-            background: passengerChrome.invert,
-            padding: "3px 8px",
-            borderRadius: 6,
-            color: passengerChrome.success.fg,
-            fontWeight: 700,
-          }}
-        >
-          {`位置更新於 ${elapsedSeconds} 秒前`}
-        </div>
-      ) : null}
-      {_isStale ? (
-        <div
-          style={{
-            position: "absolute",
-            right: 10,
-            top: 10,
-            fontSize: 10.5,
-            background: passengerChrome.warning.bg,
-            border: `1px solid ${passengerChrome.warning.border}`,
-            padding: "3px 8px",
-            borderRadius: 6,
-            color: passengerChrome.warning.fg,
-            fontWeight: 700,
-          }}
-        >
-          {connectionState !== "connected"
-            ? "連線中斷"
-            : t.DriverLocationDelayed}
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }
 

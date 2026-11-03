@@ -334,6 +334,16 @@ function arrivalClock(
   }
 }
 
+/**
+ * Whole minutes until the driver reaches the pickup. The pickup ETA is only
+ * shown while the driver is still on the way (arrival has its own 司機已抵達
+ * state), so a rounded-down 0 is shown as 1 minute, never 「預計 0 分鐘抵達」.
+ */
+export function pickupEtaMinutes(minutes: number | null | undefined) {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes)) return null;
+  return Math.max(1, Math.ceil(minutes));
+}
+
 export function mapPassengerRideAuthorityToFixture(
   rawView: PassengerRideAuthorityView,
   token: string,
@@ -350,9 +360,11 @@ export function mapPassengerRideAuthorityToFixture(
     "enroute_pickup",
   ].includes(view.order.status);
   const pickupEta = view.tracking?.pickupEta;
-  const pickupClock = pickupEta
-    ? arrivalClock(pickupEta.calculatedAt, pickupEta.minutes * 60)
-    : null;
+  const pickupMinutes = pickupEta ? pickupEtaMinutes(pickupEta.minutes) : null;
+  const pickupClock =
+    pickupEta && pickupMinutes !== null
+      ? arrivalClock(pickupEta.calculatedAt, pickupMinutes * 60)
+      : null;
   const pickupFresh =
     view.tracking?.locationFreshness === "fresh" &&
     Boolean(view.tracking.location);
@@ -360,7 +372,7 @@ export function mapPassengerRideAuthorityToFixture(
     showPickupEta &&
     pickupFresh &&
     pickupClock !== null &&
-    pickupEta?.minutes !== null;
+    pickupMinutes !== null;
   const route = view.tracking?.dropoffRoute;
   const routeClock = route
     ? arrivalClock(route.generatedAt, route.remainingDurationSeconds)
@@ -467,7 +479,7 @@ export function mapPassengerRideAuthorityToFixture(
       : {}),
     ...(canShowPickupEta
       ? {
-          etaMain: `預計 ${pickupEta.minutes} 分鐘抵達`,
+          etaMain: `預計 ${pickupMinutes} 分鐘抵達`,
           etaSub: `更新於 ${formatDateTime(pickupEta.calculatedAt)} · 約 ${pickupClock} 抵達`,
         }
       : canShowDropoffRoute

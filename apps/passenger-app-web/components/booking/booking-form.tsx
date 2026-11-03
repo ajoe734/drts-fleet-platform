@@ -1,5 +1,6 @@
 "use client";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -13,6 +14,7 @@ import { earliestBookingTime, PassengerApiError } from "@drts/passenger-client";
 import {
   AddressMapPicker,
   buildCanvasTheme,
+  type AddressMapRendererProps,
   type AddressPayload,
 } from "@drts/ui-web";
 import { REALM_COLORS } from "@drts/ui-tokens";
@@ -23,6 +25,12 @@ import { DEMO_T } from "../../lib/demo/translations";
 import { PAX_REVIEW_STOPS } from "@drts/api-client";
 import { useReviewDemo, useTrialMode } from "../review-demo/review-context";
 import { TRIAL_STOPS, trialT } from "../trial/translations";
+import {
+  googleMapsAuthFailed,
+  onGoogleMapsAuthFailure,
+} from "../../lib/map/google-maps-loader";
+import { usePassengerMapConfig } from "../map/map-config-context";
+import { BookingPlaceMap } from "./booking-place-map";
 import { CurrentLocationButton } from "./current-location-button";
 import { PLAN } from "./plan-screen";
 
@@ -85,6 +93,26 @@ export function BookingForm({
         authenticated(client.reverse(command)),
     };
   }, [client, router]);
+  // A real Google map in the picker's map slot when this origin may use the
+  // browser key; otherwise (or after any script/key failure) the picker keeps
+  // its built-in grid.
+  const mapConfig = usePassengerMapConfig();
+  const [mapFailed, setMapFailed] = useState(googleMapsAuthFailed);
+  useEffect(() => onGoogleMapsAuthFailure(() => setMapFailed(true)), []);
+  const mapKey = mapConfig.enabled && !mapFailed ? mapConfig.browserKey : null;
+  const renderMap = useCallback(
+    (props: AddressMapRendererProps) =>
+      mapKey ? (
+        <BookingPlaceMap
+          {...props}
+          browserKey={mapKey}
+          theme={theme}
+          onUnavailable={() => setMapFailed(true)}
+        />
+      ) : null,
+    [mapKey],
+  );
+  const mapSlot = mapKey ? { renderMap } : {};
   if (demo === null)
     return (
       <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
@@ -195,6 +223,7 @@ export function BookingForm({
                 })
               }
               enableServiceabilityPreview={false}
+              {...mapSlot}
             />
           </>
         )}
@@ -216,6 +245,7 @@ export function BookingForm({
               })
             }
             enableServiceabilityPreview={false}
+            {...mapSlot}
           />
         )}
       </P5Card>

@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 import path from "path";
 import { ECPAY_HOSTED_FIELDS_CSP } from "./components/payment/ecpay-csp";
 
+// Google Maps JavaScript API for the ride and booking maps: the script and
+// its modules, map tiles/markers, and its fonts. The browser key itself is
+// only handed to allowed origins (lib/map/map-config.ts).
+const GOOGLE_MAPS_ORIGINS =
+  "https://maps.googleapis.com https://maps.gstatic.com";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   compress: false,
@@ -36,7 +42,12 @@ const nextConfig: NextConfig = {
     const candidateSha =
       process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
     const contentSecurityPolicy =
-      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';";
+      "default-src 'self'; " +
+      `connect-src 'self' ${GOOGLE_MAPS_ORIGINS}; ` +
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${GOOGLE_MAPS_ORIGINS}; ` +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      `img-src 'self' data: ${GOOGLE_MAPS_ORIGINS}; ` +
+      "font-src 'self' https://fonts.gstatic.com;";
     const paymentMethodsContentSecurityPolicy = ECPAY_HOSTED_FIELDS_CSP;
     return [
       {
