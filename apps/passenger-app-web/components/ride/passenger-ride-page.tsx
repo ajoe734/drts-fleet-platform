@@ -517,19 +517,6 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           {t.GettingDriverLocation}
         </div>
       )}
-      {positions ? (
-        <span
-          style={{
-            position: "absolute",
-            left: 10,
-            top: 10,
-            fontSize: 10,
-            color: passengerChrome.muted,
-          }}
-        >
-          {t.LocationDiagram}
-        </span>
-      ) : null}
       <div
         style={{
           position: "absolute",

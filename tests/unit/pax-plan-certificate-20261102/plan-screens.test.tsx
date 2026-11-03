@@ -156,7 +156,7 @@ it("the receipt route is the E-04 page: header, certificate, PDF and 分享 only
   expect(screen.getByText("智行車隊")).toBeTruthy();
   expect(screen.getByText("執登證號 ••••0001")).toBeTruthy();
   expect(
-    screen.getByText("證明編號 MTX-20260720-PLAN0001 · 個資已遮碼"),
+    screen.getByText("證明編號 MTX-202607••-••0001 · 個資已遮碼"),
   ).toBeTruthy();
   for (const absent of ["付款狀態", "服務評分", "客訴與遺失物表單"])
     expect(screen.queryByText(absent)).toBeNull();
@@ -229,7 +229,7 @@ it("a captured payment hides the payment card; the rating needs a star and expla
   expect(
     document.getElementById(contact.getAttribute("aria-describedby")!)
       ?.textContent,
-  ).toBe("送出後即建立客訴案件；開啟表示同意客服與您聯繫");
+  ).toBe("開啟後送出將自動建立客訴案件");
   const wellDone = screen.getByText("做得好（可複選）");
   expect(wellDone).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "繞路" }));

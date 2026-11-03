@@ -14,6 +14,23 @@ export function parsePublicFareEffectiveDate(value: unknown): Date | null {
   return instant;
 }
 
+/**
+ * 證明編號 in the supplement's masking convention (RC-2607••-0186): the day
+ * of the issue date and all but the last four characters of the serial are
+ * hidden, e.g. MTX-20261102-4548B07022 → MTX-202611••-••7022. The full number
+ * stays on the downloaded PDF.
+ */
+export function maskReceiptNo(receiptNo: string): string {
+  const parts = receiptNo.split("-");
+  if (parts.length >= 3 && /^\d{8}$/.test(parts[1]!)) {
+    const serial = parts.slice(2).join("-");
+    return `${parts[0]}-${parts[1]!.slice(0, 6)}••-${serial.length > 4 ? `••${serial.slice(-4)}` : serial}`;
+  }
+  return receiptNo.length > 8
+    ? `${receiptNo.slice(0, 4)}••${receiptNo.slice(-4)}`
+    : receiptNo;
+}
+
 export const t = {
   FareChangeRule:
     "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
@@ -38,7 +55,7 @@ export const t = {
   LeaveComment: "補充意見（選填）",
   NeedSupportContact: "需要客服與您聯繫嗎？",
   // Every 1–2 star rating opens a complaint case; the switch records contact consent.
-  NeedSupportContactDetail: "送出後即建立客訴案件；開啟表示同意客服與您聯繫",
+  NeedSupportContactDetail: "開啟後送出將自動建立客訴案件",
   TripSummary: "本次行程",
   SummaryPickup: "上車",
   SummaryDropoff: "下車",
@@ -48,7 +65,7 @@ export const t = {
   FareBreakdownCollapse: "收合 ▴",
   FareBreakdownExpand: "展開 ▾",
   CertificateFootnote: (receiptNo: string) =>
-    `證明編號 ${receiptNo} · 個資已遮碼`,
+    `證明編號 ${maskReceiptNo(receiptNo)} · 個資已遮碼`,
   ThanksForRating: "感謝您的評價",
   RatingHelps: "您的意見會協助我們維持服務品質。",
   CannotContactDriver: "目前無法直接聯絡司機",
@@ -79,7 +96,6 @@ export const t = {
   DriverContact: "聯繫司機",
   Vehicle: "車",
   GettingDriverLocation: "正在取得司機位置",
-  LocationDiagram: "位置示意",
   PickupLabel: "上車：",
   DropoffLabel: "下車：",
   LocationUpdated5sAgo: "位置更新於 5 秒前",

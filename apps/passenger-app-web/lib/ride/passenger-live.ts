@@ -982,10 +982,9 @@ function formatTaipeiTimeRange(start: string, end: string, separator: string) {
   return `${from.date} ${from.time}${separator}${until}`;
 }
 
+/** Whole minutes, as the supplement's E-04 shows 行駛時間 (35 分鐘). */
 function formatDuration(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return remainder === 0 ? `${minutes} 分鐘` : `${minutes} 分 ${remainder} 秒`;
+  return `${Math.max(1, Math.round(seconds / 60))} 分鐘`;
 }
 
 function readText(record: Record<string, unknown>, key: string) {

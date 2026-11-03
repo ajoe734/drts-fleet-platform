@@ -1,8 +1,5 @@
 import type { FareVersion } from "@drts/contracts";
-import {
-  PASSENGER_FEE_ROWS,
-  PASSENGER_FREE_CANCELLATION_NOTICE,
-} from "@drts/passenger-client";
+import { PASSENGER_APP_FEE_POLICY_ROWS } from "@drts/passenger-client";
 import { P5 } from "../auth/ui";
 import { BOOK_T as T, effectiveDay } from "../../lib/booking/translations";
 import { PLAN } from "./plan-screen";
@@ -21,7 +18,7 @@ const pill = (tone: "neutral" | "ok") => ({
   border: `1px solid ${tone === "ok" ? P5.okBd : P5.line}`,
 });
 
-/** E-19a 費用與優惠說明: the user-supplied clauses as labelled rows. */
+/** E-19a 費用與優惠說明: the supplement's final fee policy, verbatim. */
 export function FeeDisclosure({ fare }: { fare: FareVersion }) {
   return (
     <>
@@ -32,7 +29,7 @@ export function FeeDisclosure({ fare }: { fare: FareVersion }) {
         aria-label={T.disclosure}
         style={{ ...PLAN.card, padding: "4px 16px" }}
       >
-        {PASSENGER_FEE_ROWS.map(([label, content], index) => (
+        {PASSENGER_APP_FEE_POLICY_ROWS.map(([label, content], index) => (
           <div
             key={label}
             style={{
@@ -50,24 +47,13 @@ export function FeeDisclosure({ fare }: { fare: FareVersion }) {
             >
               {label}
             </strong>
-            {/* 優惠活動 shows its supplied state as the plan's tag. */}
-            {label === PROMOTION ? (
-              <span style={pill("neutral")}>{content}</span>
-            ) : (
-              <span style={{ display: "block", marginTop: 3 }}>{content}</span>
+            {/* 優惠活動 also carries the supplement's 目前無 status chip. */}
+            {label === PROMOTION && (
+              <span style={pill("neutral")}>{T.noPromotion}</span>
             )}
+            <span style={{ display: "block", marginTop: 3 }}>{content}</span>
           </div>
         ))}
-        <p
-          style={{
-            ...PLAN.muted,
-            margin: 0,
-            padding: "10px 0 12px",
-            borderTop: `1px solid ${P5.lineSoft}`,
-          }}
-        >
-          {PASSENGER_FREE_CANCELLATION_NOTICE}
-        </p>
       </section>
       <p style={PLAN.stamp}>{T.feeStamp(fare.version, fare.effectiveAt)}</p>
     </>

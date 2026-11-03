@@ -101,6 +101,7 @@ export const BOOK_T = {
     "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
   viewTariff: "查看現行計費表",
   feesIntro: "下單前請確認以下收費規則",
+  noPromotion: "目前無",
   sheetPickup: "上車",
   sheetDropoff: "下車",
   paymentNone: "尚未選擇",
