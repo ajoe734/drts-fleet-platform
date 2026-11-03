@@ -1,4 +1,41 @@
 import type { FareVersion } from "@drts/contracts";
+
+/** Taipei calendar day of a genuine ISO API value; invalid days never pass. */
+export function effectiveDay(
+  effective: unknown,
+): { roc: string; gregorian: string; instant: Date } | null {
+  if (
+    typeof effective !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}(?:T.+)?$/.test(effective)
+  )
+    return null;
+  const instant = new Date(effective);
+  const calendarDate = new Date(`${effective.slice(0, 10)}T00:00:00Z`);
+  // Date parsing normalizes invalid days; those cannot become an announcement.
+  if (
+    !Number.isFinite(instant.getTime()) ||
+    !Number.isFinite(calendarDate.getTime()) ||
+    calendarDate.toISOString().slice(0, 10) !== effective.slice(0, 10)
+  )
+    return null;
+  const day = (calendar: string) => {
+    const parts = new Intl.DateTimeFormat(`zh-TW-u-ca-${calendar}`, {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(instant);
+    return ["year", "month", "day"]
+      .map((type) => parts.find((part) => part.type === type)?.value)
+      .join("/");
+  };
+  return { roc: day("roc"), gregorian: day("gregory"), instant };
+}
+function rawStamp(version: string, effective: unknown) {
+  return typeof effective === "string" && effective.trim()
+    ? `版本 ${version} · 生效日 ${effective}`
+    : `版本 ${version}`;
+}
 export const BOOK_T = {
   realmName: "乘客叫車",
   pickup: "上車地點",
@@ -50,57 +87,74 @@ export const BOOK_T = {
   noQuote: "目前無法取得正式報價，請稍後重試或聯絡客服。",
   noCreate: "無法送出叫車，請確認帳號與付款方式後重試。",
   unknownCreate: "尚未確認叫車結果；重試會使用同一筆請求，請勿另建行程。",
-  publicFares: "公開計費說明",
-  tariffAuthority: "依臺北市政府公告計程車運價",
+  publicFares: "計費說明",
+  publicInfo: "公開資訊",
   currentRegulation: "本頁依主管機關公告之現行運價揭露",
   publicError: "目前無法取得公開費率，請稍後重試。",
   publicRetry: "重試公開費率",
   publicLoading: "正在取得公開費率...",
   home: "返回叫車首頁",
-  lead: (minutes: number) =>
-    `本服務僅提供預約叫車，至少提早 ${minutes} 分鐘預約。`,
+  currentTariff: "現行計費表",
+  tariffEffective: "已生效",
+  fareChangeTitle: "車資變更規則",
+  fareChangeRule:
+    "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
+  viewTariff: "查看現行計費表",
+  feesIntro: "下單前請確認以下收費規則",
+  noPromotion: "目前無",
+  sheetPickup: "上車",
+  sheetDropoff: "下車",
+  paymentNone: "尚未選擇",
+  testCard: "測試卡",
+  changePayment: (label: string) => `變更支付方式：${label}`,
+  checkFirst: "請先勾選「我已確認費用與優惠說明」",
+  choosePaymentFirst: "請先選擇支付方式",
+  today: "今日",
+  tomorrow: "明日",
+  authorityComplaint: "主管機關申訴 1999",
+  reservationOnly: "本服務僅提供預約叫車",
+  lead: (minutes: number) => `至少提早 ${minutes} 分鐘預約。`,
   phone: (verified: boolean) =>
     `請先在帳號管理填寫${verified ? "已驗證" : "聯絡"}手機號碼。`,
-  quoteVersion: (version: string, expiry: string) =>
-    `費率版本 ${version} · 試算有效至 ${expiry}`,
+  /** Short local clock for the quote validity, never the ISO wire value. */
+  quoteValidUntil: (clock: string) => `試算有效至 ${clock}`,
   timeValue: (value: string) => `預約時間 ${value.replace("T", " ")}`,
-  fareStamp: (version: string, effective: string) => {
-    const versionStamp = `版本 ${version} · 生效日 ${effective}`;
-    if (
-      typeof effective !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}(?:T.+)?$/.test(effective)
-    )
-      return versionStamp;
-    const instant = new Date(effective);
-    const calendarDate = new Date(`${effective.slice(0, 10)}T00:00:00Z`);
-    // Date parsing normalizes invalid days; those cannot become an announcement.
-    if (
-      !Number.isFinite(instant.getTime()) ||
-      !Number.isFinite(calendarDate.getTime()) ||
-      calendarDate.toISOString().slice(0, 10) !== effective.slice(0, 10)
-    )
-      return versionStamp;
-    const parts = new Intl.DateTimeFormat("zh-TW-u-ca-roc", {
-      timeZone: "Asia/Taipei",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(instant);
-    const date = ["year", "month", "day"]
-      .map((type) => parts.find((part) => part.type === type)?.value)
-      .join("/");
-    return `依臺北市政府公告計程車運價（${date}起實施） · ${versionStamp}`;
+  /** E-05: version first, then the announcement day derived from the API. */
+  tariffStamp: (version: string, effective: unknown) => {
+    const day = effectiveDay(effective);
+    return day
+      ? `版本 ${version} · 依臺北市政府公告計程車運價（${day.roc}起實施）`
+      : rawStamp(version, effective);
+  },
+  /** E-19a stamp; a malformed API value is shown as-is, never re-dated. */
+  feeStamp: (version: string, effective: unknown) => {
+    const day = effectiveDay(effective);
+    return day
+      ? `版本 ${version} · 生效日 ${day.gregorian} · 依主管機關核定運價及備查優惠辦理`
+      : rawStamp(version, effective);
   },
   supportPhone: (phone: string) => `客服 ${phone}`,
-  base: (fare: FareVersion) =>
-    `起程 ${fare.baseDistanceMeters / 1000} 公里：NT$ ${fare.baseFare}`,
-  distance: (fare: FareVersion) =>
-    `續程每 ${fare.distanceIncrementMeters} 公尺：NT$ ${fare.distanceRate}`,
-  delay: (fare: FareVersion) =>
-    `延滯計時每 ${fare.delayIncrementSeconds} 秒：NT$ ${fare.delayRate}`,
-  night: (fare: FareVersion) =>
-    `夜間 ${fare.nightSurchargeWindowStart}–${fare.nightSurchargeWindowEnd} 每趟加收 NT$ ${fare.nightSurcharge}`,
-  additional: (name: string, amount: number) => `${name}：NT$ ${amount}`,
+  tariffRows: (fare: FareVersion): [string, string][] => [
+    [
+      `起程運價（${fare.baseDistanceMeters / 1000} 公里）`,
+      `NT$ ${fare.baseFare}`,
+    ],
+    [
+      `續程運價（每 ${fare.distanceIncrementMeters} 公尺）`,
+      `NT$ ${fare.distanceRate}`,
+    ],
+    [
+      `延滯計時（每 ${fare.delayIncrementSeconds} 秒）`,
+      `NT$ ${fare.delayRate}`,
+    ],
+    [
+      `夜間加成（${fare.nightSurchargeWindowStart}–${fare.nightSurchargeWindowEnd}）`,
+      `每趟 +NT$ ${fare.nightSurcharge}`,
+    ],
+    ...Object.entries(fare.additionalFees ?? {}).map(
+      ([name, amount]): [string, string] => [name, `NT$ ${amount}`],
+    ),
+  ],
   picker: {
     searchLabel: "搜尋地址",
     searchPlaceholder: "請輸入街道、地點或地標",

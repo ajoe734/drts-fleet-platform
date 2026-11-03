@@ -35,7 +35,7 @@ on:
         default: ""
         type: string
       readonly_fleet_failure:
-        description: "Read only the two fixed original Fleet failure requests; never reruns them"
+        description: "Read only fixed original Fleet document and root-timeout windows; never replays"
         required: false
         default: false
         type: boolean
@@ -46,6 +46,11 @@ on:
         type: boolean
       readonly_admin_root_instance_failure:
         description: "Read fixed Admin request reasons and only actually observed instance context; never replays"
+        required: false
+        default: false
+        type: boolean
+      readonly_ops_dashboard_timeout_failure:
+        description: "Read only the fixed original Ops GET /dashboard client-timeout window records; never replays"
         required: false
         default: false
         type: boolean
@@ -345,6 +350,28 @@ jobs:
             .artifacts/owned-referral-business-journey/cancellations/*-booking-write-journal.json
             .artifacts/owned-referral-business-journey/cancellations/results.json
             .artifacts/owned-referral-business-journey/cancellations/*.png
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06-custody.json
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.pdf
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
@@ -560,7 +587,7 @@ jobs:
           retention-days: 14
 
   readonly-fleet-document-failure-readback:
-    if: github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true
+    if: (github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true) || (github.event_name == 'workflow_dispatch' && inputs.readonly_ops_dashboard_timeout_failure == true)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -579,6 +606,15 @@ jobs:
           [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
           [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
           [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - name: Select exactly one fixed readback profile before authentication
+        shell: bash
+        env:
+          FLEET_SELECTED: ${{ inputs.readonly_fleet_failure }}
+          OPS_SELECTED: ${{ inputs.readonly_ops_dashboard_timeout_failure }}
+        run: |
+          set -euo pipefail
+          [[ "$FLEET_SELECTED" == true && "$OPS_SELECTED" != true ]] ||
+            [[ "$FLEET_SELECTED" != true && "$OPS_SELECTED" == true ]]
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -593,15 +629,38 @@ jobs:
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: Read only the fixed failure window without invoking the product
-        run: >-
-          python3 operations/verification/read-dev-fleet-document-failure-log.py
-          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json
+        if: inputs.readonly_ops_dashboard_timeout_failure != true
+        run: |
+          set -uo pipefail
+          read_status=0
+          python3 operations/verification/read-dev-fleet-document-failure-log.py \
+            --output .artifacts/dev-fleet-document-failure-readback/snapshot.json || read_status=1
+          python3 operations/verification/read-dev-fleet-document-failure-log.py \
+            --profile fleet-root-timeout-40891070459-v1 \
+            --output .artifacts/dev-fleet-document-failure-readback/fleet-root-timeout.json || read_status=1
+          exit "$read_status"
       - name: Preserve only the safe diagnostic projection
-        if: always()
+        if: always() && inputs.readonly_ops_dashboard_timeout_failure != true
         uses: actions/upload-artifact@v4
         with:
           name: dev-fleet-document-failure-readback-${{ github.run_id }}
-          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json
+          path: |
+            .artifacts/dev-fleet-document-failure-readback/snapshot.json
+            .artifacts/dev-fleet-document-failure-readback/fleet-root-timeout.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Read the fixed Ops dashboard window and only observed trace or instance context
+        if: inputs.readonly_ops_dashboard_timeout_failure == true
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --profile ops-dashboard-timeout-40647433932-v1
+          --output .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
+      - name: Preserve only the closed Ops diagnostic projection
+        if: always() && inputs.readonly_ops_dashboard_timeout_failure == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
           if-no-files-found: error
           retention-days: 14
 

@@ -218,18 +218,6 @@
     ]
   },
   {
-    "advisory_id": "1240912",
-    "module_name": "node-forge",
-    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
-    "expires_at": "2027-01-01T00:00:00Z",
-    "versions": [
-      "1.4.0"
-    ],
-    "paths": [
-      "apps__driver-app>expo>@expo/cli>node-forge"
-    ]
-  },
-  {
     "advisory_id": "1240992",
     "module_name": "braces",
     "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
@@ -239,6 +227,49 @@
     ],
     "paths": [
       "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
+    ]
+  },
+  {
+    "advisory_id": "1243505",
+    "module_name": "deepmerge",
+    "reason": "npm latest remains 4.3.1. Local pnpm patch follows upstream PR #274, rejecting __proto__ in both merge loops including distributed CJS/UMD. Valid only when the gate verifies pinned patch bytes, manifest/lock binding and actual Expo consumers. Recheck upstream before expiry.",
+    "expires_at": "2026-11-11T00:00:00Z",
+    "versions": [
+      "4.3.1"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/config>deepmerge"
+    ],
+    "verified_patch": "deepmerge-4.3.1-prototype-poisoning"
+  },
+  {
+    "advisory_id": "1244012",
+    "module_name": "minimatch",
+    "reason": "Patterns never come from requests: exceljs only appends in-memory parts to archiver (no archiver glob/directory calls), Expo CLI matches build-time files in the driver app toolchain, and openclaw matches session IDs and policy patterns inside the authenticated platform-admin assistant. Fixed only in minimatch 11, a major upgrade for every consumer.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "10.2.6",
+      "3.1.5",
+      "5.1.9",
+      "9.0.9"
+    ],
+    "paths": [
+      "apps__api>exceljs>archiver>archiver-utils>glob>minimatch",
+      "apps__api>exceljs>archiver>readdir-glob>minimatch",
+      "apps__api>openclaw>minimatch",
+      "apps__driver-app>expo>@expo/cli>minimatch"
+    ]
+  },
+  {
+    "advisory_id": "1244013",
+    "module_name": "glob",
+    "reason": "Build-time tooling in the mobile driver app (Expo CLI); no production code passes an AbortSignal-bounded glob. Fixed only in glob 14, a major upgrade for @expo/cli.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "13.0.6"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/cli>glob"
     ]
   }
 ]

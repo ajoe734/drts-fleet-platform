@@ -421,6 +421,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     );
     const callcenter = {
       getCallSession: vi.fn(() => ({ linkedOrderId: null })),
+      getCallSessionForRead: vi.fn(async () => ({ linkedOrderId: null })),
       linkCaseToCallSession,
     };
     const controller = new CallcenterController(
@@ -469,6 +470,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     const controller = new CallcenterController(
       {
         getCallSession: () => ({ linkedOrderId: null }),
+        getCallSessionForRead: async () => ({ linkedOrderId: null }),
         linkCaseToCallSession,
       } as never,
       context.service,
@@ -500,6 +502,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     const controller = new CallcenterController(
       {
         getCallSession: () => ({ linkedOrderId: null }),
+        getCallSessionForRead: async () => ({ linkedOrderId: null }),
         linkCaseToCallSession,
       } as never,
       context.service,
@@ -541,6 +544,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     const controller = new CallcenterController(
       {
         getCallSession: () => ({ linkedOrderId: null }),
+        getCallSessionForRead: async () => ({ linkedOrderId: null }),
         linkCaseToCallSession,
       } as never,
       context.service,

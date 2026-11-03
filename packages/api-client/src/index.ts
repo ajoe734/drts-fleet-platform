@@ -70,6 +70,8 @@ import type {
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
   CreateFleetPartnerCommand,
+  ManageFleetHumanRoleCommand,
+  FleetHumanRoleRecord,
   CreateFleetPartnerRevenueShareRuleCommand,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
@@ -280,6 +282,9 @@ import type {
   SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
+  CreateSupplyRenewalDraftCommand,
+  UpdateSupplyRenewalDraftCommand,
+  FleetSupplyRenewalTargetsResponse,
   VehicleSupplyDraft,
   TenantApiKeyIssued,
   TenantBillingProfile,
@@ -2656,6 +2661,42 @@ export class ApiClient {
     );
   }
 
+  async listFleetPortalSupplyRenewalTargets(): Promise<FleetSupplyRenewalTargetsResponse> {
+    return this.get<FleetSupplyRenewalTargetsResponse>(
+      "/api/fleet-partner/supply-renewals/targets",
+    );
+  }
+
+  async createFleetPortalSupplyRenewalDraft(
+    command: CreateSupplyRenewalDraftCommand,
+  ): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+  }> {
+    return this.post("/api/fleet-partner/supply-submissions/renewals", {
+      body: command,
+    });
+  }
+
+  async updateFleetPortalSupplyRenewalDraft(
+    submissionId: string,
+    command: UpdateSupplyRenewalDraftCommand,
+  ): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+  }> {
+    return this.put(
+      `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}/renewal`,
+      {
+        body: command,
+      },
+    );
+  }
+
   async listAdminSupplyReviewSubmissions(): Promise<SupplySubmissionRecord[]> {
     return this.getList<SupplySubmissionRecord>(
       "/api/admin/supply-review/submissions",
@@ -4561,6 +4602,25 @@ export class ApiClient {
   ): Promise<FleetPartnerRecord> {
     return this.put<FleetPartnerRecord>(
       `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}`,
+      { body: command },
+    );
+  }
+
+  async listFleetHumanRoles(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetHumanRoleRecord[]> {
+    return this.getList<FleetHumanRoleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  async manageFleetHumanRole(
+    fleetPartnerId: string,
+    command: ManageFleetHumanRoleCommand,
+  ): Promise<FleetHumanRoleRecord> {
+    return this.put<FleetHumanRoleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles`,
       { body: command },
     );
   }

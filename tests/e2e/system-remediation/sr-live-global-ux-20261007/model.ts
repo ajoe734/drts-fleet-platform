@@ -84,6 +84,16 @@ export type Recipe = {
   dialog?: { trigger: string; selector: string; returnTo: string };
   mask: string[];
 };
+export type IdentityReadbackClassification =
+  | "direct"
+  | "bank_ui_role"
+  | "referral_public_session"
+  | "first_party_passenger_account";
+export type IdentityReadbackResult = {
+  subject: string;
+  effectiveRoles: string[];
+  classification: IdentityReadbackClassification;
+};
 export type Session = {
   app: string;
   role: string;
@@ -96,6 +106,7 @@ export type Session = {
     subjectPath: string;
     rolePath: string;
     expectedSubject: string;
+    classification?: IdentityReadbackClassification;
   };
   storageState: {
     cookies: Array<{

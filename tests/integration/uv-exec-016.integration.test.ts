@@ -113,6 +113,7 @@ function registerSupplyCandidate(
     lifecycleStatus: "active",
     reviewerId: "admin",
     reviewedAt: startAt,
+    exclusiveOperatorId: "partner-demo-001",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: startAt,
     effectiveEnd: endAt,

@@ -812,10 +812,33 @@ export async function loadBankStatementsData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ statements: BankStatement[] }>> {
   try {
-    const core = await loadCoreBankData(tenantId, role);
+    // Statements need only the program usage (for the default label) and the
+    // statements. Reading the whole bank read model made every statement page
+    // and download wait on, and fail with, the slowest of seven endpoints
+    // (shared dev, 2026-11-03: the tenant audit list).
+    const actorId = `bank-console:${tenantId}:${role}`;
+    const [usageResult, statementsResult] = await Promise.allSettled([
+      bankApiGetList<TenantProgramUsageRecord>(
+        "api/tenant/program-usage",
+        tenantId,
+        actorId,
+      ),
+      bankApiGetList<ApiSettlementStatementRecord>(
+        "api/tenant/settlement-statements",
+        tenantId,
+        actorId,
+      ),
+    ]);
+    const failures: string[] = [];
+    if (usageResult.status === "rejected") failures.push("program-usage");
+    if (statementsResult.status === "rejected")
+      failures.push("settlement-statements");
+    const usage = usageResult.status === "fulfilled" ? usageResult.value : [];
+    const statements =
+      statementsResult.status === "fulfilled" ? statementsResult.value : [];
     const defaultProgramLabel =
-      core.usage[0]?.programCode ?? "Airport transfer settlement";
-    const mapped = mapStatementsFromApi(core.statements, defaultProgramLabel);
+      usage[0]?.programCode ?? "Airport transfer settlement";
+    const mapped = mapStatementsFromApi(statements, defaultProgramLabel);
     // Fail closed: see loadBankBookingsData — an upstream denial/outage on
     // settlement-statements must never fall back to the static ACME seed
     // fixture, or a Contoso (or any non-ACME) session would receive another
@@ -824,7 +847,10 @@ export async function loadBankStatementsData(
     // routes built on top of this loader.
     return {
       data: { statements: mapped },
-      degradedMessage: core.degradedMessage,
+      degradedMessage:
+        failures.length > 0
+          ? `Partially degraded: endpoints unavailable (${failures.join(", ")}).`
+          : null,
     };
   } catch (error) {
     return {

@@ -225,7 +225,11 @@ describe("P5 and A04 Screens validation", () => {
 
   it("P5-08 Rate Completed Trip", async () => {
     fetchResponse = {
-      ride: { ...baseView, order: { ...baseView.order, status: "completed" } },
+      ride: {
+        ...baseView,
+        order: { ...baseView.order, status: "completed" },
+        actions: { ...baseView.actions, canReadReceipt: true },
+      },
     };
     render(
       <PassengerRidePage
@@ -236,8 +240,25 @@ describe("P5 and A04 Screens validation", () => {
       />,
     );
     await waitFor(() =>
-      expect(screen.getByText("請為本趟服務評分")).toBeTruthy(),
+      expect(screen.getByText("感謝您的搭乘，請為本次服務評分")).toBeTruthy(),
     );
+    // Operations plan E-18: trip summary, then the required service rating.
+    expect(screen.getByText("本次行程")).toBeTruthy();
+    expect(screen.getByText("服務評分")).toBeTruthy();
+    expect(screen.getByText("*必填")).toBeTruthy();
+    expect(screen.getByText("請點選星等")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "4 星" }));
+    expect(screen.getByText("4 滿意")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "2 星" }));
+    expect(screen.getByText("2 不滿意")).toBeTruthy();
+    expect(
+      screen.getByRole("switch", { name: "需要客服與您聯繫嗎？" }),
+    ).toBeTruthy();
+    // The certificate lives on its own E-04 page, linked from here.
+    expect(screen.queryByText("車資合計")).toBeNull();
+    expect(
+      screen.getByText("查看電子乘車證明").closest("a")?.getAttribute("href"),
+    ).toBe("/rides/uuid/receipt");
   });
 
   it("P5-09 Rating Submitted", async () => {
@@ -246,6 +267,7 @@ describe("P5 and A04 Screens validation", () => {
         ...baseView,
         order: { ...baseView.order, status: "completed" },
         rating: { score: 5 },
+        actions: { ...baseView.actions, canReadReceipt: true },
       },
     };
     render(
@@ -257,6 +279,11 @@ describe("P5 and A04 Screens validation", () => {
       />,
     );
     await waitFor(() => expect(screen.getByText("感謝您的評價")).toBeTruthy());
+    expect(screen.getByText("本次行程")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "送出評分" })).toBeNull();
+    expect(
+      screen.getByText("查看電子乘車證明").closest("a")?.getAttribute("href"),
+    ).toBe("/rides/uuid/receipt");
   });
 
   it("P5-10 Electronic Ride Certificate", async () => {
@@ -307,8 +334,65 @@ describe("P5 and A04 Screens validation", () => {
       />,
     );
     await waitFor(() => expect(screen.getByText("電子乘車證明")).toBeTruthy());
-    expect(screen.getByText("下載 PDF")).toBeTruthy();
-    expect(screen.getByText("下載 HTML")).toBeTruthy();
+    // Operations plan E-04 row order, ending with the masked-data footnote.
+    const text = document.body.textContent ?? "";
+    let cursor = -1;
+    for (const label of [
+      "車隊／派遣業者",
+      "智行車隊",
+      "車牌",
+      "ABC-1234",
+      "駕駛",
+      "蔡○○",
+      "執登證號 ••••4280",
+      "上車／下車時間",
+      "2026/01/01 08:00 / 08:10",
+      "起訖地點",
+      "行駛里程",
+      "1.0 公里",
+      "行駛時間",
+      "10 分鐘",
+      "車資明細",
+      "起程",
+      "續程",
+      "延滯計時",
+      "夜間加成",
+      "通行費",
+      "車資合計",
+      "支付方式",
+      "信用卡 ••••1234",
+      "客服電話",
+      "主管機關申訴電話",
+      "證明編號 R001 · 個資已遮碼",
+    ]) {
+      const next = text.indexOf(label, cursor + 1);
+      expect(next, label).toBeGreaterThan(cursor);
+      cursor = next;
+    }
+    for (const removed of [
+      "乘車證明編號",
+      "開立時間",
+      "遮罩執登號",
+      "付款狀態",
+    ])
+      expect(text).not.toContain(removed);
+    const toggle = screen.getByRole("button", { name: "收合 ▴" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(
+      screen
+        .getByRole("button", { name: "展開 ▾" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(
+      screen.getByText("下載 PDF").closest("a")?.getAttribute("href"),
+    ).toBe("https://x.com/receipt.pdf");
+    expect(screen.queryByText("下載 HTML")).toBeNull();
+    expect(screen.getByRole("button", { name: "分享" })).toBeTruthy();
+    expect(
+      screen.getByText("返回行程").closest("a")?.getAttribute("href"),
+    ).toBe("/rides/uuid");
+    expect(screen.queryByText("客訴與遺失物表單")).toBeNull();
   });
 
   it("P5-11 Disclosure Unavailable", async () => {

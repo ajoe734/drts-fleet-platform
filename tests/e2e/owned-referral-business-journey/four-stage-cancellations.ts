@@ -20,6 +20,7 @@ import {
   type CallResult,
   type Evidence,
   type ObjectData,
+  type OriginalCancellationCheckpoint,
 } from "./protocol";
 
 export type CancellationStage =
@@ -91,6 +92,7 @@ type Ports = {
   cancelFromActualUI: (
     orderId: string,
     expectedRefusal: boolean,
+    checkpoint: (observation: OriginalCancellationCheckpoint) => Promise<void>,
   ) => Promise<
     CallResult & {
       command: ObjectData;
@@ -490,6 +492,30 @@ export async function runFourStageOwnedCancellations(
       const response = await p.cancelFromActualUI(
         ownedId,
         result.expected === "ORDER_NOT_CANCELABLE",
+        async (observation) => {
+          requireFact(
+            observation.response.orderId === ownedId &&
+              observation.response.runtimeSha === p.runtimeSha,
+            "original cancellation checkpoint own order/runtime",
+          );
+          result.actualHttpStatus = observation.response.status;
+          facts.originalUiCancellation = observation;
+          // Persist the original command/response before canonical reads or any
+          // terminal wait can fail. This is observation, never case success.
+          await persistPrivateJson(`${file}-facts.json`, { ...facts, result });
+          if (!facts.cancelConsumerReadback) {
+            const order = await getOrder();
+            const task = taskId ? await getTask() : null;
+            facts.cancelConsumerReadback = {
+              order: orderFacts(order),
+              task: task ? taskFacts(task) : null,
+            };
+            await persistPrivateJson(`${file}-facts.json`, {
+              ...facts,
+              result,
+            });
+          }
+        },
       );
       result.actualHttpStatus = response.status;
       facts.cancelResponse = {
@@ -615,6 +641,7 @@ export async function runFourStageOwnedCancellations(
       try {
         if (ownedId) {
           const order = await getOrder();
+          facts.cleanupOrderReadback = orderFacts(order);
           // A lost assignment response must not invent IDs. For this already
           // acknowledged owned UUID only, a real bound Driver list can recover
           // its exact task/assignment/job before normal task progression.

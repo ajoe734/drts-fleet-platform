@@ -157,20 +157,23 @@ export class CallcenterRepository {
     );
   }
 
-  async enqueueFinalizeRecording(params: {
-    callId: string;
-    brandId?: string | null | undefined;
-    recordingId?: string | null | undefined;
-    linkedOrderId?: string | null | undefined;
-    endedAt?: string | null | undefined;
-  }): Promise<{ enqueued: boolean; deduped: boolean }> {
+  async enqueueFinalizeRecording(
+    params: {
+      callId: string;
+      brandId?: string | null | undefined;
+      recordingId?: string | null | undefined;
+      linkedOrderId?: string | null | undefined;
+      endedAt?: string | null | undefined;
+    },
+    executor?: CallcenterQueryExecutor,
+  ): Promise<{ enqueued: boolean; deduped: boolean }> {
     if (!this.isEnabled()) {
       return { enqueued: false, deduped: false };
     }
 
     const dedupeKey = `finalize_recording:call:${params.callId}`;
 
-    const existing = await this.databaseService!.query<{
+    const existing = await (executor ?? this.databaseService!).query<{
       work_id: string;
       payload_ref: string | null;
       status: string;
@@ -221,7 +224,7 @@ export class CallcenterRepository {
       closedAt: params.endedAt ?? new Date().toISOString(),
     });
 
-    const insertResult = await this.databaseService!.query(
+    const insertResult = await (executor ?? this.databaseService!).query(
       `INSERT INTO voice.work_item (
         command_id, voice_session_id, work_type, dedupe_key, payload_ref, run_after
       ) VALUES (NULL, NULL, 'finalize_recording', $1, $2, now())

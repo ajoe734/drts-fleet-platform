@@ -20,6 +20,12 @@ import {
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
 import { AuthScreen, AuthAlert, P5Btn, P5Card, P5 } from "../auth/ui";
 import { PAY_T as T } from "../../lib/payment/translations";
+import { ECPAY_ACTION_ORIGINS } from "./ecpay-csp";
+import { EcpayHostedFields } from "./ecpay-hosted-fields";
+
+export const MAX_BOUND_CARDS = 5;
+export const CARD_LIMIT_MESSAGE =
+  "每個會員最多可綁定 5 張信用卡。如需新增第 6 張卡片，請先移除既有卡片。";
 
 export interface PaymentMethodsScreenProps {
   client?: PassengerPaymentClient;
@@ -31,10 +37,24 @@ export interface PaymentMethodsScreenProps {
 export function PaymentMethodsScreen({
   client: supplied,
   accountClient: accountSupplied,
-  fields = { status: "unavailable" },
-  hostedFieldsView,
-  approvedActionOrigins = [],
+  fields: fieldsProp,
+  hostedFieldsView: hostedFieldsViewProp,
+  approvedActionOrigins,
 }: PaymentMethodsScreenProps) {
+  const useManagedEcpay =
+    fieldsProp === undefined &&
+    hostedFieldsViewProp === undefined &&
+    process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER === "ecpay";
+  const [managedFields, setManagedFields] =
+    useState<PassengerPaymentFieldsAvailability>({ status: "unavailable" });
+  const fields = fieldsProp ?? (useManagedEcpay ? managedFields : { status: "unavailable" });
+  const hostedFieldsView =
+    hostedFieldsViewProp ??
+    (useManagedEcpay ? (
+      <EcpayHostedFields onReady={setManagedFields} />
+    ) : undefined);
+  const effectiveActionOrigins =
+    approvedActionOrigins ?? (useManagedEcpay ? ECPAY_ACTION_ORIGINS : []);
   const router = useRouter();
   const [client] = useState(
     () =>
@@ -152,6 +172,10 @@ export function PaymentMethodsScreen({
   }
   async function bind() {
     if (lock.current || pending || fields.status !== "ready") return;
+    if (methods !== undefined && methods.length >= MAX_BOUND_CARDS) {
+      setError(CARD_LIMIT_MESSAGE);
+      return;
+    }
     lock.current = true;
     setBusy(true);
     setError("");
@@ -199,6 +223,13 @@ export function PaymentMethodsScreen({
       if (!alive.current || invalidIdentity.current) return;
       if (reason instanceof PassengerApiError && reason.status === 401) {
         report(reason, T.failed);
+        return;
+      }
+      if (
+        reason instanceof PassengerApiError &&
+        reason.code.toLowerCase() === "card_limit_exceeded"
+      ) {
+        report(reason, CARD_LIMIT_MESSAGE);
         return;
       }
       const declined =
@@ -271,8 +302,10 @@ export function PaymentMethodsScreen({
   const title =
     view === "add" ? T.addTitle : view === "delete" ? T.removeTitle : T.title;
   const approvedUrl = actionUrl
-    ? approvedPaymentActionUrl(actionUrl, approvedActionOrigins)
+    ? approvedPaymentActionUrl(actionUrl, effectiveActionOrigins)
     : null;
+  const atCardLimit =
+    methods !== undefined && methods.length >= MAX_BOUND_CARDS;
   const fieldsReady =
     fields.status === "ready" &&
     (fields.port.kind === "synthetic" || hostedFieldsView !== undefined);
@@ -371,10 +404,11 @@ export function PaymentMethodsScreen({
               ))
             )}
           </P5Card>
-          <div style={{ margin: "0 14px" }}>
+          <div style={{ margin: "0 14px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {atCardLimit && <AuthAlert kind="warn">{CARD_LIMIT_MESSAGE}</AuthAlert>}
             <P5Btn
               kind="primary"
-              disabled={busy || pending || methods === undefined}
+              disabled={busy || pending || methods === undefined || atCardLimit}
               onClick={() => {
                 setError("");
                 setView("add");
@@ -425,6 +459,9 @@ export function PaymentMethodsScreen({
           >
             {hostedFieldsView ?? T.fieldsPlaceholder}
           </div>
+          {atCardLimit && (
+            <AuthAlert kind="warn">{CARD_LIMIT_MESSAGE}</AuthAlert>
+          )}
           {fields.status === "ready" && fields.port.kind === "synthetic" && (
             <AuthAlert kind="warn">{T.synthetic}</AuthAlert>
           )}
@@ -433,7 +470,7 @@ export function PaymentMethodsScreen({
           )}
           <P5Btn
             kind="primary"
-            disabled={busy || pending || !fieldsReady}
+            disabled={busy || pending || !fieldsReady || atCardLimit}
             onClick={() => void bind()}
           >
             {T.bind}

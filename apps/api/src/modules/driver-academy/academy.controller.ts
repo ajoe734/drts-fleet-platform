@@ -72,6 +72,18 @@ function resolveFleetPartnerId(
   }
 
   const normalizedRequested = requested?.trim();
+  if (identity?.realm === "partner") {
+    const own = identity.partnerId?.trim();
+    if (!own || !normalizedRequested || normalizedRequested !== own) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        SYSTEM_REMEDIATION_ERROR_CODES.ACADEMY_FORBIDDEN_FLEET_ACCESS,
+        "Fleet partners may only access their own training data.",
+        { requestedFleetPartnerId: requested, ownFleetPartnerId: own ?? null },
+      );
+    }
+    return own;
+  }
   if (!normalizedRequested) {
     throw new ApiRequestError(
       HttpStatus.BAD_REQUEST,

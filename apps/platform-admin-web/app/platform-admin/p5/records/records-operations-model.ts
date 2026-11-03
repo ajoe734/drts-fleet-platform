@@ -1,6 +1,7 @@
 import type {
   MultiTaxiTripOperationalAdminView,
   MultiTaxiTripOperationalExportJobStatus,
+  MultiTaxiTripOperationalRecord,
   MultiTaxiTripOperationalRecordQuery,
 } from "@drts/contracts";
 
@@ -154,12 +155,60 @@ export function formatRecordDateTime(
   }).format(timestamp);
 }
 
-export function formatRecordMoney(amountMinor: number, locale: "zh" | "en") {
+export function formatRecordMoney(
+  amountMinor: number,
+  locale: "zh" | "en",
+): string;
+export function formatRecordMoney(
+  amountMinor: number | null | undefined,
+  locale: "zh" | "en",
+): string | null;
+export function formatRecordMoney(
+  amountMinor: number | null | undefined,
+  locale: "zh" | "en",
+): string | null {
+  if (
+    amountMinor === null ||
+    amountMinor === undefined ||
+    !Number.isFinite(amountMinor)
+  ) {
+    return null;
+  }
   return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
     style: "currency",
     currency: "TWD",
     maximumFractionDigits: 0,
   }).format(amountMinor / 100);
+}
+
+export function resolveRecordCollectedFareMinor(record: {
+  actualFareMinor: number;
+  collectedFareMinor?: number | null;
+  paymentStatus?: MultiTaxiTripOperationalRecord["paymentStatus"];
+}): number | null {
+  if (record.collectedFareMinor !== undefined) {
+    return record.collectedFareMinor;
+  }
+  if (record.paymentStatus === "captured") {
+    return record.actualFareMinor;
+  }
+  if (record.paymentStatus === "refunded") {
+    return 0;
+  }
+  if (record.paymentStatus !== undefined) {
+    return null;
+  }
+  return record.actualFareMinor;
+}
+
+export function resolveRecordTollMinor(record: {
+  tollMinor: number | null | undefined;
+  tollSource?: MultiTaxiTripOperationalRecord["tollSource"];
+}): number | null {
+  if (record.tollSource === "unavailable") {
+    return null;
+  }
+  return record.tollMinor ?? null;
 }
 
 export function formatRecordDistance(distanceMeters: number | null) {

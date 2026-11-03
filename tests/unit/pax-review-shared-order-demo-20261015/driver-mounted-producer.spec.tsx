@@ -210,7 +210,7 @@ it.each(["/", "/rides/order-id", "/review", "/review-driver-other/trip"])(
   async (url) => {
     const headers = await headersFor(url);
     expect(headers["Content-Security-Policy"]).toBe(
-      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+      "default-src 'self'; connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://maps.googleapis.com https://maps.gstatic.com; font-src 'self' https://fonts.gstatic.com;",
     );
     expect(() => expoWorker(headers).start()).toThrow("Worker blocked");
     expect(headers["Cross-Origin-Opener-Policy"]).toBeUndefined();

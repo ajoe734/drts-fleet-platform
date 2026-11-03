@@ -6,15 +6,17 @@ import {
   PaymentAwareBookingClient,
   PassengerPaymentClient,
   paymentMethodExpired,
-  paymentMethodLabel,
 } from "@drts/passenger-client";
 import {
   BookingScreen,
   type BookingPaymentSelection,
 } from "../booking/booking-screen";
 import { AuthAlert, P5Btn } from "../auth/ui";
-import { PaymentMethodChoice, UnpaidPaymentNotice } from "./payment-summary";
-import { BOOK_T } from "../../lib/booking/translations";
+import {
+  PaymentMethodChoice,
+  UnpaidPaymentNotice,
+  passengerCardLabel,
+} from "./payment-summary";
 import { PAY_T as T } from "../../lib/payment/translations";
 
 export function PaymentBookingHome() {
@@ -115,7 +117,7 @@ export function PaymentBookingHome() {
           return preferred
             ? {
                 paymentMethodId: preferred.paymentMethodId,
-                label: paymentMethodLabel(preferred),
+                label: passengerCardLabel(preferred),
               }
             : undefined;
         });
@@ -140,12 +142,12 @@ export function PaymentBookingHome() {
       onSelect={(method) =>
         setSelection({
           paymentMethodId: method.paymentMethodId,
-          label: paymentMethodLabel(method),
+          label: passengerCardLabel(method),
         })
       }
     />
   ) : (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <AuthAlert kind="warn">{failure ? T.failed : T.loading}</AuthAlert>
       <P5Btn
         disabled={!failure}
@@ -153,19 +155,16 @@ export function PaymentBookingHome() {
       >
         {T.retry}
       </P5Btn>
-    </>
+    </div>
   );
+  // The fees link, the unpaid notice and the 支付方式 picker all render inside
+  // the booking screen's plan frame rather than above its header.
   return (
-    <>
-      <nav aria-label={BOOK_T.disclosure} style={{ padding: "12px 16px" }}>
-        <a href="/fares">{BOOK_T.fullFees}</a>
-      </nav>
-      {unpaid && <UnpaidPaymentNotice />}
-      <BookingScreen
-        client={bookingClient}
-        {...(!unpaid && selection ? { paymentSelection: selection } : {})}
-        paymentSlot={slot}
-      />
-    </>
+    <BookingScreen
+      client={bookingClient}
+      {...(!unpaid && selection ? { paymentSelection: selection } : {})}
+      paymentSlot={slot}
+      {...(unpaid ? { notice: <UnpaidPaymentNotice /> } : {})}
+    />
   );
 }

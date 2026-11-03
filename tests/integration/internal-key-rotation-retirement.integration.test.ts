@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import {
@@ -40,15 +40,21 @@ const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
   revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
   status: "active",
 };
+// The middleware reads the wall clock, so run while the fixture was active;
+// otherwise these mechanism checks start failing once its expiry passes.
+const FIXTURE_ACTIVE_AT = new Date("2026-10-15T00:00:00Z");
 
 describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)", () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
     process.env.APP_ENV = "staging";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(FIXTURE_ACTIVE_AT);
   });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
+    vi.useRealTimers();
   });
 
   it("verifies every production internal-key exception has complete metadata", () => {

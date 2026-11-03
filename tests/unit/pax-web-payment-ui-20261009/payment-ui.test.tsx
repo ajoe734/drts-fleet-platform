@@ -780,7 +780,14 @@ describe("actual root Book + opaque payment composition, not a placeholder", () 
     const f = rootFixture();
     render(<Home />);
     const dialog = await rootConfirmation();
-    await within(dialog).findByRole("radio", { name: /SYNTHETIC.*0001/ });
+    // 附錄 E-19b: the default card is the 支付方式 row; the list opens from it.
+    const toggle = await within(dialog).findByRole("button", {
+      name: "變更支付方式：測試卡 •••• 0001",
+    });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(dialog).queryByRole("radio")).toBeNull();
+    fireEvent.click(toggle);
+    await within(dialog).findByRole("radio", { name: /測試卡.*0001/ });
     fireEvent.click(within(dialog).getAllByRole("radio")[1]!);
     fireEvent.click(screen.getByLabelText("我已確認費用與優惠說明"));
     fireEvent.click(screen.getByRole("button", { name: "確認叫車" }));
@@ -816,7 +823,9 @@ describe("actual root Book + opaque payment composition, not a placeholder", () 
     });
     render(<Home />);
     const dialog = await rootConfirmation();
-    await within(dialog).findByRole("radio", { name: /SYNTHETIC.*0001/ });
+    await within(dialog).findByRole("button", {
+      name: "變更支付方式：測試卡 •••• 0001",
+    });
     fireEvent.click(screen.getByLabelText("我已確認費用與優惠說明"));
     fireEvent.click(screen.getByRole("button", { name: "確認叫車" }));
     await within(dialog).findByText(

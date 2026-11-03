@@ -1800,11 +1800,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantOrders,
       billingSettlementService?.listTenantInvoices(tenantId) ?? [],
     );
+    // Payables accrue by completion month, which billing resolves itself. A
+    // reservation in a later month (booked within the last hours of a month)
+    // must not move the estimate to a month with no completed trip yet.
     const payableSummary = billingSettlementService
-      ? await billingSettlementService.getTenantPayableSummary(
-          tenantId,
-          resolvedOrderPeriodMonth,
-        )
+      ? await billingSettlementService.getTenantPayableSummary(tenantId)
       : null;
     const periodMonth = payableSummary?.periodMonth ?? resolvedOrderPeriodMonth;
     const invoices =

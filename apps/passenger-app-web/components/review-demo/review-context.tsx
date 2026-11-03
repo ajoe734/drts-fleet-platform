@@ -11,26 +11,91 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { isDemoMode, subscribeDemo } from "../../lib/demo/store";
+import { isTrialMode, subscribeTrial } from "../../lib/trial/store";
+import { passengerChrome } from "../../lib/passenger-presentation";
+import { trialT } from "../trial/translations";
 
 const ReviewContext = createContext(false);
 const ReviewPendingContext = createContext(false);
 const OpsUrlContext = createContext("");
+const TrialContext = createContext(false);
 export const useReviewDemo = () => useContext(ReviewContext);
 export const useReviewDemoPending = () => useContext(ReviewPendingContext);
 export const useReviewOpsUrl = () => useContext(OpsUrlContext);
+/** The review backend presented as the self-serve trial (see lib/trial). */
+export const useTrialMode = () => useContext(TrialContext);
+
+const stripLink = {
+  color: passengerChrome.shell,
+  textDecoration: "none",
+  fontWeight: 600,
+} as const;
+
+/** One quiet line above the app: the trial is a test environment, and where
+ * to go next. The app's own screens stay as the plan draws them. */
+function TrialStrip() {
+  return (
+    <aside
+      aria-label={trialT.bannerLabel}
+      style={{
+        maxWidth: 430,
+        margin: "0 auto",
+        padding: "6px 14px",
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        columnGap: 10,
+        rowGap: 2,
+        fontSize: 12,
+        lineHeight: 1.5,
+        color: passengerChrome.muted,
+        fontFamily: passengerChrome.fontFamily,
+      }}
+    >
+      <span>
+        <strong style={{ color: passengerChrome.text }}>
+          {trialT.bannerTitle}
+        </strong>
+        ：{trialT.bannerBody}
+      </span>
+      <nav style={{ display: "flex", gap: 10, marginLeft: "auto" }}>
+        <Link href="/" style={stripLink}>
+          {trialT.bookingNav}
+        </Link>
+        <Link href="/rides" style={stripLink}>
+          {trialT.historyNav}
+        </Link>
+        <Link href="/account/payment-methods" style={stripLink}>
+          {trialT.paymentNav}
+        </Link>
+        <Link href="/trial" style={stripLink}>
+          {trialT.restart}
+        </Link>
+      </nav>
+    </aside>
+  );
+}
 
 export function ReviewDemoProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const demoEntry =
     pathname === "/demo" || pathname?.startsWith("/demo/") === true;
+  const trialEntry =
+    pathname === "/trial" || pathname?.startsWith("/trial/") === true;
   const [enabled, setEnabled] = useState(false);
   const [pending, setPending] = useState(true);
   const [localDemo, setLocalDemo] = useState(false);
+  const [trialFlag, setTrialFlag] = useState(false);
   const [opsUrl, setOpsUrl] = useState("");
   useEffect(() => {
     const update = () => setLocalDemo(isDemoMode());
     update();
     return subscribeDemo(update);
+  }, []);
+  useEffect(() => {
+    const update = () => setTrialFlag(isTrialMode());
+    update();
+    return subscribeTrial(update);
   }, []);
   useEffect(() => {
     // The existing local demo never needs a backend, including its initial
@@ -71,29 +136,33 @@ export function ReviewDemoProvider({ children }: { children: ReactNode }) {
     };
   }, [demoEntry, localDemo]);
   const review = enabled && !localDemo && !demoEntry;
+  const trial = review && (trialFlag || trialEntry);
   return (
     <ReviewContext.Provider value={review}>
       <ReviewPendingContext.Provider
         value={pending && !localDemo && !demoEntry}
       >
         <OpsUrlContext.Provider value={opsUrl}>
-          {review && (
-            <aside
-              aria-label={t.bannerLabel}
-              style={{ background: "#fff3cd", padding: 12, fontSize: 13 }}
-            >
-              <strong>{t.bannerTitle}</strong>
-              <p>{t.bannerSimulation}</p>
-              <p>{t.leadTimeNotice}</p>
-              <nav>
-                <Link href="/review">{t.reviewNav}</Link> ·{" "}
-                <Link href="/">{t.bookingNav}</Link> ·{" "}
-                <Link href="/rides">{t.historyNav}</Link> ·{" "}
-                <Link href="/account/payment-methods">{t.paymentNav}</Link>
-              </nav>
-            </aside>
-          )}
-          {children}
+          <TrialContext.Provider value={trial}>
+            {trial && !trialEntry && <TrialStrip />}
+            {review && !trial && (
+              <aside
+                aria-label={t.bannerLabel}
+                style={{ background: "#fff3cd", padding: 12, fontSize: 13 }}
+              >
+                <strong>{t.bannerTitle}</strong>
+                <p>{t.bannerSimulation}</p>
+                <p>{t.leadTimeNotice}</p>
+                <nav>
+                  <Link href="/review">{t.reviewNav}</Link> ·{" "}
+                  <Link href="/">{t.bookingNav}</Link> ·{" "}
+                  <Link href="/rides">{t.historyNav}</Link> ·{" "}
+                  <Link href="/account/payment-methods">{t.paymentNav}</Link>
+                </nav>
+              </aside>
+            )}
+            {children}
+          </TrialContext.Provider>
         </OpsUrlContext.Provider>
       </ReviewPendingContext.Provider>
     </ReviewContext.Provider>

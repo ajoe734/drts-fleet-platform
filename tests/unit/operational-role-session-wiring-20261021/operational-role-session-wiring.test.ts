@@ -45,6 +45,7 @@ import {
 } from "../../../operations/verification/prepare-operational-role-sessions";
 import {
   operationalRoleRequestHeaders,
+  prepareOperationalFleetSession,
   probeOperationalDocumentRoleAccess,
   verifyOperationalRoleSession,
   type RoleAccessProbeSetup,
@@ -100,24 +101,19 @@ const OPS_ORIGIN = "https://drts-dev-ops-console-web-uc.a.run.app";
 const ADMIN_ORIGIN = "https://drts-dev-platform-admin-web-uc.a.run.app";
 const GCP_PROJECT_ID = "drts-dev-devcc-20260825";
 
-// Of the five files the original C125 task accepted at commit 348b7d3c, only this one
-// has never been touched by a later authorized functional correction: it must remain
-// byte-for-byte identical to that historical snapshot forever.
-const C125_UNCHANGED_FILES = [
+// All five C125 files have since received authorized functional corrections. The runner
+// gained first-visit consent/readback coverage in REFERRAL-FIRST-VISIT-CONSENT-READBACK-COVERAGE-20261026;
+// the other four gained the own_fleet upload-probe correction in
+// C125-EXISTING-UPLOAD-PROBE-CONTRACT-20261023. Keep each original 348b7d3c
+// blob/bytes/sha256 as immutable historical evidence when its blob is locally reachable,
+// never as an assertion that the corrected working tree still has those bytes.
+const C125_HISTORICALLY_CORRECTED_FILES = [
   {
     path: "tests/e2e/operational-browser-acceptance.spec.ts",
     bytes: 23626,
     blob: "83926082888a8140246a96a9de080429f7685200",
     sha256: "6ad1b38cfd921a36866eca9844a504b552676d530afb30dddfca7dc38d1c46b2",
   },
-] as const;
-
-// These four were later authorized (C125-EXISTING-UPLOAD-PROBE-CONTRACT-20261023) to move past
-// their 348b7d3c snapshot to correct own_fleet upload probes that the diagnosed existing API
-// contract actually accepted. The recorded blob/bytes/sha256 below are kept only as immutable
-// historical evidence that the pre-correction state is still reachable in git history — they are
-// intentionally NOT asserted against the current working tree, which is expected to differ.
-const C125_HISTORICALLY_CORRECTED_FILES = [
   {
     path: "tests/e2e/operational-document-upload.ts",
     bytes: 111023,
@@ -916,7 +912,7 @@ function createStandardMockFetch(
 }
 
 describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
-  describe("immutable baseline gap proof and C125 5-file byte-for-byte preservation", () => {
+  describe("immutable baseline gap proof and C125 five-file historical preservation", () => {
     it("proves immutable baseline 337f3dd7fb530b44f4e65875dd03c7a2191e3706 lacked the four role-session producers/forwarders in deploy-dev.yml and run-operational-browser-acceptance.sh", () => {
       const { baselineWorkflow, baselineRunner } =
         reconstructImmutable337CallerSources();
@@ -978,27 +974,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       );
     });
 
-    it("preserves the unchanged C125 file byte-for-byte, keeps the four later-corrected C125 files' pre-correction evidence reachable without reverting to it, and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
-      const hasCommit = hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF);
-      for (const spec of C125_UNCHANGED_FILES) {
-        const currentBytes = readFileSync(path.join(process.cwd(), spec.path));
-        expect(currentBytes.byteLength).toBe(spec.bytes);
-        expect(gitBlobSha1Hex(currentBytes)).toBe(spec.blob);
-        expect(sha256Hex(currentBytes)).toBe(spec.sha256);
-
-        // Even in shallow fetch-depth: 1 checkouts, unchanged file blobs exist in HEAD.
-        const blobBytes = execFileSync("git", ["cat-file", "blob", spec.blob]);
-        expect(sha256Hex(currentBytes)).toBe(sha256Hex(blobBytes));
-
-        if (hasCommit) {
-          const baselineBytes = execFileSync("git", [
-            "show",
-            `${IMMUTABLE_BASELINE_REF}:${spec.path}`,
-          ]);
-          expect(sha256Hex(currentBytes)).toBe(sha256Hex(baselineBytes));
-        }
-      }
-
+    it("keeps all five corrected C125 files' pre-correction evidence reachable when available without reverting to it, and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
       for (const spec of C125_HISTORICALLY_CORRECTED_FILES) {
         // The pre-correction blob is only guaranteed reachable when full history is present:
         // a changed file's pre-correction blob is no longer referenced by HEAD's tree, so a
@@ -1059,7 +1035,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(lineageSetupRequests).toHaveLength(16);
     });
 
-    it("wires driver-provisioning WIF assertion, four role-session bindings, and always-teardown in deploy-dev.yml and run-operational-browser-acceptance.sh without setting API_ID_TOKEN", () => {
+    it("wires driver-provisioning WIF assertion, four role-session bindings, and always-teardown with API WIF limited to the original operational browser step", () => {
       const workflow = readFileSync(
         path.join(process.cwd(), ".github/workflows/deploy-dev.yml"),
         "utf8",
@@ -1097,9 +1073,37 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(workflow).toContain(
         "Revoke operational role sessions and driver device invitation",
       );
-      // Must not set DRTS_DEV_API_ID_TOKEN or DRTS_OPERATIONAL_API_ID_TOKEN on open API routes.
-      expect(workflow).not.toContain("DRTS_DEV_API_ID_TOKEN");
+      // Public routes must not inherit an application Bearer containing WIF.
+      // Only the named first-visit consumer receives this dedicated proof.
+      const browserStep = workflow
+        .split("      - name: Execute candidate-bound operational journeys")[1]!
+        .split("      - name:")[0]!;
+      expect(browserStep).toContain(
+        "DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN: ${{ steps.id_token_api_referral_first_visit.outputs.id_token }}",
+      );
+      expect(browserStep).toContain(
+        "DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}",
+      );
+      expect(
+        workflow.match(/DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN:/g),
+      ).toHaveLength(1);
+      // Must not set generic API ID tokens on open API routes.
       expect(workflow).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
+      expect(workflow).not.toContain("DRTS_DEV_API_ID_TOKEN");
+      expect(runner).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
+      const mintStep = workflow
+        .split(
+          "      - name: Mint identity token — referral first-visit evidence (operational candidate)",
+        )[1]!
+        .split("      - name:")[0]!;
+      expect(mintStep).toContain(
+        "id_token_audience: ${{ needs.health-check.outputs.api }}",
+      );
+      expect(mintStep).toContain(
+        "service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}",
+      );
+      expect(mintStep).toContain("create_credentials_file: false");
+      expect(mintStep).toContain("export_environment_variables: false");
       expect(runner).toContain(
         "operations/verification/prepare-operational-role-sessions.ts",
       );
@@ -2047,9 +2051,10 @@ process.exit(99);
       });
     }
 
-    function createOwnedForeignFleetRealServiceHarness(
+    async function createOwnedForeignFleetRealServiceHarness(
       options: {
         partnerEntriesOverride?: Array<Record<string, unknown>>;
+        skipOwnSourceEntry?: boolean;
         overrideCreatedFleetId?: string;
         overrideCreatedFleetActive?: boolean;
         dropFleetCreateResponseAfterPersist?: boolean;
@@ -2067,6 +2072,7 @@ process.exit(99);
         failCanonicalFleetVerifyStatus?: number;
         failFleetDeactivateOnce?: boolean;
         expireFirstAdminSessionBeforeTeardown?: boolean;
+        failAdminSessionVerifyWithTransientErrorOnTeardownOnce?: boolean;
         strictNoDevStepUpWaiver?: boolean;
         crossInstanceStepUpMismatch?: boolean;
       } = {},
@@ -2302,6 +2308,24 @@ process.exit(99);
             record: structuredClone(seededEntry),
           });
       }
+      // The owned-fixture source must be a real canonical own-Fleet binding,
+      // rather than an arbitrary referral entry from the default seed.
+      if (!options.skipOwnSourceEntry) {
+        await tenantPartnerService.createPlatformPartnerEntry({
+          tenantId: "tenant-canonical-own-source",
+          fleetPartnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
+          partnerCode: "CANONICAL_OWN_FLEET",
+          partnerType: "fleet_partner",
+          programId: "program-canonical-own-source",
+          entrySlug: "canonical-own-fleet",
+          displayName: "Canonical Own Fleet",
+          businessDispatchSubtype: "enterprise_dispatch",
+          authMode: "partner_api_key",
+          eligibilityMode: "none",
+          status: "active",
+          activeFlag: true,
+        });
+      }
       const jwtAuthService = new JwtAuthService(
         identityRepository,
         tenantPartnerService,
@@ -2366,6 +2390,8 @@ process.exit(99);
       let droppedKeyIssueOnce = false;
       let droppedBootstrapOnce = false;
       let failedFleetDeactivateOnce = false;
+      let readyToFailAdminSessionVerifyOnTeardown = false;
+      let failedAdminSessionVerifyOnTeardownOnce = false;
 
       const guardRequest = async (
         controllerClass: Record<string, unknown>,
@@ -2541,6 +2567,16 @@ process.exit(99);
             expect(headers.authorization).toBe(
               `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
             );
+            if (
+              options.failAdminSessionVerifyWithTransientErrorOnTeardownOnce &&
+              readyToFailAdminSessionVerifyOnTeardown &&
+              !failedAdminSessionVerifyOnTeardownOnce
+            ) {
+              failedAdminSessionVerifyOnTeardownOnce = true;
+              throw new TypeError(
+                "transient transport failure during Admin session verification; original session remains active",
+              );
+            }
             const req = await guardRequest(
               AuthController as unknown as Record<string, unknown>,
               "getAuthSession",
@@ -2767,6 +2803,7 @@ process.exit(99);
                 !failedFleetDeactivateOnce
               ) {
                 failedFleetDeactivateOnce = true;
+                readyToFailAdminSessionVerifyOnTeardown = true;
                 if (options.expireFirstAdminSessionBeforeTeardown) {
                   for (const sid of issuedAdminSessionIds) {
                     await identityRepository.revokeSession(
@@ -2875,6 +2912,7 @@ process.exit(99);
               const createdEntry =
                 await tenantPartnerController.createPlatformPartnerEntry(
                   body as CreatePartnerChannelEntryCommand,
+                  headers["x-request-id"],
                 );
               if (
                 options.dropEntryCreateResponseAfterPersist &&
@@ -3440,7 +3478,7 @@ process.exit(99);
       const exported: Record<string, string> = {};
       const masked: string[] = [];
       const savedEvidence: Record<string, OperationalRoleSessionsEvidence> = {};
-      const harness = createOwnedForeignFleetRealServiceHarness();
+      const harness = await createOwnedForeignFleetRealServiceHarness();
 
       const preExistingFleetIds = (
         await harness.fleetPartnerService.listFleetPartners()
@@ -3675,8 +3713,252 @@ process.exit(99);
       expect(preExistingEntry?.activeFlag).toBe(true);
     });
 
+    it("accepts the normal onboarding producer's manifest tenant and dedicated opaque programme, preserving its resources during owned foreign cleanup", async () => {
+      const harness = await createOwnedForeignFleetRealServiceHarness({
+        skipOwnSourceEntry: true,
+      });
+      const configuration = JSON.parse(
+        readFileSync(
+          "tests/e2e/fixtures/operational-browser-journeys.json",
+          "utf8",
+        ),
+      ).fleetApplicationSetup;
+      const env = createNoProvidedForeignFleetEnv();
+      for (const [name, value] of Object.entries(env)) {
+        vi.stubEnv(name, value);
+      }
+      vi.stubEnv("DRTS_OPERATIONAL_FLEET_SESSION_TOKEN", undefined);
+      vi.stubGlobal("fetch", harness.fetchImpl);
+      // Run the unchanged normal producer against real controllers, guards,
+      // services and repositories. Only HTTP/SQL transport ports are simulated.
+      const own = await prepareOperationalFleetSession(configuration);
+      try {
+        expect(own.metadata.source).toBe("worker-issued-session");
+        const source = harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === own.metadata.entrySlug)!;
+        expect(source.partnerId).toBe(OPERATIONAL_OWN_FLEET_PARTNER_ID);
+        expect(source.tenantId).toBe("10000000-0000-0000-0000-000000000201");
+        expect(source.programId).toBe(`${source.entrySlug}-program`);
+        expect(source.programId).toMatch(
+          /^operational-fleet-[0-9a-f-]+-program$/,
+        );
+        const ownSessions =
+          await harness.identityRepository.listSessionsByPrincipal(
+            own.metadata.keyId!,
+          );
+        expect(ownSessions).toHaveLength(1);
+        expect(ownSessions[0]?.revokedAt).toBeNull();
+        const originalCredentials =
+          harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
+            source.entrySlug,
+          );
+        // Credential signals.evaluatedAt is refreshed on each list read.
+        const credentialRecords = (credentials: typeof originalCredentials) =>
+          credentials.map((credential) => ({
+            ...credential,
+            signals: { ...credential.signals, evaluatedAt: "read-time" },
+          }));
+        const deps = {
+          fetch: harness.fetchImpl,
+          mask: () => {},
+          exportSession: (name: string, value: string) => {
+            env[name] = value;
+          },
+          save: () => {},
+        };
+        const evidence = await prepareOperationalRoleSessions(env, deps);
+        expect(evidence.status).toBe("passed");
+        expect(evidence.foreign_fleet_precondition).toBe(
+          "satisfied-by-owned-canonical-fleet",
+        );
+        const foreignFleetId =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
+        expect(foreignFleetId).not.toBe(source.partnerId);
+        const foreignSlug =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_ENTRY_SLUG!;
+        const foreign = harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === foreignSlug)!;
+        expect(foreign).toMatchObject({
+          partnerId: foreignFleetId,
+          tenantId: source.tenantId,
+          programId: source.programId,
+          status: "active",
+        });
+        expect((await teardownOperationalRoleSessions(env, deps)).status).toBe(
+          "passed",
+        );
+        expect(
+          (await harness.fleetPartnerService.getFleetPartner(foreignFleetId))
+            .active,
+        ).toBe(false);
+        expect(
+          harness.tenantPartnerService
+            .listPlatformPartnerEntries()
+            .find((entry) => entry.entrySlug === foreignSlug)?.status,
+        ).toBe("revoked");
+        expect(
+          harness.tenantPartnerService
+            .listPlatformPartnerEntries()
+            .find((entry) => entry.entrySlug === source.entrySlug),
+        ).toEqual(source);
+        expect(
+          credentialRecords(
+            harness.tenantPartnerService.listPlatformPartnerIngressCredentials(
+              source.entrySlug,
+            ),
+          ),
+        ).toEqual(credentialRecords(originalCredentials));
+        expect(
+          await harness.identityRepository.listSessionsByPrincipal(
+            own.metadata.keyId!,
+          ),
+        ).toEqual(ownSessions);
+        expect(
+          (await harness.fleetPartnerService.getFleetPartner(source.partnerId))
+            .active,
+        ).toBe(true);
+      } finally {
+        await own.cleanup();
+      }
+      expect(
+        harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === own.metadata.entrySlug)?.status,
+      ).toBe("revoked");
+    });
+
+    it.each(["stale-first", "own-first"])(
+      "selects the canonical own-Fleet pair despite disjoint invalid active entries (%s) and cleans up only owned resources",
+      async (order) => {
+        const harness = await createOwnedForeignFleetRealServiceHarness();
+        // Persist the historical manifest entry through the real service too.
+        await harness.tenantPartnerService.createPlatformPartnerEntry({
+          tenantId: "10000000-0000-0000-0000-000000000201",
+          partnerCode: "STALE_MANIFEST",
+          partnerType: "referral_channel",
+          programId: "operational-fleet-stale-program",
+          entrySlug: "stale-manifest-entry",
+          displayName: "Stale Manifest Entry",
+          businessDispatchSubtype: "enterprise_dispatch",
+          authMode: "partner_api_key",
+          eligibilityMode: "none",
+          status: "active",
+          activeFlag: true,
+        });
+        const originalEntries =
+          harness.tenantPartnerService.listPlatformPartnerEntries();
+        const ownSource = originalEntries.find(
+          (entry) => entry.entrySlug === "canonical-own-fleet",
+        )!;
+        const stale = originalEntries.find(
+          (entry) => entry.entrySlug === "stale-manifest-entry",
+        )!;
+        const readback = [
+          {
+            ...ownSource,
+            entrySlug: "same-pair-own-entry",
+            partnerCode: "SAME_PAIR_OWN",
+          },
+          stale,
+          // Disjoint malformed and conflicting historical programs cannot
+          // become a source or contaminate the selected program's checks.
+          {
+            ...stale,
+            entrySlug: "missing-pair",
+            tenantId: null,
+            programId: null,
+          },
+          {
+            ...stale,
+            entrySlug: "other-a",
+            tenantId: "tenant-a",
+            programId: "other-program",
+          },
+          {
+            ...stale,
+            entrySlug: "other-b",
+            tenantId: "tenant-b",
+            programId: "other-program",
+          },
+        ];
+        const entries =
+          order === "stale-first"
+            ? [...readback, ownSource]
+            : [ownSource, ...readback];
+        // Only the Admin list response is overridden; create, readback,
+        // bootstrap and cleanup still use the existing real-service harness.
+        const fetchWithReadback: typeof fetch = async (input, init) => {
+          const response = await harness.fetchImpl(input, init);
+          if (
+            String(input) ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/platform-admin/partner-entries` &&
+            (init?.method ?? "GET") === "GET"
+          ) {
+            return jsonResponse(deepToSnakeCase({ data: { items: entries } }));
+          }
+          return response;
+        };
+        const env = createNoProvidedForeignFleetEnv();
+        const deps = {
+          fetch: fetchWithReadback,
+          mask: () => {},
+          exportSession: (name: string, value: string) => {
+            env[name] = value;
+          },
+          save: () => {},
+        };
+        const evidence = await prepareOperationalRoleSessions(env, deps);
+        expect(evidence.status).toBe("passed");
+        expect(evidence.foreign_fleet_precondition).toBe(
+          "satisfied-by-owned-canonical-fleet",
+        );
+        const createdFleetId =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
+        const createdSlug =
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_ENTRY_SLUG!;
+        const createdEntry = harness.tenantPartnerService
+          .listPlatformPartnerEntries()
+          .find((entry) => entry.entrySlug === createdSlug)!;
+        expect(createdEntry).toMatchObject({
+          partnerId: createdFleetId,
+          partnerType: "fleet_partner",
+          tenantId: ownSource.tenantId,
+          programId: ownSource.programId,
+          status: "active",
+        });
+        expect(createdFleetId).not.toBe(OPERATIONAL_OWN_FLEET_PARTNER_ID);
+        const cleanup = await teardownOperationalRoleSessions(env, deps);
+        expect(cleanup.status).toBe("passed");
+        expect(
+          (await harness.fleetPartnerService.getFleetPartner(createdFleetId))
+            .active,
+        ).toBe(false);
+        const entriesAfter =
+          harness.tenantPartnerService.listPlatformPartnerEntries();
+        expect(
+          entriesAfter.find((entry) => entry.entrySlug === createdSlug)?.status,
+        ).toBe("revoked");
+        for (const original of originalEntries) {
+          expect(
+            entriesAfter.find(
+              (entry) => entry.entrySlug === original.entrySlug,
+            ),
+          ).toEqual(original);
+        }
+        expect(
+          (
+            await harness.fleetPartnerService.getFleetPartner(
+              OPERATIONAL_OWN_FLEET_PARTNER_ID,
+            )
+          ).active,
+        ).toBe(true);
+      },
+    );
+
     it("preserves provided-first precedence and never creates, mutates, or revokes borrowed external Fleet/entry/key/Admin fixtures", async () => {
-      const harness = createOwnedForeignFleetRealServiceHarness();
+      const harness = await createOwnedForeignFleetRealServiceHarness();
       // Seed an external foreign Fleet + entry + key in the real services
       const externalFleet =
         await harness.fleetPartnerService.createFleetPartner({
@@ -3789,9 +4071,150 @@ process.exit(99);
       ).toBe(false);
     });
 
+    it.each([
+      "no-active-entries",
+      "no-own-source",
+      "inactive-own-source",
+      "revoked-own-source",
+      "missing-tenant",
+      "missing-program",
+      "manifest-source",
+      "seed-tenant-manifest-program",
+      "wrong-partner-type",
+      "conflicting-fleet-alias",
+      "ambiguous-own-programs",
+      "ambiguous-own-tenants",
+      "selected-program-conflict",
+      "selected-program-missing-tenant",
+      "selected-program-manifest-tenant",
+    ])("fails closed before fixture writes for %s", async (scenario) => {
+      const own = {
+        partnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
+        partnerType: "fleet_partner",
+        tenantId: "tenant-demo-001",
+        programId: "program-referral-community",
+        entrySlug: "canonical-own-fleet",
+        partnerCode: "CANONICAL_OWN_FLEET",
+        status: "active",
+        activeFlag: true,
+      };
+      const unrelated = {
+        ...own,
+        partnerId: "partner-unrelated",
+        partnerType: "referral_channel",
+        programId: "disjoint-program",
+        entrySlug: "unrelated-entry",
+        partnerCode: "UNRELATED",
+      };
+      const secondOwn = {
+        ...own,
+        entrySlug: "second-own",
+        partnerCode: "SECOND_OWN",
+      };
+      const conflict = {
+        ...unrelated,
+        programId: own.programId,
+        tenantId: "tenant-other",
+      };
+      const cases: Record<string, Array<Record<string, unknown>>> = {
+        "no-active-entries": [],
+        "no-own-source": [unrelated],
+        "inactive-own-source": [unrelated, { ...own, activeFlag: false }],
+        "revoked-own-source": [
+          unrelated,
+          { ...own, revokedAt: "2026-10-29T00:00:00Z" },
+        ],
+        "missing-tenant": [unrelated, { ...own, tenantId: " " }],
+        "missing-program": [unrelated, { ...own, programId: null }],
+        "manifest-source": [
+          unrelated,
+          { ...own, tenantId: "10000000-0000-0000-0000-000000000201" },
+        ],
+        "seed-tenant-manifest-program": [
+          unrelated,
+          { ...own, programId: "10000000-0000-0000-0000-000000000302" },
+        ],
+        "wrong-partner-type": [
+          unrelated,
+          { ...own, partnerType: "referral_channel" },
+        ],
+        "conflicting-fleet-alias": [
+          unrelated,
+          { ...own, fleetPartnerId: "fleet-other" },
+        ],
+        "ambiguous-own-programs": [
+          own,
+          { ...secondOwn, programId: "another-own-program" },
+        ],
+        "ambiguous-own-tenants": [
+          own,
+          { ...secondOwn, tenantId: "tenant-other" },
+        ],
+        "selected-program-conflict": [conflict, own],
+        "selected-program-missing-tenant": [
+          own,
+          { ...conflict, tenantId: null },
+        ],
+        "selected-program-manifest-tenant": [
+          own,
+          { ...conflict, tenantId: "10000000-0000-0000-0000-000000000201" },
+        ],
+      };
+      const missing = [
+        "no-active-entries",
+        "no-own-source",
+        "inactive-own-source",
+        "revoked-own-source",
+      ].includes(scenario);
+      const harness = await createOwnedForeignFleetRealServiceHarness({
+        partnerEntriesOverride: cases[scenario]!,
+      });
+      const originalEntries =
+        harness.tenantPartnerService.listPlatformPartnerEntries();
+      const originalFleets =
+        await harness.fleetPartnerService.listFleetPartners();
+      const env = createNoProvidedForeignFleetEnv();
+      let saved: OperationalRoleSessionsEvidence | undefined;
+      await expect(
+        prepareOperationalRoleSessions(env, {
+          fetch: harness.fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            env[name] = value;
+          },
+          save: (_name, data) => {
+            saved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+      expect(saved?.stage).toBe("foreign_fleet:resolve-tenant-program");
+      expect(saved?.foreign_fleet_precondition).toBe(
+        missing ? "missing-external-fixture" : "invalid-external-fixture",
+      );
+      expect(saved?.cleanup).toBe("passed");
+      expect(
+        harness.calls.filter(
+          (call) =>
+            call.method !== "GET" &&
+            /control-plane-proxy\/(admin\/fleet-partners|platform-admin\/partner-entries)/.test(
+              call.url,
+            ),
+        ),
+      ).toEqual([]);
+      expect(harness.tenantPartnerService.listPlatformPartnerEntries()).toEqual(
+        originalEntries,
+      );
+      expect(await harness.fleetPartnerService.listFleetPartners()).toEqual(
+        originalFleets,
+      );
+      expect(
+        env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID,
+      ).toBeUndefined();
+    });
+
     it("rejects tenant/program readback mismatches (manifest UUID 201 mixed with demo seed or conflicting tenantId bindings) and same-ownFleet returns without deactivating fleet-demo-001", async () => {
       // 1. Manifest UUID 10000000-0000-0000-0000-000000000201 mixed with demo seed program-referral-community
-      const mixedHarness = createOwnedForeignFleetRealServiceHarness({
+      const mixedHarness = await createOwnedForeignFleetRealServiceHarness({
         partnerEntriesOverride: [
           {
             partnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
@@ -3822,7 +4245,7 @@ process.exit(99);
       expect(mixedSaved?.cleanup).toBe("passed");
 
       // 2. Conflicting tenantId bindings for the same programId
-      const conflictHarness = createOwnedForeignFleetRealServiceHarness({
+      const conflictHarness = await createOwnedForeignFleetRealServiceHarness({
         partnerEntriesOverride: [
           {
             partnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
@@ -3862,9 +4285,10 @@ process.exit(99);
       );
 
       // 3. Same-ownFleet returned by Fleet creation: must reject and NEVER deactivate fleet-demo-001
-      const sameOwnFleetHarness = createOwnedForeignFleetRealServiceHarness({
-        overrideCreatedFleetId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
-      });
+      const sameOwnFleetHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          overrideCreatedFleetId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
+        });
       const sameOwnEnv = createNoProvidedForeignFleetEnv();
       let sameOwnSaved: OperationalRoleSessionsEvidence | undefined;
       await expect(
@@ -3902,7 +4326,7 @@ process.exit(99);
 
     it("cleans up already-created owned Fleet and entry in reverse order when a partial creation failure occurs at entry create or key issue", async () => {
       // Partial failure at entry create (503) after Fleet was created
-      const entryFailHarness = createOwnedForeignFleetRealServiceHarness({
+      const entryFailHarness = await createOwnedForeignFleetRealServiceHarness({
         failEntryCreateStatus: 503,
       });
       const entryFailEnv = createNoProvidedForeignFleetEnv();
@@ -3939,7 +4363,7 @@ process.exit(99);
       expect(entryFailSaved?.cleanup).toBe("unconfirmed");
 
       // Partial failure at key issue (500) after Fleet and entry were created
-      const keyFailHarness = createOwnedForeignFleetRealServiceHarness({
+      const keyFailHarness = await createOwnedForeignFleetRealServiceHarness({
         failKeyIssueStatus: 500,
       });
       const keyFailEnv = createNoProvidedForeignFleetEnv();
@@ -3981,9 +4405,10 @@ process.exit(99);
       expect(keyFailSaved?.cleanup).toBe("unconfirmed");
 
       // Failure after all owned foreign_fleet resources succeed (at canonical Fleet readback verification) -> full reverse-order cleanup with cleanup="passed"
-      const postFleetFailHarness = createOwnedForeignFleetRealServiceHarness({
-        failCanonicalFleetVerifyStatus: 503,
-      });
+      const postFleetFailHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          failCanonicalFleetVerifyStatus: 503,
+        });
       const postFleetFailEnv = createNoProvidedForeignFleetEnv();
       let postFleetFailSaved: OperationalRoleSessionsEvidence | undefined;
       await expect(
@@ -4015,10 +4440,11 @@ process.exit(99);
 
     it("recovers from lost Fleet/entry/key/bootstrap responses via readback without blind retry or key rotation, and records explicit unconfirmed cleanup when readback cannot confirm", async () => {
       // 1. Recoverable lost responses on Fleet create and Entry create -> full success without blind retry
-      const recoverableHarness = createOwnedForeignFleetRealServiceHarness({
-        dropFleetCreateResponseAfterPersist: true,
-        dropEntryCreateResponseAfterPersist: true,
-      });
+      const recoverableHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          dropFleetCreateResponseAfterPersist: true,
+          dropEntryCreateResponseAfterPersist: true,
+        });
       const recoverableEnv = createNoProvidedForeignFleetEnv();
       const evidence = await prepareOperationalRoleSessions(recoverableEnv, {
         fetch: recoverableHarness.fetchImpl,
@@ -4064,7 +4490,7 @@ process.exit(99);
       expect(teardownRes.status).toBe("passed");
 
       // 2. Lost key issue response after persist: never retries credentials/issue (no rotation), recovers keyId via GET .../credentials, revokes key/entry/Fleet, and fails prepare
-      const lostKeyHarness = createOwnedForeignFleetRealServiceHarness({
+      const lostKeyHarness = await createOwnedForeignFleetRealServiceHarness({
         dropKeyIssueResponseAfterPersist: true,
       });
       const lostKeyEnv = createNoProvidedForeignFleetEnv();
@@ -4092,9 +4518,10 @@ process.exit(99);
       expect(recoveredKeyId).toBeTruthy();
 
       // 3. Lost bootstrap-session response after persist: recovers durable session via Admin GET /api/identity/sessions?principalId=<keyId>&realm=partner&tenantId=<tenantId> and revokes via POST /api/identity/sessions/:sid/revoke with CSRF
-      const lostBootstrapHarness = createOwnedForeignFleetRealServiceHarness({
-        dropBootstrapResponseAfterPersist: true,
-      });
+      const lostBootstrapHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          dropBootstrapResponseAfterPersist: true,
+        });
       const lostBootstrapEnv = createNoProvidedForeignFleetEnv();
       let lostBootstrapSaved: OperationalRoleSessionsEvidence | undefined;
       await expect(
@@ -4130,7 +4557,7 @@ process.exit(99);
 
       // 4. Unrecoverable lost bootstrap-session response (0 matching sessions in identity inventory): must record cleanup="unconfirmed" and fail teardown closed
       const unconfirmedBootstrapHarness =
-        createOwnedForeignFleetRealServiceHarness({
+        await createOwnedForeignFleetRealServiceHarness({
           dropBootstrapWithoutPersist: true,
         });
       const unconfirmedBootstrapEnv = createNoProvidedForeignFleetEnv();
@@ -4163,7 +4590,7 @@ process.exit(99);
       ).rejects.toThrow(/Operational role session cleanup failed/);
 
       // 5. Unrelated entry slug collision on lost entry response: never claims or revokes the colliding entry
-      const collisionHarness = createOwnedForeignFleetRealServiceHarness({
+      const collisionHarness = await createOwnedForeignFleetRealServiceHarness({
         dropEntryCreateWithoutPersist: true,
         injectUnrelatedEntryCollisionOnLostResponse: true,
       });
@@ -4187,7 +4614,7 @@ process.exit(99);
     });
 
     it("completes teardown across retries when Fleet deactivation fails transiently and re-mints Admin session if prior recovery token expired", async () => {
-      const retryHarness = createOwnedForeignFleetRealServiceHarness({
+      const retryHarness = await createOwnedForeignFleetRealServiceHarness({
         failFleetDeactivateOnce: true,
         expireFirstAdminSessionBeforeTeardown: true,
       });
@@ -4248,9 +4675,697 @@ process.exit(99);
       ).toBe(false);
     });
 
+    it("preserves and revokes all issued owned Admin sessions when GET /control-plane-proxy/auth/session fails transiently or returns an unknown response while the initial owned Admin session remains active", async () => {
+      // 1. Exact 4-call boundary probe: initial owned Admin session remains active when GET /control-plane-proxy/auth/session throws transient TypeError
+      const oldId = "synthetic-original-owned-admin";
+      const newId = "synthetic-replacement-owned-admin";
+      const oldToken = "synthetic-original-token";
+      const newToken = "synthetic-replacement-token";
+      const fleetId = "synthetic-owned-foreign-fleet";
+      const probeEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const active = new Map<string, boolean>([[oldId, true]]);
+      const probeCalls: Array<{
+        method: string;
+        path: string;
+        sessionId?: string;
+      }> = [];
+      let probeSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const probeFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const path = new URL(url).pathname;
+        const h = new Headers(init?.headers);
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          probeCalls.push({ method, path });
+          expect(h.get("x-drts-authorization")).toBe(`Bearer ${oldToken}`);
+          expect(active.get(oldId)).toBe(true);
+          throw new TypeError(
+            "synthetic transient transport failure; original session remains active",
+          );
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          probeCalls.push({ method, path });
+          active.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          probeCalls.push({ method, path });
+          expect(h.get("x-drts-authorization")).toBe(`Bearer ${newToken}`);
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          probeCalls.push({ method, path, sessionId });
+          expect(h.get("authorization")).toBe(`Bearer ${newToken}`);
+          expect(active.has(sessionId)).toBe(true);
+          active.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(`Unexpected probe HTTP call: ${method} ${path}`);
+      }) as typeof fetch;
+
+      const probeResult = await teardownOperationalRoleSessions(probeEnv, {
+        fetch: probeFetch,
+        mask: () => {},
+        exportSession: (name, value) => {
+          probeEnv[name] = value;
+        },
+        save: (data) => {
+          probeSaved = data;
+        },
+      });
+      const revokedIds = probeCalls
+        .filter((c) => c.path === "/api/auth/sessions/revoke")
+        .map((c) => c.sessionId);
+      expect(probeResult.status).toBe("passed");
+      expect(probeResult.admin_session_revoked).toBe(true);
+      expect(probeEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "passed",
+      );
+      expect(probeEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        `${oldId},${newId}`,
+      );
+      expect(revokedIds).toEqual([oldId, newId]);
+      expect(active.get(oldId)).toBe(false);
+      expect(active.get(newId)).toBe(false);
+      expect(probeSaved).toEqual(probeResult);
+
+      // 2. Fail-closed guard when GET /control-plane-proxy/auth/session returns an unknown payload and revoking the original session fails once
+      const failClosedEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const failClosedActive = new Map<string, boolean>([[oldId, true]]);
+      let failOldRevokeOnce = true;
+      let failClosedSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const failClosedFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse({ data: { status: "unknown" } });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          failClosedActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          if (sessionId === oldId && failOldRevokeOnce) {
+            failOldRevokeOnce = false;
+            return jsonResponse(
+              { error: "transient_revoke_error" },
+              { status: 503 },
+            );
+          }
+          failClosedActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected failClosedFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      await expect(
+        teardownOperationalRoleSessions(failClosedEnv, {
+          fetch: failClosedFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            failClosedEnv[name] = value;
+          },
+          save: (data) => {
+            failClosedSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(failClosedSaved?.status).toBe("failed");
+      expect(failClosedSaved?.admin_session_revoked).toBe(false);
+      expect(failClosedEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "failed",
+      );
+      expect(failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS).toBe(
+        "pending",
+      );
+      expect(
+        failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED,
+      ).toBe("false");
+      expect(
+        failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID,
+      ).toBe(oldId);
+      expect(failClosedActive.get(oldId)).toBe(true);
+      expect(failClosedActive.get(newId)).toBe(false);
+
+      const retriedFailClosed = await teardownOperationalRoleSessions(
+        failClosedEnv,
+        {
+          fetch: failClosedFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            failClosedEnv[name] = value;
+          },
+          save: (data) => {
+            failClosedSaved = data;
+          },
+        },
+      );
+      expect(retriedFailClosed.status).toBe("passed");
+      expect(retriedFailClosed.admin_session_revoked).toBe(true);
+      expect(failClosedActive.get(oldId)).toBe(false);
+
+      // 3. Real-service harness: initial owned Admin session stays active across transient GET /control-plane-proxy/auth/session failure, replacement Admin session is minted, and both Admin sessions are revoked in IdentityRepository
+      const transientAdminHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          failFleetDeactivateOnce: true,
+          failAdminSessionVerifyWithTransientErrorOnTeardownOnce: true,
+        });
+      const env = createNoProvidedForeignFleetEnv();
+      const evidence = await prepareOperationalRoleSessions(env, {
+        fetch: transientAdminHarness.fetchImpl,
+        mask: () => {},
+        exportSession: (name, value) => {
+          env[name] = value;
+        },
+        save: () => {},
+      });
+      expect(evidence.status).toBe("passed");
+      const initialAdminSid =
+        env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID!;
+      expect(initialAdminSid).toBeTruthy();
+
+      await expect(
+        teardownOperationalRoleSessions(env, {
+          fetch: transientAdminHarness.fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            env[name] = value;
+          },
+          save: () => {},
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            initialAdminSid,
+          )
+        )?.status,
+      ).toBe("active");
+
+      const retryResult = await teardownOperationalRoleSessions(env, {
+        fetch: transientAdminHarness.fetchImpl,
+        mask: () => {},
+        exportSession: (name, value) => {
+          env[name] = value;
+        },
+        save: () => {},
+      });
+      expect(retryResult.status).toBe("passed");
+      expect(retryResult.admin_session_revoked).toBe(true);
+      expect(transientAdminHarness.issuedAdminSessionIds.length).toBe(2);
+      const [firstIssuedSid, secondIssuedSid] =
+        transientAdminHarness.issuedAdminSessionIds;
+      expect(firstIssuedSid).toBe(initialAdminSid);
+      expect(secondIssuedSid).not.toBe(initialAdminSid);
+      expect(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        `${firstIssuedSid},${secondIssuedSid}`,
+      );
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            firstIssuedSid!,
+          )
+        )?.status,
+      ).toBe("revoked");
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            secondIssuedSid!,
+          )
+        )?.status,
+      ).toBe("revoked");
+
+      // 4. R1 regression: when known oldId exists, GET /control-plane-proxy/auth/session transiently fails, and POST /control-plane-proxy/auth/token persists replacement newId on the server but loses its ACK before returning, retry must NOT report passed after revoking only oldId while newId remains active (and must not blindly remint).
+      const lostAckEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const lostAckActive = new Map<string, boolean>([[oldId, true]]);
+      let lostAckGetCount = 0;
+      let lostAckMintCount = 0;
+      const lostAckRevokedIds: string[] = [];
+      let lostAckSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const lostAckFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          lostAckGetCount += 1;
+          if (lostAckGetCount === 1) {
+            throw new TypeError("fetch failed: transient ECONNRESET");
+          }
+          return jsonResponse({
+            data: { active: true, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          lostAckMintCount += 1;
+          lostAckActive.set(newId, true);
+          throw new TypeError(
+            "socket hang up after server persisted replacement admin session",
+          );
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          lostAckRevokedIds.push(sessionId);
+          lostAckActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(`Unexpected lostAckFetch HTTP call: ${method} ${url}`);
+      }) as typeof fetch;
+
+      await expect(
+        teardownOperationalRoleSessions(lostAckEnv, {
+          fetch: lostAckFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            lostAckEnv[name] = value;
+          },
+          save: (data) => {
+            lostAckSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(lostAckSaved?.status).toBe("failed");
+      expect(lostAckSaved?.admin_session_revoked).toBe(false);
+      expect(
+        lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_UNCONFIRMED_ISSUANCE,
+      ).toBe("true");
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        oldId,
+      );
+      expect(lostAckActive.get(oldId)).toBe(true);
+      expect(lostAckActive.get(newId)).toBe(true);
+
+      await expect(
+        teardownOperationalRoleSessions(lostAckEnv, {
+          fetch: lostAckFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            lostAckEnv[name] = value;
+          },
+          save: (data) => {
+            lostAckSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(lostAckSaved?.status).toBe("failed");
+      expect(lostAckSaved?.admin_session_revoked).toBe(false);
+      expect(lostAckEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "failed",
+      );
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS).toBe(
+        "pending",
+      );
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED).toBe(
+        "false",
+      );
+      expect(
+        lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_UNCONFIRMED_ISSUANCE,
+      ).toBe("true");
+      expect(lostAckMintCount).toBe(1);
+      expect(lostAckRevokedIds).toEqual([oldId]);
+      expect(lostAckActive.get(oldId)).toBe(false);
+      expect(lostAckActive.get(newId)).toBe(true);
+
+      // 5. R2 regression: candidate-SHA-matched HTTP 401 JWT_INVALID on GET /control-plane-proxy/auth/session is NOT authoritative session-ID inactivity; oldId must remain pending and be explicitly revoked via replacement authority, whereas ID-correlated 200 { active: false, identity: { sessionId: oldId } } is authoritative inactivity.
+      const jwtInvalidEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const jwtInvalidActive = new Map<string, boolean>([[oldId, true]]);
+      const jwtInvalidRevokedIds: string[] = [];
+      let jwtInvalidSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const jwtInvalidFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse(
+            {
+              code: "JWT_INVALID",
+              message:
+                "Access token rejected while durable session row remains active",
+            },
+            { status: 401 },
+          );
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          jwtInvalidActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const authHeader =
+            init?.headers instanceof Headers
+              ? init.headers.get("authorization")
+              : ((init?.headers as Record<string, string> | undefined)
+                  ?.authorization ??
+                (init?.headers as Record<string, string> | undefined)
+                  ?.Authorization);
+          if (authHeader !== `Bearer ${newToken}`) {
+            return jsonResponse(
+              { code: "JWT_INVALID", message: "Invalid bearer token" },
+              { status: 401 },
+            );
+          }
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          jwtInvalidRevokedIds.push(sessionId);
+          jwtInvalidActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected jwtInvalidFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const jwtInvalidResult = await teardownOperationalRoleSessions(
+        jwtInvalidEnv,
+        {
+          fetch: jwtInvalidFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            jwtInvalidEnv[name] = value;
+          },
+          save: (data) => {
+            jwtInvalidSaved = data;
+          },
+        },
+      );
+      expect(jwtInvalidResult.status).toBe("passed");
+      expect(jwtInvalidResult.admin_session_revoked).toBe(true);
+      expect(jwtInvalidSaved).toEqual(jwtInvalidResult);
+      expect(jwtInvalidRevokedIds).toEqual([oldId, newId]);
+      expect(jwtInvalidActive.get(oldId)).toBe(false);
+      expect(jwtInvalidActive.get(newId)).toBe(false);
+
+      const correlatedInactiveEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const correlatedInactive = new Map<string, boolean>([[oldId, false]]);
+      const correlatedRevokedIds: string[] = [];
+      const correlatedInactiveFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse({
+            data: { active: false, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          correlatedInactive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          correlatedRevokedIds.push(sessionId);
+          correlatedInactive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected correlatedInactiveFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const correlatedInactiveResult = await teardownOperationalRoleSessions(
+        correlatedInactiveEnv,
+        {
+          fetch: correlatedInactiveFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            correlatedInactiveEnv[name] = value;
+          },
+          save: () => {},
+        },
+      );
+      expect(correlatedInactiveResult.status).toBe("passed");
+      expect(correlatedInactiveResult.admin_session_revoked).toBe(true);
+      expect(correlatedRevokedIds).toEqual([newId]);
+      expect(correlatedInactive.get(oldId)).toBe(false);
+      expect(correlatedInactive.get(newId)).toBe(false);
+
+      // 6. R3 regression: when foreign resources are already cleaned (passed/deactivated) and only owned Admin session cleanup remains pending with a recovery token that can no longer authorize revoke, teardown checks Admin session and mints replacement Admin authority to revoke [oldId, newId].
+      const adminOnlyEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "passed",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_DEACTIVATED: "true",
+      };
+      const adminOnlyActive = new Map<string, boolean>([[oldId, true]]);
+      let adminOnlyGetCount = 0;
+      let adminOnlyMintCount = 0;
+      const adminOnlyRevokedIds: string[] = [];
+      const adminOnlyFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          adminOnlyGetCount += 1;
+          return jsonResponse({
+            data: { active: true, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          adminOnlyMintCount += 1;
+          adminOnlyActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const authHeader =
+            init?.headers instanceof Headers
+              ? init.headers.get("authorization")
+              : ((init?.headers as Record<string, string> | undefined)
+                  ?.authorization ??
+                (init?.headers as Record<string, string> | undefined)
+                  ?.Authorization);
+          if (authHeader !== `Bearer ${newToken}`) {
+            return jsonResponse(
+              {
+                code: "SESSION_EXPIRED",
+                message: "Prior recovery token expired",
+              },
+              { status: 401 },
+            );
+          }
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          adminOnlyRevokedIds.push(sessionId);
+          adminOnlyActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected adminOnlyFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const adminOnlyResult = await teardownOperationalRoleSessions(
+        adminOnlyEnv,
+        {
+          fetch: adminOnlyFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            adminOnlyEnv[name] = value;
+          },
+          save: () => {},
+        },
+      );
+      expect(adminOnlyResult.status).toBe("passed");
+      expect(adminOnlyResult.admin_session_revoked).toBe(true);
+      expect(adminOnlyGetCount).toBe(1);
+      expect(adminOnlyMintCount).toBe(1);
+      expect(adminOnlyRevokedIds).toEqual([oldId, newId]);
+      expect(adminOnlyActive.get(oldId)).toBe(false);
+      expect(adminOnlyActive.get(newId)).toBe(false);
+    });
+
     it("enforces ACTUAL-ADMIN-PRECONDITION (403 MFA_REQUIRED without dev step-up waiver) and CROSS-INSTANCE-REFERENCE-OBSERVATION (403 STEP_UP_REQUIRED across process-local StepUpProofService Maps) while cleaning up already-created resources", async () => {
       // 1. ACTUAL-ADMIN-PRECONDITION: Admin session minted without dev_token_fallback waiver or recent MFA is rejected by real StepUpProofService with 403 MFA_REQUIRED before any partner entry write is executed.
-      const strictHarness = createOwnedForeignFleetRealServiceHarness({
+      const strictHarness = await createOwnedForeignFleetRealServiceHarness({
         strictNoDevStepUpWaiver: true,
       });
       const strictEnv = createNoProvidedForeignFleetEnv();
@@ -4293,9 +5408,10 @@ process.exit(99);
       ).toBe(false);
 
       // 2. CROSS-INSTANCE-REFERENCE-OBSERVATION: step-up proof issued on instance A's StepUpProofService Map, write delivered to instance B's BootstrapAuthGuard (separate StepUpProofService Map) -> 403 STEP_UP_REQUIRED, helper fails closed and cleans up already-created Fleet/Driver/Ops/Admin resources.
-      const crossInstanceHarness = createOwnedForeignFleetRealServiceHarness({
-        crossInstanceStepUpMismatch: true,
-      });
+      const crossInstanceHarness =
+        await createOwnedForeignFleetRealServiceHarness({
+          crossInstanceStepUpMismatch: true,
+        });
       const crossEnv = createNoProvidedForeignFleetEnv();
       let crossSaved: OperationalRoleSessionsEvidence | undefined;
       await expect(
