@@ -1524,7 +1524,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .toBe("captured");
         await pax.getByRole("button", { name: "5 星", exact: true }).click();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, normal)).rating?.score)
@@ -1606,7 +1606,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await contactSwitch.check();
         await expect(contactSwitch).toBeChecked();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, retry)).rating?.score)
