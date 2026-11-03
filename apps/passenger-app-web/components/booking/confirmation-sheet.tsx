@@ -3,15 +3,21 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { P5 } from "../auth/ui";
 import { BOOK_T as T } from "../../lib/booking/translations";
 
-/** E-19b canonical bottom sheet, not a full-page substitute. */
+/**
+ * E-19b canonical bottom sheet, not a full-page substitute. Inside the drawn
+ * phone frame (`contained`) it covers the content below the header, as in the
+ * plan; on a phone it covers the viewport.
+ */
 export function BookingConfirmationSheet({
   children,
   canDismiss,
   onDismiss,
+  contained = false,
 }: {
   children: ReactNode;
   canDismiss: boolean;
   onDismiss: () => void;
+  contained?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -25,7 +31,7 @@ export function BookingConfirmationSheet({
   return (
     <div
       style={{
-        position: "fixed",
+        position: contained ? "absolute" : "fixed",
         inset: 0,
         zIndex: 100,
         display: "flex",
@@ -86,13 +92,16 @@ export function BookingConfirmationSheet({
         style={{
           position: "relative",
           width: "100%",
-          maxWidth: 390,
-          maxHeight: "90dvh",
+          maxWidth: contained ? "none" : 390,
+          maxHeight: contained ? "calc(100% - 12px)" : "90dvh",
+          boxSizing: "border-box",
           overflowY: "auto",
           background: P5.surface,
           color: P5.ink,
           borderRadius: "20px 20px 0 0",
-          padding: "10px 14px 14px",
+          padding: "10px 16px 14px",
+          fontSize: 14,
+          lineHeight: 1.5,
           boxShadow: `0 -8px 30px color-mix(in srgb, ${P5.ink} 18%, transparent)`,
         }}
       >
@@ -103,10 +112,10 @@ export function BookingConfirmationSheet({
             height: 4,
             borderRadius: 2,
             background: P5.line,
-            margin: "0 auto 10px",
+            margin: "0 auto 12px",
           }}
         />
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: "0 0 8px" }}>
+        <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 12px" }}>
           {T.confirm}
         </h2>
         {children}
