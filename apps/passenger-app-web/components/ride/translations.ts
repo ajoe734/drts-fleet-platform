@@ -96,6 +96,7 @@ export const t = {
   DriverContact: "聯繫司機",
   Vehicle: "車",
   GettingDriverLocation: "正在取得司機位置",
+  RideMap: "行程地圖",
   PickupLabel: "上車：",
   DropoffLabel: "下車：",
   LocationUpdated5sAgo: "位置更新於 5 秒前",
