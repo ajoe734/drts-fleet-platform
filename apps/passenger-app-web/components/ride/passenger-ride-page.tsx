@@ -7,6 +7,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -21,6 +22,7 @@ import {
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
+  PassengerCertificateRow,
   FaresResponse,
 } from "@drts/passenger-client";
 import { passengerClient } from "../../lib/client";
@@ -1193,6 +1195,175 @@ function PaymentCard({ fixture }: { fixture: PassengerRideFixture }) {
   );
 }
 
+/** A completed ride shows payment only while it still needs attention. */
+function PendingPaymentCard({ fixture }: { fixture: PassengerRideFixture }) {
+  if (!fixture.payment || fixture.payment.status === "captured") return null;
+  return <PaymentCard fixture={fixture} />;
+}
+
+// Rating gold from the operations plan's E-18 screen (p5-e-screens.jsx).
+const ratingGold = "#C7860B";
+
+const actionIconPaths = {
+  check: "M5 12l5 5L20 7",
+  doc: "M6 3h9l4 4v14H6zM14 3v5h5",
+  download: "M12 3v12M8 11l4 4 4-4M5 19h14",
+  share: "M12 3v12M8 7l4-4 4 4M5 13v7h14v-7",
+} as const;
+
+function ActionIcon({
+  name,
+  size = 15,
+}: {
+  name: keyof typeof actionIconPaths;
+  size?: number;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d={actionIconPaths[name]} />
+    </svg>
+  );
+}
+
+function linkButtonStyle(kind: "primary" | "secondary" | "ghost") {
+  return {
+    ...buttonStyle(kind),
+    textDecoration: "none",
+  } satisfies CSSProperties;
+}
+
+function CertificateRowView({
+  row,
+  last,
+}: {
+  row: PassengerCertificateRow;
+  last: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 12,
+        padding: "8px 0",
+        borderBottom: last
+          ? undefined
+          : `1px solid ${passengerChrome.borderSoft}`,
+        fontSize: 12.5,
+      }}
+    >
+      <span style={{ color: passengerChrome.muted, flexShrink: 0 }}>
+        {row.label}
+      </span>
+      <span
+        style={{
+          fontWeight: row.emphasis ? 800 : 600,
+          fontSize: row.emphasis ? 14 : 12.5,
+          fontFamily: row.mono ? monoFont : undefined,
+          textAlign: "right",
+          overflowWrap: "anywhere",
+        }}
+      >
+        {row.value}
+        {row.secondary ? (
+          <span style={{ marginLeft: 12, whiteSpace: "nowrap" }}>
+            {row.secondary}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function FareBreakdownRow({
+  row,
+  last,
+}: {
+  row: PassengerCertificateRow;
+  last: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  const panelId = useId();
+  return (
+    <div
+      style={{
+        padding: "8px 0",
+        borderBottom: last
+          ? undefined
+          : `1px solid ${passengerChrome.borderSoft}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          fontSize: 12.5,
+        }}
+      >
+        <span style={{ color: passengerChrome.muted }}>{row.label}</span>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((value) => !value)}
+          style={{
+            border: 0,
+            background: "transparent",
+            padding: "2px 0",
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: passengerChrome.shell,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {open ? t.FareBreakdownCollapse : t.FareBreakdownExpand}
+        </button>
+      </div>
+      <div
+        id={panelId}
+        hidden={!open}
+        style={{
+          marginTop: 6,
+          display: open ? "grid" : "none",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "4px 12px",
+          fontSize: 11.5,
+        }}
+      >
+        {(row.items ?? []).map((item) => (
+          <div
+            key={item.label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{item.label}</span>
+            <span style={{ fontFamily: monoFont, fontWeight: 600 }}>
+              {item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CertificateCard({
   fixture,
   token,
@@ -1249,7 +1420,7 @@ function CertificateCard({
 
   if (certificate.state === "pending") {
     return (
-      <Card title={t.EReceipt}>
+      <Card>
         <div style={{ fontSize: 13.5, fontWeight: 800 }}>
           {t.ReceiptPreparing}
         </div>
@@ -1279,7 +1450,7 @@ function CertificateCard({
 
   if (certificate.state === "error") {
     return (
-      <Card title={t.EReceipt}>
+      <Card>
         <div
           style={{
             border: `1px solid ${passengerChrome.danger.border}`,
@@ -1314,11 +1485,10 @@ function CertificateCard({
   }
 
   const rows = certificate.rows ?? [];
-  const hasRows = rows.length > 0;
 
   return (
-    <Card title={t.EReceipt}>
-      {!hasRows ? (
+    <Card>
+      {rows.length === 0 ? (
         <div
           style={{
             textAlign: "center",
@@ -1330,36 +1500,93 @@ function CertificateCard({
           {t.CannotLoadReceiptDetails}
         </div>
       ) : null}
+      {rows.map((row, index) =>
+        row.items ? (
+          <FareBreakdownRow
+            key={row.label}
+            row={row}
+            last={index === rows.length - 1}
+          />
+        ) : (
+          <CertificateRowView
+            key={row.label}
+            row={row}
+            last={index === rows.length - 1}
+          />
+        ),
+      )}
+      {certificate.receiptNo ? (
+        <div
+          style={{
+            fontSize: 10.5,
+            color: passengerChrome.dim,
+            marginTop: 6,
+            overflowWrap: "anywhere",
+          }}
+        >
+          {t.CertificateFootnote(certificate.receiptNo)}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
 
-      {hasRows
-        ? rows.map((row, index) => (
-            <div
-              key={`${row.label}-${index}`}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "8px 0",
-                borderBottom:
-                  index < rows.length - 1
-                    ? `1px solid ${passengerChrome.border}`
-                    : undefined,
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ color: passengerChrome.muted }}>{row.label}</span>
-              <span
-                style={{
-                  fontWeight: 600,
-                  fontFamily: row.mono ? monoFont : undefined,
-                  textAlign: "right",
-                }}
-              >
-                {row.value}
-              </span>
-            </div>
-          ))
-        : null}
+/** E-18 本次行程: the same trip facts the certificate and payment report. */
+function TripSummaryCard({ fixture }: { fixture: PassengerRideFixture }) {
+  const trip =
+    fixture.certificate?.state === "available"
+      ? fixture.certificate.trip
+      : undefined;
+  const plateDriver = [
+    trip?.plateNo || fixture.driver?.plateNo,
+    trip?.driverName,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const rows: Array<[string, string | undefined, boolean]> = [
+    [t.SummaryPickup, fixture.pickupLabel, false],
+    [t.SummaryDropoff, fixture.dropoffLabel, false],
+    [t.SummaryTime, trip?.timeRangeText, true],
+    [t.SummaryPlateDriver, plateDriver, true],
+    [
+      t.SummaryFare,
+      fixture.payment?.amountText ||
+        trip?.fareTotalText ||
+        fixture.routeFareText,
+      true,
+    ],
+  ];
+  const shown = rows.filter(([, value]) => Boolean(value));
+  if (shown.length === 0) return null;
+  return (
+    <Card title={t.TripSummary}>
+      {shown.map(([label, value, mono]) => (
+        <div
+          key={label}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            gap: 12,
+            padding: "6px 0",
+            fontSize: 12.5,
+          }}
+        >
+          <span style={{ color: passengerChrome.muted, flexShrink: 0 }}>
+            {label}
+          </span>
+          <span
+            style={{
+              fontWeight: 600,
+              fontFamily: mono ? monoFont : undefined,
+              textAlign: "right",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {value}
+          </span>
+        </div>
+      ))}
     </Card>
   );
 }
@@ -1373,31 +1600,198 @@ function RatingStars({
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-      {[1, 2, 3, 4, 5].map((value) => (
-        <button
-          key={value}
-          type="button"
-          aria-label={`${value} 星`}
-          aria-pressed={selectedScore === value}
-          onClick={() => onSelect(value)}
+      {[1, 2, 3, 4, 5].map((value) => {
+        const filled = value <= selectedScore;
+        return (
+          <button
+            key={value}
+            type="button"
+            aria-label={`${value} 星`}
+            aria-pressed={selectedScore === value}
+            onClick={() => onSelect(value)}
+            style={{
+              width: 46,
+              height: 46,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              color: filled ? ratingGold : passengerChrome.border,
+              border: 0,
+              background: "transparent",
+              cursor: "pointer",
+            }}
+          >
+            <svg
+              aria-hidden="true"
+              width="34"
+              height="34"
+              viewBox="0 0 24 24"
+              fill={filled ? ratingGold : "none"}
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z" />
+            </svg>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const positiveRatingTags = ["車內整潔", "駕駛親切", "路線順暢", "準時到達"];
+
+function RatingTagGroup({
+  title,
+  chips,
+  selectedTags,
+  onToggle,
+}: {
+  title: string;
+  chips: string[];
+  selectedTags: string[];
+  onToggle: (chip: string) => void;
+}) {
+  if (chips.length === 0) return null;
+  return (
+    <>
+      <div
+        style={{
+          fontSize: 11.5,
+          fontWeight: 700,
+          color: passengerChrome.muted,
+          margin: "12px 0 6px",
+        }}
+      >
+        {title}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {chips.map((chip) => {
+          const selected = selectedTags.includes(chip);
+          return (
+            <button
+              key={chip}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onToggle(chip)}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "7px 12px",
+                borderRadius: 999,
+                border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
+                color: selected ? passengerChrome.shell : passengerChrome.muted,
+                background: selected
+                  ? passengerChrome.brandBg
+                  : passengerChrome.card,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {chip}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function ContactRequestSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+  const [focused, setFocused] = useState(false);
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        background: passengerChrome.warning.bg,
+        border: `1px solid ${passengerChrome.warning.border}`,
+        borderRadius: 10,
+        padding: "10px 12px",
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div id={`${id}-title`} style={{ fontSize: 12.5, fontWeight: 700 }}>
+          {t.NeedSupportContact}
+        </div>
+        <div
+          id={`${id}-detail`}
           style={{
-            width: 46,
-            height: 46,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: starTone,
-            fontSize: 32,
-            lineHeight: 1,
-            border: 0,
-            background: "transparent",
-            cursor: "pointer",
-            opacity: value <= selectedScore ? 1 : 0.28,
+            fontSize: 10.5,
+            color: passengerChrome.muted,
+            marginTop: 1,
+            lineHeight: 1.5,
           }}
         >
-          ★
-        </button>
-      ))}
+          {t.NeedSupportContactDetail}
+        </div>
+      </div>
+      <span
+        style={{
+          position: "relative",
+          width: 40,
+          height: 22,
+          flexShrink: 0,
+        }}
+      >
+        <input
+          type="checkbox"
+          role="switch"
+          aria-labelledby={`${id}-title`}
+          aria-describedby={`${id}-detail`}
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            margin: 0,
+            opacity: 0,
+            cursor: "pointer",
+            zIndex: 1,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 11,
+            background: checked
+              ? passengerChrome.shell
+              : passengerChrome.border,
+            outline: focused ? `2px solid ${passengerChrome.shell}` : undefined,
+            outlineOffset: 2,
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 2,
+              left: checked ? 20 : 2,
+              width: 18,
+              height: 18,
+              borderRadius: 9,
+              background: passengerChrome.card,
+              boxShadow: "0 1px 2px rgba(15,23,42,.2)",
+            }}
+          />
+        </span>
+      </span>
     </div>
   );
 }
@@ -1413,7 +1807,8 @@ function RatingCard({
   authMode?: "id" | "token" | undefined;
   onSubmit?: (score: number) => void;
 }) {
-  const [selectedScore, setSelectedScore] = useState(5);
+  // E-18 marks the score as required, so nothing is preselected for the rider.
+  const [selectedScore, setSelectedScore] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submittedScore, setSubmittedScore] = useState<number | null>(null);
   const [comment, setComment] = useState("");
@@ -1449,7 +1844,9 @@ function RatingCard({
       </Card>
     );
   }
+  const lowScore = selectedScore > 0 && selectedScore <= 2;
   const submitRating = () => {
+    if (selectedScore === 0) return;
     if (onSubmit) {
       onSubmit(selectedScore);
       return;
@@ -1468,16 +1865,14 @@ function RatingCard({
             score: selectedScore,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
             comment: comment || undefined,
-            contactRequested:
-              selectedScore <= 2 ? Boolean(contactRequested) : false,
+            contactRequested: lowScore ? Boolean(contactRequested) : false,
           }
         : {
             rideId: token,
             rating: selectedScore,
             tags: selectedTags,
             comments: comment,
-            contactRequested:
-              selectedScore <= 2 ? Boolean(contactRequested) : false,
+            contactRequested: lowScore ? Boolean(contactRequested) : false,
           };
 
     requestPassengerRideAction<{ score?: number }>(
@@ -1498,17 +1893,32 @@ function RatingCard({
         setSubmitting(false);
       });
   };
+  const toggleTag = (chip: string) =>
+    setSelectedTags((prev) =>
+      prev.includes(chip)
+        ? prev.filter((tag) => tag !== chip)
+        : [...prev, chip],
+    );
+  const chips = fixture.ratingSummary.chips ?? [];
+  const canSubmit =
+    fixture.canRate !== false && !submitting && selectedScore > 0;
   return (
-    <Card>
-      <div style={{ textAlign: "center", padding: "6px 0 2px" }}>
-        <div style={{ fontSize: 17, fontWeight: 800 }}>{t.HowWasService}</div>
-        <div
-          style={{ fontSize: 11.5, color: passengerChrome.muted, marginTop: 3 }}
-        >
-          {fixture.ratingSummary.countText}
-        </div>
-      </div>
-      <div style={{ margin: "12px 0 4px" }}>
+    <>
+      <Card
+        title={t.ServiceRating}
+        tag={
+          <span
+            style={{
+              marginLeft: -4,
+              color: passengerChrome.danger.fg,
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            {t.RequiredMark}
+          </span>
+        }
+      >
         <RatingStars
           selectedScore={selectedScore}
           onSelect={setSelectedScore}
@@ -1518,202 +1928,105 @@ function RatingCard({
             textAlign: "center",
             fontSize: 12.5,
             fontWeight: 700,
-            color: starTone,
             marginTop: 4,
+            color:
+              selectedScore === 0
+                ? passengerChrome.dim
+                : lowScore
+                  ? passengerChrome.danger.fg
+                  : ratingGold,
           }}
         >
-          {selectedScore} {t.Star} · {t.StarLabels[selectedScore - 1]}
+          {selectedScore === 0
+            ? t.PickStarScore
+            : `${selectedScore} ${t.StarLabels[selectedScore - 1]}`}
         </div>
-      </div>
-      {(() => {
-        if (!fixture.ratingSummary.chips) return null;
-        const positive = ["車內整潔", "駕駛親切", "路線順暢", "準時到達"];
-        const positiveChips = fixture.ratingSummary.chips.filter((c) =>
-          positive.includes(c),
-        );
-        const negativeChips = fixture.ratingSummary.chips.filter(
-          (c) => !positive.includes(c),
-        );
-        return (
-          <>
-            {positiveChips.length > 0 && (
-              <>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: passengerChrome.muted,
-                    textAlign: "center",
-                    marginTop: 12,
-                    marginBottom: 8,
-                  }}
-                >
-                  {t.WellDone}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 7,
-                    justifyContent: "center",
-                  }}
-                >
-                  {positiveChips.map((chip) => {
-                    const selected = selectedTags.includes(chip);
-                    return (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() =>
-                          setSelectedTags((prev) =>
-                            prev.includes(chip)
-                              ? prev.filter((t) => t !== chip)
-                              : [...prev, chip],
-                          )
-                        }
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: "7px 13px",
-                          borderRadius: 999,
-                          border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
-                          color: selected
-                            ? passengerChrome.shell
-                            : passengerChrome.muted,
-                          background: selected
-                            ? passengerChrome.info.bg
-                            : passengerChrome.card,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {chip}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-            {negativeChips.length > 0 && (
-              <>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: passengerChrome.muted,
-                    textAlign: "center",
-                    marginTop: 12,
-                    marginBottom: 8,
-                  }}
-                >
-                  {t.NeedsImprovement}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 7,
-                    justifyContent: "center",
-                  }}
-                >
-                  {negativeChips.map((chip) => {
-                    const selected = selectedTags.includes(chip);
-                    return (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() =>
-                          setSelectedTags((prev) =>
-                            prev.includes(chip)
-                              ? prev.filter((t) => t !== chip)
-                              : [...prev, chip],
-                          )
-                        }
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: "7px 13px",
-                          borderRadius: 999,
-                          border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
-                          color: selected
-                            ? passengerChrome.shell
-                            : passengerChrome.muted,
-                          background: selected
-                            ? passengerChrome.info.bg
-                            : passengerChrome.card,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {chip}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </>
-        );
-      })()}
-      <div style={{ marginTop: 16 }}>
+        <RatingTagGroup
+          title={t.WellDone}
+          chips={chips.filter((chip) => positiveRatingTags.includes(chip))}
+          selectedTags={selectedTags}
+          onToggle={toggleTag}
+        />
+        <RatingTagGroup
+          title={t.NeedsImprovement}
+          chips={chips.filter((chip) => !positiveRatingTags.includes(chip))}
+          selectedTags={selectedTags}
+          onToggle={toggleTag}
+        />
         <textarea
+          aria-label={t.LeaveComment}
           placeholder={t.LeaveComment}
           value={comment}
           maxLength={200}
           onChange={(e) => setComment(e.target.value)}
           style={{
+            display: "block",
+            boxSizing: "border-box",
             width: "100%",
-            height: 80,
-            padding: 12,
-            borderRadius: 8,
+            minHeight: 64,
+            marginTop: 12,
+            padding: "10px 12px",
+            borderRadius: 10,
             border: `1px solid ${passengerChrome.border}`,
             resize: "none",
-            fontSize: 14,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            color: passengerChrome.text,
           }}
         />
-        {selectedScore <= 2 && (
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginTop: 8,
-              fontSize: 13.5,
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              role="switch"
-              checked={contactRequested}
-              onChange={(e) => setContactRequested(e.target.checked)}
-              style={{ width: 16, height: 16 }}
-            />
-            {t.NeedSupportContact}
-          </label>
-        )}
+        <div
+          aria-hidden="true"
+          style={{
+            textAlign: "right",
+            fontSize: 10.5,
+            color: passengerChrome.dim,
+            marginTop: 3,
+          }}
+        >
+          {Array.from(comment).length} / 200
+        </div>
+        {lowScore ? (
+          <ContactRequestSwitch
+            checked={contactRequested}
+            onChange={setContactRequested}
+          />
+        ) : null}
+      </Card>
+      <div style={{ margin: `0 ${shellInset}px 8px` }}>
+        <button
+          type="button"
+          style={{
+            ...buttonStyle("primary"),
+            opacity: canSubmit ? 1 : 0.55,
+            cursor: canSubmit ? "pointer" : "default",
+          }}
+          onClick={submitRating}
+          disabled={!canSubmit}
+        >
+          {fixture.canRate === false ? (
+            t.RatingUnavailable
+          ) : submitting ? (
+            t.Submitting
+          ) : (
+            <>
+              <ActionIcon name="check" />
+              {t.SubmitRating}
+            </>
+          )}
+        </button>
       </div>
-      <button
-        type="button"
-        style={{ ...buttonStyle("primary"), marginTop: 12 }}
-        onClick={submitRating}
-        disabled={fixture.canRate === false || submitting}
-      >
-        {fixture.canRate === false
-          ? "目前無法評價"
-          : submitting
-            ? "送出中..."
-            : "送出評價"}
-      </button>
       <div
         style={{
-          marginTop: 12,
-          textAlign: "center",
-          fontSize: 11,
+          margin: "0 22px 12px",
+          fontSize: 10.5,
           color: passengerChrome.muted,
+          textAlign: "center",
+          lineHeight: 1.55,
         }}
       >
         {t.RatingNotice}
       </div>
-    </Card>
+    </>
   );
 }
 
@@ -1721,14 +2034,13 @@ function CompletedThanks() {
   return (
     <div
       style={{
-        flex: 1,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
-        gap: 10,
-        padding: "0 30px",
+        gap: 8,
+        padding: "22px 30px 16px",
         textAlign: "center",
+        flexShrink: 0,
       }}
     >
       <span
@@ -1742,11 +2054,9 @@ function CompletedThanks() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 26,
-          fontWeight: 800,
         }}
       >
-        ✓
+        <ActionIcon name="check" size={26} />
       </span>
       <div style={{ fontSize: 18, fontWeight: 800 }}>{t.ThanksForRating}</div>
       <div style={{ fontSize: 12.5, color: passengerChrome.muted }}>
@@ -2247,24 +2557,27 @@ function Actions({
     );
   }
 
-  if (fixture.screenId === "P5-08") return null;
-
-  if (fixture.screenId === "P5-09") {
+  if (fixture.screenId === "P5-08" || fixture.screenId === "P5-09") {
     return (
       <ActionGroup>
-        <Link
-          href={
-            authMode === "token"
-              ? `/r/${token}/receipt`
-              : `/rides/${token}/receipt`
-          }
-          style={buttonStyle("secondary")}
-        >
-          {t.ViewReceipt}
-        </Link>
-        <Link href="/" style={buttonStyle("ghost")}>
-          {t.BackToHome}
-        </Link>
+        {fixture.canReadReceipt !== false ? (
+          <Link
+            href={
+              authMode === "token"
+                ? `/r/${token}/receipt`
+                : `/rides/${token}/receipt`
+            }
+            style={linkButtonStyle("secondary")}
+          >
+            <ActionIcon name="doc" />
+            {t.ViewReceipt}
+          </Link>
+        ) : null}
+        {fixture.screenId === "P5-09" ? (
+          <Link href="/" style={linkButtonStyle("ghost")}>
+            {t.BackToHome}
+          </Link>
+        ) : null}
       </ActionGroup>
     );
   }
@@ -2278,18 +2591,20 @@ function Actions({
             href={cert.pdfUrl}
             target="_blank"
             rel="noreferrer"
-            style={buttonStyle("primary")}
+            style={linkButtonStyle("primary")}
           >
+            <ActionIcon name="download" />
             {t.DownloadPdf}
           </a>
-        ) : null}
-        {cert?.htmlUrl ? (
+        ) : cert?.htmlUrl ? (
+          // E-04 offers the PDF; the HTML artifact is only a fallback.
           <a
             href={cert.htmlUrl}
             target="_blank"
             rel="noreferrer"
-            style={buttonStyle("secondary")}
+            style={linkButtonStyle("primary")}
           >
+            <ActionIcon name="download" />
             {t.DownloadHtml}
           </a>
         ) : null}
@@ -2301,7 +2616,7 @@ function Actions({
         />
         <Link
           href={authMode === "token" ? `/r/${token}` : `/rides/${token}`}
-          style={buttonStyle("ghost")}
+          style={linkButtonStyle("ghost")}
         >
           {t.BackToRide}
         </Link>
@@ -2507,46 +2822,38 @@ function RideContent({
     );
   }
 
-  if (fixture.screenId === "P5-09") {
+  if (fixture.screenId === "P5-08" || fixture.screenId === "P5-09") {
+    // Completed ride: trip summary, the rating until it is submitted, then
+    // the way to the E-04 certificate and to the complaint/lost-item form.
+    const rated = fixture.screenId === "P5-09";
     return (
       <>
-        <CompletedThanks />
-        <PaymentCard fixture={fixture} />
-        <CertificateCard
-          fixture={fixture}
-          token={token}
-          authMode={authMode}
-          onCertificateUpdate={onCertificateUpdate}
-        />
-        <ComplaintForm
-          token={token}
-          authMode={authMode}
-          orderNo={fixture.orderNo}
-          isOpen={false}
-          onOpenChange={(open) => {
-            if (open) onOpenComplaint?.();
-          }}
-        />
+        {rated ? (
+          <CompletedThanks />
+        ) : fixture.ratingSummary?.countText ? (
+          <div
+            style={{
+              margin: `12px ${shellInset}px 10px`,
+              fontSize: 12.5,
+              color: passengerChrome.muted,
+            }}
+          >
+            {fixture.ratingSummary.countText}
+          </div>
+        ) : (
+          <div style={{ height: 12, flexShrink: 0 }} />
+        )}
+        <TripSummaryCard fixture={fixture} />
+        <PendingPaymentCard fixture={fixture} />
+        {rated ? null : (
+          <RatingCard fixture={fixture} token={token} authMode={authMode} />
+        )}
         <Actions
           fixture={fixture}
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
         />
-      </>
-    );
-  }
-
-  if (fixture.screenId === "P5-10") {
-    return (
-      <>
-        <PaymentCard fixture={fixture} />
-        <CertificateCard
-          fixture={fixture}
-          token={token}
-          authMode={authMode}
-          onCertificateUpdate={onCertificateUpdate}
-        />
         <ComplaintForm
           token={token}
           authMode={authMode}
@@ -2555,6 +2862,21 @@ function RideContent({
           onOpenChange={(open) => {
             if (open) onOpenComplaint?.();
           }}
+        />
+      </>
+    );
+  }
+
+  if (fixture.screenId === "P5-10") {
+    // E-04 電子乘車證明: the certificate and its PDF actions only.
+    return (
+      <>
+        <div style={{ height: 12, flexShrink: 0 }} />
+        <CertificateCard
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={onCertificateUpdate}
         />
         <Actions
           fixture={fixture}
@@ -2655,39 +2977,6 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
-        />
-      </>
-    );
-  }
-
-  if (fixture.screenId === "P5-08") {
-    return (
-      <>
-        <RatingCard fixture={fixture} token={token} authMode={authMode} />
-        <Card>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 13,
-            }}
-          >
-            <span style={{ color: passengerChrome.muted }}>
-              {t.ThisRideFare}
-            </span>
-            <b>
-              {fixture.payment?.amountText ||
-                fixture.routeFareText ||
-                "車資資料尚未提供"}
-            </b>
-          </div>
-        </Card>
-        <PaymentCard fixture={fixture} />
-        <CertificateCard
-          fixture={fixture}
-          token={token}
-          authMode={authMode}
-          onCertificateUpdate={onCertificateUpdate}
         />
       </>
     );
@@ -2829,7 +3118,12 @@ function PassengerScreen({
       <TopChrome
         token={token}
         authMode={authMode}
-        status={fixture.status}
+        status={
+          // The receipt route is the E-04 page; a cancelled ride keeps its status.
+          fixture.screenId === "P5-10" && fixture.status !== "行程已取消"
+            ? t.EReceipt
+            : fixture.status
+        }
         order={
           fixture.screenId === "A03"
             ? "公開資訊"

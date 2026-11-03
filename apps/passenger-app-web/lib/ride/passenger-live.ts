@@ -573,7 +573,7 @@ export function mapPassengerRideAuthorityToFixture(
               }
             : {
                 state: "unavailable",
-                countText: "請為本趟服務評分",
+                countText: "感謝您的搭乘，請為本次服務評分",
                 chips: [
                   "車內整潔",
                   "駕駛親切",
@@ -770,68 +770,74 @@ export function mapPassengerCertificate(
     };
   }
 
+  const fareParts: Array<[string, number | null | undefined]> = [
+    ["起程", fareBaseMinor],
+    ["續程", fareDistanceMinor],
+    ["延滯計時", fareTimeMinor],
+    ["夜間加成", fareNightMinor],
+  ];
+  const fareItems: PassengerCertificateRow[] = fareParts.flatMap(
+    ([label, minor]) =>
+      typeof minor === "number"
+        ? [{ label, value: formatMoney(minor), mono: true }]
+        : [],
+  );
+  const fareTotalText = formatMoney(receipt.amountMinor);
+
+  // Row order and labels follow the operations plan's E-04 screen.
   const rows: PassengerCertificateRow[] = [
-    { label: "乘車證明編號", value: receipt.receiptNo, mono: true },
+    ...(fleetName ? [{ label: "車隊／派遣業者", value: fleetName }] : []),
+    { label: "車牌", value: plateNo, mono: true },
+    ...(driverName
+      ? [
+          {
+            label: "駕駛",
+            value: driverName,
+            mono: true,
+            ...(driverRegistrationNo
+              ? { secondary: `執登證號 ${driverRegistrationNo}` }
+              : {}),
+          },
+        ]
+      : []),
     {
-      label: "開立時間",
-      value: formatDateTime(receipt.issuedAt),
+      label: "上車／下車時間",
+      value: formatTaipeiTimeRange(pickupAt, dropoffAt, " / "),
       mono: true,
     },
-    ...(fleetName ? [{ label: "車隊", value: fleetName }] : []),
-    ...(driverName ? [{ label: "駕駛", value: driverName }] : []),
-    { label: "車牌", value: plateNo, mono: true },
-    ...(driverRegistrationNo
-      ? [{ label: "遮罩執登號", value: driverRegistrationNo, mono: true }]
-      : []),
-    { label: "上車時間", value: formatDateTime(pickupAt), mono: true },
-    { label: "下車時間", value: formatDateTime(dropoffAt), mono: true },
-    { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
-    { label: "路線", value: routeSummary },
+    { label: "起訖地點", value: routeSummary },
     {
       label: "行駛里程",
       value: `${(distanceMeters / 1000).toFixed(1)} 公里`,
       mono: true,
     },
-    {
-      label: "車資金額",
-      value: formatMoney(receipt.amountMinor),
-      mono: true,
-    },
+    { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
+    ...(fareItems.length > 0
+      ? [{ label: "車資明細", value: "", items: fareItems }]
+      : []),
     { label: "通行費", value: formatMoney(tollMinor), mono: true },
+    { label: "車資合計", value: fareTotalText, mono: true, emphasis: true },
+    ...(paymentMethod
+      ? [{ label: "支付方式", value: paymentMethod, mono: true }]
+      : []),
     { label: "客服電話", value: consumerServicePhone, mono: true },
     {
       label: "主管機關申訴電話",
       value: authorityComplaintPhone,
       mono: true,
     },
-    ...(paymentMethod ? [{ label: "支付方式", value: paymentMethod }] : []),
   ];
-
-  if (fareBaseMinor !== null && fareBaseMinor !== undefined) {
-    rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
-  }
-  if (fareDistanceMinor !== null && fareDistanceMinor !== undefined) {
-    rows.push({
-      label: "續程",
-      value: formatMoney(fareDistanceMinor),
-      mono: true,
-    });
-  }
-  if (fareTimeMinor !== null && fareTimeMinor !== undefined) {
-    rows.push({ label: "延滯", value: formatMoney(fareTimeMinor), mono: true });
-  }
-  if (fareNightMinor !== null && fareNightMinor !== undefined) {
-    rows.push({
-      label: "夜間加成",
-      value: formatMoney(fareNightMinor),
-      mono: true,
-    });
-  }
 
   const result: PassengerCertificatePresentation = {
     state: "available",
     receiptNo: receipt.receiptNo,
     rows,
+    trip: {
+      timeRangeText: formatTaipeiTimeRange(pickupAt, dropoffAt, " – "),
+      plateNo,
+      ...(driverName ? { driverName } : {}),
+      fareTotalText,
+    },
   };
   if (htmlUrl) result.htmlUrl = htmlUrl;
   if (pdfUrl) result.pdfUrl = pdfUrl;
@@ -946,6 +952,34 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+const taipeiDateTimeFormat = new Intl.DateTimeFormat("zh-TW", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function taipeiParts(value: string) {
+  const parts = taipeiDateTimeFormat.formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return {
+    date: `${part("year")}/${part("month")}/${part("day")}`,
+    time: `${part("hour")}:${part("minute")}`,
+  };
+}
+
+/** "2026/07/20 14:32 / 15:07" in Taiwan time; repeats the date only when it changes. */
+function formatTaipeiTimeRange(start: string, end: string, separator: string) {
+  const from = taipeiParts(start);
+  const to = taipeiParts(end);
+  const until = from.date === to.date ? to.time : `${to.date} ${to.time}`;
+  return `${from.date} ${from.time}${separator}${until}`;
 }
 
 function formatDuration(seconds: number) {
