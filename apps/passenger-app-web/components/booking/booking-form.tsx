@@ -24,7 +24,6 @@ import { DEMO_ADDRESSES, isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
 import { PAX_REVIEW_STOPS } from "@drts/api-client";
 import { useReviewDemo, useTrialMode } from "../review-demo/review-context";
-import { TRIAL_STOPS, trialT } from "../trial/translations";
 import {
   googleMapsAuthFailed,
   onGoogleMapsAuthFailure,
@@ -119,26 +118,24 @@ export function BookingForm({
         {DEMO_T.addressLoading}
       </p>
     );
+  // The self-serve trial books like the real app: address search, current
+  // location and the map. Only the internal rehearsal keeps fixed stops.
   const fixedAddresses =
-    demo || (review && draft.reviewAddressMode !== "standard");
+    demo || (review && !trial && draft.reviewAddressMode !== "standard");
   function patchDraft(update: Partial<BookingDraft>) {
     onChange((current) => ({ ...current, ...update }));
   }
   function demoAddress(field: "origin" | "destination") {
-    const addresses: readonly AddressPayload[] = trial
-      ? TRIAL_STOPS
-      : review
-        ? PAX_REVIEW_STOPS
-        : DEMO_ADDRESSES;
+    const addresses: readonly AddressPayload[] = review
+      ? PAX_REVIEW_STOPS
+      : DEMO_ADDRESSES;
     return (
       <>
-        {!trial && (
-          <p style={{ ...PLAN.muted, margin: "0 0 8px" }}>
-            {review
-              ? "模擬新北選址；試算與建單仍呼叫真 API，費率與服務範圍由後端判定。"
-              : DEMO_T.addressHint}
-          </p>
-        )}
+        <p style={{ ...PLAN.muted, margin: "0 0 8px" }}>
+          {review
+            ? "模擬新北選址；試算與建單仍呼叫真 API，費率與服務範圍由後端判定。"
+            : DEMO_T.addressHint}
+        </p>
         <select
           aria-label={field === "origin" ? DEMO_T.pickup : DEMO_T.dropoff}
           style={PLAN.field}
@@ -163,13 +160,12 @@ export function BookingForm({
       </>
     );
   }
-  const addressMode = trial ? trialT.addressMode : T.reviewAddressMode;
   return (
     <>
-      {review && (
-        <P5Card title={addressMode}>
+      {review && !trial && (
+        <P5Card title={T.reviewAddressMode}>
           <select
-            aria-label={addressMode}
+            aria-label={T.reviewAddressMode}
             style={PLAN.field}
             value={draft.reviewAddressMode ?? "fixed"}
             disabled={busy}
@@ -187,16 +183,10 @@ export function BookingForm({
               });
             }}
           >
-            <option value="fixed">
-              {trial ? trialT.fixedAddresses : T.reviewFixedAddresses}
-            </option>
-            <option value="standard">
-              {trial ? trialT.standardAddresses : T.reviewStandardAddresses}
-            </option>
+            <option value="fixed">{T.reviewFixedAddresses}</option>
+            <option value="standard">{T.reviewStandardAddresses}</option>
           </select>
-          <p style={PLAN.muted}>
-            {trial ? trialT.addressNotice : T.reviewAddressNotice}
-          </p>
+          <p style={PLAN.muted}>{T.reviewAddressNotice}</p>
         </P5Card>
       )}
       <P5Card title={<StopTitle kind="pickup">{T.pickup}</StopTitle>}>
@@ -223,6 +213,7 @@ export function BookingForm({
                 })
               }
               enableServiceabilityPreview={false}
+              technicalDetails={false}
               {...mapSlot}
             />
           </>
@@ -245,6 +236,7 @@ export function BookingForm({
               })
             }
             enableServiceabilityPreview={false}
+            technicalDetails={false}
             {...mapSlot}
           />
         )}
