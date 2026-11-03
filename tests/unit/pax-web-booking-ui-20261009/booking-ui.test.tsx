@@ -910,15 +910,16 @@ describe("real public fare component", () => {
     expect(calls("/fares")).toHaveLength(1);
     expect(calls("/me")).toHaveLength(0);
   });
-  it("public 費用與優惠說明 shows the supplied clauses and free cancellation without an account", async () => {
+  it("public 費用與優惠說明 shows the supplement's final clauses without an account", async () => {
     render(<FeesPage />);
     const card = await screen.findByRole("region", { name: "費用與優惠說明" });
     expect(within(card).getByText("取消費").parentElement?.textContent).toBe(
-      "取消費不收",
+      "取消費不收取（指派前取消不收費）",
     );
+    // G201011 補件 §3.3: no fee text beyond the eight final clauses.
     expect(
-      within(card).getByText(/任何允許取消的時間均不收取消費/),
-    ).toBeTruthy();
+      within(card).queryByText(/任何允許取消的時間均不收取消費/),
+    ).toBeNull();
     expect(
       screen.getByText(
         "版本 synthetic-fare-v1 · 生效日 2023/04/01 · 依主管機關核定運價及備查優惠辦理",
@@ -945,7 +946,7 @@ describe("real public fare component", () => {
 });
 
 describe("USER copy through the original mounted booking and public fare flows", () => {
-  it("USER copy: first-use E19a displays exactly the eight supplied clauses before durable acknowledgement", async () => {
+  it("USER copy: first-use E19a displays the supplement's eight final clauses verbatim before durable acknowledgement", async () => {
     delete f.account.feeAcknowledgementVersion;
     render(<BookingScreen />);
     await screen.findByRole("button", { name: "我已閱讀並同意" });
@@ -955,14 +956,15 @@ describe("USER copy through the original mounted booking and public fare flows",
         .getAllByText(/.+/, { selector: "strong" })
         .map((label) => label.parentElement?.textContent),
     ).toEqual([
-      "車資依核定運價含延滯計時",
-      "預約費不另收",
-      "取消費不收",
-      "等待費不另收",
-      "遺失物補償金不收",
-      "汙損清潔費實支實付",
-      "國道通行費經同意後實收",
-      "優惠活動目前無",
+      "車資依主管機關核定運價計費（含延滯計時）",
+      "預約費不另收取",
+      "取消費不收取（指派前取消不收費）",
+      "等待費不另收取（車資依核定運價含延滯計時計收）",
+      "遺失物返還補償金不收取；如要求專程送還，所生車資由乘客負擔並於送還前確認",
+      "車內汙損清潔費由可歸責之乘客負擔實際清潔費用，實支實付、憑單據計收",
+      "國道通行費經乘客同意行駛後實收",
+      // 優惠活動 carries the 目前無 chip before its clause.
+      "優惠活動目前無目前無；如有，依規定備查後於本頁公告",
     ]);
     expect(screen.queryByLabelText("預約時間")).toBeNull();
     expect(calls("/quotes")).toHaveLength(0);
@@ -973,7 +975,7 @@ describe("USER copy through the original mounted booking and public fare flows",
     });
   });
 
-  it("USER copy: E19b retains four rules without the obsolete pre-assignment limit and stays natively unchecked", async () => {
+  it("USER copy: E19b shows the supplement's four rules verbatim and stays natively unchecked", async () => {
     render(<BookingScreen paymentSelection={selection} />);
     await quote();
     const dialog = screen.getByRole("dialog");
@@ -985,14 +987,13 @@ describe("USER copy through the original mounted booking and public fare flows",
         .map((row) => row.textContent),
     ).toEqual([
       "車資依核定運價計費（含延滯計時）",
-      "預約費、取消費、等待費：不另收",
+      "預約費、取消費（指派前）、等待費：不另收",
       "國道通行費經您同意行駛後實收",
       "車內汙損清潔費實支實付",
     ]);
-    expect(within(rules).queryByText(/指派前/)).toBeNull();
     expect(
-      within(rules).getByText(/任何允許取消的時間均不收取消費/),
-    ).toBeTruthy();
+      within(rules).queryByText(/任何允許取消的時間均不收取消費/),
+    ).toBeNull();
     const checkbox = within(dialog).getByLabelText(
       "我已確認費用與優惠說明",
     ) as HTMLInputElement;

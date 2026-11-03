@@ -14,8 +14,7 @@ import {
   earliestBookingTime,
   fromLocalDateTime,
   isBookingTimeAllowed,
-  PASSENGER_CONFIRMATION_ROWS,
-  PASSENGER_FREE_CANCELLATION_NOTICE,
+  PASSENGER_APP_CONFIRMATION_ROWS,
   PASSENGER_SUPPORT_PHONE,
 } from "@drts/passenger-client";
 import { AuthAlert, P5Btn, P5 } from "../auth/ui";
@@ -485,10 +484,29 @@ export function BookingScreen({
       : !!(account.contactPhone || account.verifiedPhone));
   const acknowledged =
     account && fare && account.feeAcknowledgementVersion === fare.version;
+  // The supplement (E-19a) puts 費用與優惠說明 at the top of the home screen
+  // as a fixed entry, before any booking input.
   const feesLink = (
-    <div style={{ margin: "4px 14px 12px", textAlign: "center" }}>
-      <PlanLink href={FEES_PATH}>{T.fullFees}</PlanLink>
-    </div>
+    <a
+      href={FEES_PATH}
+      style={{
+        ...PLAN.card,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "11px 14px",
+        color: P5.ink,
+        textDecoration: "none",
+        fontSize: 13.5,
+        fontWeight: 700,
+      }}
+    >
+      <P5Icon name="info" size={16} style={{ color: P5.brand }} />
+      <span style={{ flex: 1 }}>{T.fullFees}</span>
+      <span aria-hidden="true" style={{ color: P5.brand }}>
+        ›
+      </span>
+    </a>
   );
   const topNotices = (
     <>
@@ -639,7 +657,7 @@ export function BookingScreen({
           <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px" }}>
             {T.rules}
           </h3>
-          {PASSENGER_CONFIRMATION_ROWS.map((row) => (
+          {PASSENGER_APP_CONFIRMATION_ROWS.map((row) => (
             <p
               key={row}
               style={{
@@ -653,9 +671,6 @@ export function BookingScreen({
               {row}
             </p>
           ))}
-          <p style={{ ...PLAN.muted, margin: "4px 0 0", fontSize: 11.5 }}>
-            {PASSENGER_FREE_CANCELLATION_NOTICE}
-          </p>
           <div style={{ textAlign: "right", marginTop: 8 }}>
             <PlanLink href={FEES_PATH} newTab>
               {T.fullFees}
@@ -746,10 +761,10 @@ export function BookingScreen({
         body: (
           <>
             {topNotices}
+            {feesLink}
             <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
               {T.loadingSettings}
             </p>
-            {feesLink}
           </>
         ),
       };
@@ -759,6 +774,7 @@ export function BookingScreen({
         body: (
           <>
             {topNotices}
+            {feesLink}
             <div style={PLAN.card}>
               <p style={{ margin: "0 0 12px", color: P5.mut }}>
                 {busy ? T.loadingSettings : T.missingSettings}
@@ -767,7 +783,6 @@ export function BookingScreen({
                 {T.retrySettings}
               </P5Btn>
             </div>
-            {feesLink}
           </>
         ),
       };
@@ -802,13 +817,13 @@ export function BookingScreen({
         body: (
           <>
             {topNotices}
+            {feesLink}
             <div style={PLAN.inset}>
               <AuthAlert>{T.phone(settings.requireSmsVerification)}</AuthAlert>
               <a href="/account" style={{ ...PLAN.linkButton, marginTop: 12 }}>
                 {T.account}
               </a>
             </div>
-            {feesLink}
           </>
         ),
       };
@@ -821,6 +836,7 @@ export function BookingScreen({
         body: (
           <>
             {topNotices}
+            {feesLink}
             <P5Map
               state="missing"
               pickupAddress={draft.origin?.address ?? ""}
@@ -863,7 +879,6 @@ export function BookingScreen({
                 {T.modify}
               </P5Btn>
             </div>
-            {feesLink}
           </>
         ),
       };
@@ -873,6 +888,7 @@ export function BookingScreen({
         body: (
           <>
             {topNotices}
+            {feesLink}
             <P5RouteFare
               pickup={draft.origin?.address ?? ""}
               dropoff={draft.destination?.address ?? ""}
@@ -880,7 +896,6 @@ export function BookingScreen({
             <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
               {T.quoting}
             </p>
-            {feesLink}
           </>
         ),
       };
@@ -889,6 +904,7 @@ export function BookingScreen({
       body: (
         <>
           {topNotices}
+          {feesLink}
           {/* A trial account signed in with its verified test phone. */}
           {!account.contactPhoneVerified &&
             !settings.requireSmsVerification &&
@@ -923,7 +939,6 @@ export function BookingScreen({
               {T.refreshSettings}
             </P5Btn>
           </div>
-          {feesLink}
         </>
       ),
     };
