@@ -18,7 +18,26 @@ export type SupplySubmissionType =
   | "insurance_update"
   | "contract_update"
   | "driver_affiliation"
-  | "vehicle_affiliation";
+  | "vehicle_affiliation"
+  | "profile_correction";
+
+export const SUPPLY_RENEWAL_SUBMISSION_TYPES = [
+  "insurance_update",
+  "contract_update",
+  "profile_correction",
+] as const;
+
+export type SupplyRenewalSubmissionType =
+  (typeof SUPPLY_RENEWAL_SUBMISSION_TYPES)[number];
+
+export function isSupplyRenewalSubmissionType(
+  value: unknown,
+): value is SupplyRenewalSubmissionType {
+  return (
+    typeof value === "string" &&
+    (SUPPLY_RENEWAL_SUBMISSION_TYPES as readonly string[]).includes(value)
+  );
+}
 
 export type SupplySubmissionStatus =
   | "draft"
@@ -62,6 +81,71 @@ export interface SupplyReviewActionCommand {
   expectedRevisionNo: number;
   reasonCode: string;
   comment?: string | null;
+}
+
+export interface CreateSupplyRenewalDraftCommand {
+  submissionType: SupplyRenewalSubmissionType;
+  subjectDriverId?: string | null;
+  subjectVehicleId?: string | null;
+  driverDraft?: Partial<Omit<DriverSupplyDraft, "submissionId">> | null;
+  vehicleDraft?: Partial<Omit<VehicleSupplyDraft, "submissionId">> | null;
+}
+
+export interface UpdateSupplyRenewalDraftCommand {
+  expectedRevisionNo: number;
+  driverDraft?: Partial<Omit<DriverSupplyDraft, "submissionId">> | null;
+  vehicleDraft?: Partial<Omit<VehicleSupplyDraft, "submissionId">> | null;
+}
+
+export interface FleetSupplyRenewalTargetDriver {
+  driverId: string;
+  fleetPartnerId: string;
+  name: string;
+  mobile: string;
+  professionalDriverLicenseNo: string;
+  professionalDriverLicenseExpiry: string;
+  taxiDriverRegistrationNo: string;
+  taxiDriverRegistrationArea: string;
+  taxiDriverRegistrationExpiry: string;
+  supportedServiceProductCodes: string[];
+  lifecycleStatus: string;
+  licensesValid: boolean;
+  ready: boolean;
+  reasonCodes: SupplyReadinessReasonCode[];
+}
+
+export interface FleetSupplyRenewalTargetVehicle {
+  vehicleId: string;
+  fleetPartnerId: string;
+  plateNo: string;
+  licenseType: string;
+  brand: string | null;
+  model: string | null;
+  modelYear: number | null;
+  seatCount: number;
+  luggageCapacity: number;
+  businessArea: string;
+  supportedServiceProductCodes: string[];
+  airportTransferEligible: boolean;
+  fixedFareAllowed: boolean;
+  doorCount: number | null;
+  color: string | null;
+  supplyLifecycle: string;
+  activeContractId: string | null;
+  activeContractStatus: string | null;
+  activeContractEndAt: string | null;
+  activePolicyId: string | null;
+  activePolicyNo: string | null;
+  activePolicyStatus: string | null;
+  activePolicyEndAt: string | null;
+  ready: boolean;
+  reasonCodes: SupplyReadinessReasonCode[];
+}
+
+export interface FleetSupplyRenewalTargetsResponse {
+  fleetPartnerId: string;
+  drivers: FleetSupplyRenewalTargetDriver[];
+  vehicles: FleetSupplyRenewalTargetVehicle[];
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +495,50 @@ export interface DispatchableSupplySnapshotRecord {
   generatedAt: string;
 }
 
+export interface SixMonthMonthlyOperationsSummary {
+  periodMonth: string;
+  from: string;
+  to: string;
+
+  businessArea: string | null;
+  serviceProductCode: string | null;
+
+  demandRequestCount: number;
+  actualDispatchCount: number;
+  completedTripCount: number;
+  cancelledOrderCount: number;
+
+  /**
+   * Sample-weighted dispatchable vehicle average across valid complete
+   * snapshots in the month. `null` when `validSnapshotCount === 0` (未提供);
+   * numeric `0` only when at least one valid complete snapshot measured zero
+   * vehicles.
+   */
+  averageDispatchableVehicleCount: number | null;
+  validSnapshotCount: number;
+  expectedSnapshotCount: number;
+  snapshotCoverageRate: number;
+
+  complaintCount: number;
+  complaintsByCategory: Record<string, number>;
+
+  lateArrivalThresholdMinutes?: number;
+  onTimeTripCount?: number;
+  lateTripCount?: number;
+  noShowTripCount?: number;
+  punctualityUnknownTripCount?: number;
+
+  complaintCreatedLowRatingAutoCount?: number;
+  complaintCreatedManualCount?: number;
+  complaintClosedLowRatingAutoCount?: number;
+  complaintClosedManualCount?: number;
+  complaintOverdueLowRatingAutoCount?: number;
+  complaintOverdueManualCount?: number;
+  complaintStatisticsAsOf?: string;
+
+  generatedAt: string;
+}
+
 export interface SixMonthOperationsSummary {
   from: string;
   to: string;
@@ -423,7 +551,13 @@ export interface SixMonthOperationsSummary {
   completedTripCount: number;
   cancelledOrderCount: number;
 
-  averageDispatchableVehicleCount: number;
+  /**
+   * Sample-weighted dispatchable vehicle average across valid complete
+   * snapshots in the window. `null` when `validSnapshotCount === 0` (未提供);
+   * numeric `0` only when at least one valid complete snapshot measured zero
+   * vehicles.
+   */
+  averageDispatchableVehicleCount: number | null;
   validSnapshotCount: number;
   expectedSnapshotCount: number;
   snapshotCoverageRate: number;
@@ -455,6 +589,12 @@ export interface SixMonthOperationsSummary {
   complaintOverdueManualCount?: number;
   /** Reference time for complaint `overdue` (SLA due passed, not closed). */
   complaintStatisticsAsOf?: string;
+
+  /**
+   * Six consecutive monthly detail rows generated from the same canonical
+   * source snapshot and rebuild batch as this summary row.
+   */
+  monthlySummaries?: SixMonthMonthlyOperationsSummary[];
 
   /**
    * Source order / case ids behind every figure above. Returned by the
@@ -533,6 +673,7 @@ export interface ComplaintMonthlyCategoryCounts extends ComplaintMonthlyCounts {
 export interface OperationsSummaryDrilldown {
   punctuality: OperationsPunctualityMetrics;
   complaintMonthlyStatistics: ComplaintMonthlyStatistic[];
+  monthlySummaries?: SixMonthMonthlyOperationsSummary[];
 }
 
 export interface ComplaintMonthlyStatistic {

@@ -88,7 +88,8 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
     rawRealm === "tenant" ||
     rawRealm === "ops" ||
     rawRealm === "driver" ||
-    rawRealm === "partner"
+    rawRealm === "partner" ||
+    rawRealm === "agency"
   ) {
     return rawRealm;
   }
@@ -106,6 +107,8 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
     case "partner_user":
     case "referral_passenger":
       return "partner";
+    case "agency_user":
+      return "agency";
     default:
       return "system";
   }
@@ -121,7 +124,8 @@ function normalizeRoleFamilies(
       family === "tenant" ||
       family === "ops" ||
       family === "driver" ||
-      family === "partner",
+      family === "partner" ||
+      family === "agency",
   );
 
   const fromActorType = AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE[actorType];
@@ -202,6 +206,16 @@ export function extractBootstrapRequestIdentity(
       normalizeHeaderValue(headers["x-partner-program-id"]) || null,
     partnerEntrySlug:
       normalizeHeaderValue(headers["x-partner-entry-slug"]) || null,
+    // Dev bootstrap only (rejected in strict environments). The agency portal
+    // still re-resolves this against an active durable membership per request.
+    ...(realm === "agency"
+      ? {
+          agencyId: normalizeHeaderValue(headers["x-agency-id"]) || null,
+          membershipId:
+            normalizeHeaderValue(headers["x-membership-id"]) || null,
+          principalId: normalizeHeaderValue(headers["x-actor-id"]) || null,
+        }
+      : {}),
     drtsPassengerId:
       normalizeHeaderValue(headers["x-drts-passenger-id"]) ||
       normalizeHeaderValue(headers["x-actor-id"]) ||

@@ -342,9 +342,58 @@ describe("bureau-r09_monthly_complaint_statistics", () => {
     const service = memoryService(buildSource(TRIPS, CASES), TIMELINES);
     const row = only(await service.previewSixMonthOperationsSummary(QUERY));
     expectComplaintStatistics(row);
-    // The existing complaint count keeps its original (UTC created-month)
-    // definition: the case created 2026-07-31T16:30Z is not in it.
-    expect(row.complaintCount).toBe(4);
+    // R10 complaintCount and complaintsByCategory use the accepted Asia/Taipei
+    // created-month attribution aligned with R09: C-20260801-000001 (created
+    // 2026-07-31T16:30:00.000Z = 2026-08-01 00:30 Asia/Taipei) belongs to
+    // August alongside C-20260805-000003 and C-20260812-000005, and
+    // C-20260901-000002 (2026-08-31T16:30:00.000Z = 2026-09-01 00:30 Asia/Taipei)
+    // belongs to September alongside C-20260913-000006, while July case
+    // C-20260720-000004 remains outside the 2026-08..2026-09 window.
+    const [augustStat, septemberStat] =
+      row.drilldown!.complaintMonthlyStatistics;
+    expect([
+      ...augustStat!.lowRatingAuto.createdCaseNos,
+      ...augustStat!.manual.createdCaseNos,
+      ...septemberStat!.lowRatingAuto.createdCaseNos,
+      ...septemberStat!.manual.createdCaseNos,
+    ]).toEqual([
+      "C-20260805-000003",
+      "C-20260801-000001",
+      "C-20260812-000005",
+      "C-20260901-000002",
+      "C-20260913-000006",
+    ]);
+    expect(row.complaintCount).toBe(5);
+    expect(row.complaintCount).toBe(
+      (row.complaintCreatedLowRatingAutoCount ?? 0) +
+        (row.complaintCreatedManualCount ?? 0),
+    );
+    expect(row.complaintsByCategory).toEqual({
+      driver_service: 4,
+      fare_dispute: 1,
+    });
+    const [augustMonthly, septemberMonthly] = row.monthlySummaries ?? [];
+    expect(augustMonthly).toMatchObject({
+      periodMonth: "2026-08",
+      complaintCount: 3,
+      complaintsByCategory: {
+        driver_service: 2,
+        fare_dispute: 1,
+      },
+      complaintCreatedLowRatingAutoCount:
+        augustStat!.lowRatingAuto.createdCount,
+      complaintCreatedManualCount: augustStat!.manual.createdCount,
+    });
+    expect(septemberMonthly).toMatchObject({
+      periodMonth: "2026-09",
+      complaintCount: 2,
+      complaintsByCategory: {
+        driver_service: 2,
+      },
+      complaintCreatedLowRatingAutoCount:
+        septemberStat!.lowRatingAuto.createdCount,
+      complaintCreatedManualCount: septemberStat!.manual.createdCount,
+    });
   });
 
   it("reads closures and low-rating provenance from canonical storage in the persisted runtime", async () => {

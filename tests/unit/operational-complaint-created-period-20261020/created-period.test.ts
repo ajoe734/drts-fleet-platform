@@ -292,12 +292,89 @@ it.each(["csv", "xlsx", "pdf"] as const)(
     const { job, artifact } = await f.job(format);
     const rows = job.rows;
     if (!rows) throw new Error("Actual completed report rows missing");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      complaintCount: 1,
-      demandRequestCount: 1,
-      completedTripCount: 1,
-    });
+    if (format === "csv") {
+      expect(rows).toHaveLength(6);
+      expect(
+        rows.map((row) => ("periodMonth" in row ? row.periodMonth : null)),
+      ).toEqual([
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+        "2026-09",
+        "2026-10",
+      ]);
+      for (const row of rows) {
+        expect(row).toMatchObject({
+          businessArea: "NTP",
+          serviceProductCode: "enterprise_dispatch",
+        });
+      }
+      const juneRow = rows.find(
+        (row) => "periodMonth" in row && row.periodMonth === "2026-06",
+      );
+      expect(juneRow).toMatchObject({
+        periodMonth: "2026-06",
+        complaintCount: 0,
+        demandRequestCount: 1,
+        completedTripCount: 1,
+        complaintsByCategory: {},
+      });
+      const augustRow = rows.find(
+        (row) => "periodMonth" in row && row.periodMonth === "2026-08",
+      );
+      expect(augustRow).toMatchObject({
+        periodMonth: "2026-08",
+        complaintCount: 1,
+        demandRequestCount: 0,
+        completedTripCount: 0,
+        complaintsByCategory: { [f.firstCase.category]: 1 },
+      });
+      for (const emptyMonth of ["2026-05", "2026-07", "2026-09", "2026-10"]) {
+        const emptyRow = rows.find(
+          (row) => "periodMonth" in row && row.periodMonth === emptyMonth,
+        );
+        expect(emptyRow).toMatchObject({
+          periodMonth: emptyMonth,
+          complaintCount: 0,
+          demandRequestCount: 0,
+          completedTripCount: 0,
+          complaintsByCategory: {},
+        });
+      }
+      expect(
+        rows.reduce(
+          (sum, row) => sum + ("complaintCount" in row ? row.complaintCount : 0),
+          0,
+        ),
+      ).toBe(1);
+      expect(
+        rows.reduce(
+          (sum, row) =>
+            sum + ("demandRequestCount" in row ? row.demandRequestCount : 0),
+          0,
+        ),
+      ).toBe(1);
+      expect(
+        rows.reduce(
+          (sum, row) =>
+            sum + ("completedTripCount" in row ? row.completedTripCount : 0),
+          0,
+        ),
+      ).toBe(1);
+    } else {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        from: "2026-05-01",
+        to: "2026-10-31",
+        businessArea: "NTP",
+        serviceProductCode: "enterprise_dispatch",
+        complaintCount: 1,
+        demandRequestCount: 1,
+        completedTripCount: 1,
+        complaintsByCategory: { [f.firstCase.category]: 1 },
+      });
+    }
     await assertArtifactRecords(artifact, format, rows);
     if (process.env.MONTHLY_REPORT_OUTPUT) {
       fs.mkdirSync(process.env.MONTHLY_REPORT_OUTPUT, { recursive: true });

@@ -269,7 +269,7 @@ describe("current canonical Referral entry deployment and original setup", () =>
       returnTo: `/embed/${entrySlug}?state=handoff&screen=book`,
     });
     const consent = await POST(request(form));
-    expect(consent.status).toBe(307);
+    expect(consent.status).toBe(303);
     expect(consent.headers.get("location")).toBe(
       `${publicOrigin}/embed/${entrySlug}?state=handoff&screen=book`,
     );

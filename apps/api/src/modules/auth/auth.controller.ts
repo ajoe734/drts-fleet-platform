@@ -216,11 +216,11 @@ export class AuthController {
     @Query("partner_id") partnerId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (realm !== "tenant" && realm !== "partner") {
+    if (realm !== "tenant" && realm !== "partner" && realm !== "agency") {
       throw new ApiRequestError(
         400,
         "AUTH_REALM_INVALID",
-        `Unsupported OIDC realm '${realm}'. Only 'tenant' and 'partner' are supported.`,
+        `Unsupported OIDC realm '${realm}'. Only 'tenant', 'partner' and 'agency' are supported.`,
       );
     }
     const result = this.requireOidcPkceService().generateLoginParameters(
@@ -302,6 +302,81 @@ export class AuthController {
         );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
+      throw toPublicTenantAuthError(error);
+    }
+  }
+
+  /** BUREAU-R13 §3.1: agency invitation login binds the state to the proof. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("agency/invitation-login")
+  getAgencyInvitationLoginUrl(
+    @Body()
+    command: {
+      invitationToken: string;
+      redirectUri: string;
+      agencyId?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      typeof command?.invitationToken !== "string" ||
+      !command.invitationToken.trim() ||
+      command.invitationToken.length > 512
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      "agency",
+      {
+        redirectUri: command.redirectUri,
+        invitationToken: command.invitationToken.trim(),
+        agencyId:
+          typeof command.agencyId === "string" ? command.agencyId : null,
+      },
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("agency/callback-session")
+  async exchangeAgencyCallbackSession(
+    @Body() command: IamCallbackSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-oidc-state-token") stateTokenHeader?: string,
+  ) {
+    const stateToken = stateTokenHeader?.trim();
+    if (!stateToken) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
+      );
+    }
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
+    try {
+      const session =
+        await this.requireOidcPkceService().exchangeAgencyCallbackSession(
+          command,
+          meta,
+        );
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      // Same opaque public error as tenant: no account-existence oracle.
       throw toPublicTenantAuthError(error);
     }
   }

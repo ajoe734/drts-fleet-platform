@@ -1,6 +1,8 @@
 import type { AuthActorType, AuthRealm, AuthRoleFamily } from "./auth.types";
 import {
   getIamActorScopePresets,
+  getIamAgencyRoleScopePresets,
+  getIamAgencyRoleScopes,
   getIamTenantRoleScopes,
   getIamTenantRoleScopePresets,
 } from "@drts/contracts";
@@ -39,6 +41,7 @@ export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   partner_api_key: ["partner"],
   partner_user: ["partner"],
   referral_passenger: ["partner"],
+  agency_user: ["agency"],
 };
 
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> =
@@ -46,6 +49,27 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> =
 
 export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
   getIamTenantRoleScopePresets();
+
+export const AUTH_AGENCY_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
+  getIamAgencyRoleScopePresets();
+
+export function getAgencyRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return getIamAgencyRoleScopes(roleCode);
+}
+
+/**
+ * BUREAU-R13 §2.6: the only non-read requests an agency session may make.
+ * Export-job creation produces an access record and an export artifact; it
+ * never changes operational data. Every other write is denied to the realm.
+ */
+export const AGENCY_WRITE_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
+  "POST agency/trip-records/export-jobs/preview",
+  "POST agency/trip-records/export-jobs",
+  "POST auth/logout",
+  "POST auth/logout-all",
+]);
 
 export function getTenantRoleScopes(
   roleCode: string,

@@ -1916,20 +1916,22 @@ export default async function DispatchDetailPage({
   }
   const generatedAt = new Date().toISOString();
 
-  const ordersResult = await load(
-    () => client.listOrders(),
-    [] as OwnedOrderRecord[],
+  // Read the one order by its id first. Every order is listed only to match an
+  // order number: shared dev holds over 7 MB of orders, and listing them on
+  // each 5-second refresh made a render take 7-49 s.
+  const orderById = await resolveOrFallback(
+    () => client.getOrder(dispatchId),
+    null as OwnedOrderRecord | null,
   );
+  const ordersResult = orderById
+    ? { data: [orderById], failed: false }
+    : await load(() => client.listOrders(), [] as OwnedOrderRecord[]);
 
   const matchedOrder =
     ordersResult.data.find(
       (candidate) =>
         candidate.orderId === dispatchId || candidate.orderNo === dispatchId,
-    ) ??
-    (await resolveOrFallback(
-      () => client.getOrder(dispatchId),
-      null as OwnedOrderRecord | null,
-    ));
+    ) ?? null;
 
   if (matchedOrder) {
     return renderOwnedWorkspace({

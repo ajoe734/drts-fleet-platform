@@ -18,6 +18,143 @@ import {
   assignInOrdinaryWorkspace,
 } from "./pax-review-shared-order/ordinary-ops-dispatch";
 
+// Only public codes reachable through the existing Ops prepare call chain may
+// leave the response boundary; validators can put persisted values in messages.
+const PUBLIC_PREPARE_CODES = new Set([
+  "review_supply_unavailable",
+  "not_found",
+  "NOT_FOUND",
+  "CONFLICT",
+  "VALIDATION_ERROR",
+  "INVALID_ARGUMENT",
+  "IAP_ASSERTION_INVALID",
+  "IAP_AUDIENCE_MISMATCH",
+  "IAP_SUBJECT_FORBIDDEN",
+  "AMBIGUOUS_OPERATOR_MAPPING",
+  "INVALID_DRIVER_PROFILE",
+  "DRIVER_PROFILE_STORAGE_UNAVAILABLE",
+  "VEHICLE_ELIGIBILITY_STORAGE_UNAVAILABLE",
+  "DRIVER_ALREADY_EXISTS",
+  "INVALID_VEHICLE_ELIGIBILITY_ITEM",
+  "INVALID_VEHICLE_ELIGIBILITY_CAPABILITY",
+  "INVALID_VEHICLE_LICENSE_TYPE",
+  "INVALID_SUPPORTED_PRODUCTS",
+  "INVALID_SERVICE_PRODUCT_TYPE",
+  "INVALID_SEAT_COUNT",
+  "INVALID_LUGGAGE_CAPACITY",
+  "INVALID_CONDITIONALLY_ALLOWED",
+  "INVALID_REQUIRED_DOCUMENTS",
+  "INVALID_TRAINING_REQUIRED",
+  "INVALID_PERMIT_REQUIRED",
+  "INVALID_EFFECTIVE_RANGE",
+  "INVALID_EFFECTIVE_TIMESTAMP",
+  "SERVICE_PRODUCT_INACTIVE",
+  "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+  "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+  "TAXI_METER_REQUIRED",
+  "AIRPORT_PERMIT_REQUIRED",
+  "FIXED_FARE_NOT_ALLOWED",
+  "FIELD_REQUIRED",
+  "FIELD_INVALID",
+  "INVALID_NUMBER",
+  "INVALID_COORDINATE",
+  "INTERNAL_SERVER_ERROR",
+]);
+// Accept only UUID-shaped public request traces; arbitrary IDs are not output.
+const PUBLIC_PREPARE_TRACE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+// Diagnostic only: the caller still asserts response.ok() and never retries.
+async function opsPrepareDiagnostic(response: {
+  status(): number;
+  json(): Promise<unknown>;
+}): Promise<string> {
+  const status = response.status();
+  let code = "unclassified";
+  let reason = "unclassified";
+  let trace = "unavailable";
+  if (status >= 400) {
+    try {
+      const body: unknown = await response.json();
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        !("error" in body)
+      ) {
+        reason = "non-api-envelope";
+      } else {
+        const error = body.error;
+        if (
+          typeof error !== "string" &&
+          (error === null || typeof error !== "object" || Array.isArray(error))
+        ) {
+          reason = "non-api-envelope";
+        } else {
+          const fields =
+            typeof error === "string"
+              ? null
+              : (error as {
+                  code?: unknown;
+                  message?: unknown;
+                  details?: unknown;
+                  trace_id?: unknown;
+                  traceId?: unknown;
+                });
+          const candidate = fields ? fields.code : error;
+          if (
+            typeof candidate === "string" &&
+            PUBLIC_PREPARE_CODES.has(candidate)
+          ) {
+            code = candidate;
+            if (code === "review_supply_unavailable" && fields) {
+              const message = fields.message;
+              reason =
+                message === "Rehearsal product storage is unavailable."
+                  ? "product-storage"
+                  : message === "Reservation product is unavailable."
+                    ? "reservation-product"
+                    : message ===
+                        "Established rehearsal supply templates are unavailable."
+                      ? "supply-templates"
+                      : "review_supply_unavailable";
+            } else if (code === "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT") {
+              const details = fields?.details;
+              const candidateReason =
+                details !== null &&
+                typeof details === "object" &&
+                !Array.isArray(details) &&
+                "reason" in details
+                  ? details.reason
+                  : undefined;
+              reason =
+                candidateReason === "inactive" ||
+                candidateReason === "unsupported_product" ||
+                candidateReason === "license_type" ||
+                candidateReason === "business_dispatch_eligibility" ||
+                candidateReason === "platform_forwarding_not_allowed"
+                  ? candidateReason
+                  : candidateReason === undefined
+                    ? "missing-domain-reason"
+                    : "unrecognized-domain-reason";
+            }
+          }
+          if (fields) {
+            const candidateTrace = [fields.trace_id, fields.traceId].find(
+              (value) =>
+                typeof value === "string" && PUBLIC_PREPARE_TRACE.test(value),
+            );
+            if (typeof candidateTrace === "string") trace = candidateTrace;
+          }
+        }
+      }
+    } catch {
+      // Empty/HTML/unparseable response must not mask the original HTTP failure.
+      reason = "non-json";
+    }
+  }
+  return `Ops prepare status=${status} code=${code} reason=${reason} trace=${trace}`;
+}
+
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
 const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
@@ -123,9 +260,12 @@ async function book(
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
-  await expect(page.getByText("建立乘車需求", { exact: true })).toBeVisible();
-  // AuthScreen's P5Header renders the title as text. Settings load separately;
-  // wait for the actual disclosure or form before deciding whether to agree.
+  // The plan header shows 建立乘車需求, or 費用與優惠說明 on the first-use
+  // fee gate (附錄 E-19a). Settings load separately; wait for the actual
+  // disclosure or form before deciding whether to agree.
+  await expect(
+    page.getByText(/^(建立乘車需求|費用與優惠說明)$/).first(),
+  ).toBeVisible();
   await expect(
     ack.or(page.getByLabel("示範上車地點", { exact: true })),
   ).toBeVisible();
@@ -149,7 +289,11 @@ async function book(
   await expect(page.getByText(/NT\$ (85|105)/).first()).toBeVisible();
   // The existing confirmation sheet owns payment selection. Require the
   // newly bound method itself; selecting another card would change B's PSP case.
+  // 附錄 E-19b shows the selected card as the 支付方式 row; the owned card list
+  // opens from that row (it is already open while no card is selected).
   const choice = page.locator(`input[value="${paymentMethodId}"]`);
+  if (!(await choice.isVisible()))
+    await page.getByRole("button", { name: /^變更支付方式：/ }).click();
   await expect(choice).toBeVisible();
   await choice.check();
   await page.getByRole("checkbox", { name: "我已確認費用與優惠說明" }).check();
@@ -1053,7 +1197,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
         (await authority(pax, orderId)).receipt?.record?.e04Snapshot
           ?.fleetOperatorName,
     )
-    .toBe("虛構演練派遣業者（合成・非正式）");
+    .toBe("智行車隊");
   const ride = await authority(pax, orderId);
   const snapshot = ride.receipt.record.e04Snapshot;
   expect(ride.receipt.orderId).toBe(orderId);
@@ -1081,7 +1225,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
   const e04 = await pax.request.get(`${PAX}${metadata.htmlUrl}`);
   expect(e04.status()).toBe(200);
   const e04Html = await e04.text();
-  expect(e04Html).toContain("合成・非正式");
+  expect(e04Html).toContain(snapshot.fleetOperatorName);
   expect(e04Html).toContain(snapshot.driverRegistrationMasked);
   await info.attach(`same-order-${orderId}-e04`, {
     body: e04Html,
@@ -1221,23 +1365,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       );
       await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
       const preparedResponse = await preparing;
-      let prepareFailure = "unclassified";
-      if (!preparedResponse.ok()) {
-        const body = await preparedResponse.json().catch(() => null);
-        if (body?.error?.code === "review_supply_unavailable") {
-          const reasons: Record<string, string> = {
-            "Rehearsal product storage is unavailable.": "product-storage",
-            "Reservation product is unavailable.": "reservation-product",
-            "Established rehearsal supply templates are unavailable.":
-              "supply-templates",
-          };
-          prepareFailure =
-            reasons[body.error.message] ?? "review_supply_unavailable";
-        }
-      }
       expect(
         preparedResponse.ok(),
-        `Ops prepare status=${preparedResponse.status()} reason=${prepareFailure}`,
+        await opsPrepareDiagnostic(preparedResponse),
       ).toBe(true);
       await expect(
         ops.getByText("已準備兩組合成車司；未建立訂單、派遣或付款。"),
@@ -1401,7 +1531,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .toBe("captured");
         await pax.getByRole("button", { name: "5 星", exact: true }).click();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, normal)).rating?.score)
@@ -1483,7 +1613,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await contactSwitch.check();
         await expect(contactSwitch).toBeChecked();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, retry)).rating?.score)

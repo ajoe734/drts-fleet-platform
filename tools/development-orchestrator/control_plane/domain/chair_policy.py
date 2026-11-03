@@ -1,6 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+import hashlib
+import json
+import re
+from typing import Any, Iterable, Mapping
+
+from .unblock_resolution import MERGED_RUNTIME_ACCEPTANCE_READY
+
+
+# Explicit Chair-only resume basis: the original review candidate's own CI has
+# recovered at the exact same SHA/generation. Never inferred from CI polling.
+CANDIDATE_CI_RECOVERED = "candidate_ci_recovered"
+CANDIDATE_CI_RECOVERY_IDENTITY_KEYS = (
+    "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+)
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+_PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/[1-9][0-9]*")
 
 
 CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
@@ -17,6 +33,80 @@ CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
         "recommended_focus",
     }
 )
+
+
+def open_blocker_fingerprint(blockers: Iterable[Any] | None, task_id: str) -> tuple[str, int]:
+    """Digest the exact open blocker records of one task, order-independently.
+
+    Compares whole structured records (not task.next or any free text), so an
+    added, removed, or edited open blocker changes the fingerprint.
+    """
+    rows = sorted(
+        json.dumps(blocker, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        for blocker in blockers or []
+        if isinstance(blocker, dict)
+        and blocker.get("task_id") == task_id
+        and str(blocker.get("status") or "").lower() == "open"
+    )
+    digest = hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return digest, len(rows)
+
+
+def candidate_ci_recovery_identity(task: Mapping[str, Any]) -> dict[str, str] | None:
+    """Return the retained review identity, or None if no original handoff stands."""
+    identity = {key: task.get(key) for key in CANDIDATE_CI_RECOVERY_IDENTITY_KEYS}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return None
+    if not _FULL_SHA.fullmatch(identity["candidate_sha"]) or identity["owner"] == identity["reviewer"]:
+        return None
+    if task.get("reviewed_sha") or task.get("merge_sha"):
+        return None
+    handoff = {key: identity[key] for key in identity if key != "pr_url"}
+    if task.get("candidate_review_handoff") != handoff:
+        return None
+    return identity
+
+
+MERGED_ACCEPTANCE_RESUME_ACTION_KEYS = frozenset(
+    {
+        "task_id", "action", "reason", "resume_basis", "resume_status",
+        "candidate_sha", "candidate_generation", "merge_sha", "blocker_fingerprint",
+        "candidate_branch", "owner", "reviewer", "required_acceptance", "depends_on",
+    }
+)
+
+
+def _merged_acceptance_resume_error(action: Mapping[str, Any]) -> str | None:
+    """Exact shape of the Chair's merged-acceptance resume; the Supervisor
+    re-binds every observed value (including the identity and dependency
+    fields the gateway recomputes on its own reread) to the locked board
+    before any write."""
+    if "helper_task_id" in action:
+        return "merged acceptance resume must not name an unblock helper"
+    extra = sorted(str(key) for key in action if key not in MERGED_ACCEPTANCE_RESUME_ACTION_KEYS)
+    if extra:
+        return f"merged acceptance resume has unexpected fields: {', '.join(extra)}"
+    if action.get("resume_status") != "acceptance":
+        return "merged acceptance resume only resumes acceptance"
+    if not isinstance(action.get("candidate_sha"), str) or not _FULL_SHA.fullmatch(action["candidate_sha"]):
+        return "merged acceptance resume requires a full candidate_sha"
+    if not isinstance(action.get("candidate_generation"), str) or not action["candidate_generation"].strip():
+        return "merged acceptance resume requires candidate_generation"
+    if not isinstance(action.get("merge_sha"), str) or not _FULL_SHA.fullmatch(action["merge_sha"]):
+        return "merged acceptance resume requires a full merge_sha"
+    if not isinstance(action.get("blocker_fingerprint"), str) or not _FINGERPRINT.fullmatch(action["blocker_fingerprint"]):
+        return "merged acceptance resume requires the observed blocker_fingerprint"
+    if not isinstance(action.get("candidate_branch"), str) or not action["candidate_branch"].strip():
+        return "merged acceptance resume requires the observed candidate_branch"
+    if not isinstance(action.get("owner"), str) or not action["owner"].strip():
+        return "merged acceptance resume requires the observed owner"
+    if not isinstance(action.get("reviewer"), str) or not action["reviewer"].strip():
+        return "merged acceptance resume requires the observed reviewer"
+    if not validate_string_list(action.get("required_acceptance")) or not action.get("required_acceptance"):
+        return "merged acceptance resume requires the observed required_acceptance list"
+    if not validate_string_list(action.get("depends_on")):
+        return "merged acceptance resume requires the observed depends_on list"
+    return None
 
 
 def validate_string_list(value: Any) -> bool:
@@ -111,10 +201,38 @@ def validate_review_payload(payload: Any) -> str | None:
                 or not str(action.get(key)).strip()
             ):
                 return f"task_actions {key} must be a non-empty string when provided"
-        if "resume_status" in action and str(
+        resume_basis = action.get("resume_basis")
+        merged_acceptance = resume_basis == MERGED_RUNTIME_ACCEPTANCE_READY
+        if "resume_status" in action and not merged_acceptance and str(
             action.get("resume_status") or ""
         ).strip().lower() not in {"backlog", "todo", "in_progress"}:
             return "task_actions resume_status must be backlog, todo, or in_progress when provided"
+        if "resume_basis" in action and (
+            action.get("action") != "resume_parent_task"
+            or not isinstance(resume_basis, str)
+            or resume_basis not in {CANDIDATE_CI_RECOVERED, MERGED_RUNTIME_ACCEPTANCE_READY}
+        ):
+            return (
+                f"task_actions resume_basis is only {CANDIDATE_CI_RECOVERED} or "
+                f"{MERGED_RUNTIME_ACCEPTANCE_READY} for resume_parent_task"
+            )
+        if merged_acceptance:
+            error = _merged_acceptance_resume_error(action)
+            if error:
+                return error
+        elif "resume_basis" in action:
+            if "helper_task_id" in action:
+                return "candidate CI recovery must not name an unblock helper"
+            if str(action.get("resume_status") or "in_progress").strip().lower() != "in_progress":
+                return "candidate CI recovery resumes in_progress before restoring review"
+            if not isinstance(action.get("candidate_sha"), str) or not _FULL_SHA.fullmatch(action["candidate_sha"]):
+                return "candidate CI recovery requires a full candidate_sha"
+            if not isinstance(action.get("candidate_generation"), str) or not action["candidate_generation"].strip():
+                return "candidate CI recovery requires candidate_generation"
+            if not isinstance(action.get("blocker_fingerprint"), str) or not _FINGERPRINT.fullmatch(action["blocker_fingerprint"]):
+                return "candidate CI recovery requires the observed blocker_fingerprint"
+            if not isinstance(action.get("pr_url"), str) or not _PR_URL.fullmatch(action["pr_url"]):
+                return "candidate CI recovery requires the observed candidate pr_url"
 
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):

@@ -42,6 +42,7 @@ const activeServices = [
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
   "drts-dev-passenger-app-web",
+  "drts-dev-agency-portal-web",
 ] as const;
 const pausedService = "drts-dev-partner-booking-web";
 const retiredService = "drts-passenger-web";
@@ -132,6 +133,7 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
       "enterprise-dispatch-web|drts-dev-enterprise-dispatch-web",
       "channel-partner-portal-web|drts-channel-partner-portal-web",
       "passenger-app-web|drts-dev-passenger-app-web",
+      "agency-portal-web|drts-dev-agency-portal-web",
     ]);
     expect(cleanupJob).toBeGreaterThan(-1);
     expect(healthJob).toBeGreaterThan(cleanupJob);

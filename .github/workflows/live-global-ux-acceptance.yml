@@ -11,17 +11,30 @@ on:
   workflow_dispatch:
     inputs:
       harness_sha:
-        description: Reviewed harness full SHA (must equal dispatch ref)
+        description: Reviewed harness full 40-hex commit SHA resolved by the workflow_dispatch branch/tag --ref (GITHUB_SHA == inputs.harness_sha)
         required: true
       runtime_sha:
         description: Immutable already-deployed product SHA
         required: true
       bundle_run_id:
-        description: Operator-provisioned global-ux-input artifact run ID (same repository)
-        required: true
+        description: Operator-provisioned global-ux-input artifact run ID (required for hosted verify mode; omit in package-input mode)
+        required: false
+        default: ""
       plan_sha256:
         description: Reviewed plan.json SHA256 from input artifact
         required: true
+      mode:
+        description: Dispatch mode (verify for hosted prepare -> Playwright -> gate; package-input to upload global-ux-input artifact)
+        required: false
+        default: verify
+      input_ref:
+        description: Optional same-repository full commit SHA carrying nonsecret input directory for package-input mode (defaults to harness_sha)
+        required: false
+        default: ""
+      input_dir:
+        description: Relative repository directory containing nonsecret plan.json, manual.json, and artifacts/ for package-input mode
+        required: false
+        default: tests/e2e/system-remediation/sr-live-global-ux-20261007/input
 
 permissions:
   contents: read
@@ -35,6 +48,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Validate workflow dispatch contract
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISPATCH_SHA: ${{ github.sha }}
+          HARNESS_SHA: ${{ inputs.harness_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+          MODE: ${{ inputs.mode || 'verify' }}
+          INPUT_REF: ${{ inputs.input_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$HARNESS_SHA" == "$DISPATCH_SHA" ]]
+          if [[ "$MODE" == "verify" ]]; then
+            [[ "$BUNDLE_RUN_ID" =~ ^[0-9]+$ ]]
+          elif [[ "$MODE" == "package-input" ]]; then
+            [[ -z "$BUNDLE_RUN_ID" ]]
+            [[ -z "$INPUT_REF" || "$INPUT_REF" =~ ^[a-f0-9]{40}$ ]]
+          else
+            echo "Unsupported workflow_dispatch mode: $MODE" >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || inputs.harness_sha }}
@@ -51,8 +88,65 @@ jobs:
       - name: Scoped lint
         run: pnpm exec eslint tests/e2e/system-remediation/sr-live-global-ux-20261007 tests/unit/system-remediation/sr-live-global-ux-20261007 playwright.live-global-ux.config.ts --max-warnings=0
 
+  package-input:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'package-input'
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      HARNESS_SHA: ${{ inputs.harness_sha }}
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      PLAN_SHA256: ${{ inputs.plan_sha256 }}
+      GLOBAL_UX_INPUT_SOURCE: ${{ inputs.input_dir || 'tests/e2e/system-remediation/sr-live-global-ux-20261007/input' }}
+      GLOBAL_UX_INPUT_BUNDLE: .local/global-ux-input-bundle
+    steps:
+      - name: Require exact workflow and producer identity
+        env:
+          DISPATCH_SHA: ${{ github.sha }}
+          INPUT_REF: ${{ inputs.input_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$HARNESS_SHA" == "$DISPATCH_SHA" ]]
+          [[ -z "$INPUT_REF" || "$INPUT_REF" =~ ^[a-f0-9]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.harness_sha }}
+          fetch-depth: 0
+      - name: Resolve optional same-repository input commit
+        env:
+          INPUT_REF: ${{ inputs.input_ref }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$INPUT_REF" ]]; then
+            if ! git cat-file -e "${INPUT_REF}^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$INPUT_REF"
+            fi
+            git cat-file -e "${INPUT_REF}^{commit}"
+            echo "GLOBAL_UX_INPUT_REF=$INPUT_REF" >> "$GITHUB_ENV"
+          fi
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Validate and stage nonsecret global-ux-input bundle
+        run: ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts package-input
+      - name: Upload nonsecret global-ux-input artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-ux-input
+          path: .local/global-ux-input-bundle
+          if-no-files-found: error
+          retention-days: 14
+      - name: Record nonsecret producer receipt
+        run: cat .artifacts/live-global-ux/input-package.json >> "$GITHUB_STEP_SUMMARY"
+
   hosted:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == '' || inputs.mode == 'verify')
     needs: offline
     runs-on: ubuntu-24.04
     timeout-minutes: 360

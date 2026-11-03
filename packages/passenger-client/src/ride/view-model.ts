@@ -51,12 +51,28 @@ export interface PassengerCertificateRow {
   label: string;
   value: string;
   mono?: boolean;
+  /** Second fact printed after `value` in the same row (E-04 駕駛 + 執登證號). */
+  secondary?: string;
+  /** The certificate's bold total row (E-04 車資合計). */
+  emphasis?: boolean;
+  /** Collapsible itemisation shown under this row (E-04 車資明細). */
+  items?: PassengerCertificateRow[];
+}
+
+/** Facts from the same issued certificate, reused by the completed-ride summary. */
+export interface PassengerCertificateTripSummary {
+  timeRangeText: string;
+  plateNo: string;
+  /** Already masked for public display. */
+  driverName?: string;
+  fareTotalText: string;
 }
 
 export interface PassengerCertificatePresentation {
   state: "pending" | "available" | "error";
   receiptNo?: string;
   rows?: PassengerCertificateRow[];
+  trip?: PassengerCertificateTripSummary;
   htmlUrl?: string;
   pdfUrl?: string;
   errorCode?: string;

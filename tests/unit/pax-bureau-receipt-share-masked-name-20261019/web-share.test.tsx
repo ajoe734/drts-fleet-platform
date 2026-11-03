@@ -179,15 +179,15 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     },
   );
 
-  it("keeps the original PDF/HTML download links mounted next to the new share action", () => {
+  it("keeps the original PDF download link mounted next to the share action (E-04: 下載 PDF / 分享)", () => {
     const { fixture } = buildP5_10Fixture();
+    expect(fixture.certificate?.htmlUrl).toBe(HTML_URL);
     render(<Actions fixture={fixture} token="ETA-ORDER" authMode="id" />);
     expect(
       screen.getByText(t.DownloadPdf).closest("a")?.getAttribute("href"),
     ).toBe(PDF_URL);
-    expect(
-      screen.getByText(t.DownloadHtml).closest("a")?.getAttribute("href"),
-    ).toBe(HTML_URL);
+    // The plan shows PDF and 分享 only; HTML is offered only without a PDF.
+    expect(screen.queryByText(t.DownloadHtml)).toBeNull();
     expect(screen.getByRole("button", { name: t.SharePdf })).toBeTruthy();
   });
 
@@ -253,7 +253,7 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     });
   });
 
-  it("falls back to existing download links when the browser cannot share files", async () => {
+  it("falls back to the existing PDF download link when the browser cannot share files", async () => {
     const { fixture } = buildP5_10Fixture();
     const fetchMock = vi.fn().mockResolvedValue(pdfResponse());
     vi.stubGlobal("fetch", fetchMock);
@@ -262,8 +262,9 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     await waitFor(() => {
       expect(screen.getByText(t.ShareUnsupported)).toBeTruthy();
     });
-    expect(screen.getByText(t.DownloadPdf)).toBeTruthy();
-    expect(screen.getByText(t.DownloadHtml)).toBeTruthy();
+    expect(
+      screen.getByText(t.DownloadPdf).closest("a")?.getAttribute("href"),
+    ).toBe(PDF_URL);
   });
 
   it.each([

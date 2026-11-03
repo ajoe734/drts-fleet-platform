@@ -9,14 +9,18 @@ import {
 } from "../../lib/demo/store";
 import { DEMO_T as T } from "../../lib/demo/translations";
 import { P5 } from "../auth/ui";
+import { useTrialMode } from "../review-demo/review-context";
 
 export function DemoBanner() {
+  const trial = useTrialMode();
   const [demo, setDemo] = useState(false);
   useEffect(() => {
     const update = () => setDemo(isDemoMode());
     update();
     return subscribeDemo(update);
   }, []);
+  // The trial is its own entry; the offline demo link would only confuse it.
+  if (!demo && trial) return null;
   if (!demo)
     return (
       <div style={{ padding: "10px 16px", textAlign: "right", fontSize: 13 }}>

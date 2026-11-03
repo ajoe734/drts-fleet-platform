@@ -35,7 +35,7 @@ function createSource(overrides: Record<string, unknown> = {}) {
         orderId: order.orderId,
         status: "assigned",
         mode: "auto",
-        latestEtaMinutes: 9,
+        latestEtaMinutes: 9 as number | null,
         createdAt: "2026-06-20T01:01:00.000Z",
         updatedAt: "2026-06-20T01:02:00.000Z",
       },
@@ -214,6 +214,58 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
 }
 
 describe("ReportingService", () => {
+  it.each([
+    { caseName: "measured zero", etaMinutes: 0, expectedSeconds: 0 },
+    { caseName: "positive ETA", etaMinutes: 5, expectedSeconds: 300 },
+    { caseName: "unknown ETA", etaMinutes: null, expectedSeconds: null },
+    {
+      caseName: "no dispatch or assignment",
+      etaMinutes: null,
+      expectedSeconds: null,
+      noDispatch: true,
+    },
+  ])(
+    "keeps $caseName in the daily rebuild and readback",
+    async ({ etaMinutes, expectedSeconds, noDispatch }) => {
+      // Repository is only the external persistence boundary; the public service
+      // still loads canonical dispatch/assignment data and builds the real row.
+      const source = createSource();
+      if (noDispatch) {
+        source.dispatchJobs.splice(0);
+        source.dispatchAssignments.splice(0);
+        source.driverTasks.splice(0);
+        source.dispatchTraceLogs.splice(0);
+      } else {
+        source.dispatchJobs[0]!.latestEtaMinutes = etaMinutes;
+      }
+      const { service, reportingRepository } = createService();
+      reportingRepository.loadDailyDispatchRecordSource.mockResolvedValue(
+        source,
+      );
+      const query = { serviceDate: "2026-06-20" };
+
+      const rebuilt = await service.rebuildDailyDispatchRecords(query);
+      expect(rebuilt.rebuiltCount).toBe(1);
+      expect(rebuilt.records[0]).toMatchObject({
+        orderId: "order-report-001",
+        finalStatus: "completed",
+        firstDispatchAt: noDispatch ? null : "2026-06-20T01:01:00.000Z",
+        firstAssignedAt: noDispatch ? null : "2026-06-20T01:02:00.000Z",
+        etaSecondsAtAssignment: expectedSeconds,
+      });
+      expect(
+        reportingRepository.upsertDailyDispatchRecords,
+      ).toHaveBeenCalledWith([
+        expect.objectContaining({ etaSecondsAtAssignment: expectedSeconds }),
+      ]);
+      reportingRepository.listDailyDispatchRecords.mockResolvedValueOnce(
+        rebuilt.records,
+      );
+      const [readback] = await service.listDailyDispatchRecords(query);
+      expect(readback?.etaSecondsAtAssignment).toBe(expectedSeconds);
+    },
+  );
+
   it("starts the production snapshot scheduler unless it is explicitly disabled", () => {
     const original = process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
     delete process.env.REPORTING_SNAPSHOT_SCHEDULER_ENABLED;
@@ -358,13 +410,8 @@ describe("ReportingService", () => {
   });
 
   it("builds six-month summaries from monthly aggregates with weighted snapshot coverage", async () => {
-    const { service, reportingRepository } = createService();
-    vi.spyOn(service, "rebuildMonthlyOperationsSummaries").mockResolvedValue({
-      rebuiltCount: 2,
-      generatedAt: "2026-06-20T00:00:00.000Z",
-      records: [],
-    });
-    reportingRepository.listMonthlyOperationsSummaries.mockResolvedValue([
+    const { service } = createService();
+    const rebuiltRecords = [
       {
         periodMonth: "2026-01",
         businessArea: "taipei",
@@ -397,7 +444,12 @@ describe("ReportingService", () => {
         complaintsByCategory: { no_show: 2 },
         generatedAt: "2026-03-01T00:00:00.000Z",
       },
-    ]);
+    ];
+    vi.spyOn(service, "rebuildMonthlyOperationsSummaries").mockResolvedValue({
+      rebuiltCount: 2,
+      generatedAt: "2026-03-01T00:00:00.000Z",
+      records: rebuiltRecords,
+    });
 
     const summary = await service.previewSixMonthOperationsSummary({
       from: "2026-01-01",
@@ -439,6 +491,22 @@ describe("ReportingService", () => {
         complaintOverdueLowRatingAutoCount: 0,
         complaintOverdueManualCount: 0,
         complaintStatisticsAsOf: expect.any(String),
+        monthlySummaries: [
+          expect.objectContaining({
+            periodMonth: "2026-01",
+            demandRequestCount: 3,
+            actualDispatchCount: 2,
+            averageDispatchableVehicleCount: 4,
+            complaintCount: 1,
+          }),
+          expect.objectContaining({
+            periodMonth: "2026-02",
+            demandRequestCount: 5,
+            actualDispatchCount: 4,
+            averageDispatchableVehicleCount: 10,
+            complaintCount: 2,
+          }),
+        ],
         drilldown: {
           punctuality: expect.objectContaining({
             assignedTripCount: 0,
@@ -448,9 +516,63 @@ describe("ReportingService", () => {
             expect.objectContaining({ periodMonth: "2026-01" }),
             expect.objectContaining({ periodMonth: "2026-02" }),
           ],
+          monthlySummaries: [
+            expect.objectContaining({ periodMonth: "2026-01" }),
+            expect.objectContaining({ periodMonth: "2026-02" }),
+          ],
         },
         generatedAt: "2026-03-01T00:00:00.000Z",
       },
     ]);
+  });
+
+  it("never mixes a newer six-month total with stale PG monthly rows in the same report response", async () => {
+    const { service, reportingRepository } = createService();
+    (
+      reportingRepository as Record<string, unknown>
+    ).replaceMonthlyOperationsSummaries = vi.fn(async () => undefined);
+    // Simulate a stale PG read-model row returning old counts (demand=99) if
+    // listMonthlyOperationsSummaries were mistakenly consulted after rebuild.
+    reportingRepository.listMonthlyOperationsSummaries.mockResolvedValue([
+      {
+        periodMonth: "2026-06",
+        businessArea: "taipei",
+        serviceProductCode: "airport_transfer",
+        demandRequestCount: 99,
+        actualDispatchCount: 99,
+        completedTripCount: 99,
+        cancelledOrderCount: 0,
+        averageDispatchableVehicleCount: 50,
+        validSnapshotCount: 1,
+        expectedSnapshotCount: 8640,
+        snapshotCoverageRate: 0.0001,
+        complaintCount: 99,
+        complaintsByCategory: { late_arrival: 99 },
+        generatedAt: "2026-06-01T00:00:00.000Z",
+      },
+    ]);
+
+    const [summary] = await service.previewSixMonthOperationsSummary({
+      periodMonthFrom: "2026-05",
+      periodMonthTo: "2026-10",
+    });
+
+    expect(summary).toBeDefined();
+    // Canonical source has exactly 1 order and 1 complaint in 2026-06; stale
+    // PG row (99) must not leak into either the six-month total or monthlySummaries.
+    expect(summary!.demandRequestCount).toBe(1);
+    expect(summary!.actualDispatchCount).toBe(1);
+    expect(summary!.complaintCount).toBe(1);
+    expect(summary!.monthlySummaries).toHaveLength(6);
+    const june = summary!.monthlySummaries!.find(
+      (item) => item.periodMonth === "2026-06",
+    )!;
+    expect(june.demandRequestCount).toBe(1);
+    expect(june.actualDispatchCount).toBe(1);
+    expect(june.complaintCount).toBe(1);
+    expect(june.generatedAt).toBe(summary!.generatedAt);
+    expect(
+      reportingRepository.listMonthlyOperationsSummaries,
+    ).not.toHaveBeenCalled();
   });
 });

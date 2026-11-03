@@ -76,6 +76,25 @@ function resolveSameOriginUrl(url: string): URL | null {
   }
 }
 
+function ShareIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width={15}
+      height={15}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M12 3v12M8 7l4-4 4 4M5 13v7h14v-7" />
+    </svg>
+  );
+}
+
 export function ReceiptShareActions({
   pdfUrl,
   receiptNo,
@@ -224,6 +243,7 @@ export function ReceiptShareActions({
             opacity: state.kind === "preparing" ? 0.6 : 1,
           }}
         >
+          <ShareIcon />
           {prepareLabel}
         </button>
       ) : (
@@ -250,6 +270,7 @@ export function ReceiptShareActions({
             opacity: state.kind === "sharing" ? 0.6 : 1,
           }}
         >
+          <ShareIcon />
           {t.SharePdf}
         </button>
       )}

@@ -14,6 +14,23 @@ export function parsePublicFareEffectiveDate(value: unknown): Date | null {
   return instant;
 }
 
+/**
+ * 證明編號 in the supplement's masking convention (RC-2607••-0186): the day
+ * of the issue date and all but the last four characters of the serial are
+ * hidden, e.g. MTX-20261102-4548B07022 → MTX-202611••-••7022. The full number
+ * stays on the downloaded PDF.
+ */
+export function maskReceiptNo(receiptNo: string): string {
+  const parts = receiptNo.split("-");
+  if (parts.length >= 3 && /^\d{8}$/.test(parts[1]!)) {
+    const serial = parts.slice(2).join("-");
+    return `${parts[0]}-${parts[1]!.slice(0, 6)}••-${serial.length > 4 ? `••${serial.slice(-4)}` : serial}`;
+  }
+  return receiptNo.length > 8
+    ? `${receiptNo.slice(0, 4)}••${receiptNo.slice(-4)}`
+    : receiptNo;
+}
+
 export const t = {
   FareChangeRule:
     "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
@@ -27,13 +44,28 @@ export const t = {
   ReceiptNotGenerated: "證明尚未產生。可重新讀取，但此頁不會要求後端重新開立。",
   CannotReadReceipt: "無法讀取完整乘車證明",
   NoMockData: "系統不會以展示資料補齊缺少欄位。錯誤代碼：",
-  RatingSubmitted: "評價已送出",
-  RatingPrefix: "本趟評價為",
-  RatingSuffix: "星；重整後仍以伺服器已評價狀態為準。",
-  HowWasService: "這趟服務如何？",
-  Star: "星",
-  LeaveComment: "給我們一些建議吧",
+  RatingSubmitted: "評分已送出",
+  RatingPrefix: "本趟評分為",
+  RatingSuffix: "星；評分送出後不可修改。",
+  ServiceRating: "服務評分",
+  RequiredMark: "*必填",
+  PickStarScore: "請點選星等",
+  SubmitRating: "送出評分",
+  RatingUnavailable: "目前無法評分",
+  LeaveComment: "補充意見（選填）",
   NeedSupportContact: "需要客服與您聯繫嗎？",
+  // Every 1–2 star rating opens a complaint case; the switch records contact consent.
+  NeedSupportContactDetail: "開啟後送出將自動建立客訴案件",
+  TripSummary: "本次行程",
+  SummaryPickup: "上車",
+  SummaryDropoff: "下車",
+  SummaryTime: "時間",
+  SummaryPlateDriver: "車牌 · 駕駛",
+  SummaryFare: "車資",
+  FareBreakdownCollapse: "收合 ▴",
+  FareBreakdownExpand: "展開 ▾",
+  CertificateFootnote: (receiptNo: string) =>
+    `證明編號 ${maskReceiptNo(receiptNo)} · 個資已遮碼`,
   ThanksForRating: "感謝您的評價",
   RatingHelps: "您的意見會協助我們維持服務品質。",
   CannotContactDriver: "目前無法直接聯絡司機",
@@ -43,7 +75,7 @@ export const t = {
   SeatbeltReminder: "上車後請全程繫妥安全帶",
   SeatbeltBoth: "前後座乘客都需要繫安全帶。",
   ReservationOnly: "本服務僅提供預約叫車",
-  AuthoritativeContact: "聯絡與申訴資訊以本趟權威資料為準",
+  AuthoritativeContact: "聯絡與申訴資訊以本趟行程資料為準",
   CancelRide: "取消行程",
   CancelFree: "取消不收費",
   CancelFreeDuringReassign: "改派期間取消不收費",
@@ -61,12 +93,12 @@ export const t = {
   ArrangingVehicle: "正在為您安排合適的車輛",
   ArrangingAnother: "正在為您安排另一輛車",
   Unassigned: "已取消指派",
-  ThisRideFare: "本趟車資",
   DriverContact: "聯繫司機",
   Vehicle: "車",
   GettingDriverLocation: "正在取得司機位置",
-  LocationDiagram: "位置示意",
+  RideMap: "行程地圖",
   PickupLabel: "上車：",
+  DropoffLabel: "下車：",
   LocationUpdated5sAgo: "位置更新於 5 秒前",
   DriverLocationDelayed: "司機位置更新稍有延遲",
   LiveRouteEstimateUnavailable: "目前無法預估抵達時間與剩餘距離",
@@ -122,8 +154,8 @@ export const t = {
   DownloadHtml: "下載 HTML",
   EReceiptIframeTitle: "Electronic Receipt",
   CannotLoadReceiptDetails: "無法載入完整電子收據明細",
-  WellDone: "做得好",
-  NeedsImprovement: "待改善",
+  WellDone: "做得好（可複選）",
+  NeedsImprovement: "待改善（可複選）",
   DesignPending: "(畫面設計待補)",
   RideCancelledThisTrip: "此行程已取消",
   RideCancelledNote: "行程已取消，未產生後續扣款。",
@@ -144,11 +176,11 @@ export const t = {
   DropoffLocation: "下車地點",
   SharePdfPreparing: "正在準備可分享的 PDF...",
   SharePdfReady: "PDF 已就緒，可以分享",
-  SharePdf: "分享 PDF",
+  SharePdf: "分享",
   ShareInProgress: "正在分享...",
   ShareFinished: "分享流程已完成",
   ShareCancelled: "已取消分享",
-  ShareUnsupported: "此瀏覽器不支援檔案分享，請改用下方下載",
-  ShareFailed: "分享失敗，請重試或改用下方下載",
+  ShareUnsupported: "此瀏覽器不支援檔案分享，請改用「下載 PDF」",
+  ShareFailed: "分享失敗，請重試或改用「下載 PDF」",
   ShareRetry: "重試準備分享",
 };

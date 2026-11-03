@@ -53,7 +53,7 @@ it.each(["id", "token"] as const)(
       name: "需要客服與您聯繫嗎？",
     }) as HTMLInputElement;
     expect(contact.checked).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
+    fireEvent.click(screen.getByRole("button", { name: "送出評分" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.contactRequested).toBe(true);
     first.unmount();
@@ -64,7 +64,7 @@ it.each(["id", "token"] as const)(
     fireEvent.click(
       screen.getByRole("switch", { name: "需要客服與您聯繫嗎？" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
+    fireEvent.click(screen.getByRole("button", { name: "送出評分" }));
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1]?.contactRequested).toBe(false);
     expect(urls).toEqual(
@@ -108,7 +108,7 @@ it("a higher score suppresses contact even when low-score contact defaults on", 
   ).toBe(true);
   fireEvent.click(screen.getByLabelText("5 星"));
   expect(screen.queryByRole("switch")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
+  fireEvent.click(screen.getByRole("button", { name: "送出評分" }));
   await waitFor(() => expect(payload?.contactRequested).toBe(false));
 });
 

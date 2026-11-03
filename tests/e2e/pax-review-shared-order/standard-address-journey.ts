@@ -193,7 +193,11 @@ export async function standardAddressJourney(
       "F actual standard-address booking writes a new order",
       async () => {
         bookedQuoteId = await quote();
-        await pax.locator(`input[value="${paymentMethodId}"]`).check();
+        // 附錄 E-19b: the owned card list opens from the 支付方式 row.
+        const choice = pax.locator(`input[value="${paymentMethodId}"]`);
+        if (!(await choice.isVisible()))
+          await pax.getByRole("button", { name: /^變更支付方式：/ }).click();
+        await choice.check();
         await pax.getByLabel("我已確認費用與優惠說明", { exact: true }).check();
         const created = pax.waitForResponse(
           (response) =>

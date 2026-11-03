@@ -15,6 +15,7 @@ WORKDIR /workspace
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY patches/ patches/
 COPY packages/ packages/
 COPY apps/passenger-app-web/package.json apps/passenger-app-web/
 COPY apps/driver-app/package.json apps/driver-app/

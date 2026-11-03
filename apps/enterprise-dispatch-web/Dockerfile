@@ -23,6 +23,7 @@ WORKDIR /workspace
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY patches/ patches/
 COPY packages/ packages/
 COPY apps/enterprise-dispatch-web/package.json apps/enterprise-dispatch-web/
 

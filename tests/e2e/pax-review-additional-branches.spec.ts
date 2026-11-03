@@ -344,7 +344,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
                 `/rides/${completed}/ratings`,
               ) && r.request().method() === "POST",
           ),
-          pax.getByRole("button", { name: "送出評價", exact: true }).click(),
+          pax.getByRole("button", { name: "送出評分", exact: true }).click(),
         ]);
         expect(response.status()).toBeLessThan(300);
         await expect
@@ -417,7 +417,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
         await pax.reload();
         expect((await authority(pax, completed)).actions.canRate).toBe(false);
         await expect(
-          pax.getByRole("button", { name: "送出評價", exact: true }),
+          pax.getByRole("button", { name: "送出評分", exact: true }),
         ).toHaveCount(0);
         const duplicate = await pax.request.post(
           `${PAX}/api/passenger-app/rides/${completed}/ratings`,

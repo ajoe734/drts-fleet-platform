@@ -242,7 +242,14 @@ def _detect_antigravity_result_signal(payload: dict[str, Any]) -> WorkerFailureS
     reason = str(result.get("error") or result.get("response") or "").strip()
     if not reason:
         reason = "Antigravity CLI stream ended with a structured ERROR result."
-    authorized = _is_result_level_provider_blocker(reason.lower()) or _extract_failure_candidate(reason) is not None
+    # Agy omits "Error:" in its native quota error; response text is not
+    # authoritative for this additional bare-error spelling.
+    bare_quota_error = re.match(
+        r"^Individual quota reached\b",
+        str(result.get("error") or "").strip(),
+        re.IGNORECASE,
+    ) is not None
+    authorized = bare_quota_error or _is_result_level_provider_blocker(reason.lower()) or _extract_failure_candidate(reason) is not None
     return WorkerFailureSignal(reason, "antigravity_stream_result_error", authorized)
 
 

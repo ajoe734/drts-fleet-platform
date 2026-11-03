@@ -22,6 +22,7 @@ import type {
   ReportJobType,
   ReportOutputFormat,
   ResourceActionDescriptor,
+  SixMonthMonthlyOperationsSummary,
   SixMonthOperationsSummary,
 } from "@drts/contracts";
 import {
@@ -58,6 +59,7 @@ import { t as translate, type Locale } from "../../lib/translations";
 
 import { artifactDownloadUrl } from "../../lib/report-artifact-url";
 import { OperationsMetricsSection } from "./operations-metrics-section";
+import { operationsMetricsCopy } from "./translations";
 
 type ReportsTab = "jobs" | "operational" | "packages" | "schedules";
 
@@ -334,7 +336,7 @@ function formatDateTime(
           hour: "2-digit",
           minute: "2-digit",
           hour12: false,
-          timeZone: "UTC",
+          timeZone: "Asia/Taipei",
         }
       : {
           month: "2-digit",
@@ -342,7 +344,7 @@ function formatDateTime(
           hour: "2-digit",
           minute: "2-digit",
           hour12: false,
-          timeZone: "UTC",
+          timeZone: "Asia/Taipei",
         },
   ).format(parsed);
 
@@ -721,6 +723,7 @@ function downloadJsonFile(filename: string, payload: unknown) {
 
 function OperationalReportsPanel() {
   const { t, locale } = useTranslation();
+  const opsCopy = operationsMetricsCopy(locale);
   const [reportType, setReportType] = useState<OperationalReportType>(
     "daily_dispatch_record",
   );
@@ -859,6 +862,9 @@ function OperationalReportsPanel() {
             const query = buildSummaryQuery();
             const rows =
               await getOpsClient().previewSixMonthOperationsSummary(query);
+            const monthlySummaries = rows.flatMap(
+              (row) => row.monthlySummaries ?? [],
+            );
             downloadJsonFile(
               `six-month-operations-summary-${new Date()
                 .toISOString()
@@ -868,6 +874,7 @@ function OperationalReportsPanel() {
                 query,
                 exportedAt: new Date().toISOString(),
                 rows,
+                monthlySummaries,
               },
             );
             setSummaryRows(rows);
@@ -1499,7 +1506,11 @@ function OperationalReportsPanel() {
                       },
                       {
                         label: t("reports.ops.metric.avgVehicles"),
-                        value: row.averageDispatchableVehicleCount.toFixed(1),
+                        value:
+                          row.validSnapshotCount > 0 &&
+                          row.averageDispatchableVehicleCount !== null
+                            ? row.averageDispatchableVehicleCount.toFixed(1)
+                            : opsCopy.notProvided,
                         mono: true,
                       },
                       {
@@ -1541,6 +1552,118 @@ function OperationalReportsPanel() {
                       {t("reports.ops.metric.noComplaints")}
                     </div>
                   )}
+                  {row.monthlySummaries && row.monthlySummaries.length > 0 ? (
+                    <div style={{ marginTop: 14 }}>
+                      <CanvasTable<
+                        SixMonthMonthlyOperationsSummary &
+                          Record<string, unknown>
+                      >
+                        theme={th}
+                        columns={[
+                          {
+                            h: opsCopy.month,
+                            mono: true,
+                            r: (item) => item.periodMonth,
+                          },
+                          {
+                            h: t("reports.ops.metric.demand"),
+                            align: "right",
+                            mono: true,
+                            r: (item) => String(item.demandRequestCount),
+                          },
+                          {
+                            h: t("reports.ops.metric.dispatch"),
+                            align: "right",
+                            mono: true,
+                            r: (item) => String(item.actualDispatchCount),
+                          },
+                          {
+                            h: t("reports.ops.metric.completed"),
+                            align: "right",
+                            mono: true,
+                            r: (item) => String(item.completedTripCount),
+                          },
+                          {
+                            h: t("reports.ops.metric.cancelled"),
+                            align: "right",
+                            mono: true,
+                            r: (item) => String(item.cancelledOrderCount),
+                          },
+                          {
+                            h: opsCopy.onTime,
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              item.onTimeTripCount !== undefined
+                                ? String(item.onTimeTripCount)
+                                : opsCopy.notProvided,
+                          },
+                          {
+                            h: opsCopy.late,
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              item.lateTripCount !== undefined
+                                ? String(item.lateTripCount)
+                                : opsCopy.notProvided,
+                          },
+                          {
+                            h: opsCopy.noShow,
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              item.noShowTripCount !== undefined
+                                ? String(item.noShowTripCount)
+                                : opsCopy.notProvided,
+                          },
+                          {
+                            h: opsCopy.unknown,
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              item.punctualityUnknownTripCount !== undefined
+                                ? String(item.punctualityUnknownTripCount)
+                                : opsCopy.notProvided,
+                          },
+                          {
+                            h: t("reports.ops.metric.avgVehicles"),
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              item.validSnapshotCount > 0 &&
+                              item.averageDispatchableVehicleCount !== null
+                                ? item.averageDispatchableVehicleCount.toFixed(
+                                    1,
+                                  )
+                                : opsCopy.notProvided,
+                          },
+                          {
+                            h: t("reports.ops.metric.snapshots"),
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              `${item.validSnapshotCount} / ${item.expectedSnapshotCount}`,
+                          },
+                          {
+                            h: t("reports.ops.metric.coverageRate"),
+                            align: "right",
+                            mono: true,
+                            r: (item) =>
+                              formatPercent(item.snapshotCoverageRate),
+                          },
+                          {
+                            h: t("reports.ops.metric.complaints"),
+                            align: "right",
+                            mono: true,
+                            r: (item) => String(item.complaintCount),
+                          },
+                        ]}
+                        rows={row.monthlySummaries.map((item) => ({
+                          ...item,
+                        }))}
+                      />
+                    </div>
+                  ) : null}
                   <OperationsMetricsSection
                     row={row}
                     theme={th}
@@ -1571,6 +1694,7 @@ function OperationalReportsPanel() {
 
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
+  const opsCopy = operationsMetricsCopy(locale);
   const [activeTab, setActiveTab] = useState<ReportsTab>("jobs");
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
   const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
@@ -2407,53 +2531,156 @@ export default function ReportsPage() {
                 title={t("reports.detail.dispatchRows")}
                 padding={0}
               >
-                <CanvasTable<DispatchRow>
-                  theme={th}
-                  columns={[
-                    {
-                      h: t("reports.col.order"),
-                      w: 184,
-                      r: (row) => (
-                        <div style={rowStackStyle}>
-                          <span style={rowTitleStyle}>
-                            {String(row.orderNo)}
-                          </span>
-                          <span style={rowMetaStyle}>
-                            {String(row.orderId)}
-                          </span>
-                        </div>
-                      ),
-                    },
-                    {
-                      h: t("reports.col.call"),
-                      k: "callId",
-                      w: 140,
-                      mono: true,
-                    },
-                    {
-                      h: t("reports.col.recording"),
-                      k: "recordingId",
-                      w: 160,
-                      mono: true,
-                    },
-                    {
-                      h: t("reports.col.missing"),
-                      w: 110,
-                      r: (row) => (
-                        <CanvasPill
-                          theme={th}
-                          tone={row.missingRecording ? "warn" : "success"}
-                          dot
-                        >
-                          {row.missingRecording
-                            ? t("common.yes")
-                            : t("common.no")}
-                        </CanvasPill>
-                      ),
-                    },
-                  ]}
-                  rows={jobDetail.rows.map((row) => ({ ...row }))}
-                />
+                {jobDetail.jobType === "six_month_operations_summary" ||
+                jobDetail.jobType === "six_month_statistics" ? (
+                  <CanvasTable<
+                    (SixMonthOperationsSummary | SixMonthMonthlyOperationsSummary) &
+                      Record<string, unknown>
+                  >
+                    theme={th}
+                    columns={[
+                      {
+                        h: opsCopy.month,
+                        mono: true,
+                        r: (row) =>
+                          "periodMonth" in row &&
+                          typeof row.periodMonth === "string"
+                            ? row.periodMonth
+                            : `${row.from} ~ ${row.to}`,
+                      },
+                      {
+                        h: t("reports.ops.metric.demand"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => String(row.demandRequestCount),
+                      },
+                      {
+                        h: t("reports.ops.metric.dispatch"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => String(row.actualDispatchCount),
+                      },
+                      {
+                        h: t("reports.ops.metric.completed"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => String(row.completedTripCount),
+                      },
+                      {
+                        h: t("reports.ops.metric.cancelled"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => String(row.cancelledOrderCount),
+                      },
+                      {
+                        h: opsCopy.late,
+                        align: "right",
+                        mono: true,
+                        r: (row) =>
+                          row.lateTripCount !== undefined
+                            ? String(row.lateTripCount)
+                            : opsCopy.notProvided,
+                      },
+                      {
+                        h: opsCopy.noShow,
+                        align: "right",
+                        mono: true,
+                        r: (row) =>
+                          row.noShowTripCount !== undefined
+                            ? String(row.noShowTripCount)
+                            : opsCopy.notProvided,
+                      },
+                      {
+                        h: t("reports.ops.metric.avgVehicles"),
+                        align: "right",
+                        mono: true,
+                        r: (row) =>
+                          row.validSnapshotCount > 0 &&
+                          row.averageDispatchableVehicleCount !== null
+                            ? row.averageDispatchableVehicleCount.toFixed(1)
+                            : opsCopy.notProvided,
+                      },
+                      {
+                        h: t("reports.ops.metric.snapshots"),
+                        align: "right",
+                        mono: true,
+                        r: (row) =>
+                          `${row.validSnapshotCount} / ${row.expectedSnapshotCount}`,
+                      },
+                      {
+                        h: t("reports.ops.metric.coverageRate"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => formatPercent(row.snapshotCoverageRate),
+                      },
+                      {
+                        h: t("reports.ops.metric.complaints"),
+                        align: "right",
+                        mono: true,
+                        r: (row) => String(row.complaintCount),
+                      },
+                    ]}
+                    rows={
+                      jobDetail.rows.map((row) => ({
+                        ...row,
+                      })) as unknown as Array<
+                        (
+                          | SixMonthOperationsSummary
+                          | SixMonthMonthlyOperationsSummary
+                        ) &
+                          Record<string, unknown>
+                      >
+                    }
+                  />
+                ) : (
+                  <CanvasTable<DispatchRow>
+                    theme={th}
+                    columns={[
+                      {
+                        h: t("reports.col.order"),
+                        w: 184,
+                        r: (row) => (
+                          <div style={rowStackStyle}>
+                            <span style={rowTitleStyle}>
+                              {String(row.orderNo)}
+                            </span>
+                            <span style={rowMetaStyle}>
+                              {String(row.orderId)}
+                            </span>
+                          </div>
+                        ),
+                      },
+                      {
+                        h: t("reports.col.call"),
+                        k: "callId",
+                        w: 140,
+                        mono: true,
+                      },
+                      {
+                        h: t("reports.col.recording"),
+                        k: "recordingId",
+                        w: 160,
+                        mono: true,
+                      },
+                      {
+                        h: t("reports.col.missing"),
+                        w: 110,
+                        r: (row) => (
+                          <CanvasPill
+                            theme={th}
+                            tone={row.missingRecording ? "warn" : "success"}
+                            dot
+                          >
+                            {row.missingRecording
+                              ? t("common.yes")
+                              : t("common.no")}
+                          </CanvasPill>
+                        ),
+                      },
+                    ]}
+                    rows={jobDetail.rows.map((row) => ({ ...row }))}
+                  />
+                )}
               </CanvasCard>
             ) : null}
 

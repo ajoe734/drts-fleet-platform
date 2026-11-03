@@ -477,6 +477,40 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     enforcedRealms: ["tenant", "platform"],
     matches: exactMatch("POST", "tenant/billing/profile"),
   },
+  // BUREAU-R13 §7.1: granting or changing an external agency's data access
+  // is a privileged platform mutation. The existing platform user-invitation
+  // and role-assignment actions are reused. Agency suspension and invitation
+  // revocation only remove access and are not gated.
+  {
+    actionId: "platform:users:create",
+    description: "Regulatory agency member invitation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/agencies\/[^/]+\/invitations$/,
+    ),
+  },
+  {
+    actionId: "platform:users:role:update",
+    description: "Regulatory agency member deactivation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/agencies\/[^/]+\/members\/[^/]+\/deactivate$/,
+    ),
+  },
+  {
+    actionId: "platform:users:role:update",
+    description: "Regulatory agency member access-period change",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/agencies\/[^/]+\/members\/[^/]+\/access-period$/,
+    ),
+  },
 ] as const;
 
 export function resolveRouteStepUpPolicy(

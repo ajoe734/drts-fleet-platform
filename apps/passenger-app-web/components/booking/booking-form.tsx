@@ -1,5 +1,6 @@
 "use client";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -13,16 +14,24 @@ import { earliestBookingTime, PassengerApiError } from "@drts/passenger-client";
 import {
   AddressMapPicker,
   buildCanvasTheme,
+  type AddressMapRendererProps,
   type AddressPayload,
 } from "@drts/ui-web";
 import { REALM_COLORS } from "@drts/ui-tokens";
-import { P5Btn, P5Card, inputStyle } from "../auth/ui";
+import { P5, P5Btn, P5Card } from "../auth/ui";
 import { BOOK_T as T } from "../../lib/booking/translations";
 import { DEMO_ADDRESSES, isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
 import { PAX_REVIEW_STOPS } from "@drts/api-client";
-import { useReviewDemo } from "../review-demo/review-context";
+import { useReviewDemo, useTrialMode } from "../review-demo/review-context";
+import {
+  googleMapsAuthFailed,
+  onGoogleMapsAuthFailure,
+} from "../../lib/map/google-maps-loader";
+import { usePassengerMapConfig } from "../map/map-config-context";
+import { BookingPlaceMap } from "./booking-place-map";
 import { CurrentLocationButton } from "./current-location-button";
+import { PLAN } from "./plan-screen";
 
 export interface BookingDraft {
   origin: AddressPayload | null;
@@ -61,6 +70,7 @@ export function BookingForm({
   // Real search/resolve/reverse failures surface through the real shared picker.
   const router = useRouter();
   const review = useReviewDemo();
+  const trial = useTrialMode();
   const [demo, setDemo] = useState<boolean | null>(null);
   useEffect(() => setDemo(isDemoMode()), []);
   const provider = useMemo(() => {
@@ -82,24 +92,53 @@ export function BookingForm({
         authenticated(client.reverse(command)),
     };
   }, [client, router]);
-  if (demo === null) return <p>{DEMO_T.addressLoading}</p>;
+  // A real Google map in the picker's map slot when this origin may use the
+  // browser key; otherwise (or after any script/key failure) the picker keeps
+  // its built-in grid.
+  const mapConfig = usePassengerMapConfig();
+  const [mapFailed, setMapFailed] = useState(googleMapsAuthFailed);
+  useEffect(() => onGoogleMapsAuthFailure(() => setMapFailed(true)), []);
+  const mapKey = mapConfig.enabled && !mapFailed ? mapConfig.browserKey : null;
+  const renderMap = useCallback(
+    (props: AddressMapRendererProps) =>
+      mapKey ? (
+        <BookingPlaceMap
+          {...props}
+          browserKey={mapKey}
+          theme={theme}
+          onUnavailable={() => setMapFailed(true)}
+        />
+      ) : null,
+    [mapKey],
+  );
+  const mapSlot = mapKey ? { renderMap } : {};
+  if (demo === null)
+    return (
+      <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
+        {DEMO_T.addressLoading}
+      </p>
+    );
+  // The self-serve trial books like the real app: address search, current
+  // location and the map. Only the internal rehearsal keeps fixed stops.
   const fixedAddresses =
-    demo || (review && draft.reviewAddressMode !== "standard");
+    demo || (review && !trial && draft.reviewAddressMode !== "standard");
   function patchDraft(update: Partial<BookingDraft>) {
     onChange((current) => ({ ...current, ...update }));
   }
   function demoAddress(field: "origin" | "destination") {
-    const addresses = review ? PAX_REVIEW_STOPS : DEMO_ADDRESSES;
+    const addresses: readonly AddressPayload[] = review
+      ? PAX_REVIEW_STOPS
+      : DEMO_ADDRESSES;
     return (
       <>
-        <p>
+        <p style={{ ...PLAN.muted, margin: "0 0 8px" }}>
           {review
             ? "模擬新北選址；試算與建單仍呼叫真 API，費率與服務範圍由後端判定。"
             : DEMO_T.addressHint}
         </p>
         <select
           aria-label={field === "origin" ? DEMO_T.pickup : DEMO_T.dropoff}
-          style={inputStyle}
+          style={PLAN.field}
           disabled={busy}
           value={draft[field]?.addressId ?? ""}
           onChange={(event) =>
@@ -123,37 +162,34 @@ export function BookingForm({
   }
   return (
     <>
-      {review && (
+      {review && !trial && (
         <P5Card title={T.reviewAddressMode}>
-          <label>
-            {T.reviewAddressMode}
-            <select
-              aria-label={T.reviewAddressMode}
-              style={inputStyle}
-              value={draft.reviewAddressMode ?? "fixed"}
-              disabled={busy}
-              onChange={(event) => {
-                const reviewAddressMode = event.target.value;
-                if (
-                  reviewAddressMode !== "fixed" &&
-                  reviewAddressMode !== "standard"
-                )
-                  return;
-                patchDraft({
-                  origin: null,
-                  destination: null,
-                  reviewAddressMode,
-                });
-              }}
-            >
-              <option value="fixed">{T.reviewFixedAddresses}</option>
-              <option value="standard">{T.reviewStandardAddresses}</option>
-            </select>
-          </label>
-          <p>{T.reviewAddressNotice}</p>
+          <select
+            aria-label={T.reviewAddressMode}
+            style={PLAN.field}
+            value={draft.reviewAddressMode ?? "fixed"}
+            disabled={busy}
+            onChange={(event) => {
+              const reviewAddressMode = event.target.value;
+              if (
+                reviewAddressMode !== "fixed" &&
+                reviewAddressMode !== "standard"
+              )
+                return;
+              patchDraft({
+                origin: null,
+                destination: null,
+                reviewAddressMode,
+              });
+            }}
+          >
+            <option value="fixed">{T.reviewFixedAddresses}</option>
+            <option value="standard">{T.reviewStandardAddresses}</option>
+          </select>
+          <p style={PLAN.muted}>{T.reviewAddressNotice}</p>
         </P5Card>
       )}
-      <P5Card title={T.pickup}>
+      <P5Card title={<StopTitle kind="pickup">{T.pickup}</StopTitle>}>
         {fixedAddresses ? (
           demoAddress("origin")
         ) : (
@@ -177,11 +213,13 @@ export function BookingForm({
                 })
               }
               enableServiceabilityPreview={false}
+              technicalDetails={false}
+              {...mapSlot}
             />
           </>
         )}
       </P5Card>
-      <P5Card title={T.dropoff}>
+      <P5Card title={<StopTitle kind="dropoff">{T.dropoff}</StopTitle>}>
         {fixedAddresses ? (
           demoAddress("destination")
         ) : (
@@ -198,33 +236,61 @@ export function BookingForm({
               })
             }
             enableServiceabilityPreview={false}
+            technicalDetails={false}
+            {...mapSlot}
           />
         )}
       </P5Card>
       <P5Card title={T.time}>
-        <label>
-          {T.time}
-          <input
-            aria-label={T.time}
-            type="datetime-local"
-            style={inputStyle}
-            value={draft.localTime}
-            min={earliestBookingTime(settings)}
-            disabled={busy}
-            onChange={(event) => patchDraft({ localTime: event.target.value })}
-          />
-        </label>
-        <p>{T.lead(settings.minLeadTimeMinutes)}</p>
+        <input
+          aria-label={T.time}
+          type="datetime-local"
+          style={PLAN.field}
+          value={draft.localTime}
+          min={earliestBookingTime(settings)}
+          disabled={busy}
+          onChange={(event) => patchDraft({ localTime: event.target.value })}
+        />
+        <p style={PLAN.muted}>{T.lead(settings.minLeadTimeMinutes)}</p>
       </P5Card>
-      <P5Btn
-        kind="primary"
-        disabled={
-          busy || !draft.origin || !draft.destination || !draft.localTime
-        }
-        onClick={onQuote}
-      >
-        {busy ? T.quoting : T.quote}
-      </P5Btn>
+      <div style={{ margin: "4px 14px 8px" }}>
+        <P5Btn
+          kind="primary"
+          disabled={
+            busy || !draft.origin || !draft.destination || !draft.localTime
+          }
+          onClick={onQuote}
+        >
+          {busy ? T.quoting : T.quote}
+        </P5Btn>
+      </div>
+    </>
+  );
+}
+
+/** Card title with the route markers of the plan's 預估路線 card. */
+function StopTitle({
+  kind,
+  children,
+}: {
+  kind: "pickup" | "dropoff";
+  children: string;
+}) {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        style={{
+          width: 8,
+          height: 8,
+          flexShrink: 0,
+          boxSizing: "border-box",
+          borderRadius: kind === "pickup" ? 4 : 2,
+          border: `2px solid ${P5.brand}`,
+          background: kind === "pickup" ? "transparent" : P5.brand,
+        }}
+      />
+      {children}
     </>
   );
 }

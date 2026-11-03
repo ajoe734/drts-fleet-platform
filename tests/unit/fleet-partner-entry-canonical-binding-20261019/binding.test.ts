@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -10,7 +11,11 @@ import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-part
 import { TenantPartnerRepository } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuthController } from "../../../apps/api/src/modules/auth/auth.controller";
+import { FleetPartnerController } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
+import { OidcPkceService } from "../../../apps/api/src/modules/auth/oidc-pkce.service";
+import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
+import { PartnerUserIdentityLinkRepository } from "../../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import type { AuthenticatedRequestLike } from "../../../apps/api/src/common/auth/auth.types";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
@@ -335,6 +340,91 @@ describe("normal Fleet Entry canonical binding", () => {
     expect(call?.[0]).not.toContain(reference);
     expect(call?.[1]).toEqual([reference]);
     expect(state.entries.size).toBe(0);
+  });
+
+  it("keeps the persisted bound Fleet master ID in a plain linked OIDC session without a managed grant", async () => {
+    vi.stubEnv("APP_ENV", "local");
+    vi.stubEnv("AUTH_MODE", "local");
+    vi.stubEnv("OIDC_MOCK_MODE", "true");
+    vi.stubEnv("JWT_SECRET", "synthetic-binding-socket-free-unit-signing-key");
+    const state = setup();
+    const entry = await state.service.createPlatformPartnerEntry(command());
+    expect(entry.partnerId).toBe(FLEET);
+    expect(entry.entrySlug).not.toBe(FLEET);
+    const code = "fleet_partner_plain_oidc_subject";
+    const subject = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+    const link = new PartnerUserIdentityLinkRepository();
+    await link.resolveOrCreate({
+      entrySlug: entry.entrySlug,
+      partnerUserRef: subject,
+    });
+    const repository = new IdentityRepository();
+    const jwt = new JwtAuthService(
+      repository,
+      state.service,
+      undefined,
+      undefined,
+      link,
+    );
+    const oidc = new OidcPkceService(
+      jwt,
+      state.service,
+      undefined,
+      link,
+      undefined,
+      repository,
+    );
+    const login = oidc.generateLoginParameters("partner", {
+      partnerId: entry.entrySlug,
+    });
+    const session = await oidc.exchangePartnerCallbackSession(
+      {
+        provider: "oidc",
+        code,
+        state: login.state,
+        partnerId: entry.entrySlug,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+      },
+      { stateToken: login.stateToken },
+    );
+    expect(session.partnerEntry.partnerId).toBe(FLEET);
+    expect(session.identity).toMatchObject({
+      partnerId: FLEET,
+      partnerEntrySlug: entry.entrySlug,
+      scopes: ["partner:read", "partner:write"],
+    });
+    expect(session.identity.membershipId).toBeUndefined();
+    expect(session.identity.scopes).not.toContain("fleet:read");
+    expect(session.identity.scopes).not.toContain("billing:read");
+    expect(jwt.verify(session.accessToken)).toMatchObject({
+      partnerId: FLEET,
+      partnerEntrySlug: entry.entrySlug,
+    });
+    expect(
+      await repository.getSession(session.identity.sessionId!),
+    ).toMatchObject({
+      partnerId: FLEET,
+      partnerEntrySlug: entry.entrySlug,
+      membershipId: null,
+    });
+    expect(await jwt.verifyAccessToken(session.accessToken)).toMatchObject({
+      partnerId: FLEET,
+      partnerEntrySlug: entry.entrySlug,
+    });
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+    await expect(
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "GET",
+            url: "/api/fleet-partner/drivers",
+            headers: { authorization: `Bearer ${session.accessToken}` },
+          }),
+        }),
+        getHandler: () => FleetPartnerController.prototype.listPortalDrivers,
+        getClass: () => FleetPartnerController,
+      } as never),
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
   });
 
   it("uses normal first-key/bootstrap issuance for a verified Fleet principal while retaining scope, cross-fleet and lifecycle denials", async () => {

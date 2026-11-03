@@ -1,5 +1,5 @@
 import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
-import { t, type Locale, type TranslationKey } from "@/lib/translations";
+import { t, type Locale, type TranslationKey } from "./translations";
 
 export type BankDemoTenantCode =
   | "acme"
