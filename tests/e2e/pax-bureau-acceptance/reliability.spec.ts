@@ -302,6 +302,9 @@ test("original drafts, lost acknowledgement, payment methods and a second device
         // Reload selects the current default again. Use the original owned
         // method explicitly so the later active-order deletion checks it.
         const originalMethod = pax.locator(`input[value="${method}"]`);
+        // 附錄 E-19b: the owned card list opens from the 支付方式 row.
+        if (!(await originalMethod.isVisible()))
+          await pax.getByRole("button", { name: /^變更支付方式：/ }).click();
         await originalMethod.check();
         await expect(originalMethod).toBeChecked();
         await pax

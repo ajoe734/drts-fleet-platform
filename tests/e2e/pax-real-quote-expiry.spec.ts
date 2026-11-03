@@ -342,7 +342,11 @@ test("a real fifteen-minute quote expires without booking, then requotes and can
     await step(
       "Original confirmation is prepared but never submitted",
       async () => {
-        await pax.locator(`input[value="${paymentMethodId}"]`).check();
+        // 附錄 E-19b: the owned card list opens from the 支付方式 row.
+        const choice = pax.locator(`input[value="${paymentMethodId}"]`);
+        if (!(await choice.isVisible()))
+          await pax.getByRole("button", { name: /^變更支付方式：/ }).click();
+        await choice.check();
         await pax.getByLabel("我已確認費用與優惠說明", { exact: true }).check();
         await expect(
           pax.getByRole("button", { name: "確認叫車", exact: true }),
@@ -454,7 +458,11 @@ test("a real fifteen-minute quote expires without booking, then requotes and can
     await step(
       "Original confirmation books one real order using only the new snapshot",
       async () => {
-        await pax.locator(`input[value="${paymentMethodId}"]`).check();
+        // 附錄 E-19b: the owned card list opens from the 支付方式 row.
+        const choice = pax.locator(`input[value="${paymentMethodId}"]`);
+        if (!(await choice.isVisible()))
+          await pax.getByRole("button", { name: /^變更支付方式：/ }).click();
+        await choice.check();
         await pax.getByLabel("我已確認費用與優惠說明", { exact: true }).check();
         const requested = pax.waitForResponse(
           (response) =>
