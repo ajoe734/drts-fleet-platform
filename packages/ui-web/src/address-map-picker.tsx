@@ -1067,11 +1067,12 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           />
           <button
             type="button"
-            style={buttonStyle(
-              theme,
-              "primary",
-              !providerAvailable || searching,
-            )}
+            style={{
+              ...buttonStyle(theme, "primary", !providerAvailable || searching),
+              // Beside a full-width query box the label must not wrap to 搜/尋.
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
             disabled={!providerAvailable || searching}
             onClick={() => void handleSearch()}
           >

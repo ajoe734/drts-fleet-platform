@@ -22,6 +22,13 @@ body {
   display: none;
 }
 
+/* Inside the fixed-height device frame the content scrolls; its cards keep
+   their own height instead of being squeezed and clipped (an inline `flex`
+   still lets a child grow or shrink on purpose). */
+.pax-scroll > * {
+  flex-shrink: 0;
+}
+
 /* The ride and history screens draw a device frame for desktop previews.
    On an actual phone the page is the device: drop the bezel and the drawn
    status bar instead of nesting a phone inside the phone. */
