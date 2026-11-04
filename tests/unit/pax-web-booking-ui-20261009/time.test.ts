@@ -7,6 +7,7 @@ import {
   proposedBookingTime,
   toLocalDateTime,
   validateBookingSettings,
+  withBookableTime,
 } from "../../../packages/passenger-client/src/booking/time";
 
 const settings = (minLeadTimeMinutes: number) => ({
@@ -142,4 +143,35 @@ describe("the time the app proposes", () => {
       });
     }
   }
+});
+
+describe("keeping a draft's time bookable", () => {
+  const now = Date.UTC(2026, 10, 4, 6, 0, 30);
+  const policy = settings(1);
+  const proposal = proposedBookingTime(policy, now);
+  it("keeps a picked time that can still be booked", () => {
+    const draft = { localTime: "2099-10-11T12:00", localTimeAuto: false };
+    expect(withBookableTime(draft, policy, now)).toBe(draft);
+  });
+  it("treats a draft without the flag, saved before it existed, as picked", () => {
+    const draft = { localTime: "2099-10-11T12:00" };
+    expect(withBookableTime(draft, policy, now)).toBe(draft);
+  });
+  it.each(["2000-01-01T00:00", "", "not-a-time"])(
+    "replaces the picked value %j, which cannot be booked",
+    (localTime) => {
+      expect(withBookableTime({ localTime }, policy, now)).toEqual({
+        localTime: proposal,
+        localTimeAuto: true,
+      });
+    },
+  );
+  it("moves an earlier proposal even while it is still bookable", () => {
+    const draft = { localTime: "2099-10-11T12:00", localTimeAuto: true };
+    expect(withBookableTime(draft, policy, now).localTime).toBe(proposal);
+  });
+  it("leaves the rest of the draft alone", () => {
+    const draft = { origin: "A", localTime: "2000-01-01T00:00" };
+    expect(withBookableTime(draft, policy, now).origin).toBe("A");
+  });
 });

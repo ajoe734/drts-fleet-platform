@@ -9,6 +9,7 @@ import type {
   PassengerBookingSettingsResponse,
 } from "@drts/contracts";
 import {
+  BOOKING_PROPOSAL_REFRESH_MS,
   PassengerBookingClient,
   PassengerApiError,
   fromLocalDateTime,
@@ -16,6 +17,7 @@ import {
   PASSENGER_APP_CONFIRMATION_ROWS,
   PASSENGER_SUPPORT_PHONE,
   proposedBookingTime,
+  withBookableTime,
 } from "@drts/passenger-client";
 import { AuthAlert, P5Btn, P5 } from "../auth/ui";
 import { P5Icon, P5Map, P5RouteFare } from "../p5-ui";
@@ -69,26 +71,6 @@ const emptyDraft: BookingDraft = {
   destination: null,
   localTime: "",
 };
-const PROPOSED_TIME_REFRESH_MS = 15_000;
-/** A picked time that can still be booked stays; anything else gets a proposal. */
-function withBookableTime(
-  draft: BookingDraft,
-  settings: PassengerBookingSettingsResponse,
-): BookingDraft {
-  if (!draft.localTimeAuto) {
-    try {
-      const iso = fromLocalDateTime(draft.localTime);
-      if (isBookingTimeAllowed(iso, settings)) return draft;
-    } catch {
-      /* Empty or unparsable: nothing worth keeping. */
-    }
-  }
-  return {
-    ...draft,
-    localTime: proposedBookingTime(settings),
-    localTimeAuto: true,
-  };
-}
 
 export function BookingScreen({
   client: supplied,
@@ -209,7 +191,7 @@ export function BookingScreen({
       );
     };
     refresh();
-    const timer = setInterval(refresh, PROPOSED_TIME_REFRESH_MS);
+    const timer = setInterval(refresh, BOOKING_PROPOSAL_REFRESH_MS);
     return () => clearInterval(timer);
   }, [mode, busy, settings, draft.localTimeAuto]);
 
