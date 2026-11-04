@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOOKING_PROPOSAL_MARGIN_MINUTES,
   earliestBookingTime,
   fromLocalDateTime,
   isBookingTimeAllowed,
+  proposedBookingTime,
   toLocalDateTime,
   validateBookingSettings,
 } from "../../../packages/passenger-client/src/booking/time";
@@ -115,5 +117,29 @@ describe("ISO / datetime-local complete draft roundtrip (R6)", () => {
     it(`rejects invalid/non-local value ${value}`, () => {
       expect(() => fromLocalDateTime(value)).toThrow("invalid_booking_time");
     });
+  }
+});
+
+describe("the time the app proposes", () => {
+  for (const lead of [0, 1, 15, 30]) {
+    for (const seconds of [0, 30, 59]) {
+      it(`stays bookable through the margin for lead=${lead}, second=${seconds}`, () => {
+        const now = Date.UTC(2026, 10, 4, 6, 0, seconds);
+        const later = now + BOOKING_PROPOSAL_MARGIN_MINUTES * 60_000;
+        const proposed = fromLocalDateTime(
+          proposedBookingTime(settings(lead), now),
+        );
+        expect(isBookingTimeAllowed(proposed, settings(lead), later)).toBe(
+          true,
+        );
+        // Why a proposal cannot sit on the lead itself.
+        const earliest = fromLocalDateTime(
+          earliestBookingTime(settings(lead), now),
+        );
+        expect(
+          isBookingTimeAllowed(earliest, settings(lead), now + 60_000),
+        ).toBe(false);
+      });
+    }
   }
 });

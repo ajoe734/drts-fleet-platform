@@ -21,6 +21,7 @@ import type { PassengerFareRepository } from "../../../apps/api/src/modules/pass
 import type { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { BookingScreen } from "../../../apps/passenger-app-web/components/booking/booking-screen";
+import { BOOKING_RECOVERY_KEY } from "../../../apps/passenger-app-web/components/booking/booking-draft-recovery";
 import Home from "../../../apps/passenger-app-web/app/page";
 import FaresPage from "../../../apps/passenger-app-web/app/fares/page";
 import FeesPage from "../../../apps/passenger-app-web/app/fees/page";
@@ -879,6 +880,175 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
       "2099-10-11T12:00",
     );
     expect(calls("/rides")).toHaveLength(0);
+  });
+});
+
+describe("the time the app proposes stays bookable until the passenger picks one", () => {
+  const SHORT_LEAD = "預約時間不符合最短前置時間規定";
+  const REFRESHED = "原預約時間已過，已為您更新時間，請重新試算車資。";
+  const timeField = () => screen.getByLabelText("預約時間") as HTMLInputElement;
+  const fieldMs = () => new Date(timeField().value).getTime();
+  const minutes = (count: number) => count * 60_000;
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  async function start() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // The value ride.smarttransport.tw reports on shared dev.
+    f.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    await selectAddress(0, "上車");
+    await selectAddress(1, "下車");
+  }
+
+  it("minutes spent on the addresses never trip the lead refusal", async () => {
+    await start();
+    await advance(minutes(10));
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+    expect(calls("/quotes")).toHaveLength(1);
+    expect(
+      Date.parse(String(calls("/quotes")[0]!.body.scheduledAt)),
+    ).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+  });
+  it("the quoted time survives confirming the sheet and is the time booked", async () => {
+    await start();
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    await advance(minutes(3));
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+    expect(calls("/rides")[0]!.body.scheduledAt).toBe(
+      calls("/quotes")[0]!.body.scheduledAt,
+    );
+  });
+  it("the proposal stays fixed on the sheet, whose quote is bound to it", async () => {
+    await start();
+    click("試算車資");
+    const dialog = await screen.findByRole("dialog", { name: "確認叫車" });
+    const shown = within(dialog).getByText(
+      /^(今日|明日) \d{2}:\d{2}$/,
+    ).textContent;
+    await advance(minutes(2));
+    expect(
+      within(dialog).getByText(/^(今日|明日) \d{2}:\d{2}$/).textContent,
+    ).toBe(shown);
+  });
+  it("a proposal that outlives the sheet comes back refreshed, without booking", async () => {
+    await start();
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    await advance(minutes(10));
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(REFRESHED);
+    expect(calls("/rides")).toHaveLength(0);
+    await form();
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(calls("/quotes")).toHaveLength(2);
+  });
+  it("a server too-soon refusal returns to the form instead of blaming the account or card", async () => {
+    await start();
+    f.errors.set("POST /api/passenger-app/rides", {
+      status: 400,
+      code: "TOO_SOON_TO_BOOK",
+    });
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(REFRESHED);
+    await form();
+    expect(
+      screen.queryByText("無法送出叫車，請確認帳號與付款方式後重試。"),
+    ).toBeNull();
+  });
+  it("a time the passenger picked is never moved, and is still refused once too short", async () => {
+    await start();
+    const picked = new Date(Date.now() + minutes(3));
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const local = `${picked.getFullYear()}-${pad(picked.getMonth() + 1)}-${pad(picked.getDate())}T${pad(picked.getHours())}:${pad(picked.getMinutes())}`;
+    fireEvent.change(timeField(), { target: { value: local } });
+    await advance(minutes(10));
+    expect(timeField().value).toBe(local);
+    click("試算車資");
+    await screen.findByText(SHORT_LEAD);
+    expect(timeField().value).toBe(local);
+    expect(calls("/quotes")).toHaveLength(0);
+  });
+  it("a server too-soon refusal of a picked time keeps it and says so", async () => {
+    await start();
+    f.errors.set("POST /api/passenger-app/rides", {
+      status: 400,
+      code: "TOO_SOON_TO_BOOK",
+    });
+    fireEvent.change(timeField(), { target: { value: "2099-10-11T12:00" } });
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(SHORT_LEAD);
+    await form();
+    expect(timeField().value).toBe("2099-10-11T12:00");
+  });
+  it("a recovered draft whose time has passed gets a new proposal and keeps its addresses", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    f.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
+    const stop = (address: string) => ({
+      address,
+      lat: 25,
+      lng: 121,
+      coordinateSource: "provider_candidate",
+      geocodeConfidence: "exact",
+      geocodeProvider: "synthetic-http",
+      surface: "passenger_entry",
+    });
+    sessionStorage.setItem(
+      BOOKING_RECOVERY_KEY,
+      JSON.stringify({
+        version: 1,
+        accountId: f.account.drtsPassengerId,
+        draft: {
+          origin: stop("台北市上車測試路1號"),
+          destination: stop("台北市下車測試路1號"),
+          localTime: "2000-01-01T00:00",
+        },
+        pending: null,
+      }),
+    );
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    expect(screen.getAllByRole("button", { name: "清除選點" })).toHaveLength(2);
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+  });
+  it("a recovered draft whose picked time is still bookable keeps it", async () => {
+    sessionStorage.setItem(
+      BOOKING_RECOVERY_KEY,
+      JSON.stringify({
+        version: 1,
+        accountId: f.account.drtsPassengerId,
+        draft: {
+          origin: null,
+          destination: null,
+          localTime: "2099-10-11T12:00",
+        },
+        pending: null,
+      }),
+    );
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(timeField().value).toBe("2099-10-11T12:00");
   });
 });
 
