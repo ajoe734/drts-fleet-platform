@@ -62,6 +62,25 @@ export function earliestBookingTime(
   }
 }
 
+/**
+ * Minutes the time the app proposes keeps above the lead. The lead is checked
+ * again at the quote and at the submit, and a proposal exactly on it fails both
+ * from the next whole minute, before anyone can finish the booking. Only the
+ * proposal moves: a passenger can still pick any time the lead allows.
+ */
+export const BOOKING_PROPOSAL_MARGIN_MINUTES = 5;
+
+/** The time to offer a passenger who has not picked one. */
+export function proposedBookingTime(
+  settings: PassengerBookingSettingsResponse,
+  now: number = Date.now(),
+): string {
+  return earliestBookingTime(
+    settings,
+    now + BOOKING_PROPOSAL_MARGIN_MINUTES * 60_000,
+  );
+}
+
 /** Revalidate at every quote and submit boundary, using the current clock. */
 export function isBookingTimeAllowed(
   iso: string,

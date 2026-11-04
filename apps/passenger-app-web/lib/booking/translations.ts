@@ -84,6 +84,7 @@ export const BOOK_T = {
   notServiceable: "您選擇的地點超出目前服務範圍",
   changedFare: "費率版本已更新，請重新載入費用與設定。",
   shortLead: "預約時間不符合最短前置時間規定",
+  timeRefreshed: "原預約時間已過，已為您更新時間，請重新試算車資。",
   noQuote: "目前無法取得正式報價，請稍後重試或聯絡客服。",
   noCreate: "無法送出叫車，請確認帳號與付款方式後重試。",
   unknownCreate: "尚未確認叫車結果；重試會使用同一筆請求，請勿另建行程。",
