@@ -237,6 +237,28 @@ async function registerDriver(
   });
 }
 
+/** The rehearsal phone comes from the run id (0900000000–0900000099) and each
+ * run binds two cards, so a phone's third run would hit the five-card cap.
+ * Remove earlier runs' cards through the ordinary UI before binding. */
+async function freeCardSlots(page: Page, needed: number) {
+  await page.goto(`${PAX}/account/payment-methods`);
+  const remove = page.getByRole("button", { name: "刪除", exact: true });
+  await expect(
+    remove.first().or(page.getByText("尚未設定付款卡片", { exact: true })),
+  ).toBeVisible();
+  for (let count = await remove.count(); count > 5 - needed; count -= 1) {
+    await remove.last().click();
+    const removed = page.waitForResponse(
+      (r) =>
+        /\/payment-methods\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        r.request().method() === "DELETE",
+    );
+    await page.getByRole("button", { name: "確定刪除", exact: true }).click();
+    expect((await removed).ok(), "Remove an earlier run's card").toBe(true);
+    await expect(remove).toHaveCount(count - 1);
+  }
+}
+
 async function bind(page: Page, scenario: "success" | "retry_once") {
   await page.goto(`${PAX}/account/payment-methods`);
   await page
@@ -1483,6 +1505,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         ),
       ).toBeNull();
     });
+    await step("Passenger free card slots for this run", () =>
+      freeCardSlots(pax, 2),
+    );
     const firstMethod = await step("A bind successful simulated PSP", () =>
       bind(pax, "success"),
     );
