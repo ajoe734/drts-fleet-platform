@@ -237,7 +237,16 @@ export function verifyAndUnwrapEcpayEnvelope(params: {
   ) {
     cipherError();
   }
-  const headerRaw = record.RpHeader ?? record.RqHeader;
+  let headerRaw: unknown = record.RpHeader ?? record.RqHeader;
+  if (typeof headerRaw === "string") {
+    const trimmedHeader = headerRaw.trim();
+    if (!trimmedHeader) cipherError();
+    try {
+      headerRaw = JSON.parse(trimmedHeader);
+    } catch {
+      cipherError();
+    }
+  }
   if (!headerRaw || typeof headerRaw !== "object" || Array.isArray(headerRaw)) {
     cipherError();
   }
