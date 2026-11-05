@@ -5,7 +5,7 @@
 - **Reviewer**: `Claude2`
 - **Acceptance key**: `pax-psp_sandbox_bind_and_charge_evidence`（完成後由 Supervisor 回填 `PAX-PSP-ADAPTER-20261009` 的 `pax-psp_adapter_sandbox_verified`）
 - **Base**: `origin/dev` @ `a2696824610f`（`PAX-TRIAL-SKIP-BLOCKED-ACCOUNTS-20261101`, #3175）
-- **Candidate SHA / PR**: 本文件所在 commit 即 candidate；PR 與 hosted runner run 由既有候選流程在 push 後建立，結果待回填（見 §5）。
+- **Candidate SHA / PR**: `e5b4dabff97dd9e6fffd27b4a55eb42bc0adfba3`，[PR #3177](https://github.com/ajoe734/drts-fleet-platform/pull/3177)（branch `claude/pax-psp-sandbox-evidence-20261101-zvhn36`）；hosted runner 結果見 §5.2（驗收通過）。
 
 ## 1. 依據
 
@@ -73,22 +73,29 @@ Provider 由已合併的 `paymentRuntimeFromEnv({ PSP_PROVIDER: "ecpay", ... })`
 
 沒有在本 session 執行 `playwright test`，也沒有啟動瀏覽器或 server：任務限制禁止，而且沒有真實憑證。下表的 Stage 結果一律未知，沒有任何偽造的回應或 RtnCode。
 
-### 5.2 Hosted runner 結果（待回填）
+### 5.2 Hosted runner 結果（第八次 run，驗收通過）
 
-| 項目                                                          | 值                                                          |
-| ------------------------------------------------------------- | ----------------------------------------------------------- |
-| candidate SHA                                                 | 待回填（本 commit）                                         |
-| run URL                                                       | 待回填                                                      |
-| artifact                                                      | `pax-psp-sandbox-evidence-<sha>-<run_id>-<attempt>`，待回填 |
-| 01 GetTokenbyBindingCard HTTP／RtnCode／時間                  | 待回填                                                      |
-| 05 CreateBindCard HTTP／RtnCode／是否回 3D                    | 待回填                                                      |
-| 06 3D OTP／OrderResult RtnCode／BindCardID_sha12／末四碼      | 待回填                                                      |
-| 06b 綁卡授權撤銷（DoAction N）                                | 待回填                                                      |
-| 08 CreatePaymentWithCardID NT$85 HTTP／RtnCode／TradeNo_sha12 | 待回填                                                      |
-| 09 refund() 結果與 QueryTrade／DoAction 回應                  | 待回填（預期 Stage 不支援，退款證據改在正式特店取得）       |
-| 10 DeleteMemberBindCard 結果                                  | 待回填                                                      |
+第八次 hosted run（candidate `e5b4dabff97dd9e6fffd27b4a55eb42bc0adfba3`，merge origin/dev 帶入 `PAX-PSP-ECPAY-CALLBACK-NULL-HEADER-20261105`/PR #3202/`9db5f3629` 後的候選）：全部步驟通過，`evidence.json`／`run-status.json` 的 `acceptance.satisfied=true`。
 
-回填來源：該 run 的 `evidence.json`／`summary.md`（也會附在 job summary）與 `run-status.json`。
+| 項目                                                          | 值                                                                                                                                                                                             |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| candidate SHA                                                 | `e5b4dabff97dd9e6fffd27b4a55eb42bc0adfba3`                                                                                                                                                      |
+| run URL                                                       | [run 41960909435](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41960909435)（attempt 1，2026-11-05T03:22:46.636Z–03:23:02.858Z）                                               |
+| artifact                                                      | `pax-psp-sandbox-evidence-e5b4dabff97dd9e6fffd27b4a55eb42bc0adfba3-41960909435-1`                                                                                                              |
+| 01 GetTokenbyBindingCard HTTP／RtnCode／時間                  | HTTP 200／RtnCode 1「Success」／629ms；`merchantToken_present=true`                                                                                                                             |
+| 03 卡片欄位輸入                                                | `frameHost=127.0.0.1:...`、`layout=card+combined-expiry+cvv`、`card_last4=2222`、`holderNameFilled=true`                                                                                       |
+| 04 getBindCardPayToken                                        | `accepted=true`、`payToken_length=32`、`merchantTradeNo_sha12=2960d32bdea1`（無 `sdkError`）                                                                                                   |
+| 05 CreateBindCard HTTP／RtnCode／是否回 3D                    | HTTP 200／RtnCode 1「Success!」／808ms；`threeDUrl_present=true`，host `cc-stage.ecpay.com.tw`                                                                                                 |
+| 06 3D OTP／OrderResult                                        | `sentOtpRequest=true`、`orderResultMethod=POST`、`callbackFormKeys=ResultData`（`callbackHasFlatHeaderField=false`，即第五／六輪遇到的扁平表單修正不適用本輪真實回呼，回呼仍是 `ResultData=<JSON>`）；診斷欄位 `diag_header_field_kind=undefined`／`diag_header_is_object=false`（與第七輪相同，`RpHeader` 為 `null`），但 `verified=true`、`kind=bind`、`rtnCode=1`「Success」——確認 `PAX-PSP-ECPAY-CALLBACK-NULL-HEADER-20261105`（PR #3202）的修正讓 `verifyAndUnwrapEcpayEnvelope` 正確接受非同步回呼的 `RpHeader: null`，同時 `diag_decrypt_ok=true`、`MerchantID`／`TransCode` 一致性檢查仍有效 |
+| 06 BindCardID／末四碼                                         | `bindCardId_sha12=089b1b7bf016`、`card_last4=2222`、`cardType=VISA`、`expiry=11/2029`、`cipher_roundtrip=true`                                                                                 |
+| 06b 綁卡授權撤銷（DoAction N）                                | HTTP 200／RtnCode 1「更新訂單成功」；`attempted=true`、`cancelled=true`                                                                                                                         |
+| 08 CreatePaymentWithCardID NT$85 HTTP／RtnCode／TradeNo_sha12 | HTTP 200／RtnCode 1「Success!」／1448ms；`amountTwd=85`、`need3D=0`、`tradeNo_sha12=2092b5895a4a`、`status=completed`                                                                           |
+| 09 refund() 結果與 QueryTrade／DoAction 回應                  | QueryTrade HTTP 200（`status=Authorized`，RtnCode 未回傳）；DoAction HTTP 200／RtnCode 1「更新訂單成功」；`adapterResult=completed`，分類為 `stage_refund_succeeded`（Stage 本輪確實支援關帳退款，非預期的「不支援」情形未發生）             |
+| 10 DeleteMemberBindCard 結果                                  | HTTP 200／RtnCode 1「Success!」；`unbound=true`、`bindCardId_sha12=089b1b7bf016`                                                                                                                |
+
+驗收：`bind_completed=true`、`three_d_performed=true`、`capture_completed=true`、`refund_recorded=true`、`stage_card_unbound=true`，`acceptance.satisfied=true`。卡號全程只在綠界 SDK 自己的頁面輸入，我方程式與測試腳本從未接觸過完整卡號（只留末四碼 `2222`）。
+
+回填來源：該 run 的 `evidence.json`／`summary.md`（也附在 job summary）與 `run-status.json`，皆已下載核對（遮罩截圖 `01-sdk-mounted-empty.png`／`02-card-entered-masked.png`／`03-three-d-page.png`／`04-order-result-captured.png` 隨 artifact 一併上傳）。
 
 ## 6. 剩餘未驗項目與風險
 
@@ -130,6 +137,8 @@ Provider 由已合併的 `paymentRuntimeFromEnv({ PSP_PROVIDER: "ecpay", ... })`
 - 第六次 hosted run（candidate `ffd5342730`，[run 41948427641](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41948427641)，merge commit `cad62be29` 帶入 `6c5bc09b7f6d` 後的候選）：通過 `01`～`05`，`06_three_d_verification` 再次送出真實 OTP 並收到 `OrderResultURL` 的 `POST`，但 `verifyNotification` **仍然**拋出同一個 `ECPay payload decryption or envelope verification failed.`——與第五輪不同的是，這次 `describeCallbackBodyShape` 顯示真實回呼其實是 `callbackBodyKind=form`、`callbackFormKeys=ResultData`、`callbackHasResultData=true`、`callbackResultDataKind=json_object`、`callbackHasFlatHeaderField=false`：也就是說這次綠界送來的是 `ResultData=<JSON>` 這種**原本就支援、單元測試也覆蓋過**的形狀，不是第五輪診斷出的「扁平欄位＋`RpHeader` 為字串」形狀；PR #3198 的修正對應的是後者，對這次的失敗完全不相關，表示還有另一個獨立的根因尚未定位。
   - 新增更細的診斷：`evidence.ts` 新增 `diagnoseEnvelopeVerification()`，改為直接呼叫既有已匯出、未修改的 `normalizeEcpayEnvelopeInput()` 與 `decryptEcpayData()`（而不是只呼叫會把所有失敗原因都吞成同一個泛用錯誤的 `verifyAndUnwrapEcpayEnvelope()`），逐步記錄：`normalize` 是否成功、解出的 `record` 有哪些欄位名稱（不含值）、`MerchantID` 欄位的型態與是否與密鑰持有的 `merchantId` 相符（僅布林值）、`RpHeader`/`RqHeader` 的型態與是否已是物件、`Timestamp` 是否存在／是否為安全整數／與伺服器當下時間的秒差與是否在 600 秒窗內（秒差本身不是密鑰或個資，是安全的時間診斷值）、`TransCode` 是否存在／是否為安全整數、`Data`／`ResultData` 欄位的型態與長度與是否像 base64、最後呼叫 `decryptEcpayData()` 是否成功與解密後物件的欄位名稱（不含值）。全程只記錄欄位名稱／型態／布林／長度／秒數，從未記錄任何欄位實際值，符合本文件 §4 的遮罩規則。已加進 `06_three_d_verification` 的 `outcome`（`ecpay-stage-sandbox.spec.ts` 呼叫 `verifyNotification` 前），即使驗證再次失敗也會留在證據裡，供下一輪直接定位是 `normalize`／`MerchantID`／`Timestamp`／`TransCode`／`decrypt` 哪一步失敗，不需要再猜測。只改 `evidence.ts`／`ecpay-stage-sandbox.spec.ts`（在既有 write_scopes 內），未修改 `apps/api` 任何檔案；eslint／prettier／tsc（限本次改動檔案）皆通過。
   - 待下一輪 hosted run 的 `diag_*` 欄位回填後才能確定真正根因；在那之前不猜測、不假裝已修正。
+
+- **第八次 hosted run（candidate `e5b4dabff97dd9e6`，[run 41960909435](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41960909435)，驗收通過）**：第七輪定位出真正根因後，Supervisor 另開 `PAX-PSP-ECPAY-CALLBACK-NULL-HEADER-20261105`，已合併為 `9db5f36291a8`（PR #3202）：`verifyAndUnwrapEcpayEnvelope` 對非同步 `OrderResultURL` 回呼接受 `RpHeader: null`，同時保留 `MerchantID`／`TransCode`／AES-128-CBC 密文完整性檢查。本任務將 `origin/dev`（含該修正）`git merge` 進候選分支（merge commit `e5b4dabff97d`，`git diff` 確認本任務 write_scopes 內檔案未受影響），push 後觸發此次 hosted run：`evidence.json` 的 `diag_header_field_kind=undefined`／`diag_header_is_object=false` 與第七輪完全相同（確認仍是 `RpHeader: null` 的同一真實回呼形狀），但這次 `verified=true`、`rtnCode=1`「Success」，證明修正確實生效；`06b` 撤銷授權、`08` 扣款 NT$85、`09` 退款（Stage 本輪回 `completed`，分類 `stage_refund_succeeded`）、`10` 解綁全部通過，`acceptance.satisfied=true`。完整回填見 §5.2。未修改 `apps/api` 任何檔案，本任務範疇內只有 merge commit。
 
 - 第七次 hosted run（candidate `5db78dc82e`，[run 41949723157](https://github.com/ajoe734/drts-fleet-platform/actions/runs/41949723157)）：`06_three_d_verification` 再次失敗，但這次 `diag_*` 欄位已精確定位根因：
   - `diag_normalize_ok=true`、`diag_record_keys=Data,MerchantID,RpHeader,TransCode,TransMsg`（`RpHeader` 確實是 record 的一個 key）。
