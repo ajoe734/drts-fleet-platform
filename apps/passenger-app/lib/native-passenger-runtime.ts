@@ -130,6 +130,7 @@ export class NativePassengerRuntime {
     option: PassengerRideContactOption;
   } | null = null;
   private rideRevision = 0;
+  private manualRideRequestGeneration = 0;
   private navigationEpoch = 0;
   private state: NativePassengerApplicationState = {
     phase: "restoring",
@@ -384,6 +385,7 @@ export class NativePassengerRuntime {
     this.publish({ route: { kind }, message: "" });
   }
   private closeRide() {
+    ++this.manualRideRequestGeneration;
     ++this.navigationEpoch;
     ++this.rideRevision;
     this.stream?.stop();
@@ -561,7 +563,10 @@ export class NativePassengerRuntime {
     }
     const epoch = this.epoch;
     const navigationEpoch = this.navigationEpoch;
+    const requestGeneration = ++this.manualRideRequestGeneration;
     const result = await this.passenger.getRide(this.state.route.orderId);
+    if (requestGeneration !== this.manualRideRequestGeneration || this.stream)
+      return;
     await this.acceptRide(result.ride, epoch, navigationEpoch);
   }
   requestCancel() {

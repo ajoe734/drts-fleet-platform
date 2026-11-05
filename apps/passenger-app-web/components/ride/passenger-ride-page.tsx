@@ -1507,24 +1507,33 @@ function CertificateCard({
 }) {
   const [certificate, setCertificate] = useState(fixture.certificate);
   const [retrying, setRetrying] = useState(false);
+  const receiptReadGeneration = useRef(0);
 
   useEffect(() => {
+    ++receiptReadGeneration.current;
     setCertificate(fixture.certificate);
-  }, [fixture.certificate]);
+    setRetrying(false);
+    return () => {
+      ++receiptReadGeneration.current;
+    };
+  }, [fixture.certificate, token, authMode]);
 
   if (!certificate) return null;
 
   const retryRead = () => {
     if (fixture.canReadReceipt !== true || retrying) return;
+    const requestGeneration = ++receiptReadGeneration.current;
     setRetrying(true);
     void fetchPassengerReceipt(token, authMode === "token")
       .then((receiptRes) => {
+        if (requestGeneration !== receiptReadGeneration.current) return;
         const newCert = mapPassengerCertificate(receiptRes as any, true);
         setCertificate(newCert);
         onCertificateUpdate?.(newCert);
         setRetrying(false);
       })
       .catch((error: unknown) => {
+        if (requestGeneration !== receiptReadGeneration.current) return;
         let errCert: PassengerCertificatePresentation;
         if (
           error instanceof PassengerAuthorityError &&
