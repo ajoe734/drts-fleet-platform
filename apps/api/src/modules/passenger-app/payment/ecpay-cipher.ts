@@ -247,16 +247,26 @@ export function verifyAndUnwrapEcpayEnvelope(params: {
       cipherError();
     }
   }
-  if (!headerRaw || typeof headerRaw !== "object" || Array.isArray(headerRaw)) {
-    cipherError();
-  }
-  const timestamp = Number((headerRaw as Record<string, unknown>).Timestamp);
-  if (
-    !Number.isSafeInteger(timestamp) ||
-    timestamp <= 0 ||
-    Math.abs(nowSeconds - timestamp) > maxSkewSeconds
-  ) {
-    cipherError();
+  // ECPay's asynchronous OrderResultURL callback sends RpHeader (and RqHeader)
+  // as null, unlike synchronous API responses which always carry
+  // RpHeader: { Timestamp }. Treat a missing/null header as "no timestamp
+  // claim" rather than rejecting the envelope, but still reject any present,
+  // non-null header that is malformed or lacks a fresh Timestamp.
+  let timestamp: number;
+  if (headerRaw === null || headerRaw === undefined) {
+    timestamp = nowSeconds;
+  } else {
+    if (typeof headerRaw !== "object" || Array.isArray(headerRaw)) {
+      cipherError();
+    }
+    timestamp = Number((headerRaw as Record<string, unknown>).Timestamp);
+    if (
+      !Number.isSafeInteger(timestamp) ||
+      timestamp <= 0 ||
+      Math.abs(nowSeconds - timestamp) > maxSkewSeconds
+    ) {
+      cipherError();
+    }
   }
   const hasExplicitTransCode =
     record.TransCode !== undefined &&
