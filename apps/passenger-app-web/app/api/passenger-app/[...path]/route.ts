@@ -86,6 +86,8 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "POST" && fullPath === "quotes") return true;
   if (method === "GET" && fullPath === "review-demo/config") return true;
   if (method === "POST" && fullPath === "review-demo/otp") return true;
+  if (method === "GET" && fullPath === "review-demo/trial/readiness")
+    return true;
   if (
     ["POST", "GET"].includes(method) &&
     path.length === 4 &&

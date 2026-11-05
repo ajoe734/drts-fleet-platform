@@ -99,9 +99,12 @@ export async function prepareBooking(
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
-  await expect(page.getByText("建立乘車需求", { exact: true })).toBeVisible();
-  // AuthScreen's P5Header renders the title as text. Settings load separately;
-  // wait for the actual disclosure or form before deciding whether to agree.
+  // The plan header shows 建立乘車需求, or 費用與優惠說明 on the first-use
+  // fee gate (附錄 E-19a). Settings load separately; wait for the actual
+  // disclosure or form before deciding whether to agree.
+  await expect(
+    page.getByText(/^(建立乘車需求|費用與優惠說明)$/).first(),
+  ).toBeVisible();
   await expect(
     ack.or(page.getByLabel("演練選址方式", { exact: true })),
   ).toBeVisible();
@@ -150,7 +153,11 @@ export async function prepareBooking(
   await expect(page.getByText(/NT\$ (85|105)/).first()).toBeVisible();
   // The existing confirmation sheet owns payment selection. Require the
   // newly bound method itself; selecting another card would change B's PSP case.
+  // 附錄 E-19b shows the selected card as the 支付方式 row; the owned card list
+  // opens from that row (it is already open while no card is selected).
   const choice = page.locator(`input[value="${paymentMethodId}"]`);
+  if (!(await choice.isVisible()))
+    await page.getByRole("button", { name: /^變更支付方式：/ }).click();
   await expect(choice).toBeVisible();
   await choice.check();
   if (verifyPrerequisites) {

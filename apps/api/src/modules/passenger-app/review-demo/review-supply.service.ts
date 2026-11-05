@@ -16,6 +16,8 @@ const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
  * bookings (MULTI_TAXI_DEFAULT_AUTHORIZATION_ID). */
 export const REVIEW_AUTHORIZATION_ID = AUTHORIZATION_ID;
 export const REVIEW_OPERATOR_ID = "review-synthetic-operator";
+/** Shown as the fleet on ride certificates (its legal name). */
+export const REVIEW_FLEET_NAME = "智行車隊";
 export const REVIEW_SUPPLY = ["a", "b"].map((suffix, index) => ({
   driverId: `pax-review-driver-${suffix}`,
   vehicleId: `pax-review-vehicle-${suffix}`,
@@ -95,8 +97,8 @@ export class ReviewSupplyService {
       await this.fleets.findFleetPartnerForMultiTaxiOperator(operatorId);
     if (!fleet) {
       fleet = await this.fleets.createFleetPartner({
-        legalName: "虛構演練派遣業者（合成・非正式）",
-        displayName: "虛構演練車隊",
+        legalName: REVIEW_FLEET_NAME,
+        displayName: REVIEW_FLEET_NAME,
         businessRegistrationNo: "SIMULATED-NOT-A-REGISTRATION",
         contactName: "合成演練來源",
         contactPhone: "SIMULATED-NOT-A-PHONE",
@@ -105,6 +107,15 @@ export class ReviewSupplyService {
       // Preserve the actual writer-issued Fleet ID and await the mapping ACK.
       fleet = await this.fleets.updateFleetPartner(fleet.fleetPartnerId, {
         multiTaxiOperatorIds: [operatorId],
+      });
+    } else if (
+      fleet.legalName !== REVIEW_FLEET_NAME ||
+      fleet.displayName !== REVIEW_FLEET_NAME
+    ) {
+      // Earlier preparations named it 虛構演練派遣業者（合成・非正式） and 智行.
+      fleet = await this.fleets.updateFleetPartner(fleet.fleetPartnerId, {
+        legalName: REVIEW_FLEET_NAME,
+        displayName: REVIEW_FLEET_NAME,
       });
     }
     for (const fixture of REVIEW_SUPPLY) {
@@ -206,6 +217,25 @@ export class ReviewSupplyService {
             },
           ],
         });
+      } else {
+        // Rehearsal supply prepared before BUREAU-R02 (V0131) has an active
+        // exclusivity declaration without an operator ID, which normal
+        // dispatch eligibility now blocks as `exclusivity_operator_unbound`.
+        // Complete only that missing binding with this synthetic operator;
+        // never rebind a declaration that already names an operator.
+        const declaration = state.exclusivities.find(
+          (e) => e.vehicleId === fixture.vehicleId,
+        );
+        if (declaration && !declaration.exclusiveOperatorId?.trim())
+          await repository.persistChanges({
+            exclusivities: [
+              {
+                ...declaration,
+                exclusiveOperatorId: operatorId,
+                updatedAt: now,
+              },
+            ],
+          });
       }
       await this.profiles.prepareProfileAuthority(fixture.driverId);
       await this.profiles.updateProfile(fixture.driverId, {

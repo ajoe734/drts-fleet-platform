@@ -472,8 +472,20 @@ printf '%s' "$MOCK_STATUS"
       "DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}",
     );
     expect(deployStep).not.toMatch(
-      /JWT_SECRET|NEXT_PUBLIC|CLIENT_SECRET|PSP_API_KEY|COOKIE_SECRET|--set-secrets/,
+      /JWT_SECRET|NEXT_PUBLIC|CLIENT_SECRET|PSP_API_KEY|COOKIE_SECRET/,
     );
+    // The BFF mounts no secret except the Google Maps browser key, which the
+    // ride and booking maps hand to the browser anyway (referrer-restricted).
+    expect(deployStep.match(/--set-secrets[^\n]*/g)).toEqual([
+      '--set-secrets "$passenger_app_secrets")',
+    ]);
+    const passengerSecrets = deploy.match(
+      /^\s*passenger_app_secret_args="([^"]*)"$/gm,
+    );
+    expect(passengerSecrets?.map((line) => line.trim())).toEqual([
+      'passenger_app_secret_args=""',
+      'passenger_app_secret_args="GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"',
+    ]);
     expect(deploy).toContain("Enforce no public access — passenger-app-web");
     expect(step(deploy, "Wait for services to be Ready")).toContain(
       "needs.prepare.outputs.passenger_app_service",

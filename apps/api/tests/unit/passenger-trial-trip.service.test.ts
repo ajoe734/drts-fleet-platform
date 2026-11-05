@@ -591,7 +591,7 @@ describe("PassengerTrialTripService", () => {
     });
   });
 
-  it("drives the ride for the quoted route's duration", async () => {
+  it("drives the 14-minute quoted ride in three minutes", async () => {
     const started = Date.parse("2026-10-27T02:00:00.000Z");
     const h = withTaxi(harness());
     await h.service.assign(ORDER_ID, identity);
@@ -603,12 +603,37 @@ describe("PassengerTrialTripService", () => {
       status: "on_trip",
       startedAt: new Date(started).toISOString(),
     };
-    const halfway = h.service.simulatedPosition(
-      order() as never,
-      task as never,
-      started + 420_000,
-    );
-    expect(halfway.lat).toBeCloseTo(25.025, 3);
-    expect(halfway.lng).toBeCloseTo(121.51, 3);
+    const at = (ms: number) =>
+      h.service.simulatedPosition(
+        order() as never,
+        task as never,
+        started + ms,
+      );
+    expect(at(90_000).lat).toBeCloseTo(25.025, 3);
+    expect(at(90_000).lng).toBeCloseTo(121.51, 3);
+    expect(at(180_000)).toEqual({ lat: 25.04, lng: 121.56 });
+  });
+
+  it("approaches from the north-east and reaches the pickup in 90 s", async () => {
+    const departed = Date.parse("2026-10-27T02:00:00.000Z");
+    const h = withTaxi(harness());
+    const task = {
+      taskId: "task-1",
+      orderId: ORDER_ID,
+      driverId: "pax-trial-driver-1",
+      vehicleId: "pax-trial-vehicle-1",
+      status: "enroute_pickup",
+      departedAt: new Date(departed).toISOString(),
+    };
+    const at = (ms: number) =>
+      h.service.simulatedPosition(
+        order() as never,
+        task as never,
+        departed + ms,
+      );
+    expect(at(0).lat).toBeCloseTo(25.014, 6);
+    expect(at(0).lng).toBeCloseTo(121.465, 6);
+    expect(at(90_000).lat).toBeCloseTo(25.01, 6);
+    expect(at(90_000).lng).toBeCloseTo(121.46, 6);
   });
 });

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PassengerBookingClient,
   PassengerPaymentClient,
+  toLocalDateTime,
   type FetchOptions,
   type FetchResponse,
 } from "@drts/passenger-client";
@@ -749,5 +750,139 @@ describe("Native booking actual SDK and rendered reservation actions", () => {
     expect(f.onSessionUnavailable).toHaveBeenCalledTimes(1);
     expect(exists(r, "booking-origin-selected")).toBe(false);
     expect(exists(r, "booking-reload")).toBe(true);
+  });
+});
+
+describe("the time the app proposes stays bookable until the passenger picks one", () => {
+  const SHORT_LEAD = "請選擇符合最短提前時間的有效預約時間。";
+  const REFRESHED = "原預約時間已過，已為您更新時間，請重新試算。";
+  const MINUTE = 60_000;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  function liveFixture(handler?: Handler) {
+    const f = fixture(handler);
+    // The value shared dev reports; a quote that outlasts these tests.
+    f.state.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
+    f.state.quote = {
+      serviceAreaResult: "serviceable",
+      estimatedMin: 200,
+      estimatedMax: 300,
+      fareVersion: "7",
+      fareSnapshotId: "QUOTE-CAPTURED",
+      expiresAt: "2099-01-01T00:00:00Z",
+    };
+    return f;
+  }
+  async function start(f: ReturnType<typeof fixture>) {
+    // Only the refresh timer: the screen reads its clock from the injected now.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { r } = await mount(f);
+    await selectAddress(r, "origin");
+    await selectAddress(r, "destination");
+    return r;
+  }
+  const field = (r: Rendered) =>
+    r.root.findByProps({ testID: "booking-time" }).props.value as string;
+  const fieldMs = (r: Rendered) => new Date(field(r)).getTime();
+  const elapse = (f: ReturnType<typeof fixture>, ms: number) =>
+    act(async () => {
+      f.clock.value += ms;
+      vi.advanceTimersByTime(15_000);
+    });
+  const bodyOf = (f: ReturnType<typeof fixture>, path: string, index = 0) =>
+    JSON.parse(calls(f, path)[index]?.options.body ?? "{}") as {
+      scheduledAt: string;
+    };
+
+  it("minutes spent on the addresses never trip the lead refusal", async () => {
+    const f = liveFixture();
+    const r = await start(f);
+    await elapse(f, 10 * MINUTE);
+    expect(fieldMs(r)).toBeGreaterThanOrEqual(f.clock.value + MINUTE);
+    await press(r, "booking-quote");
+    expect(exists(r, "booking-error")).toBe(false);
+    expect(exists(r, "booking-e19b")).toBe(true);
+    expect(Date.parse(bodyOf(f, "quotes").scheduledAt)).toBeGreaterThanOrEqual(
+      f.clock.value + MINUTE,
+    );
+  });
+  it("a refresh timer that slept with the app does not matter", async () => {
+    const f = liveFixture();
+    const r = await start(f);
+    f.clock.value += 10 * MINUTE;
+    await press(r, "booking-quote");
+    expect(exists(r, "booking-error")).toBe(false);
+    expect(new Date(field(r)).toISOString()).toBe(
+      bodyOf(f, "quotes").scheduledAt,
+    );
+    expect(text(r, "booking-confirm-time")).toBe(field(r).replace("T", " "));
+  });
+  it("the quoted time stays fixed on E-19b and is the time booked", async () => {
+    const f = liveFixture();
+    const r = await start(f);
+    await press(r, "booking-quote");
+    const quoted = text(r, "booking-confirm-time");
+    await elapse(f, 3 * MINUTE);
+    expect(text(r, "booking-confirm-time")).toBe(quoted);
+    await press(r, "booking-confirm-checkbox");
+    await press(r, "booking-submit");
+    expect(calls(f, "rides")).toHaveLength(1);
+    expect(bodyOf(f, "rides").scheduledAt).toBe(
+      bodyOf(f, "quotes").scheduledAt,
+    );
+  });
+  it("a proposal that outlives E-19b comes back refreshed, without booking", async () => {
+    const f = liveFixture();
+    const r = await start(f);
+    await press(r, "booking-quote");
+    await elapse(f, 10 * MINUTE);
+    await press(r, "booking-confirm-checkbox");
+    await press(r, "booking-submit");
+    expect(calls(f, "rides")).toHaveLength(0);
+    expect(text(r, "booking-error")).toBe(REFRESHED);
+    expect(exists(r, "booking-e19b")).toBe(false);
+    expect(fieldMs(r)).toBeGreaterThanOrEqual(f.clock.value + MINUTE);
+    await press(r, "booking-quote");
+    expect(exists(r, "booking-e19b")).toBe(true);
+    expect(calls(f, "quotes")).toHaveLength(2);
+  });
+  it("a server too-soon refusal of a proposal refreshes it instead of a generic failure", async () => {
+    const f = liveFixture(async (path) =>
+      path === "rides" ? fault("TOO_SOON_TO_BOOK", 400) : undefined,
+    );
+    const r = await start(f);
+    await press(r, "booking-quote");
+    await press(r, "booking-confirm-checkbox");
+    await press(r, "booking-submit");
+    expect(text(r, "booking-error")).toBe(REFRESHED);
+    expect(exists(r, "booking-e19b")).toBe(false);
+    expect(exists(r, "booking-recovery")).toBe(false);
+  });
+  it("a time the passenger typed is never moved, and is still refused once too short", async () => {
+    const f = liveFixture();
+    const r = await start(f);
+    const typed = toLocalDateTime(
+      new Date(f.clock.value + 3 * MINUTE).toISOString(),
+    );
+    await enter(r, "booking-time", typed);
+    await elapse(f, 10 * MINUTE);
+    expect(field(r)).toBe(typed);
+    await press(r, "booking-quote");
+    expect(text(r, "booking-error")).toBe(SHORT_LEAD);
+    expect(field(r)).toBe(typed);
+    expect(calls(f, "quotes")).toHaveLength(0);
+  });
+  it("a server too-soon refusal of a typed time keeps it and says so", async () => {
+    const f = liveFixture(async (path) =>
+      path === "rides" ? fault("TOO_SOON_TO_BOOK", 400) : undefined,
+    );
+    const r = await start(f);
+    await enter(r, "booking-time", FUTURE);
+    await press(r, "booking-quote");
+    await press(r, "booking-confirm-checkbox");
+    await press(r, "booking-submit");
+    expect(text(r, "booking-error")).toBe(SHORT_LEAD);
+    expect(field(r)).toBe(FUTURE);
   });
 });

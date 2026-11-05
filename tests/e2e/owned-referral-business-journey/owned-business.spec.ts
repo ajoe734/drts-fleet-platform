@@ -3043,6 +3043,22 @@ test(journeyName, async ({ browser, request }) => {
         );
         return source;
       };
+      // Keep one exact booking route registered after the main booking's
+      // normal cleanup. The newest supplemental handler receives its own POST;
+      // after that handler is removed, a late POST is still blocked.
+      const stableSupplementalBookingGuard = (() => {
+        let ready: ReturnType<typeof page.route> | undefined;
+        return (url: string) => {
+          ready ??= page.route(url, async (route) => {
+            if (route.request().method() !== "POST") {
+              await route.continue();
+              return;
+            }
+            await route.abort("blockedbyclient").catch(() => undefined);
+          });
+          return ready;
+        };
+      })();
       const bookExtraFromUI = async (
         name: SupplementalBookingName,
         intendedInput?: string,
@@ -3251,6 +3267,7 @@ test(journeyName, async ({ browser, request }) => {
           const create = page.locator('[data-drt-operation="referral-create"]');
           await expect(create).toBeEnabled();
           await finalizer.checkpoint(`supplemental-${name}-original-booking`);
+          await stableSupplementalBookingGuard(url);
           await page.route(url, handle);
           operation.arm(25_000, fail);
           await clickAndSettleOriginalBookingAck(

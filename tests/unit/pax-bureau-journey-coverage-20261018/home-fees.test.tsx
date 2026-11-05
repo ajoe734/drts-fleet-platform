@@ -47,7 +47,7 @@ function link() {
     screen
       .getByRole("link", { name: "查看完整費用與優惠說明" })
       .getAttribute("href"),
-  ).toBe("/fares");
+  ).toBe("/fees");
 }
 it.each(["loading", "unauthorized", "ready", "payment_failure"] as const)(
   "the fixed fees link remains usable in the real %s home",
@@ -144,7 +144,7 @@ it("the real quoted booking sheet keeps its accessible fees link without creatin
     within(sheet)
       .getByRole("link", { name: "查看完整費用與優惠說明" })
       .getAttribute("href"),
-  ).toBe("/fares");
+  ).toBe("/fees");
   expect(
     (within(sheet).getByLabelText("我已確認費用與優惠說明") as HTMLInputElement)
       .checked,

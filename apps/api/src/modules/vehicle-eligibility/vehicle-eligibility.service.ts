@@ -777,6 +777,7 @@ export class VehicleEligibilityService implements OnModuleInit {
         {
           vehicleId,
           serviceProduct,
+          reason: this.classifyDispatchabilityRefusal(vehicleId),
         },
       );
     }
@@ -1156,6 +1157,25 @@ export class VehicleEligibilityService implements OnModuleInit {
         "INVALID_EFFECTIVE_TIMESTAMP",
         `${field} must be a valid ISO-8601 timestamp.`,
       );
+    }
+  }
+
+  /**
+   * Public category for a registry dispatchability refusal. Only the existing
+   * public reason vocabulary is returned; the internal supply-lifecycle block
+   * codes (contract / insurance / exclusivity detail) stay server-side.
+   * A vehicle whose own supply lifecycle is dispatchable was refused only for
+   * the requested service bucket.
+   */
+  private classifyDispatchabilityRefusal(
+    vehicleId: string,
+  ): "inactive" | "unsupported_product" {
+    try {
+      return this.regulatoryRegistryService.getVehicleDispatchability(vehicleId)
+        ? "unsupported_product"
+        : "inactive";
+    } catch {
+      return "inactive";
     }
   }
 

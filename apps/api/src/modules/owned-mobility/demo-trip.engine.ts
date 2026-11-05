@@ -51,7 +51,8 @@ const DRIVER_TASK_TRANSITION_RACE_CODES = new Set([
 // minutes; once the passenger boards, drive to the destination in the quoted
 // route's own duration, so the live ETA (from the same route provider) counts
 // down in step with the map. Testers can complete the trip at any time.
-const APPROACH_START_LAT_OFFSET = 0.012;
+// These are defaults; a subclass may move the start or shorten both.
+const APPROACH_START_OFFSET = { lat: 0.012, lng: 0 };
 const APPROACH_MS = 3 * 60_000;
 const DEFAULT_RIDE_MS = 3 * 60_000;
 const MAX_RIDE_MS = 90 * 60_000;
@@ -95,6 +96,13 @@ export abstract class DemoTripEngine<
   protected abstract readonly errorPrefix: string;
   /** Prefix of the simulated GPS device id and of log lines. */
   protected abstract readonly label: string;
+  /** Where the simulated driver departs from, relative to the pickup. */
+  protected readonly approachStartOffset: { lat: number; lng: number } =
+    APPROACH_START_OFFSET;
+  /** How long the simulated driver takes to reach the pickup. */
+  protected readonly approachMs: number = APPROACH_MS;
+  /** The longest simulated ride; shorter quoted routes take their own time. */
+  protected readonly maxRideMs: number = MAX_RIDE_MS;
 
   constructor(
     protected readonly orders: OwnedMobilityService,
@@ -370,8 +378,8 @@ export abstract class DemoTripEngine<
   private rideMs(order: OwnedOrderRecord) {
     const seconds = Number(this.quotedRouteSeconds(order));
     return Number.isFinite(seconds) && seconds > 0
-      ? Math.min(seconds * 1000, MAX_RIDE_MS)
-      : DEFAULT_RIDE_MS;
+      ? Math.min(seconds * 1000, this.maxRideMs)
+      : Math.min(DEFAULT_RIDE_MS, this.maxRideMs);
   }
 
   private rideDriven(
@@ -385,12 +393,12 @@ export abstract class DemoTripEngine<
 
   private approachDriven(task: DriverTaskRecord, now = Date.now()) {
     const since = Date.parse(task.departedAt ?? task.acceptedAt ?? "");
-    return Number.isFinite(since) && now - since >= APPROACH_MS;
+    return Number.isFinite(since) && now - since >= this.approachMs;
   }
 
   /**
-   * About 1.3 km north of the pickup on departure, closing in over the
-   * approach; at the pickup once arrived; then along the straight line to the
+   * At the approach start offset (about 1.3 km north of the pickup unless a
+   * subclass moves it) on departure, closing in over the approach; at the pickup once arrived; then along the straight line to the
    * destination over the ride once the passenger is on board.
    */
   simulatedPosition(
@@ -404,10 +412,13 @@ export abstract class DemoTripEngine<
     if (
       ["pending_acceptance", "accepted", "enroute_pickup"].includes(task.status)
     ) {
-      const done = progress(task.departedAt ?? task.acceptedAt, APPROACH_MS);
+      const done = progress(
+        task.departedAt ?? task.acceptedAt,
+        this.approachMs,
+      );
       return {
-        lat: pickup.lat + APPROACH_START_LAT_OFFSET * (1 - done),
-        lng: pickup.lng,
+        lat: pickup.lat + this.approachStartOffset.lat * (1 - done),
+        lng: pickup.lng + this.approachStartOffset.lng * (1 - done),
       };
     }
     if (["on_trip", "proof_pending"].includes(task.status)) {

@@ -1,0 +1,220 @@
+name: PAX PSP ECPay Stage sandbox evidence
+
+# PAX-PSP-SANDBOX-EVIDENCE-20261101 (acceptance key
+# pax-psp_sandbox_bind_and_charge_evidence; feeds PAX-PSP-ADAPTER-20261009's
+# pax-psp_adapter_sandbox_verified).
+#
+# Shared dev runs DEV_PAX_REVIEW_DEMO_ENABLED=true, where deploy-dev.yml forces
+# PSP_PROVIDER=fake, so it can never produce ECPay evidence. This workflow
+# leaves shared dev untouched and instead runs the merged EcpayPaymentProvider
+# in-process on a GitHub-hosted runner against ECPay Stage, using the existing
+# drts-dev-psp-* Secret Manager values read through the existing dev WIF.
+#
+# Trigger design: workflow_dispatch only works from the default branch, and
+# main promotion is currently blocked, so a pull_request trigger limited to
+# this workflow, its Playwright config and its test directory lets the task's
+# own PR produce evidence for the same candidate SHA. Fork PRs never receive
+# secrets and are skipped explicitly.
+#
+# WIF trust (infra/gcp/dev/provision-dev-project.sh): the provider's attribute
+# condition is assertion.repository=='ajoe734/drts-fleet-platform' and the
+# deployer SA binding is principalSet .../attribute.repository/<repo>; no ref
+# restriction, so same-repository pull_request runs may authenticate. If the
+# live provider differs, the auth step fails and the run records that.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Full commit SHA containing this workflow and tests/e2e/pax-psp-sandbox"
+        required: true
+        type: string
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - .github/workflows/psp-sandbox-acceptance.yml
+      - playwright.pax-psp-sandbox.config.ts
+      - tests/e2e/pax-psp-sandbox/**
+
+permissions:
+  contents: read
+
+# One Stage merchant and a 5-card-per-member limit: never run two at once.
+concurrency:
+  group: pax-psp-ecpay-stage-sandbox
+  cancel-in-progress: false
+
+jobs:
+  ecpay-stage-sandbox:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CI: true
+      PAX_PSP_SANDBOX_CANDIDATE_SHA: ${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      PSP_SECRET_PROJECT_ID: drts-dev-devcc-20260825
+      PAX_PSP_SANDBOX_EVIDENCE_DIR: .artifacts/pax-psp-sandbox
+    steps:
+      - name: Validate immutable candidate and target project
+        run: |
+          set -euo pipefail
+          [[ "$PAX_PSP_SANDBOX_CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::candidate SHA must be a full 40-hex commit"; exit 1; }
+          [[ "$DEV_GCP_PROJECT_ID" == "$PSP_SECRET_PROJECT_ID" ]] || { echo "::error::DEV_GCP_PROJECT_ID is not $PSP_SECRET_PROJECT_ID"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PAX_PSP_SANDBOX_CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Record the actual candidate checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PAX_PSP_SANDBOX_CANDIDATE_SHA"
+          mkdir -p "$PAX_PSP_SANDBOX_EVIDENCE_DIR"
+          python3 - <<'PY'
+          import json, os
+          env = os.environ
+          run_url = f"{env['GITHUB_SERVER_URL']}/{env['GITHUB_REPOSITORY']}/actions/runs/{env['GITHUB_RUN_ID']}/attempts/{env['GITHUB_RUN_ATTEMPT']}"
+          out = {
+              "candidate_sha": env["PAX_PSP_SANDBOX_CANDIDATE_SHA"],
+              "event": env["GITHUB_EVENT_NAME"],
+              "workflow_ref": env.get("GITHUB_WORKFLOW_REF"),
+              "workflow_sha": env.get("GITHUB_WORKFLOW_SHA"),
+              "run_url": run_url,
+              "runner_environment": env.get("RUNNER_ENVIRONMENT"),
+              "runner_os": env.get("RUNNER_OS"),
+          }
+          path = os.path.join(env["PAX_PSP_SANDBOX_EVIDENCE_DIR"], "candidate.json")
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump(out, fh, indent=2)
+              fh.write("\n")
+          PY
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium in the hosted runner
+        run: |
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Authenticate with existing dev WIF
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+
+      # Secrets live only in this step's process environment: they are masked
+      # before any other output and never written to GITHUB_ENV or disk.
+      - name: Bind, 3D, charge, refund attempt and unbind on ECPay Stage
+        id: sandbox
+        run: |
+          set -euo pipefail
+          read_secret() {
+            gcloud secrets versions access latest --secret="$1" --project="$PSP_SECRET_PROJECT_ID"
+          }
+          mask_value() {
+            local line
+            while IFS= read -r line; do
+              if [[ -n "$line" ]]; then printf '::add-mask::%s\n' "$line"; fi
+            done <<< "$1"
+            return 0
+          }
+          PSP_MERCHANT_ID="$(read_secret drts-dev-psp-merchant-id)"; mask_value "$PSP_MERCHANT_ID"
+          PSP_HASH_KEY="$(read_secret drts-dev-psp-hash-key)"; mask_value "$PSP_HASH_KEY"
+          PSP_HASH_IV="$(read_secret drts-dev-psp-hash-iv)"; mask_value "$PSP_HASH_IV"
+          PSP_TOKEN_ENCRYPTION_KEY_NAME="$(read_secret drts-dev-psp-token-encryption-key-name)"; mask_value "$PSP_TOKEN_ENCRYPTION_KEY_NAME"
+          PSP_SANDBOX="$(read_secret drts-dev-psp-sandbox | tr -d '[:space:]')"
+          export PSP_MERCHANT_ID PSP_HASH_KEY PSP_HASH_IV PSP_TOKEN_ENCRYPTION_KEY_NAME PSP_SANDBOX
+          # Mask the compact form and every key of the JSON key ring as well.
+          python3 - <<'PY'
+          import json, os
+          raw = os.environ["PSP_TOKEN_ENCRYPTION_KEY_NAME"]
+          try:
+              ring = json.loads(raw)
+          except ValueError:
+              ring = None
+          if isinstance(ring, dict):
+              print("::add-mask::" + json.dumps(ring, separators=(",", ":")))
+              for value in (ring.get("keys") or {}).values():
+                  if isinstance(value, str) and value:
+                      print("::add-mask::" + value)
+          PY
+          if [[ "$PSP_SANDBOX" != "true" ]]; then
+            echo "::error::drts-dev-psp-sandbox is not 'true'; refusing to call a non-Stage ECPay endpoint."
+            exit 1
+          fi
+          pnpm exec playwright test -c playwright.pax-psp-sandbox.config.ts
+
+      - name: Record fail-closed run status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          SANDBOX_OUTCOME: ${{ steps.sandbox.outcome }}
+        run: |
+          mkdir -p "$PAX_PSP_SANDBOX_EVIDENCE_DIR"
+          python3 - <<'PY'
+          import json, os
+          env = os.environ
+          evidence_path = os.path.join(env["PAX_PSP_SANDBOX_EVIDENCE_DIR"], "evidence.json")
+          acceptance = None
+          if os.path.exists(evidence_path):
+              try:
+                  with open(evidence_path, encoding="utf-8") as fh:
+                      acceptance = json.load(fh).get("acceptance")
+              except ValueError:
+                  acceptance = {"error": "evidence_unreadable"}
+          status = {
+              "candidate_sha": env["PAX_PSP_SANDBOX_CANDIDATE_SHA"],
+              "install": env.get("INSTALL_OUTCOME"),
+              "wif_auth": env.get("AUTH_OUTCOME"),
+              "sandbox_run": env.get("SANDBOX_OUTCOME"),
+              "evidence_present": os.path.exists(evidence_path),
+              "acceptance": acceptance,
+              "satisfied": bool(acceptance and acceptance.get("satisfied") is True and env.get("SANDBOX_OUTCOME") == "success"),
+          }
+          with open(os.path.join(env["PAX_PSP_SANDBOX_EVIDENCE_DIR"], "run-status.json"), "w", encoding="utf-8") as fh:
+              json.dump(status, fh, indent=2)
+              fh.write("\n")
+          print(json.dumps(status, indent=2))
+          PY
+          if [[ -f "$PAX_PSP_SANDBOX_EVIDENCE_DIR/summary.md" ]]; then
+            cat "$PAX_PSP_SANDBOX_EVIDENCE_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Only the masked evidence files; never Playwright's output directory.
+      - name: Upload masked ECPay Stage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-psp-sandbox-evidence-${{ env.PAX_PSP_SANDBOX_CANDIDATE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/pax-psp-sandbox/candidate.json
+            .artifacts/pax-psp-sandbox/run-status.json
+            .artifacts/pax-psp-sandbox/evidence.json
+            .artifacts/pax-psp-sandbox/summary.md
+            .artifacts/pax-psp-sandbox/sdk-controls.json
+            .artifacts/pax-psp-sandbox/three-d-controls.json
+            .artifacts/pax-psp-sandbox/screenshots/*.png
+          if-no-files-found: error
+          retention-days: 30

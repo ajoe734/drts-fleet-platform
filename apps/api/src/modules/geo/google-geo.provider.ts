@@ -43,6 +43,23 @@ type GoogleGeocodeResult = {
   types?: unknown;
 };
 
+/**
+ * Google's zh-TW formatted address leads with the postal code and the country
+ * ("220台灣新北市板橋區板橋車站"). Passengers, drivers and ride certificates
+ * read the address from 縣市 onwards; the full text stays the normalized form.
+ */
+export function displayAddress(
+  formatted: string,
+  countryCode: string | null | undefined,
+): string {
+  if (countryCode && countryCode.toUpperCase() !== "TW") return formatted;
+  const trimmed = formatted
+    .replace(/^\s*\d{3,6}\s*/, "")
+    .replace(/^(?:台灣|臺灣)\s*/, "")
+    .trim();
+  return trimmed || formatted;
+}
+
 @Injectable()
 export class GoogleGeoProvider implements GeoProvider {
   readonly providerId = PROVIDER_ID;
@@ -293,12 +310,14 @@ export class GoogleGeoProvider implements GeoProvider {
 
   private toCandidate(result: GoogleGeocodeResult): GeocodeCandidate {
     const placeId = this.requiredResultText(result.place_id, "place_id");
-    const address = this.requiredResultText(
+    const formatted = this.requiredResultText(
       result.formatted_address,
       "formatted_address",
     );
     const location = this.resultLocation(result);
     const components = this.addressComponents(result);
+    const countryCode = this.component(components, ["country"], true);
+    const address = displayAddress(formatted, countryCode);
     return {
       candidateId: `google:${placeId}`,
       provider: this.providerId,
@@ -306,7 +325,7 @@ export class GoogleGeoProvider implements GeoProvider {
       placeId,
       displayName: address,
       address,
-      normalizedAddress: address,
+      normalizedAddress: formatted,
       district: this.component(components, [
         "administrative_area_level_3",
         "sublocality_level_1",
@@ -316,7 +335,7 @@ export class GoogleGeoProvider implements GeoProvider {
         "locality",
         "administrative_area_level_1",
       ]),
-      countryCode: this.component(components, ["country"], true),
+      countryCode,
       location,
       confidence: this.confidence(result),
       accuracyM: this.accuracyMeters(result),

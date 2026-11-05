@@ -40,7 +40,10 @@ env:
 
 jobs:
   acceptance:
-    runs-on: ubuntu-latest
+    # Pinned: the restore uses the runner's preinstalled pg_dump/pg_restore
+    # against the PG16 service below. ubuntu-latest moved to 26.04, whose
+    # newer pg_dump writes `SET transaction_timeout`, which PG16 rejects.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:

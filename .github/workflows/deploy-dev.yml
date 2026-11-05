@@ -755,6 +755,9 @@ jobs:
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           referral_embed_secret_args="$web_secret_args"
           ops_secret_args="$web_secret_args"
+          # The passenger app's BFF holds no tenant secrets; it mounts only the
+          # map browser key below, when the map secrets are provisioned.
+          passenger_app_secret_args=""
           map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
@@ -868,6 +871,8 @@ jobs:
             # The referral embed's pickup/drop-off map uses the same browser key;
             # its route hands it only to origins on MAP_PROVIDER_ALLOWED_ORIGINS.
             referral_embed_secret_args="${referral_embed_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            # So do the passenger app's ride tracking and booking maps.
+            passenger_app_secret_args="GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
             map_provider_mode="external"
           elif [[ "$map_secret_count" -ne 0 ]]; then
             echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
@@ -981,6 +986,7 @@ jobs:
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "passenger_app=${passenger_app_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
           echo "bank_console=${bank_console_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
@@ -1032,7 +1038,14 @@ jobs:
           optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
           optional_group otp PASSENGER_OTP_PEPPER
           optional_group sms TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER
-          if gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
+          if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            # The rehearsal forces PSP_PROVIDER=fake, so payment references
+            # would only swap the token key ring under cards already bound
+            # with the public synthetic profile (every capture then fails).
+            # The public profile always owns payment in this mode.
+            echo "::notice::Passenger review rehearsal uses the public synthetic payment profile; no payment credentials are mounted."
+            echo "payment_mounts_complete=false" >> "$GITHUB_OUTPUT"
+          elif gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || gcloud secrets describe "${SECRET_PREFIX}-psp-hash-iv" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || ! gcloud secrets describe "${SECRET_PREFIX}-psp-api-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             optional_group payment PSP_MERCHANT_ID PSP_HASH_KEY PSP_HASH_IV PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
@@ -1168,8 +1181,9 @@ jobs:
           env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
             env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
-            # Existing complete groups keep their references. Absent groups
-            # receive the explicit PUBLIC synthetic profile; never generate a
+            # A complete OTP group keeps its references (payment never mounts
+            # in this mode). Absent groups receive the explicit PUBLIC
+            # synthetic profile; never generate a
             # new key at boot or require a real SMS/financial account. The
             # original OTP/provider/cipher readers validate these env values.
             review_simulation_env="$(python3 - '${{ steps.passenger_secrets.outputs.otp_mounts_complete }}' '${{ steps.passenger_secrets.outputs.payment_mounts_complete }}' <<'PY_REVIEW'
@@ -1256,6 +1270,43 @@ jobs:
           passenger_secrets="${{ steps.passenger_secrets.outputs.api }}"
           if [[ -n "$passenger_secrets" ]]; then
             api_secrets="${api_secrets},${passenger_secrets}"
+          fi
+
+          # gcloud applies literal env changes before secret changes, so one
+          # deploy cannot turn a secret reference into a literal (2026-11-01:
+          # the rehearsal's public payment profile replacing mounted payment
+          # references). Release those references first. The interim revision
+          # has no usable payment configuration, so it also turns capture off;
+          # enabled capture refuses to start without it (revision 00173). The
+          # deploy below sets every literal again. A missing service (fresh
+          # project) has nothing to release.
+          live_api_service="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format=json 2>/dev/null || true)"
+          released_secrets="$(LIVE_API_SERVICE="$live_api_service" python3 - <<'PY_RELEASE'
+          import json
+          import os
+          live = os.environ['LIVE_API_SERVICE'].strip()
+          if live:
+              env = json.loads(live)['spec']['template']['spec']['containers'][0].get('env', [])
+              secret = {entry['name'] for entry in env if 'valueFrom' in entry}
+              pairs = os.environ['API_ENV_VARS']
+              delimiter = ','
+              if pairs.startswith('^'):
+                  delimiter, pairs = pairs[1:].split('^', 1)
+              literal = {entry.split('=', 1)[0] for entry in pairs.split(delimiter)}
+              print(','.join(sorted(secret & literal)))
+          PY_RELEASE
+          )"
+          if [[ -n "$released_secrets" ]]; then
+            echo "::notice::Releasing secret references that this deploy sets as literals: ${released_secrets}"
+            operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --image "$IMAGE" \
+              --remove-secrets "$released_secrets" \
+              --update-env-vars PAX_PAYMENT_CAPTURE_ENABLED=false \
+              --project "${{ needs.prepare.outputs.project_id }}"
           fi
 
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
@@ -1571,21 +1622,39 @@ jobs:
           set -euo pipefail
           IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
-          env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          # "@" separates the values because the map origin list has commas.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@DRTS_API_URL=${{ steps.api_url.outputs.url }}@DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           passenger_public_only=false
           if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
             passenger_public_only=true
           fi
-          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
-          env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
+          env_vars="${env_vars}@PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
+          env_vars="${env_vars}@PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
+          # Ride tracking and booking maps: the app hands the browser key only
+          # to its public origins listed in MAP_PROVIDER_ALLOWED_ORIGINS, which
+          # mirror the key's referrer list.
+          map_provider_mode="${{ steps.api_secrets.outputs.map_provider_mode }}"
+          map_provider_name=mock
+          if [[ "$map_provider_mode" == "external" ]]; then
+            map_provider_name=google
+          fi
+          env_vars="${env_vars}@MAP_PROVIDER_MODE=${map_provider_mode}@MAP_PROVIDER_NAME=${map_provider_name}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
+          passenger_app_secrets="${{ steps.api_secrets.outputs.passenger_app }}"
+          secret_flags=(--clear-secrets)
+          if [[ -n "$passenger_app_secrets" ]]; then
+            secret_flags=(--set-secrets "$passenger_app_secrets")
+          fi
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3009 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --clear-secrets \
+            "${secret_flags[@]}" \
             --set-env-vars "$env_vars" \
             ${{ needs.prepare.outputs.passenger_app_exposure_flag }} \
             --cpu 1 \

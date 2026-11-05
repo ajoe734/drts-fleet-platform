@@ -18,10 +18,37 @@ import {
 } from "../review-demo/review-context";
 import { trialT } from "./translations";
 
-/** One of the review backend's synthetic phones (0900000000–0900000099). */
-function trialPhone() {
-  const suffix = Math.floor(Math.random() * 100);
-  return `09000000${String(suffix).padStart(2, "0")}`;
+/** One of the review backend's synthetic phones (0900000000–0900000099)
+ * not yet tried by this start. */
+function trialPhone(tried: ReadonlySet<string>) {
+  for (;;) {
+    const suffix = Math.floor(Math.random() * 100);
+    const phone = `09000000${String(suffix).padStart(2, "0")}`;
+    if (!tried.has(phone)) return phone;
+  }
+}
+
+/** Phones signed in before giving up on one start. */
+const TRIAL_SIGN_IN_ATTEMPTS = 5;
+
+/** False only when the API says booking would refuse this account (an earlier
+ * test charge left unsettled). An unanswered check keeps the account; booking
+ * still enforces the same rule.
+ */
+async function trialAccountCanBook() {
+  try {
+    const response = await passengerFetch(
+      "/api/passenger-app/review-demo/trial/readiness",
+      { cache: "no-store" },
+    );
+    if (!response.ok) return true;
+    const body = (await response.json()) as {
+      data?: { can_book?: unknown };
+    };
+    return body.data?.can_book !== false;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -49,18 +76,26 @@ export function TrialEntry() {
     setError("");
     setStep("signing");
     try {
-      clearOtpState();
-      const target = trialPhone();
-      const sms = await requestReviewLoginSms(target);
-      if (!sms.challenge || !/^\d{6}$/.test(sms.code))
-        throw new Error("trial_sms_unavailable");
-      const result = await client.login({
-        target,
-        provider: "phone",
-        code: sms.code,
-        challenge: sms.challenge,
-      });
-      if (result.result !== "logged_in") throw new Error("trial_login_failed");
+      const tried = new Set<string>();
+      for (;;) {
+        if (tried.size === TRIAL_SIGN_IN_ATTEMPTS)
+          throw new Error("trial_account_unavailable");
+        clearOtpState();
+        const target = trialPhone(tried);
+        tried.add(target);
+        const sms = await requestReviewLoginSms(target);
+        if (!sms.challenge || !/^\d{6}$/.test(sms.code))
+          throw new Error("trial_sms_unavailable");
+        const result = await client.login({
+          target,
+          provider: "phone",
+          code: sms.code,
+          challenge: sms.challenge,
+        });
+        if (result.result !== "logged_in")
+          throw new Error("trial_login_failed");
+        if (await trialAccountCanBook()) break;
+      }
       setTrialMode(true);
       setStep("consent");
     } catch {
