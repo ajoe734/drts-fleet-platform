@@ -417,6 +417,78 @@ describe("EcpayPaymentProvider adapter operations", () => {
     expect(() => provider.verifyNotification(tamperedCallback)).toThrow();
   });
 
+  it("verifies a real OrderResultURL 3D bind callback whose RpHeader is JSON null (Stage run 41949723157)", () => {
+    const provider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+    });
+    const cipherText = encryptEcpayData(
+      {
+        RtnCode: 1,
+        RtnMsg: "Succeeded",
+        BindCardID: "ECPAY_BIND_CARD_ID_CALLBACK_002",
+        MerchantMemberID: "mbr_synthetic_member_02",
+        CardInfo: {
+          Card6No: "541234",
+          Card4No: "8899",
+          CardValidYY: "30",
+          CardValidMM: "11",
+        },
+        OrderInfo: {
+          MerchantTradeNo: "DR3DSBIND00000000006",
+          TradeNo: "26110500000066",
+          TotalAmount: 5,
+        },
+      },
+      SYNTHETIC_HASH_KEY,
+      SYNTHETIC_HASH_IV,
+    );
+    const callbackWithNullHeader = {
+      MerchantID: SYNTHETIC_MERCHANT_ID,
+      RpHeader: null,
+      TransCode: 1,
+      TransMsg: "Success",
+      Data: cipherText,
+    };
+    const expectedNotification = {
+      kind: "bind",
+      rtnCode: 1,
+      rtnMsg: "Succeeded",
+      merchantTradeNo: "DR3DSBIND00000000006",
+      tradeNo: "26110500000066",
+      merchantMemberId: "mbr_synthetic_member_02",
+      authorizedAmountMinor: 500,
+      bindResult: {
+        status: "completed",
+        card: {
+          token: "ECPAY_BIND_CARD_ID_CALLBACK_002",
+          last4: "8899",
+          cardType: "MASTERCARD",
+          expiryMonth: "11",
+          expiryYear: "2030",
+        },
+      },
+    };
+    expect(
+      provider.verifyNotification(
+        `ResultData=${encodeURIComponent(JSON.stringify(callbackWithNullHeader))}`,
+      ),
+    ).toEqual(expectedNotification);
+
+    const tamperedCallback = {
+      ...callbackWithNullHeader,
+      Data: "ZZZZ" + callbackWithNullHeader.Data.slice(4),
+    };
+    expect(() => provider.verifyNotification(tamperedCallback)).toThrow();
+
+    const wrongMerchantCallback = {
+      ...callbackWithNullHeader,
+      MerchantID: "OTHER_MERCHANT",
+    };
+    expect(() => provider.verifyNotification(wrongMerchantCallback)).toThrow();
+  });
+
   it("executes CreatePaymentWithCardID with Need3D=0 and ConsumerInfo.MerchantMemberID (including via PaymentChargeService), enforces amount bounds, and blocks re-authorization of a declined BindCardID", async () => {
     const owner = "pax_uuid_0001_safe";
     const expectedMemberId = deriveEcpayMerchantMemberId(
@@ -2371,7 +2443,9 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
             rowCount: 1,
           };
         }
-        if (sql.includes("FROM passenger.psp_tokens WHERE drts_passenger_id=$1")) {
+        if (
+          sql.includes("FROM passenger.psp_tokens WHERE drts_passenger_id=$1")
+        ) {
           return { rows: [], rowCount: 0 };
         }
         if (
