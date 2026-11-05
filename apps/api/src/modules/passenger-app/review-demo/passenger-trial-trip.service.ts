@@ -55,6 +55,12 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
   protected readonly supply = PASSENGER_TRIAL_SUPPLY;
   protected readonly errorPrefix = "PASSENGER_TRIAL_TRIP";
   protected readonly label = "passenger-trial";
+  // Nobody steers the trial's test driver, so keep the whole trip short: the
+  // driver starts about 700 m north-east of the pickup and arrives in 90 s,
+  // and the ride lasts the quoted route time up to three minutes.
+  protected override readonly approachStartOffset = { lat: 0.004, lng: 0.005 };
+  protected override readonly approachMs = 90_000;
+  protected override readonly maxRideMs = 3 * 60_000;
   /** Quotes of orders this instance has served, keyed by order id. */
   private readonly quotes = new Map<string, FareQuoteSnapshot>();
 

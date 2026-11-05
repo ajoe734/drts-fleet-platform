@@ -4669,6 +4669,54 @@ describe("TenantPartnerService tenant business ops views", () => {
     );
   });
 
+  it("keeps the payable estimate on the month trips completed in", async () => {
+    // E2E-012 at 2026-10-31T23:45Z: a reservation 70 minutes ahead fell in
+    // November while its trip completed in October, and the dashboard asked
+    // billing for November's payable, which had no trip yet.
+    const service = new TenantPartnerService(new AuditNotificationService());
+    service.registerOrderFeedProvider(() => [
+      createTenantOrder({
+        orderId: "order-month-end-001",
+        bookingId: "booking-month-end-001",
+        status: "completed",
+        reservationWindowStart: "2026-11-01T00:55:00.000Z",
+        reservationWindowEnd: "2026-11-01T01:25:00.000Z",
+        createdAt: "2026-10-31T23:45:00.000Z",
+        updatedAt: "2026-10-31T23:43:00.000Z",
+      }),
+    ]);
+    const getTenantPayableSummary = vi.fn(
+      async (tenantId: string, periodMonth?: string) => {
+        const resolved = periodMonth ?? "2026-10";
+        return {
+          tenantId,
+          periodMonth: resolved,
+          totalTrips: resolved === "2026-10" ? 1 : 0,
+          completedTrips: resolved === "2026-10" ? 1 : 0,
+          cancelledTrips: 0,
+          noShowTrips: 0,
+          grossAmountMinor: resolved === "2026-10" ? 30000 : 0,
+          adjustmentAmountMinor: 0,
+          taxAmountMinor: 0,
+          payableAmountMinor: resolved === "2026-10" ? 30000 : 0,
+          invoiceStatus: "draft",
+        };
+      },
+    );
+
+    const dashboard = await service.getTenantDashboardSummary(
+      "tenant-demo-001",
+      { listTenantInvoices: vi.fn(() => []), getTenantPayableSummary } as any,
+    );
+
+    expect(getTenantPayableSummary).toHaveBeenCalledWith("tenant-demo-001");
+    expect(dashboard).toMatchObject({
+      periodMonth: "2026-10",
+      completedTripCount: 1,
+      estimatedPayableAmountMinor: 30000,
+    });
+  });
+
   it("projects issuer contract SLA posture with masked exception references", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
     service.registerOrderFeedProvider(() => [

@@ -237,6 +237,28 @@ async function registerDriver(
   });
 }
 
+/** The rehearsal phone comes from the run id (0900000000–0900000099) and each
+ * run binds two cards, so a phone's third run would hit the five-card cap.
+ * Remove earlier runs' cards through the ordinary UI before binding. */
+async function freeCardSlots(page: Page, needed: number) {
+  await page.goto(`${PAX}/account/payment-methods`);
+  const remove = page.getByRole("button", { name: "刪除", exact: true });
+  await expect(
+    remove.first().or(page.getByText("尚未設定付款卡片", { exact: true })),
+  ).toBeVisible();
+  for (let count = await remove.count(); count > 5 - needed; count -= 1) {
+    await remove.last().click();
+    const removed = page.waitForResponse(
+      (r) =>
+        /\/payment-methods\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        r.request().method() === "DELETE",
+    );
+    await page.getByRole("button", { name: "確定刪除", exact: true }).click();
+    expect((await removed).ok(), "Remove an earlier run's card").toBe(true);
+    await expect(remove).toHaveCount(count - 1);
+  }
+}
+
 async function bind(page: Page, scenario: "success" | "retry_once") {
   await page.goto(`${PAX}/account/payment-methods`);
   await page
@@ -260,9 +282,12 @@ async function book(
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
-  await expect(page.getByText("建立乘車需求", { exact: true })).toBeVisible();
-  // AuthScreen's P5Header renders the title as text. Settings load separately;
-  // wait for the actual disclosure or form before deciding whether to agree.
+  // The plan header shows 建立乘車需求, or 費用與優惠說明 on the first-use
+  // fee gate (附錄 E-19a). Settings load separately; wait for the actual
+  // disclosure or form before deciding whether to agree.
+  await expect(
+    page.getByText(/^(建立乘車需求|費用與優惠說明)$/).first(),
+  ).toBeVisible();
   await expect(
     ack.or(page.getByLabel("示範上車地點", { exact: true })),
   ).toBeVisible();
@@ -286,7 +311,11 @@ async function book(
   await expect(page.getByText(/NT\$ (85|105)/).first()).toBeVisible();
   // The existing confirmation sheet owns payment selection. Require the
   // newly bound method itself; selecting another card would change B's PSP case.
+  // 附錄 E-19b shows the selected card as the 支付方式 row; the owned card list
+  // opens from that row (it is already open while no card is selected).
   const choice = page.locator(`input[value="${paymentMethodId}"]`);
+  if (!(await choice.isVisible()))
+    await page.getByRole("button", { name: /^變更支付方式：/ }).click();
   await expect(choice).toBeVisible();
   await choice.check();
   await page.getByRole("checkbox", { name: "我已確認費用與優惠說明" }).check();
@@ -1190,7 +1219,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
         (await authority(pax, orderId)).receipt?.record?.e04Snapshot
           ?.fleetOperatorName,
     )
-    .toBe("虛構演練派遣業者（合成・非正式）");
+    .toBe("智行車隊");
   const ride = await authority(pax, orderId);
   const snapshot = ride.receipt.record.e04Snapshot;
   expect(ride.receipt.orderId).toBe(orderId);
@@ -1218,7 +1247,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
   const e04 = await pax.request.get(`${PAX}${metadata.htmlUrl}`);
   expect(e04.status()).toBe(200);
   const e04Html = await e04.text();
-  expect(e04Html).toContain("合成・非正式");
+  expect(e04Html).toContain(snapshot.fleetOperatorName);
   expect(e04Html).toContain(snapshot.driverRegistrationMasked);
   await info.attach(`same-order-${orderId}-e04`, {
     body: e04Html,
@@ -1476,6 +1505,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         ),
       ).toBeNull();
     });
+    await step("Passenger free card slots for this run", () =>
+      freeCardSlots(pax, 2),
+    );
     const firstMethod = await step("A bind successful simulated PSP", () =>
       bind(pax, "success"),
     );
@@ -1524,7 +1556,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .toBe("captured");
         await pax.getByRole("button", { name: "5 星", exact: true }).click();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, normal)).rating?.score)
@@ -1606,7 +1638,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await contactSwitch.check();
         await expect(contactSwitch).toBeChecked();
         await pax
-          .getByRole("button", { name: "送出評價", exact: true })
+          .getByRole("button", { name: "送出評分", exact: true })
           .click();
         await expect
           .poll(async () => (await authority(pax, retry)).rating?.score)

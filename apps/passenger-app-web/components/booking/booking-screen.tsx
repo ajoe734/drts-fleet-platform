@@ -1,6 +1,6 @@
 "use client";
 import { passengerFetch } from "../../lib/runtime-fetch";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
   FareQuoteResponse,
@@ -9,20 +9,28 @@ import type {
   PassengerBookingSettingsResponse,
 } from "@drts/contracts";
 import {
+  BOOKING_PROPOSAL_REFRESH_MS,
   PassengerBookingClient,
   PassengerApiError,
-  earliestBookingTime,
   fromLocalDateTime,
   isBookingTimeAllowed,
-  PASSENGER_CONFIRMATION_ROWS,
-  PASSENGER_FREE_CANCELLATION_NOTICE,
+  PASSENGER_APP_CONFIRMATION_ROWS,
   PASSENGER_SUPPORT_PHONE,
+  proposedBookingTime,
+  withBookableTime,
 } from "@drts/passenger-client";
-import { AuthScreen, AuthAlert, P5Btn, P5Card, P5 } from "../auth/ui";
-import { P5Map, P5RouteFare } from "../p5-ui";
+import { AuthAlert, P5Btn, P5 } from "../auth/ui";
+import { P5Icon, P5Map, P5RouteFare } from "../p5-ui";
 import { BookingForm, type BookingDraft } from "./booking-form";
 import { FeeDisclosure } from "./disclosure";
 import { BookingConfirmationSheet } from "./confirmation-sheet";
+import {
+  FEES_PATH,
+  PLAN,
+  PlanLink,
+  PlanScreen,
+  useFramedDevice,
+} from "./plan-screen";
 import { BOOK_T as T } from "../../lib/booking/translations";
 import {
   useReviewDemo,
@@ -49,6 +57,8 @@ export interface BookingScreenProps {
   client?: PassengerBookingClient;
   paymentSelection?: BookingPaymentSelection;
   paymentSlot?: ReactNode;
+  /** Account-level notice (e.g. an unpaid trip) shown above the content. */
+  notice?: ReactNode;
 }
 export function createBookingClient() {
   return new PassengerBookingClient({
@@ -66,6 +76,7 @@ export function BookingScreen({
   client: supplied,
   paymentSelection,
   paymentSlot,
+  notice,
 }: BookingScreenProps) {
   const router = useRouter();
   const review = useReviewDemo();
@@ -83,6 +94,9 @@ export function BookingScreen({
   const [error, setError] = useState("");
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const paymentListId = useId();
+  const framed = useFramedDevice();
   const lock = useRef(false);
   const submitted = useRef(false);
   const mounted = useRef(true);
@@ -123,17 +137,19 @@ export function BookingScreen({
       recoveryAccount.current = me.account.drtsPassengerId;
       if (restored) {
         pending.current = restored.pending;
-        setDraft(restored.draft);
+        // A pending command is immutable; an unsent draft needs a bookable time.
+        setDraft(
+          restored.pending
+            ? restored.draft
+            : withBookableTime(restored.draft, configuration),
+        );
         setQuote(restored.quote);
         setChecked(!!restored.pending);
         setMode(restored.pending ? "unavailable" : "form");
         if (restored.pending) setError(T.unknownCreate);
         return;
       }
-      setDraft((current) => ({
-        ...current,
-        localTime: current.localTime || earliestBookingTime(configuration),
-      }));
+      setDraft((current) => withBookableTime(current, configuration));
       setMode("form");
     } catch (reason) {
       if (mounted.current) report(reason, T.settingsError);
@@ -164,6 +180,22 @@ export function BookingScreen({
   }, [account, draft, quote]);
 
   useEffect(() => {
+    // Only on the form: the confirmation sheet's quote is bound to its time.
+    if (mode !== "form" || busy || !settings || !draft.localTimeAuto) return;
+    const refresh = () => {
+      const localTime = proposedBookingTime(settings);
+      setDraft((current) =>
+        current.localTimeAuto && current.localTime !== localTime
+          ? { ...current, localTime }
+          : current,
+      );
+    };
+    refresh();
+    const timer = setInterval(refresh, BOOKING_PROPOSAL_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [mode, busy, settings, draft.localTimeAuto]);
+
+  useEffect(() => {
     if (mode !== "confirm" || !quote || pending.current) return;
     let timer: ReturnType<typeof setTimeout>;
     function expire() {
@@ -183,6 +215,12 @@ export function BookingScreen({
     expire();
     return () => clearTimeout(timer);
   }, [mode, quote]);
+
+  useEffect(() => {
+    // Each sheet opens collapsed; without a usable card the list stays open.
+    if (mode !== "confirm") setPaymentOpen(false);
+    else if (!paymentSelection) setPaymentOpen(true);
+  }, [mode, paymentSelection]);
 
   async function currentAccount() {
     const me = await client.getAccount();
@@ -236,9 +274,9 @@ export function BookingScreen({
       setBusy(false);
     }
   }
-  function scheduledAt() {
+  function scheduledAt(localTime = draft.localTime) {
     if (!settings) throw new Error("booking_settings_unavailable");
-    const iso = fromLocalDateTime(draft.localTime);
+    const iso = fromLocalDateTime(localTime);
     if (!isBookingTimeAllowed(iso, settings))
       throw new Error("booking_lead_invalid");
     return iso;
@@ -258,7 +296,12 @@ export function BookingScreen({
     setChecked(false);
     try {
       if (!(await currentAccount())) return;
-      const time = scheduledAt();
+      // Fresh at the click: a sleeping tab can miss the refresh timer.
+      const localTime = draft.localTimeAuto
+        ? proposedBookingTime(settings)
+        : draft.localTime;
+      const time = scheduledAt(localTime);
+      setDraft((current) => ({ ...current, localTime }));
       setMode("quoting");
       const result = await client.getFareQuote({
         originLat: draft.origin.lat!,
@@ -425,11 +468,15 @@ export function BookingScreen({
         setMode("form");
         setError(T.expired);
       } else if (
-        ["booking_lead_invalid", "invalid_booking_time"].includes(code)
+        [
+          "booking_lead_invalid",
+          "invalid_booking_time",
+          "too_soon_to_book",
+        ].includes(code)
       ) {
         pending.current = null;
         setMode("form");
-        setError(T.shortLead);
+        setError(draft.localTimeAuto ? T.timeRefreshed : T.shortLead);
       } else if (
         reason instanceof PassengerApiError &&
         reason.status >= 400 &&
@@ -466,202 +513,447 @@ export function BookingScreen({
       : !!(account.contactPhone || account.verifiedPhone));
   const acknowledged =
     account && fare && account.feeAcknowledgementVersion === fare.version;
-  return (
-    <AuthScreen title={T.book}>
+  // The supplement (E-19a) puts 費用與優惠說明 at the top of the home screen
+  // as a fixed entry, before any booking input.
+  const feesLink = (
+    <a
+      href={FEES_PATH}
+      style={{
+        ...PLAN.card,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "11px 14px",
+        color: P5.ink,
+        textDecoration: "none",
+        fontSize: 13.5,
+        fontWeight: 700,
+      }}
+    >
+      <P5Icon name="info" size={16} style={{ color: P5.brand }} />
+      <span style={{ flex: 1 }}>{T.fullFees}</span>
+      <span aria-hidden="true" style={{ color: P5.brand }}>
+        ›
+      </span>
+    </a>
+  );
+  const topNotices = (
+    <>
+      {notice && <div style={PLAN.inset}>{notice}</div>}
       {error && (mode !== "confirm" || !quote) && (
-        <AuthAlert>{error}</AuthAlert>
+        <div style={PLAN.inset}>
+          <AuthAlert>{error}</AuthAlert>
+        </div>
       )}
-      {reviewPending ? (
-        <p>{T.loadingSettings}</p>
-      ) : !account || !fare || !settings ? (
-        <>
-          <p>{busy ? T.loadingSettings : T.missingSettings}</p>
-          <P5Btn disabled={busy} onClick={() => void load()}>
-            {T.retrySettings}
-          </P5Btn>
-        </>
-      ) : !acknowledged && !pending.current ? (
-        <>
-          <FeeDisclosure fare={fare} />
-          <P5Btn
-            kind="primary"
-            disabled={busy}
-            onClick={() => void acknowledge()}
-          >
-            {T.acknowledge}
-          </P5Btn>
-          <p>{T.disclosureFooter}</p>
-        </>
-      ) : !phoneReady && !pending.current ? (
-        <>
-          <AuthAlert>{T.phone(settings.requireSmsVerification)}</AuthAlert>
-          <a href="/account">{T.account}</a>
-        </>
-      ) : mode === "confirm" && quote ? (
-        <BookingConfirmationSheet
-          canDismiss={!busy && !pending.current && !submitted.current}
-          onDismiss={() => {
-            setChecked(false);
-            setMode("form");
-          }}
-        >
-          {error && <AuthAlert>{error}</AuthAlert>}
-          <dl
+    </>
+  );
+  function sheet(current: ServiceableQuote) {
+    const recovering = !!pending.current;
+    const paymentLabel =
+      pending.current?.paymentLabel ?? paymentSelection?.label;
+    // The selected card is the 支付方式 row; the card list opens from it and
+    // stays open whenever no usable card is selected.
+    const canChoose = !!paymentSlot && !recovering && !submitted.current;
+    const expanded = canChoose && (paymentOpen || !paymentSelection);
+    const rows: [string, ReactNode, boolean][] = [
+      [T.sheetPickup, draft.origin?.address ?? "", false],
+      [T.sheetDropoff, draft.destination?.address ?? "", false],
+      [T.time, scheduleLabel(draft.localTime), true],
+      [
+        T.estimatedFare,
+        `NT$ ${current.estimatedMin}–${current.estimatedMax}`,
+        true,
+      ],
+      [
+        T.payment,
+        canChoose ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={paymentListId}
+            aria-label={T.changePayment(paymentLabel ?? T.paymentNone)}
+            // Without a usable card the list cannot be collapsed.
+            onClick={() => setPaymentOpen(paymentSelection ? !expanded : true)}
             style={{
-              border: `1px solid ${P5.line}`,
-              borderRadius: 12,
-              padding: "8px 14px",
-              margin: "0 0 10px",
+              border: 0,
+              padding: 0,
+              background: "transparent",
+              font: "inherit",
+              color: "inherit",
+              cursor: "pointer",
+              textAlign: "right",
             }}
           >
-            {[
-              [T.pickup, draft.origin?.address ?? ""],
-              [T.dropoff, draft.destination?.address ?? ""],
-              [T.time, draft.localTime.replace("T", " ")],
-              [
-                T.estimatedFare,
-                `NT$ ${quote.estimatedMin}–${quote.estimatedMax}`,
-              ],
-              [
-                T.payment,
-                pending.current?.paymentLabel ??
-                  paymentSelection?.label ??
-                  T.paymentPending,
-              ],
-            ].map(([label, value]) => (
-              <div
-                key={label}
+            {paymentLabel ?? T.paymentNone}
+            <span aria-hidden="true" style={{ color: P5.brand }}>
+              {expanded ? " ˄" : " ›"}
+            </span>
+          </button>
+        ) : (
+          (paymentLabel ?? T.paymentNone)
+        ),
+        true,
+      ],
+    ];
+    return (
+      <BookingConfirmationSheet
+        contained={framed}
+        canDismiss={!busy && !recovering && !submitted.current}
+        onDismiss={() => {
+          setChecked(false);
+          setMode("form");
+        }}
+      >
+        {error && (
+          <div style={{ marginBottom: 10 }}>
+            <AuthAlert>{error}</AuthAlert>
+          </div>
+        )}
+        <dl
+          style={{
+            border: `1px solid ${P5.line}`,
+            borderRadius: 14,
+            padding: "6px 16px",
+            margin: 0,
+          }}
+        >
+          {rows.map(([label, value, mono]) => (
+            <div
+              key={label}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 12,
+                padding: "6px 0",
+              }}
+            >
+              <dt style={{ color: P5.mut, flexShrink: 0 }}>{label}</dt>
+              <dd
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: "6px 0",
-                  fontSize: 12.5,
+                  margin: 0,
+                  fontWeight: 700,
+                  textAlign: "right",
+                  ...(mono ? { fontFamily: P5.mono } : {}),
                 }}
               >
-                <dt style={{ color: P5.mut }}>{label}</dt>
-                <dd style={{ margin: 0, fontWeight: 600, textAlign: "right" }}>
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          <p>{T.quoteVersion(quote.fareVersion, quote.expiresAt)}</p>
-          <P5Card title={T.rules}>
-            {PASSENGER_CONFIRMATION_ROWS.map((row) => (
-              <p key={row}>{row}</p>
-            ))}
-            <p>{PASSENGER_FREE_CANCELLATION_NOTICE}</p>
-            <a href="/fares" target="_blank" rel="noopener noreferrer">
-              {T.fullFees}
-            </a>
-          </P5Card>
-          <P5Card title={T.payment}>
-            <fieldset
-              disabled={busy || !!pending.current || submitted.current}
-              style={{ border: 0, padding: 0, margin: 0 }}
-            >
-              {pending.current ? (
-                <p>{pending.current.paymentLabel}</p>
-              ) : (
-                (paymentSlot ??
-                (paymentSelection ? (
-                  <p>{paymentSelection.label}</p>
-                ) : (
-                  <p>{T.paymentPending}</p>
-                )))
-              )}
-            </fieldset>
-          </P5Card>
-          <label
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p
+          style={{
+            fontSize: 11,
+            color: P5.dim,
+            textAlign: "right",
+            margin: "4px 4px 8px",
+          }}
+        >
+          {T.quoteValidUntil(clockLabel(current.expiresAt))}
+        </p>
+        {expanded && (
+          <div
+            id={paymentListId}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              fontSize: 12.5,
-              fontWeight: 600,
+              border: `1px solid ${P5.line}`,
+              borderRadius: 14,
+              padding: "12px 14px",
               marginBottom: 10,
             }}
           >
-            <input
-              type="checkbox"
-              checked={checked}
-              disabled={busy || !!pending.current}
-              style={{ width: 20, height: 20, accentColor: P5.brand }}
-              onChange={(event) => setChecked(event.target.checked)}
-            />
-            {T.checkbox}
-          </label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <P5Btn
-              kind="primary"
-              disabled={
-                !checked ||
-                busy ||
-                submitted.current ||
-                (!pending.current && !paymentSelection?.paymentMethodId)
-              }
-              onClick={() => void submit()}
+            <fieldset
+              disabled={busy || recovering || submitted.current}
+              style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
             >
-              {T.confirm}
-            </P5Btn>
-            <P5Btn
-              disabled={busy || !!pending.current || submitted.current}
-              onClick={() => {
-                setChecked(false);
-                setMode("form");
+              {paymentSlot}
+            </fieldset>
+          </div>
+        )}
+        {!paymentSlot && !paymentLabel && (
+          <p style={{ ...PLAN.muted, margin: "0 4px 10px" }}>
+            {T.paymentPending}
+          </p>
+        )}
+        <section
+          style={{
+            border: `1px solid ${P5.line}`,
+            borderRadius: 14,
+            padding: "12px 16px",
+            marginBottom: 12,
+          }}
+        >
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px" }}>
+            {T.rules}
+          </h3>
+          {PASSENGER_APP_CONFIRMATION_ROWS.map((row) => (
+            <p
+              key={row}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                margin: "0 0 4px",
               }}
             >
-              {T.modify}
-            </P5Btn>
+              <P5Icon name="check" size={15} style={{ color: P5.ok }} />
+              {row}
+            </p>
+          ))}
+          <div style={{ textAlign: "right", marginTop: 8 }}>
+            <PlanLink href={FEES_PATH} newTab>
+              {T.fullFees}
+            </PlanLink>
           </div>
-          <p>{T.confirmationFooter}</p>
-        </BookingConfirmationSheet>
-      ) : mode === "unavailable" ? (
-        <>
-          <P5Map state="missing" pickupAddress={draft.origin?.address ?? ""} />
-          <P5RouteFare
-            mode="anomaly"
-            pickup={draft.origin?.address ?? ""}
-            dropoff={draft.destination?.address ?? ""}
-          />
-          <P5Btn
-            disabled={busy}
-            onClick={() => {
-              if (pending.current) {
-                setMode("confirm");
-                void submit();
-              } else void getQuote();
+        </section>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 14,
+            fontWeight: 700,
+            margin: "0 2px 12px",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={busy || recovering}
+            style={{
+              width: 22,
+              height: 22,
+              margin: 0,
+              accentColor: P5.brand,
             }}
-          >
-            {pending.current ? T.retrySame : T.retryQuote}
-          </P5Btn>
-          <a href={`tel:${PASSENGER_SUPPORT_PHONE}`}>{T.support}</a>
+            onChange={(event) => setChecked(event.target.checked)}
+          />
+          {T.checkbox}
+        </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <P5Btn
-            disabled={busy || !!pending.current}
-            onClick={() => setMode("form")}
+            kind="primary"
+            disabled={
+              !checked ||
+              busy ||
+              submitted.current ||
+              (!recovering && !paymentSelection?.paymentMethodId)
+            }
+            onClick={() => void submit()}
+          >
+            {T.confirm}
+          </P5Btn>
+          <P5Btn
+            disabled={busy || recovering || submitted.current}
+            onClick={() => {
+              setChecked(false);
+              setMode("form");
+            }}
           >
             {T.modify}
           </P5Btn>
-        </>
-      ) : mode === "quoting" ? (
+        </div>
+        {!recovering && (!checked || !paymentSelection?.paymentMethodId) && (
+          <p
+            style={{
+              fontSize: 12.5,
+              color: P5.warn,
+              textAlign: "center",
+              margin: "10px 0 0",
+            }}
+          >
+            {checked ? T.choosePaymentFirst : T.checkFirst}
+          </p>
+        )}
+        <p
+          style={{
+            fontSize: 11.5,
+            color: P5.dim,
+            textAlign: "center",
+            margin: "8px 0 0",
+          }}
+        >
+          {T.confirmationFooter}
+        </p>
+      </BookingConfirmationSheet>
+    );
+  }
+  function currentView(): {
+    title: string;
+    right?: string;
+    body: ReactNode;
+    overlay?: ReactNode;
+  } {
+    if (reviewPending)
+      return {
+        title: T.book,
+        body: (
+          <>
+            {topNotices}
+            {feesLink}
+            <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
+              {T.loadingSettings}
+            </p>
+          </>
+        ),
+      };
+    if (!account || !fare || !settings)
+      return {
+        title: T.book,
+        body: (
+          <>
+            {topNotices}
+            {feesLink}
+            <div style={PLAN.card}>
+              <p style={{ margin: "0 0 12px", color: P5.mut }}>
+                {busy ? T.loadingSettings : T.missingSettings}
+              </p>
+              <P5Btn disabled={busy} onClick={() => void load()}>
+                {T.retrySettings}
+              </P5Btn>
+            </div>
+          </>
+        ),
+      };
+    if (!acknowledged && !pending.current)
+      // E-19a: the first-use 費用與優惠說明 gate.
+      return {
+        title: T.disclosure,
+        right: T.publicInfo,
+        body: (
+          <>
+            {topNotices}
+            <FeeDisclosure fare={fare} />
+            <div style={{ margin: "0 14px 8px" }}>
+              <P5Btn
+                kind="primary"
+                icon="check"
+                disabled={busy}
+                onClick={() => void acknowledge()}
+              >
+                {T.acknowledge}
+              </P5Btn>
+            </div>
+            <p style={{ ...PLAN.stamp, textAlign: "center" }}>
+              {T.disclosureFooter}
+            </p>
+          </>
+        ),
+      };
+    if (!phoneReady && !pending.current)
+      return {
+        title: T.book,
+        body: (
+          <>
+            {topNotices}
+            {feesLink}
+            <div style={PLAN.inset}>
+              <AuthAlert>{T.phone(settings.requireSmsVerification)}</AuthAlert>
+              <a href="/account" style={{ ...PLAN.linkButton, marginTop: 12 }}>
+                {T.account}
+              </a>
+            </div>
+          </>
+        ),
+      };
+    if (mode === "confirm" && quote)
+      // E-19b: the sheet over the dimmed 建立乘車需求 screen.
+      return { title: T.book, body: null, overlay: sheet(quote) };
+    if (mode === "unavailable")
+      return {
+        title: T.book,
+        body: (
+          <>
+            {topNotices}
+            {feesLink}
+            <P5Map
+              state="missing"
+              pickupAddress={draft.origin?.address ?? ""}
+            />
+            <P5RouteFare
+              mode="anomaly"
+              pickup={draft.origin?.address ?? ""}
+              dropoff={draft.destination?.address ?? ""}
+            />
+            <div
+              style={{
+                margin: "0 14px 12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <P5Btn
+                kind="primary"
+                disabled={busy}
+                onClick={() => {
+                  if (pending.current) {
+                    setMode("confirm");
+                    void submit();
+                  } else void getQuote();
+                }}
+              >
+                {pending.current ? T.retrySame : T.retryQuote}
+              </P5Btn>
+              <a
+                href={`tel:${PASSENGER_SUPPORT_PHONE}`}
+                style={PLAN.linkButton}
+              >
+                {T.support}
+              </a>
+              <P5Btn
+                disabled={busy || !!pending.current}
+                onClick={() => setMode("form")}
+              >
+                {T.modify}
+              </P5Btn>
+            </div>
+          </>
+        ),
+      };
+    if (mode === "quoting")
+      return {
+        title: T.book,
+        body: (
+          <>
+            {topNotices}
+            {feesLink}
+            <P5RouteFare
+              pickup={draft.origin?.address ?? ""}
+              dropoff={draft.destination?.address ?? ""}
+            />
+            <p role="status" style={{ ...PLAN.muted, margin: "0 16px 12px" }}>
+              {T.quoting}
+            </p>
+          </>
+        ),
+      };
+    return {
+      title: T.book,
+      body: (
         <>
-          <P5RouteFare
-            pickup={draft.origin?.address ?? ""}
-            dropoff={draft.destination?.address ?? ""}
-          />
-          <p>{T.quoting}</p>
-        </>
-      ) : (
-        <>
+          {topNotices}
+          {feesLink}
           {/* A trial account signed in with its verified test phone. */}
           {!account.contactPhoneVerified &&
             !settings.requireSmsVerification &&
             !trial && (
-              <>
-                <AuthAlert kind="warn">{T.unverifiedPhone}</AuthAlert>
-                <a href="/account">{T.account}</a>
-              </>
+              <div style={PLAN.inset}>
+                <AuthAlert kind="warn">
+                  <span>{T.unverifiedPhone}</span>
+                  <a
+                    href="/account"
+                    style={{
+                      display: "block",
+                      marginTop: 6,
+                      color: "inherit",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {T.account}
+                  </a>
+                </AuthAlert>
+              </div>
             )}
           <BookingForm
             client={client}
@@ -671,14 +963,50 @@ export function BookingScreen({
             busy={busy}
             onQuote={() => void getQuote()}
           />
-          <P5Btn disabled={busy} onClick={() => void load()}>
-            {T.refreshSettings}
-          </P5Btn>
+          <div style={{ margin: "0 14px 4px" }}>
+            <P5Btn kind="ghost" disabled={busy} onClick={() => void load()}>
+              {T.refreshSettings}
+            </P5Btn>
+          </div>
         </>
-      )}
-      <a href={`tel:${PASSENGER_SUPPORT_PHONE}`}>
-        {T.supportPhone(PASSENGER_SUPPORT_PHONE)}
-      </a>
-    </AuthScreen>
+      ),
+    };
+  }
+  const view = currentView();
+  return (
+    <PlanScreen title={view.title} right={view.right} overlay={view.overlay}>
+      {view.body}
+    </PlanScreen>
   );
+}
+
+/** 「今日 14:45」 style for the browser-local datetime-local draft value. */
+export function scheduleLabel(local: string, now = new Date()) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local);
+  if (!match) return local.replace("T", " ");
+  const [, year, month, day, hour, minute] = match;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const key = (date: Date) =>
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const tomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+  );
+  const date = `${year}-${month}-${day}`;
+  const time = `${hour}:${minute}`;
+  if (date === key(now)) return `${T.today} ${time}`;
+  if (date === key(tomorrow)) return `${T.tomorrow} ${time}`;
+  return `${year}/${month}/${day} ${time}`;
+}
+
+/** Local wall-clock of an API instant (「18:23」, with the date if not today). */
+export function clockLabel(iso: string, now = new Date()) {
+  const instant = new Date(iso);
+  if (!Number.isFinite(instant.getTime())) return "—";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const time = `${pad(instant.getHours())}:${pad(instant.getMinutes())}`;
+  return instant.toDateString() === now.toDateString()
+    ? time
+    : `${instant.getMonth() + 1}/${instant.getDate()} ${time}`;
 }

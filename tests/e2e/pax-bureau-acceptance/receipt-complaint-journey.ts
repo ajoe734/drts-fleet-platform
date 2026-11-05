@@ -106,7 +106,7 @@ export async function completedOrderAftercare(
           r.url().endsWith(`/rides/${orderId}/ratings`) &&
           r.request().method() === "POST",
       );
-      await pax.getByRole("button", { name: "送出評價", exact: true }).click();
+      await pax.getByRole("button", { name: "送出評分", exact: true }).click();
       expect((await rated).status()).toBe(201);
       const before = (await authority(pax, orderId)).rating;
       expect(before.score).toBe(5);
@@ -131,7 +131,7 @@ export async function completedOrderAftercare(
       }
       await pax.reload();
       await expect(
-        pax.getByRole("button", { name: "送出評價", exact: true }),
+        pax.getByRole("button", { name: "送出評分", exact: true }),
       ).toHaveCount(0);
       expect((await authority(pax, orderId)).rating).toEqual(before);
       await recordOrderEvidence(

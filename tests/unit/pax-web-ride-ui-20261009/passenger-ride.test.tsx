@@ -165,10 +165,10 @@ describe("Passenger Ride UI Acceptance", () => {
 
     fireEvent.click(screen.getByLabelText("2 星"));
     fireEvent.click(screen.getByText("車內異味"));
-    fireEvent.click(screen.getByText("送出評價"));
+    fireEvent.click(screen.getByText("送出評分"));
 
     await waitFor(() => {
-      expect(screen.getByText("評價已送出")).toBeTruthy();
+      expect(screen.getByText("評分已送出")).toBeTruthy();
     });
 
     expect(fetchCalls[0].body).toMatchObject({
@@ -197,7 +197,7 @@ describe("Passenger Ride UI Acceptance", () => {
     expect(fetchCalls[0].body.contactConsent).toBe(false);
   });
 
-  it("CertificateCard renders HTML and PDF download links correctly without embedding iframe", async () => {
+  it("CertificateCard offers the E-04 PDF download without embedding an iframe", async () => {
     const view = {
       order: { orderId: "order-uuid", status: "completed" },
       receipt: {
@@ -218,10 +218,39 @@ describe("Passenger Ride UI Acceptance", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("下載 HTML")).toBeTruthy();
-      expect(screen.getByText("下載 PDF")).toBeTruthy();
+      expect(
+        screen.getByText("下載 PDF").closest("a")?.getAttribute("href"),
+      ).toBe("https://example.com/authorized.pdf");
       expect(document.querySelector("iframe")).toBeNull();
     });
+    // The plan's E-04 page offers PDF only; HTML stays a fallback artifact.
+    expect(screen.queryByText("下載 HTML")).toBeNull();
+  });
+
+  it("CertificateCard falls back to the HTML artifact only when no PDF exists", async () => {
+    fetchResponse = {
+      ride: {
+        order: { orderId: "order-uuid", status: "completed" },
+        receipt: { receiptUrl: "https://example.com/authorized.html" },
+        actions: { canReadReceipt: true },
+      },
+    };
+
+    render(
+      <PassengerRidePage
+        token="order-uuid"
+        searchParams={{ mode: "live" }}
+        kind="receipt"
+        authMode="id"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("下載 HTML").closest("a")?.getAttribute("href"),
+      ).toBe("https://example.com/authorized.html");
+    });
+    expect(screen.queryByText("下載 PDF")).toBeNull();
   });
 
   it("MapCard freshness relies on calculatedAt rather than event arrival time", async () => {

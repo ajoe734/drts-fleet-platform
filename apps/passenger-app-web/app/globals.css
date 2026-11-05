@@ -6,6 +6,29 @@ body {
   font-family: sans-serif;
 }
 
+/* Pages share a phone-width column; a screen in the device frame centers
+   itself instead, so on a desktop it is not squeezed into that column. */
+#passenger-app-root {
+  width: 100%;
+  max-width: 390px;
+  margin: 0 auto;
+}
+#passenger-app-root:has(.pax-device) {
+  max-width: none;
+}
+/* A screen that shows the plan's own footer (客服 · 主管機關申訴 · 僅提供預約叫車)
+   replaces the shared contact footer. */
+#passenger-app-root:has([data-pax-footer]) > #passenger-root-footer {
+  display: none;
+}
+
+/* Inside the fixed-height device frame the content scrolls; its cards keep
+   their own height instead of being squeezed and clipped (an inline `flex`
+   still lets a child grow or shrink on purpose). */
+.pax-scroll > * {
+  flex-shrink: 0;
+}
+
 /* The ride and history screens draw a device frame for desktop previews.
    On an actual phone the page is the device: drop the bezel and the drawn
    status bar instead of nesting a phone inside the phone. */

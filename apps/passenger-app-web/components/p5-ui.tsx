@@ -121,6 +121,7 @@ export function P5Phone({
         <span style={{ fontFamily: P5.mono }}>5G ▮▮▮</span>
       </div>
       <div
+        className="pax-scroll"
         style={{
           flex: 1,
           overflowY: "auto",
@@ -895,9 +896,12 @@ export function P5Seatbelt() {
   );
 }
 
+/** The plan's in-app footer; it replaces the layout's shared contact footer
+ * on any page that shows it (see globals.css). */
 export function P5Notice() {
   return (
     <div
+      data-pax-footer=""
       style={{
         margin: "auto 14px 14px",
         paddingTop: 6,

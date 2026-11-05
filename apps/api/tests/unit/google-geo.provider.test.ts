@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
 import { GeoProviderError } from "../../src/modules/geo/geo.provider";
-import { GoogleGeoProvider } from "../../src/modules/geo/google-geo.provider";
+import {
+  GoogleGeoProvider,
+  displayAddress,
+} from "../../src/modules/geo/google-geo.provider";
 
 const env = {
   GOOGLE_MAPS_GEOCODING_API_KEY: "test-geocoding-key",
@@ -62,7 +65,10 @@ describe("GoogleGeoProvider", () => {
         {
           candidateId: "google:ChIJTaipeiStation",
           placeId: "ChIJTaipeiStation",
-          address: "100台北市中正區北平西路3號",
+          // Read from 縣市 onwards; the full text stays the normalized form.
+          address: "台北市中正區北平西路3號",
+          displayName: "台北市中正區北平西路3號",
+          normalizedAddress: "100台北市中正區北平西路3號",
           district: "中正區",
           locality: "台北市",
           countryCode: "TW",
@@ -216,5 +222,25 @@ describe("Google provider health", () => {
         expect.objectContaining({ name: "external_adapter", status: "pass" }),
       ]),
     });
+  });
+});
+
+describe("displayAddress", () => {
+  it.each([
+    ["220台灣新北市板橋區板橋車站", "TW", "新北市板橋區板橋車站"],
+    ["100臺灣臺北市中正區北平西路3號", "TW", "臺北市中正區北平西路3號"],
+    [
+      "台灣新北市板橋區縣民大道1段193號府中",
+      null,
+      "新北市板橋區縣民大道1段193號府中",
+    ],
+    [
+      "1-1 Marunouchi, Chiyoda City, Tokyo 100-0005, Japan",
+      "JP",
+      "1-1 Marunouchi, Chiyoda City, Tokyo 100-0005, Japan",
+    ],
+    ["台灣", "TW", "台灣"],
+  ])("%s → %s", (formatted, country, expected) => {
+    expect(displayAddress(formatted, country)).toBe(expected);
   });
 });

@@ -1,7 +1,7 @@
 import { PassengerRidePage } from "../../../components/ride/passenger-ride-page";
 import { notFound } from "next/navigation";
 import { ReviewRideControls } from "../../../components/review-demo/ride-controls";
-import { TrialRideControls } from "../../../components/trial/trial-ride-controls";
+import { TrialAutoDriver } from "../../../components/trial/trial-auto-driver";
 
 export default async function RideDetailPage({
   params,
@@ -16,7 +16,7 @@ export default async function RideDetailPage({
   return (
     <>
       <ReviewRideControls orderId={id} />
-      <TrialRideControls orderId={id} />
+      <TrialAutoDriver orderId={id} />
       <PassengerRidePage
         token={id}
         searchParams={await searchParams}

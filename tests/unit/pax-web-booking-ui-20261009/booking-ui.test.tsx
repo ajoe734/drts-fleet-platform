@@ -21,8 +21,10 @@ import type { PassengerFareRepository } from "../../../apps/api/src/modules/pass
 import type { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { BookingScreen } from "../../../apps/passenger-app-web/components/booking/booking-screen";
+import { BOOKING_RECOVERY_KEY } from "../../../apps/passenger-app-web/components/booking/booking-draft-recovery";
 import Home from "../../../apps/passenger-app-web/app/page";
 import FaresPage from "../../../apps/passenger-app-web/app/fares/page";
+import FeesPage from "../../../apps/passenger-app-web/app/fees/page";
 import { bookingFixture, selection } from "./fixture";
 import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
 
@@ -109,6 +111,18 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     render(<Home />);
     await form();
     expect(screen.getByText(/本服務僅提供預約叫車/)).toBeTruthy();
+    // 附錄 E in-app footer: the only support contact on the booking screen.
+    const footers = document.querySelectorAll("[data-pax-footer]");
+    expect(footers).toHaveLength(1);
+    expect(footers[0]!.textContent).toBe(
+      "客服 02-2944-0985 · 主管機關申訴 1999本服務僅提供預約叫車",
+    );
+    expect(
+      screen
+        .getAllByRole("link")
+        .filter((link) => link.getAttribute("href")?.startsWith("tel:"))
+        .map((link) => link.textContent),
+    ).toEqual(["客服 02-2944-0985", "主管機關申訴 1999"]);
   });
   it("persists mandatory first-use acknowledgement, reuses it on reload", async () => {
     delete f.account.feeAcknowledgementVersion;
@@ -178,15 +192,15 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     await waitFor(() => expect(document.activeElement).toBe(dialog));
     expect(dialog.style.borderRadius).toBe("20px 20px 0 0");
     expect(document.querySelector("[data-booking-backdrop]")).not.toBeNull();
-    for (const label of [
-      "上車地點",
-      "下車地點",
-      "預約時間",
-      "預估車資",
-      "支付方式",
-    ])
+    // 附錄 E-19b row labels; the quote expiry is a local clock, not ISO.
+    for (const label of ["上車", "下車", "預約時間", "預估車資", "支付方式"])
       expect(within(dialog.querySelector("dl")!).getByText(label)).toBeTruthy();
     expect(within(dialog).getByText("NT$ 320–380")).toBeTruthy();
+    expect(within(dialog).getByText("2099/10/11 12:00")).toBeTruthy();
+    expect(
+      within(dialog).getByText(/^試算有效至 \d+\/\d+ \d{2}:\d{2}$/),
+    ).toBeTruthy();
+    expect(dialog.textContent).not.toMatch(/T\d{2}:\d{2}|Z\b|synthetic-fare/);
     expect(
       within(dialog)
         .getByRole("button", { name: "確認叫車" })
@@ -505,7 +519,7 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     render(<BookingScreen />);
     await quote();
     const link = screen.getByRole("link", { name: "查看完整費用與優惠說明" });
-    expect(link.getAttribute("href")).toBe("/fares");
+    expect(link.getAttribute("href")).toBe("/fees");
     expect(link.getAttribute("target")).toBe("_blank");
     click("返回修改");
     await form();
@@ -869,13 +883,222 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
   });
 });
 
+describe("the time the app proposes stays bookable until the passenger picks one", () => {
+  const SHORT_LEAD = "預約時間不符合最短前置時間規定";
+  const REFRESHED = "原預約時間已過，已為您更新時間，請重新試算車資。";
+  const timeField = () => screen.getByLabelText("預約時間") as HTMLInputElement;
+  const fieldMs = () => new Date(timeField().value).getTime();
+  const minutes = (count: number) => count * 60_000;
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  async function start() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // The value ride.smarttransport.tw reports on shared dev.
+    f.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    await selectAddress(0, "上車");
+    await selectAddress(1, "下車");
+  }
+
+  it("minutes spent on the addresses never trip the lead refusal", async () => {
+    await start();
+    await advance(minutes(10));
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+    expect(calls("/quotes")).toHaveLength(1);
+    expect(
+      Date.parse(String(calls("/quotes")[0]!.body.scheduledAt)),
+    ).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+  });
+  it("the quoted time survives confirming the sheet and is the time booked", async () => {
+    await start();
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    await advance(minutes(3));
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+    expect(calls("/rides")[0]!.body.scheduledAt).toBe(
+      calls("/quotes")[0]!.body.scheduledAt,
+    );
+  });
+  it("the proposal stays fixed on the sheet, whose quote is bound to it", async () => {
+    await start();
+    click("試算車資");
+    const dialog = await screen.findByRole("dialog", { name: "確認叫車" });
+    const shown = within(dialog).getByText(
+      /^(今日|明日) \d{2}:\d{2}$/,
+    ).textContent;
+    await advance(minutes(2));
+    expect(
+      within(dialog).getByText(/^(今日|明日) \d{2}:\d{2}$/).textContent,
+    ).toBe(shown);
+  });
+  it("a proposal that outlives the sheet comes back refreshed, without booking", async () => {
+    await start();
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    await advance(minutes(10));
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(REFRESHED);
+    expect(calls("/rides")).toHaveLength(0);
+    await form();
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(calls("/quotes")).toHaveLength(2);
+  });
+  it("a server too-soon refusal returns to the form instead of blaming the account or card", async () => {
+    await start();
+    f.errors.set("POST /api/passenger-app/rides", {
+      status: 400,
+      code: "TOO_SOON_TO_BOOK",
+    });
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(REFRESHED);
+    await form();
+    expect(
+      screen.queryByText("無法送出叫車，請確認帳號與付款方式後重試。"),
+    ).toBeNull();
+  });
+  it("a time the passenger picked is never moved, and is still refused once too short", async () => {
+    await start();
+    const picked = new Date(Date.now() + minutes(3));
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const local = `${picked.getFullYear()}-${pad(picked.getMonth() + 1)}-${pad(picked.getDate())}T${pad(picked.getHours())}:${pad(picked.getMinutes())}`;
+    fireEvent.change(timeField(), { target: { value: local } });
+    await advance(minutes(10));
+    expect(timeField().value).toBe(local);
+    click("試算車資");
+    await screen.findByText(SHORT_LEAD);
+    expect(timeField().value).toBe(local);
+    expect(calls("/quotes")).toHaveLength(0);
+  });
+  it("a server too-soon refusal of a picked time keeps it and says so", async () => {
+    await start();
+    f.errors.set("POST /api/passenger-app/rides", {
+      status: 400,
+      code: "TOO_SOON_TO_BOOK",
+    });
+    fireEvent.change(timeField(), { target: { value: "2099-10-11T12:00" } });
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    confirmed();
+    click("確認叫車");
+    await screen.findByText(SHORT_LEAD);
+    await form();
+    expect(timeField().value).toBe("2099-10-11T12:00");
+  });
+  it("a recovered draft whose time has passed gets a new proposal and keeps its addresses", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    f.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
+    const stop = (address: string) => ({
+      address,
+      lat: 25,
+      lng: 121,
+      coordinateSource: "provider_candidate",
+      geocodeConfidence: "exact",
+      geocodeProvider: "synthetic-http",
+      surface: "passenger_entry",
+    });
+    sessionStorage.setItem(
+      BOOKING_RECOVERY_KEY,
+      JSON.stringify({
+        version: 1,
+        accountId: f.account.drtsPassengerId,
+        draft: {
+          origin: stop("台北市上車測試路1號"),
+          destination: stop("台北市下車測試路1號"),
+          localTime: "2000-01-01T00:00",
+        },
+        pending: null,
+      }),
+    );
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(fieldMs()).toBeGreaterThanOrEqual(Date.now() + minutes(1));
+    expect(screen.getAllByRole("button", { name: "清除選點" })).toHaveLength(2);
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(screen.queryByText(SHORT_LEAD)).toBeNull();
+  });
+  it("a recovered draft whose picked time is still bookable keeps it", async () => {
+    sessionStorage.setItem(
+      BOOKING_RECOVERY_KEY,
+      JSON.stringify({
+        version: 1,
+        accountId: f.account.drtsPassengerId,
+        draft: {
+          origin: null,
+          destination: null,
+          localTime: "2099-10-11T12:00",
+        },
+        pending: null,
+      }),
+    );
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(timeField().value).toBe("2099-10-11T12:00");
+  });
+});
+
 describe("real public fare component", () => {
+  const tariffRow = (label: string) =>
+    screen.getByText(label).parentElement!.textContent;
   it("shows active API tariff values, authoritative free cancellation and no invented document number", async () => {
     render(<FaresPage />);
-    await screen.findByText("起程 1.25 公里：NT$ 85");
-    expect(screen.getByText("延滯計時每 60 秒：NT$ 5")).toBeTruthy();
-    expect(screen.getByText("夜間 23:00–06:00 每趟加收 NT$ 20")).toBeTruthy();
-    expect(screen.getByText(/任何允許取消的時間均不收取消費/)).toBeTruthy();
+    await screen.findByText("起程運價（1.25 公里）");
+    expect(tariffRow("起程運價（1.25 公里）")).toBe(
+      "起程運價（1.25 公里）NT$ 85",
+    );
+    expect(tariffRow("續程運價（每 200 公尺）")).toBe(
+      "續程運價（每 200 公尺）NT$ 5",
+    );
+    expect(tariffRow("延滯計時（每 60 秒）")).toBe("延滯計時（每 60 秒）NT$ 5");
+    expect(tariffRow("夜間加成（23:00–06:00）")).toBe(
+      "夜間加成（23:00–06:00）每趟 +NT$ 20",
+    );
+    expect(screen.getByText("已生效")).toBeTruthy();
+    // E-05 keeps the tariff only; the always-free cancellation lives on the
+    // linked public 費用與優惠說明 page.
+    expect(
+      screen
+        .getByRole("link", { name: "查看完整費用與優惠說明" })
+        .getAttribute("href"),
+    ).toBe("/fees");
+    expect(screen.queryByText(/1130042|F-2026/)).toBeNull();
+    expect(calls("/fares")).toHaveLength(1);
+    expect(calls("/me")).toHaveLength(0);
+  });
+  it("public 費用與優惠說明 shows the supplement's final clauses without an account", async () => {
+    render(<FeesPage />);
+    const card = await screen.findByRole("region", { name: "費用與優惠說明" });
+    expect(within(card).getByText("取消費").parentElement?.textContent).toBe(
+      "取消費不收取（指派前取消不收費）",
+    );
+    // G201011 補件 §3.3: no fee text beyond the eight final clauses.
+    expect(
+      within(card).queryByText(/任何允許取消的時間均不收取消費/),
+    ).toBeNull();
+    expect(
+      screen.getByText(
+        "版本 synthetic-fare-v1 · 生效日 2023/04/01 · 依主管機關核定運價及備查優惠辦理",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "查看現行計費表" }).getAttribute("href"),
+    ).toBe("/fares");
+    expect(screen.queryByRole("button", { name: "我已閱讀並同意" })).toBeNull();
     expect(calls("/fares")).toHaveLength(1);
     expect(calls("/me")).toHaveLength(0);
   });
@@ -888,29 +1111,30 @@ describe("real public fare component", () => {
     await screen.findByText("目前無法取得公開費率，請稍後重試。");
     f.errors.clear();
     click("重試公開費率");
-    await screen.findByText("起程 1.25 公里：NT$ 85");
+    await screen.findByText("起程運價（1.25 公里）");
   });
 });
 
 describe("USER copy through the original mounted booking and public fare flows", () => {
-  it("USER copy: first-use E19a displays exactly the eight supplied clauses before durable acknowledgement", async () => {
+  it("USER copy: first-use E19a displays the supplement's eight final clauses verbatim before durable acknowledgement", async () => {
     delete f.account.feeAcknowledgementVersion;
     render(<BookingScreen />);
     await screen.findByRole("button", { name: "我已閱讀並同意" });
-    const card = screen.getByText("費用與優惠說明").closest("section")!;
+    const card = screen.getByRole("region", { name: "費用與優惠說明" });
     expect(
       within(card)
         .getAllByText(/.+/, { selector: "strong" })
         .map((label) => label.parentElement?.textContent),
     ).toEqual([
-      "車資依核定運價含延滯計時",
-      "預約費不另收",
-      "取消費不收",
-      "等待費不另收",
-      "遺失物補償金不收",
-      "汙損清潔費實支實付",
-      "國道通行費經同意後實收",
-      "優惠活動目前無",
+      "車資依主管機關核定運價計費（含延滯計時）",
+      "預約費不另收取",
+      "取消費不收取（指派前取消不收費）",
+      "等待費不另收取（車資依核定運價含延滯計時計收）",
+      "遺失物返還補償金不收取；如要求專程送還，所生車資由乘客負擔並於送還前確認",
+      "車內汙損清潔費由可歸責之乘客負擔實際清潔費用，實支實付、憑單據計收",
+      "國道通行費經乘客同意行駛後實收",
+      // 優惠活動 carries the 目前無 chip before its clause.
+      "優惠活動目前無目前無；如有，依規定備查後於本頁公告",
     ]);
     expect(screen.queryByLabelText("預約時間")).toBeNull();
     expect(calls("/quotes")).toHaveLength(0);
@@ -921,7 +1145,7 @@ describe("USER copy through the original mounted booking and public fare flows",
     });
   });
 
-  it("USER copy: E19b retains four rules without the obsolete pre-assignment limit and stays natively unchecked", async () => {
+  it("USER copy: E19b shows the supplement's four rules verbatim and stays natively unchecked", async () => {
     render(<BookingScreen paymentSelection={selection} />);
     await quote();
     const dialog = screen.getByRole("dialog");
@@ -933,14 +1157,13 @@ describe("USER copy through the original mounted booking and public fare flows",
         .map((row) => row.textContent),
     ).toEqual([
       "車資依核定運價計費（含延滯計時）",
-      "預約費、取消費、等待費：不另收",
+      "預約費、取消費（指派前）、等待費：不另收",
       "國道通行費經您同意行駛後實收",
       "車內汙損清潔費實支實付",
     ]);
-    expect(within(rules).queryByText(/指派前/)).toBeNull();
     expect(
-      within(rules).getByText(/任何允許取消的時間均不收取消費/),
-    ).toBeTruthy();
+      within(rules).queryByText(/任何允許取消的時間均不收取消費/),
+    ).toBeNull();
     const checkbox = within(dialog).getByLabelText(
       "我已確認費用與優惠說明",
     ) as HTMLInputElement;
@@ -949,21 +1172,29 @@ describe("USER copy through the original mounted booking and public fare flows",
     }) as HTMLButtonElement;
     expect(checkbox.checked).toBe(false);
     expect(submit.disabled).toBe(true);
+    // E-19c: the disabled confirm explains what is missing.
+    expect(
+      within(dialog).getByText("請先勾選「我已確認費用與優惠說明」"),
+    ).toBeTruthy();
     fireEvent.click(submit);
     expect(calls("/rides")).toHaveLength(0);
     fireEvent.click(checkbox);
     expect(checkbox.checked).toBe(true);
     expect(submit.disabled).toBe(false);
+    expect(
+      within(dialog).queryByText("請先勾選「我已確認費用與優惠說明」"),
+    ).toBeNull();
   });
 
   it("USER copy: standalone fares show the exact footer and the actual API announcement date", async () => {
     render(<FaresPage />);
     await screen.findByText("本頁依主管機關公告之現行運價揭露");
     const stamp = screen.getByText(/版本 synthetic-fare-v1/);
-    expect(stamp.textContent).toContain(
-      "依臺北市政府公告計程車運價（112/04/01起實施）",
+    // E-05 order: version, then the announcement day derived from the API
+    // value; the raw ISO wire value is not printed.
+    expect(stamp.textContent).toBe(
+      "版本 synthetic-fare-v1 · 依臺北市政府公告計程車運價（112/04/01起實施）",
     );
-    expect(stamp.textContent).toContain(f.fare.effectiveAt);
     expect(calls("/fares")).toHaveLength(1);
     expect(calls("/me")).toHaveLength(0);
   });
@@ -980,7 +1211,6 @@ describe("USER copy through the original mounted booking and public fare flows",
       expect(stamp.textContent).toContain(
         `依臺北市政府公告計程車運價（${expectedDay}起實施）`,
       );
-      expect(stamp.textContent).toContain(effectiveAt);
       expect(calls("/fares")).toHaveLength(1);
     },
   );
@@ -992,7 +1222,7 @@ describe("USER copy through the original mounted booking and public fare flows",
     expect(stamp.textContent).toContain(
       "依臺北市政府公告計程車運價（112/04/01起實施）",
     );
-    expect(stamp.textContent).toContain("2023-03-31T16:00:00.000Z");
+    expect(stamp.textContent).not.toContain("2023-03-31T16:00:00.000Z");
     expect(screen.queryByText(/112\/03\/31/)).toBeNull();
   });
 
@@ -1004,7 +1234,8 @@ describe("USER copy through the original mounted booking and public fare flows",
     expect(stamp.textContent).toContain(
       "依臺北市政府公告計程車運價（119/04/01起實施）",
     );
-    expect(stamp.textContent).toContain(f.fare.effectiveAt);
+    // A not-yet-reached API date is never badged as already effective.
+    expect(screen.queryByText("已生效")).toBeNull();
     expect(screen.queryByText(/112\/04\/01/)).toBeNull();
   });
 

@@ -755,6 +755,9 @@ jobs:
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           referral_embed_secret_args="$web_secret_args"
           ops_secret_args="$web_secret_args"
+          # The passenger app's BFF holds no tenant secrets; it mounts only the
+          # map browser key below, when the map secrets are provisioned.
+          passenger_app_secret_args=""
           map_provider_mode="mock"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
@@ -868,6 +871,8 @@ jobs:
             # The referral embed's pickup/drop-off map uses the same browser key;
             # its route hands it only to origins on MAP_PROVIDER_ALLOWED_ORIGINS.
             referral_embed_secret_args="${referral_embed_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            # So do the passenger app's ride tracking and booking maps.
+            passenger_app_secret_args="GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
             map_provider_mode="external"
           elif [[ "$map_secret_count" -ne 0 ]]; then
             echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
@@ -981,6 +986,7 @@ jobs:
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "passenger_app=${passenger_app_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
           echo "bank_console=${bank_console_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
@@ -1616,21 +1622,39 @@ jobs:
           set -euo pipefail
           IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
-          env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          # "@" separates the values because the map origin list has commas.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@DRTS_API_URL=${{ steps.api_url.outputs.url }}@DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           passenger_public_only=false
           if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
             passenger_public_only=true
           fi
-          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
-          env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
+          env_vars="${env_vars}@PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
+          env_vars="${env_vars}@PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
+          # Ride tracking and booking maps: the app hands the browser key only
+          # to its public origins listed in MAP_PROVIDER_ALLOWED_ORIGINS, which
+          # mirror the key's referrer list.
+          map_provider_mode="${{ steps.api_secrets.outputs.map_provider_mode }}"
+          map_provider_name=mock
+          if [[ "$map_provider_mode" == "external" ]]; then
+            map_provider_name=google
+          fi
+          env_vars="${env_vars}@MAP_PROVIDER_MODE=${map_provider_mode}@MAP_PROVIDER_NAME=${map_provider_name}"
+          if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
+            env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          fi
+          passenger_app_secrets="${{ steps.api_secrets.outputs.passenger_app }}"
+          secret_flags=(--clear-secrets)
+          if [[ -n "$passenger_app_secrets" ]]; then
+            secret_flags=(--set-secrets "$passenger_app_secrets")
+          fi
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3009 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --clear-secrets \
+            "${secret_flags[@]}" \
             --set-env-vars "$env_vars" \
             ${{ needs.prepare.outputs.passenger_app_exposure_flag }} \
             --cpu 1 \
