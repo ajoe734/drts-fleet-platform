@@ -41,6 +41,7 @@ import {
   STAGE_TEST_CARD,
   createRecordingFetch,
   describeCallbackBodyShape,
+  diagnoseEnvelopeVerification,
   digest12,
   maskInLog,
   writeEvidence,
@@ -374,6 +375,19 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
         // failure still leaves this in the evidence artifact.
         for (const [key, value] of Object.entries(
           describeCallbackBodyShape(orderResultBody!),
+        ))
+          outcome[key] = value;
+        // Narrows which specific check inside verifyAndUnwrapEcpayEnvelope
+        // rejects the real callback, since the combined function (called
+        // right below via verifyNotification) only ever throws one generic
+        // error regardless of which stage actually failed.
+        for (const [key, value] of Object.entries(
+          diagnoseEnvelopeVerification({
+            raw: orderResultBody!,
+            merchantId,
+            hashKey,
+            hashIv,
+          }),
         ))
           outcome[key] = value;
 

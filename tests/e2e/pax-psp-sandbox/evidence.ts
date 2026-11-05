@@ -18,7 +18,11 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { verifyAndUnwrapEcpayEnvelope } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-cipher";
+import {
+  decryptEcpayData,
+  normalizeEcpayEnvelopeInput,
+  verifyAndUnwrapEcpayEnvelope,
+} from "../../../apps/api/src/modules/passenger-app/payment/ecpay-cipher";
 import type { EcpayFetchFn } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-payment-provider";
 
 export const EVIDENCE_SCHEMA = "pax-psp-sandbox-evidence/v1";
@@ -230,6 +234,95 @@ export function describeCallbackBodyShape(raw: string): Record<string, Scalar> {
     // rejects it even though the envelope is genuine.
     callbackHasFlatHeaderField: rpHeaderRaw !== null,
   };
+}
+
+/**
+ * Narrows exactly which stage of `verifyAndUnwrapEcpayEnvelope` rejects a
+ * real ECPay callback, by calling the same exported, unmodified helpers
+ * (`normalizeEcpayEnvelopeInput`, `decryptEcpayData`) step by step instead of
+ * the combined function, which only ever throws one generic error. Records
+ * field *names*, booleans, lengths and a clock-skew delta only — never a
+ * field value — so a HashKey/HashIV/PAN/token can never leak through this
+ * diagnostic even though it has them in scope to attempt the real decrypt.
+ */
+export function diagnoseEnvelopeVerification(params: {
+  raw: string;
+  merchantId: string;
+  hashKey: string;
+  hashIv: string;
+  nowSeconds?: number;
+}): Record<string, Scalar> {
+  const { raw, merchantId, hashKey, hashIv } = params;
+  const nowSeconds = params.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const out: Record<string, Scalar> = {};
+
+  let record: Record<string, unknown>;
+  try {
+    record = normalizeEcpayEnvelopeInput(raw);
+  } catch {
+    out.diag_normalize_ok = false;
+    return out;
+  }
+  out.diag_normalize_ok = true;
+  out.diag_record_keys = Object.keys(record).sort().join(",");
+
+  const merchantIdField = record.MerchantID;
+  out.diag_merchantId_field_kind = typeof merchantIdField;
+  out.diag_merchantId_matches =
+    typeof merchantIdField === "string" &&
+    merchantIdField.trim() === merchantId.trim();
+
+  let headerRaw: unknown = record.RpHeader ?? record.RqHeader;
+  out.diag_header_field_kind = typeof headerRaw;
+  if (typeof headerRaw === "string") {
+    try {
+      headerRaw = JSON.parse(headerRaw.trim());
+      out.diag_header_string_parsed_ok = true;
+    } catch {
+      out.diag_header_string_parsed_ok = false;
+    }
+  }
+  const headerIsObject =
+    !!headerRaw && typeof headerRaw === "object" && !Array.isArray(headerRaw);
+  out.diag_header_is_object = headerIsObject;
+  if (headerIsObject) {
+    const headerRecord = headerRaw as Record<string, unknown>;
+    out.diag_timestamp_present = headerRecord.Timestamp !== undefined;
+    const timestamp = Number(headerRecord.Timestamp);
+    out.diag_timestamp_is_safe_integer = Number.isSafeInteger(timestamp);
+    if (Number.isSafeInteger(timestamp)) {
+      out.diag_timestamp_skew_seconds = Math.abs(nowSeconds - timestamp);
+      out.diag_timestamp_within_window =
+        Math.abs(nowSeconds - timestamp) <= 600;
+    }
+  }
+
+  const transCodeField = record.TransCode;
+  out.diag_transCode_field_present = transCodeField !== undefined;
+  if (transCodeField !== undefined) {
+    out.diag_transCode_is_safe_integer = Number.isSafeInteger(
+      Number(transCodeField),
+    );
+  }
+
+  const cipherText = record.Data ?? record.ResultData;
+  out.diag_data_field_kind =
+    cipherText === undefined ? "missing" : typeof cipherText;
+  if (typeof cipherText === "string") {
+    const trimmedCipherText = cipherText.trim();
+    out.diag_data_field_length = trimmedCipherText.length;
+    out.diag_data_field_base64_like = /^[A-Za-z0-9+/]+={0,2}$/.test(
+      trimmedCipherText,
+    );
+  }
+  try {
+    const decrypted = decryptEcpayData(cipherText, hashKey, hashIv);
+    out.diag_decrypt_ok = true;
+    out.diag_decrypted_keys = Object.keys(decrypted).sort().join(",");
+  } catch {
+    out.diag_decrypt_ok = false;
+  }
+  return out;
 }
 
 export function createRecordingFetch(params: {
