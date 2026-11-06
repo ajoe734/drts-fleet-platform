@@ -2513,6 +2513,7 @@ function Actions({
   onCancel,
   onContact,
   onFixtureUpdate,
+  onAuthorityRefresh,
 }: {
   fixture: PassengerRideFixture;
   token: string;
@@ -2520,10 +2521,35 @@ function Actions({
   onCancel?: () => void;
   onContact?: () => void;
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
+  onAuthorityRefresh?: (() => Promise<void>) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
   const [contactFallback, setContactFallback] = useState<string | null>(null);
-  useEffect(() => setContactFallback(null), [token]);
+  const refreshOwner = React.useMemo(
+    () => ({ token, authMode, onAuthorityRefresh, active: true, sequence: 0 }),
+    [
+      token,
+      authMode,
+      onAuthorityRefresh,
+      fixture.status,
+      fixture.actionMode,
+      fixture.canCancel,
+      fixture.canContact,
+      fixture.assignment?.assignmentId,
+      fixture.assignment?.assignmentVersion,
+    ],
+  );
+  const refreshOwnerRef = useRef(refreshOwner);
+  refreshOwnerRef.current = refreshOwner;
+  useEffect(() => {
+    refreshOwner.active = true;
+    setActionPending(false);
+    setContactFallback(null);
+    return () => {
+      refreshOwner.active = false;
+      ++refreshOwner.sequence;
+    };
+  }, [refreshOwner]);
   if (fixture.status === "行程已取消") {
     return <CancelledActions token={token} authMode={authMode} />;
   }
@@ -2543,10 +2569,16 @@ function Actions({
       return;
     }
     setActionPending(true);
+    const sequence = ++refreshOwner.sequence;
+    const current = () =>
+      refreshOwner.active &&
+      refreshOwnerRef.current === refreshOwner &&
+      refreshOwner.sequence === sequence;
     const body =
       action === "cancel" && authMode !== "token" ? { rideId: token } : {};
     void requestPassengerRideAction(token, action, body, authMode === "token")
       .then((res: unknown) => {
+        if (!current()) return;
         const result =
           res as import("@drts/contracts").PassengerRideContactOption;
         if (action === "contact") {
@@ -2561,6 +2593,7 @@ function Actions({
         window.location.reload();
       })
       .catch((error: unknown) => {
+        if (!current()) return;
         window.alert(
           error instanceof Error ? error.message : "PASSENGER_ACTION_FAILED",
         );
@@ -2578,6 +2611,24 @@ function Actions({
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
+    if (onAuthorityRefresh) {
+      const sequence = ++refreshOwner.sequence;
+      const current = () =>
+        refreshOwner.active &&
+        refreshOwnerRef.current === refreshOwner &&
+        refreshOwner.sequence === sequence;
+      void onAuthorityRefresh()
+        .catch((error: unknown) => {
+          if (!current()) return;
+          window.alert(
+            error instanceof Error ? error.message : "AUTHORITY_REFRESH_FAILED",
+          );
+        })
+        .finally(() => {
+          if (current()) setActionPending(false);
+        });
+      return;
+    }
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
         const isTerminal =
@@ -2893,6 +2944,7 @@ function RideContent({
   authMode,
   onCertificateUpdate,
   onFixtureUpdate,
+  onAuthorityRefresh,
   onOpenComplaint,
 }: {
   fixture: PassengerRideFixture;
@@ -2902,6 +2954,7 @@ function RideContent({
     | ((cert: PassengerCertificatePresentation) => void)
     | undefined;
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
+  onAuthorityRefresh?: (() => Promise<void>) | undefined;
   onOpenComplaint?: (() => void) | undefined;
 }) {
   if (fixture.status === "行程已取消") {
@@ -2939,6 +2992,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -2975,6 +3029,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
         <ComplaintForm
           token={token}
@@ -3005,6 +3060,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3047,6 +3103,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3084,6 +3141,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3099,6 +3157,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3117,6 +3176,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3135,6 +3195,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3154,6 +3215,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3171,6 +3233,7 @@ function RideContent({
           token={token}
           authMode={authMode}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
         />
       </>
     );
@@ -3189,6 +3252,7 @@ function RideContent({
         token={token}
         authMode={authMode}
         onFixtureUpdate={onFixtureUpdate}
+        onAuthorityRefresh={onAuthorityRefresh}
       />
     </>
   );
@@ -3200,6 +3264,7 @@ function PassengerScreen({
   authMode,
   onCertificateUpdate,
   onFixtureUpdate,
+  onAuthorityRefresh,
 }: {
   fixture: PassengerRideFixture;
   token: string;
@@ -3208,6 +3273,7 @@ function PassengerScreen({
     | ((cert: PassengerCertificatePresentation) => void)
     | undefined;
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
+  onAuthorityRefresh?: (() => Promise<void>) | undefined;
 }) {
   const [complaintOpen, setComplaintOpen] = useState(false);
 
@@ -3267,6 +3333,7 @@ function PassengerScreen({
           authMode={authMode}
           onCertificateUpdate={onCertificateUpdate}
           onFixtureUpdate={onFixtureUpdate}
+          onAuthorityRefresh={onAuthorityRefresh}
           onOpenComplaint={() => setComplaintOpen(true)}
         />
         <FooterNotice />
@@ -3293,105 +3360,217 @@ export function PassengerRidePage({
     "connecting" | "connected" | "disconnected"
   >("connecting");
   const [lastEventTime, setLastEventTime] = useState<number>(0);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  // GET snapshots have no revision comparable with the SSE eventVersion.
+  // One owner coordinates both transports and is replaced with the page context.
+  const owner = React.useMemo(
+    () => ({
+      token,
+      authMode,
+      kind,
+      active: false,
+      fixture: null as PassengerRideFixture | null,
+      refreshSequence: 0,
+      sseRevision: 0,
+      streamEpoch: 0,
+    }),
+    [token, authMode, kind],
+  );
+  const ownerRef = useRef(owner);
+  ownerRef.current = owner;
+  const subscriptionRef = useRef<{
+    owner: typeof owner;
+    unsubscribe: () => void;
+  } | null>(null);
+  const isCurrentOwner = useCallback(
+    () => owner.active && ownerRef.current === owner,
+    [owner],
+  );
+
+  const applyFixture = useCallback(
+    (next: PassengerRideFixture) => {
+      if (!isCurrentOwner()) return;
+      owner.fixture = next;
+      const recordedAt = getPassengerLocationRecordedAt(next);
+      const timestamp = recordedAt ? new Date(recordedAt).getTime() : 0;
+      startTransition(() => {
+        setLiveFixture((previous) =>
+          isCurrentOwner() && owner.fixture === next ? next : previous,
+        );
+        setAuthorityError((previous) =>
+          isCurrentOwner() && owner.fixture === next ? null : previous,
+        );
+        setLastEventTime((previous) =>
+          isCurrentOwner() && owner.fixture === next
+            ? Number.isNaN(timestamp)
+              ? 0
+              : timestamp
+            : previous,
+        );
+      });
+    },
+    [owner, isCurrentOwner],
+  );
+
+  const stopSubscription = useCallback(() => {
+    ++owner.streamEpoch;
+    if (subscriptionRef.current?.owner === owner) {
+      const subscription = subscriptionRef.current;
+      subscriptionRef.current = null;
+      subscription.unsubscribe();
+    }
+    if (isCurrentOwner()) setConnectionState("disconnected");
+  }, [owner, isCurrentOwner]);
 
   const startSubscription = useCallback(() => {
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
+    if (!isCurrentOwner()) return;
+    const previous = subscriptionRef.current;
+    if (previous) {
+      ++previous.owner.streamEpoch;
+      subscriptionRef.current = null;
+      previous.unsubscribe();
     }
-    unsubscribeRef.current = subscribePassengerRideAuthority(
-      token,
-      (nextView) => {
-        startTransition(() => {
-          const fixture = mapPassengerRideAuthorityToFixture(
-            nextView.data,
-            token,
-            kind,
+    const epoch = ++owner.streamEpoch;
+    const current = () => isCurrentOwner() && owner.streamEpoch === epoch;
+    try {
+      const unsubscribe = subscribePassengerRideAuthority(
+        token,
+        (nextView) => {
+          if (!current()) return;
+          // Fence an overlapping GET before React commits the new fixture.
+          ++owner.sseRevision;
+          applyFixture(
+            mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
           );
-          setLiveFixture(fixture);
-          const newCalculatedAt = getPassengerLocationRecordedAt(fixture);
-          if (newCalculatedAt) {
-            const ts = new Date(newCalculatedAt).getTime();
-            setLastEventTime(Number.isNaN(ts) ? 0 : ts);
-          } else {
-            setLastEventTime(0);
-          }
-        });
-      },
-      authMode === "token",
-      (state) => {
-        setConnectionState(state);
-      },
-    );
-  }, [token, authMode, kind]);
+        },
+        authMode === "token",
+        (state) => {
+          if (current()) setConnectionState(state);
+        },
+      );
+      subscriptionRef.current = { owner, unsubscribe };
+    } catch {
+      // A stream setup failure must not erase a successful authority read.
+      if (current()) setConnectionState("disconnected");
+    }
+  }, [owner, isCurrentOwner, token, authMode, kind, applyFixture]);
 
   const handleFixtureUpdate = useCallback(
     (next: PassengerRideFixture) => {
-      startTransition(() => {
-        setLiveFixture(next);
-        const calculatedAt = getPassengerLocationRecordedAt(next);
-        if (calculatedAt) {
-          const ts = new Date(calculatedAt).getTime();
-          setLastEventTime(Number.isNaN(ts) ? 0 : ts);
-        } else {
-          setLastEventTime(0);
-        }
-      });
-      if (next.screenId !== "A04") {
-        if (!unsubscribeRef.current) {
-          startSubscription();
-        }
-      } else {
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current();
-          unsubscribeRef.current = null;
-        }
-      }
+      if (!isCurrentOwner()) return;
+      applyFixture(next);
+      if (next.screenId === "A04") stopSubscription();
+      else if (subscriptionRef.current?.owner !== owner) startSubscription();
     },
-    [startSubscription],
+    [owner, isCurrentOwner, applyFixture, stopSubscription, startSubscription],
   );
 
+  const handleAuthorityRefresh = useCallback(async () => {
+    if (!isCurrentOwner() || !owner.fixture) return;
+    const sequence = ++owner.refreshSequence;
+    const revision = owner.sseRevision;
+    const current = () =>
+      isCurrentOwner() && owner.refreshSequence === sequence;
+    let resynchronizing = false;
+    const resynchronize = async () => {
+      // An overlapping response could be older OR newer than the event. Read
+      // again with the old stream fenced, then restore the read→stream sequence.
+      resynchronizing = true;
+      stopSubscription();
+      setConnectionState("connecting");
+      return fetchPassengerRideAuthority(token, authMode === "token");
+    };
+    try {
+      let view;
+      try {
+        view = await fetchPassengerRideAuthority(token, authMode === "token");
+      } catch (error: unknown) {
+        if (!current()) return;
+        if (owner.sseRevision === revision) throw error;
+        view = await resynchronize();
+      }
+      if (!current()) return;
+      if (!resynchronizing && owner.sseRevision !== revision) {
+        view = await resynchronize();
+      }
+      if (!current()) return;
+      const fixture = owner.fixture;
+      if (!fixture) return;
+      const isTerminal =
+        view.order.status === "completed" || view.order.status === "cancelled";
+      const hasValidQuote = Boolean(
+        view.assignment?.routeFare?.payableFareMinor != null ||
+        view.assignment?.routeFare?.estimatedFareMinor != null,
+      );
+      const anomalyCode =
+        !isTerminal && !hasValidQuote && fixture.screenId === "A04"
+          ? (fixture as any).quoteAnomalyCode || "P5_QUOTE_PROVIDER_UNAVAILABLE"
+          : undefined;
+      handleFixtureUpdate(
+        mapPassengerRideAuthorityToFixture(view, token, kind, anomalyCode),
+      );
+    } catch (error: unknown) {
+      if (!current()) return;
+      console.error("Requote error", error);
+      const errCode =
+        (error as any)?.code ||
+        (error instanceof Error ? error.message : "AUTHORITY_REFRESH_FAILED");
+      const fixture = owner.fixture;
+      if (!fixture) return;
+      if (P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)) {
+        // A failed read does not revoke an already observed terminal state.
+        handleFixtureUpdate(
+          fixture.status === "行程已完成" || fixture.status === "行程已取消"
+            ? fixture
+            : retainFixtureQuoteAnomaly(fixture, errCode),
+        );
+      } else {
+        window.alert(errCode);
+        if (
+          current() &&
+          fixture.screenId !== "A04" &&
+          subscriptionRef.current?.owner !== owner
+        )
+          startSubscription();
+      }
+    }
+  }, [
+    owner,
+    isCurrentOwner,
+    token,
+    authMode,
+    kind,
+    stopSubscription,
+    handleFixtureUpdate,
+    startSubscription,
+  ]);
+
   useEffect(() => {
-    let active = true;
+    owner.active = true;
+    const sequence = ++owner.refreshSequence;
+    const current = () =>
+      isCurrentOwner() && owner.refreshSequence === sequence;
+    owner.fixture = null;
+    owner.sseRevision = 0;
+    stopSubscription();
     setLiveFixture(null);
     setAuthorityError(null);
     setConnectionState("connecting");
     setLastEventTime(0);
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
-    }
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
-        if (!active) return;
-        startTransition(() => {
-          const fixture = mapPassengerRideAuthorityToFixture(view, token, kind);
-          setLiveFixture(fixture);
-          setAuthorityError(null);
-          const recordedAt = getPassengerLocationRecordedAt(fixture);
-          if (recordedAt) {
-            const ts = new Date(recordedAt).getTime();
-            setLastEventTime(Number.isNaN(ts) ? 0 : ts);
-          } else {
-            setLastEventTime(0); // Make it stale if missing or cancelled
-          }
-        });
+        if (!current()) return;
+        applyFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
         startSubscription();
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        if (!current()) return;
         const errCode =
           (error as any)?.code ||
           (error instanceof Error
             ? error.message
             : "PASSENGER_AUTHORITY_UNAVAILABLE");
         if (P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)) {
-          startTransition(() => {
-            setLiveFixture(createFareQuoteAnomalyFixture(token, errCode));
-            setAuthorityError(null);
-            setLastEventTime(0);
-          });
+          applyFixture(createFareQuoteAnomalyFixture(token, errCode));
           return;
         }
         setAuthorityError(errCode);
@@ -3399,13 +3578,20 @@ export function PassengerRidePage({
         setLastEventTime(0);
       });
     return () => {
-      active = false;
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
+      owner.active = false;
+      ++owner.refreshSequence;
+      stopSubscription();
     };
-  }, [kind, token, authMode, startSubscription]);
+  }, [
+    owner,
+    token,
+    authMode,
+    kind,
+    isCurrentOwner,
+    applyFixture,
+    startSubscription,
+    stopSubscription,
+  ]);
 
   const fixture = liveFixture;
 
@@ -3430,7 +3616,9 @@ export function PassengerRidePage({
   }
 
   const handleCertificateUpdate = (cert: PassengerCertificatePresentation) => {
-    setLiveFixture((prev) => (prev ? { ...prev, certificate: cert } : null));
+    if (isCurrentOwner() && owner.fixture) {
+      applyFixture({ ...owner.fixture, certificate: cert });
+    }
   };
 
   return (
@@ -3446,6 +3634,7 @@ export function PassengerRidePage({
           authMode={authMode}
           onCertificateUpdate={handleCertificateUpdate}
           onFixtureUpdate={handleFixtureUpdate}
+          onAuthorityRefresh={handleAuthorityRefresh}
         />
       </PassengerConnectionProvider>
     </Shell>

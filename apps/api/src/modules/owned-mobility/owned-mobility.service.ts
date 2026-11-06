@@ -8508,6 +8508,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8526,6 +8527,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8547,6 +8549,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8828,6 +8831,8 @@ export class OwnedMobilityService
     if (proofPendingError) {
       const now = new Date().toISOString();
       task.status = "proof_pending";
+      task.actualDistanceKm = params.command.actualDistanceKm;
+      task.actualDurationSec = params.command.actualDurationSec;
       task.proof = params.proofHasEvidence ? params.proof : null;
       order.status = "proof_pending";
       order.updatedAt = now;
@@ -15178,11 +15183,14 @@ export class OwnedMobilityService
     assignment: DispatchAssignmentRecord,
     order: OwnedOrderRecord,
     proof: CompletionProofBundle,
+    command: DriverCompleteTaskCommand,
     requestId?: string,
   ): Promise<void> {
     const now = new Date().toISOString();
 
     task.status = "proof_pending";
+    task.actualDistanceKm = command.actualDistanceKm;
+    task.actualDurationSec = command.actualDurationSec;
     task.proof = this.hasCompletionProofEvidence(proof) ? proof : null;
     order.status = "proof_pending";
     order.updatedAt = now;

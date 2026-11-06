@@ -301,6 +301,9 @@ function getVisibleStateCode(
   job?: DispatchJobRecord,
   locale: Locale = "zh",
 ) {
+  if (OWNED_TERMINAL_STATUSES.has(order.status)) {
+    return order.status;
+  }
   const queueSemantics = resolveQueueSemantics(order, locale);
   if (queueSemantics.isStatutoryRefusal) {
     return "statutory_refusal";
