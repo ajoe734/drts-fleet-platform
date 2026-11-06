@@ -11,6 +11,7 @@ import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { signInBookablePassenger } from "./pax-review-shared-order/rehearsal-passenger";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
 import {
@@ -1397,51 +1398,53 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     });
     await registerDriver(ops, driver, DRIVER, step);
     await step("Passenger genuine OTP login and account", async () => {
-      await pax.goto(`${PAX}/login`);
-      await expect(
-        pax.getByLabel("同單審查演練", { exact: true }),
-      ).toBeVisible();
-      await pax
-        .getByRole("button", { name: "手機號碼登入", exact: true })
-        .click();
-      await info.attach("ordinary-entry-phone-login-pax", {
-        body: await pax.screenshot({ fullPage: true }),
-        contentType: "image/png",
+      let actualVerificationStatus = 0;
+      await signInBookablePassenger(pax, 0, async (phone) => {
+        await pax.goto(`${PAX}/login`);
+        await expect(
+          pax.getByLabel("同單審查演練", { exact: true }),
+        ).toBeVisible();
+        await pax
+          .getByRole("button", { name: "手機號碼登入", exact: true })
+          .click();
+        await info.attach("ordinary-entry-phone-login-pax", {
+          body: await pax.screenshot({ fullPage: true }),
+          contentType: "image/png",
+        });
+        await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
+        const requestedOtp = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/passenger-app/review-demo/otp" &&
+            response.request().method() === "POST",
+        );
+        await pax
+          .getByRole("button", { name: "取得驗證碼", exact: true })
+          .click();
+        const otpResponse = await requestedOtp;
+        expect(
+          otpResponse.ok(),
+          `Rehearsal SMS HTTP${otpResponse.status()}`,
+        ).toBe(true);
+        // The page shows the external simulated inbox. Do not attach its code,
+        // challenge, request bodies or screenshot to the exported evidence.
+        const code =
+          (await pax
+            .getByLabel("模擬簡訊驗證碼", { exact: true })
+            .textContent()) ?? "";
+        expect(/^\d{6}$/.test(code)).toBe(true);
+        await pax
+          .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
+          .fill(code);
+        const verification = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
+            response.request().method() === "POST",
+        );
+        await pax.getByRole("button", { name: "驗證", exact: true }).click();
+        actualVerificationStatus = (await verification).status();
+        expect(actualVerificationStatus).toBe(201);
       });
-      const phone = `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`;
-      await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
-      const requestedOtp = pax.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname ===
-            "/api/passenger-app/review-demo/otp" &&
-          response.request().method() === "POST",
-      );
-      await pax
-        .getByRole("button", { name: "取得驗證碼", exact: true })
-        .click();
-      const otpResponse = await requestedOtp;
-      expect(
-        otpResponse.ok(),
-        `Rehearsal SMS HTTP${otpResponse.status()}`,
-      ).toBe(true);
-      // The page shows the external simulated inbox. Do not attach its code,
-      // challenge, request bodies or screenshot to the exported evidence.
-      const code =
-        (await pax
-          .getByLabel("模擬簡訊驗證碼", { exact: true })
-          .textContent()) ?? "";
-      expect(/^\d{6}$/.test(code)).toBe(true);
-      await pax
-        .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
-        .fill(code);
-      const verification = pax.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
-          response.request().method() === "POST",
-      );
-      await pax.getByRole("button", { name: "驗證", exact: true }).click();
-      const actualVerificationStatus = (await verification).status();
-      expect(actualVerificationStatus).toBe(201);
       const accountResponse = await pax.request.get(
         `${PAX}/api/passenger-app/me`,
       );
