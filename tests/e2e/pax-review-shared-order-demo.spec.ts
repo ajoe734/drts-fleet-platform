@@ -11,6 +11,7 @@ import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { signInBookablePassenger } from "./pax-review-shared-order/rehearsal-passenger";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
 import {
@@ -235,6 +236,28 @@ async function registerDriver(
     await expect(driver).toHaveURL(/\/jobs$/);
     await ops.getByRole("button", { name: "隱藏註冊碼" }).click();
   });
+}
+
+/** The rehearsal phone comes from the run id (0900000000–0900000099) and each
+ * run binds two cards, so a phone's third run would hit the five-card cap.
+ * Remove earlier runs' cards through the ordinary UI before binding. */
+async function freeCardSlots(page: Page, needed: number) {
+  await page.goto(`${PAX}/account/payment-methods`);
+  const remove = page.getByRole("button", { name: "刪除", exact: true });
+  await expect(
+    remove.first().or(page.getByText("尚未設定付款卡片", { exact: true })),
+  ).toBeVisible();
+  for (let count = await remove.count(); count > 5 - needed; count -= 1) {
+    await remove.last().click();
+    const removed = page.waitForResponse(
+      (r) =>
+        /\/payment-methods\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        r.request().method() === "DELETE",
+    );
+    await page.getByRole("button", { name: "確定刪除", exact: true }).click();
+    expect((await removed).ok(), "Remove an earlier run's card").toBe(true);
+    await expect(remove).toHaveCount(count - 1);
+  }
 }
 
 async function bind(page: Page, scenario: "success" | "retry_once") {
@@ -1375,51 +1398,53 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     });
     await registerDriver(ops, driver, DRIVER, step);
     await step("Passenger genuine OTP login and account", async () => {
-      await pax.goto(`${PAX}/login`);
-      await expect(
-        pax.getByLabel("同單審查演練", { exact: true }),
-      ).toBeVisible();
-      await pax
-        .getByRole("button", { name: "手機號碼登入", exact: true })
-        .click();
-      await info.attach("ordinary-entry-phone-login-pax", {
-        body: await pax.screenshot({ fullPage: true }),
-        contentType: "image/png",
+      let actualVerificationStatus = 0;
+      await signInBookablePassenger(pax, 0, async (phone) => {
+        await pax.goto(`${PAX}/login`);
+        await expect(
+          pax.getByLabel("同單審查演練", { exact: true }),
+        ).toBeVisible();
+        await pax
+          .getByRole("button", { name: "手機號碼登入", exact: true })
+          .click();
+        await info.attach("ordinary-entry-phone-login-pax", {
+          body: await pax.screenshot({ fullPage: true }),
+          contentType: "image/png",
+        });
+        await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
+        const requestedOtp = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/passenger-app/review-demo/otp" &&
+            response.request().method() === "POST",
+        );
+        await pax
+          .getByRole("button", { name: "取得驗證碼", exact: true })
+          .click();
+        const otpResponse = await requestedOtp;
+        expect(
+          otpResponse.ok(),
+          `Rehearsal SMS HTTP${otpResponse.status()}`,
+        ).toBe(true);
+        // The page shows the external simulated inbox. Do not attach its code,
+        // challenge, request bodies or screenshot to the exported evidence.
+        const code =
+          (await pax
+            .getByLabel("模擬簡訊驗證碼", { exact: true })
+            .textContent()) ?? "";
+        expect(/^\d{6}$/.test(code)).toBe(true);
+        await pax
+          .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
+          .fill(code);
+        const verification = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
+            response.request().method() === "POST",
+        );
+        await pax.getByRole("button", { name: "驗證", exact: true }).click();
+        actualVerificationStatus = (await verification).status();
+        expect(actualVerificationStatus).toBe(201);
       });
-      const phone = `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`;
-      await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
-      const requestedOtp = pax.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname ===
-            "/api/passenger-app/review-demo/otp" &&
-          response.request().method() === "POST",
-      );
-      await pax
-        .getByRole("button", { name: "取得驗證碼", exact: true })
-        .click();
-      const otpResponse = await requestedOtp;
-      expect(
-        otpResponse.ok(),
-        `Rehearsal SMS HTTP${otpResponse.status()}`,
-      ).toBe(true);
-      // The page shows the external simulated inbox. Do not attach its code,
-      // challenge, request bodies or screenshot to the exported evidence.
-      const code =
-        (await pax
-          .getByLabel("模擬簡訊驗證碼", { exact: true })
-          .textContent()) ?? "";
-      expect(/^\d{6}$/.test(code)).toBe(true);
-      await pax
-        .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
-        .fill(code);
-      const verification = pax.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
-          response.request().method() === "POST",
-      );
-      await pax.getByRole("button", { name: "驗證", exact: true }).click();
-      const actualVerificationStatus = (await verification).status();
-      expect(actualVerificationStatus).toBe(201);
       const accountResponse = await pax.request.get(
         `${PAX}/api/passenger-app/me`,
       );
@@ -1483,6 +1508,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         ),
       ).toBeNull();
     });
+    await step("Passenger free card slots for this run", () =>
+      freeCardSlots(pax, 2),
+    );
     const firstMethod = await step("A bind successful simulated PSP", () =>
       bind(pax, "success"),
     );
