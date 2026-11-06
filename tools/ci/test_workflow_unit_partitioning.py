@@ -84,6 +84,19 @@ class CiIntegUnitPartitioningTests(unittest.TestCase):
         self.assertFalse(env_is_set(job_block(self.text, "unit-image"), "DRTS_REQUIRE_API_TEST_IMAGE"))
         self.assertFalse(env_is_set(job_block(self.text, "unit"), "DRTS_REQUIRE_API_TEST_IMAGE"))
 
+    def test_postgres_opt_in_suites_receive_the_shard_database(self) -> None:
+        block = job_block(self.text, "unit-shard")
+        # Match job-level env only: a comment or another step/job cannot enable
+        # these opt-in suites in the actual Vitest shard process.
+        env = re.search(r"^    env:\n((?:      [^\n]*\n)+)", block, re.MULTILINE)
+        self.assertIsNotNone(env)
+        values = dict(re.findall(r"^      ([A-Z_]+):\s*(\S+)\s*$", env.group(1), re.MULTILINE))
+        database_url = values.get("DATABASE_URL")
+        self.assertEqual(database_url, "postgresql://postgres:postgres@localhost:5432/drts_fleet_platform")
+        for name in ("PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL", "UV_RECORDER_TEST_DATABASE_URL"):
+            with self.subTest(variable=name):
+                self.assertEqual(values.get(name), database_url)
+
     def test_unit_shard_fails_closed_on_a_non_success_shard_result(self) -> None:
         block = job_block(self.text, "unit")
         self.assertIn("needs.unit-shard.result", block)
