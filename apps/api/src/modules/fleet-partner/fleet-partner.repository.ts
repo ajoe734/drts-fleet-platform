@@ -108,6 +108,23 @@ export class FleetPartnerRepository {
     );
   }
 
+  async loadRevenueShareRules(): Promise<FleetPartnerRevenueShareRuleRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM billing.phase1_fleet_partner_revenue_share_rules
+        ORDER BY updated_at DESC
+      `,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<FleetPartnerRevenueShareRuleRecord>(
+        row.record,
+        "billing.phase1_fleet_partner_revenue_share_rules",
+      ),
+    );
+  }
+
   async findActiveFleetPartnerById(
     fleetPartnerId: string,
   ): Promise<FleetPartnerRecord | null> {

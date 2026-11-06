@@ -18,6 +18,7 @@ import { CallcenterModule } from "../callcenter/callcenter.module";
 import { IdentityModule } from "../identity/identity.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { SecurityEventsModule } from "../security-events/security-events.module";
+import { IncidentModule } from "../incident/incident.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { FleetPartnerCaseService } from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";
@@ -38,6 +39,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
     VehicleEligibilityModule,
     AuditNotificationModule,
     ComplaintModule,
+    IncidentModule,
     CallcenterModule,
     IdentityModule,
     TenantPartnerModule,

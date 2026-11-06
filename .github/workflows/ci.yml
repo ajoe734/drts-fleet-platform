@@ -326,6 +326,19 @@ jobs:
           path: apps/passenger-app/native-passenger-app-test-results.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Agency portal unit tests
+        run: pnpm --filter @drts/agency-portal-web exec vitest run --config vitest.config.ts --maxWorkers=1 --reporter=default --reporter=json --outputFile.json=agency-portal-web-test-results.json
+      - name: Bank console unit tests
+        run: pnpm --filter @drts/bank-console-web exec vitest run --config vitest.config.ts --maxWorkers=1 --reporter=default --reporter=json --outputFile.json=bank-console-web-test-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-fast-checks-agency-bank-${{ github.run_id }}
+          path: |
+            apps/agency-portal-web/agency-portal-web-test-results.json
+            apps/bank-console-web/bank-console-web-test-results.json
+          if-no-files-found: warn
+          retention-days: 7
 
   product_root_unit:
     name: Product root unit tests (shard ${{ matrix.shard }}/4)

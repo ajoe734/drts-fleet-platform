@@ -15,6 +15,9 @@ import type {
   TenantBookingListQuery,
   TenantBookingsPageRecord,
   TenantDashboardSummary,
+  TenantPassengerRecord,
+  TenantAddressRecord,
+  TenantCostCenterRecord,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import {
@@ -54,6 +57,12 @@ export type TenantBookingDriverContactOption = PassengerRideContactOption & {
   assignmentId: string;
 };
 
+export interface EnterpriseBookingDirectory {
+  passengers: TenantPassengerRecord[];
+  addresses: TenantAddressRecord[];
+  costCenters: TenantCostCenterRecord[];
+}
+
 export class EnterpriseDispatchTenantClient {
   constructor(private readonly client: ApiClient) {}
 
@@ -71,6 +80,15 @@ export class EnterpriseDispatchTenantClient {
     fixture: EnterpriseDispatchBookingFixture,
   ): Promise<EnterpriseDispatchBookingSubmitResult> {
     return this.createBooking(adaptBookingFixtureToCreateCommand(fixture));
+  }
+
+  async getBookingDirectory(): Promise<EnterpriseBookingDirectory> {
+    const [passengers, addresses, costCenters] = await Promise.all([
+      this.client.listPassengers(),
+      this.client.listAddresses(),
+      this.client.listCostCenters({ activeOnly: true }),
+    ]);
+    return { passengers, addresses, costCenters };
   }
 
   async getBooking(bookingId: string): Promise<BookingRecord> {

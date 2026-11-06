@@ -167,7 +167,11 @@ test("the real reservation acceptance deadline expires automatically, then recov
                 has: driver.getByText(assigned.taskId, { exact: true }),
               })
               .click();
-            await expect(driver).toHaveURL(/\/trip$/);
+            await expect(driver).toHaveURL(
+              (url) =>
+                url.pathname === new URL(`${driverBase}/trip`).pathname &&
+                url.searchParams.get("taskId") === assigned.taskId,
+            );
             await expect(
               driver.getByText(orderId, { exact: false }).first(),
             ).toBeVisible();
