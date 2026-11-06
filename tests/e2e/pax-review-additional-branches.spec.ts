@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { trackInterruptedRehearsal } from "./pax-review-shared-order/interrupted-rehearsal-finalizer";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
+import { signInOnReviewPage } from "./pax-review-shared-order/rehearsal-passenger";
 import { standardAddressJourney } from "./pax-review-shared-order/standard-address-journey";
 import { ownedRejectionJourney } from "./pax-review-shared-order/owned-rejection-journey";
 import { arrivedCancellationJourney } from "./pax-review-shared-order/arrived-cancellation-journey";
@@ -95,21 +96,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
     });
     await registerDriver(ops, driver, driverBase, step);
     await step("Additional Passenger actual OTP login", async () => {
-      await pax.goto(`${PAX}/review`);
-      const suffix = (Number(process.env.GITHUB_RUN_ID ?? 1) + 50) % 100;
-      await pax
-        .getByLabel("演練手機", { exact: true })
-        .fill(`09000000${String(suffix).padStart(2, "0")}`);
-      await pax.getByRole("checkbox").check();
-      const requested = pax.waitForResponse(
-        (r) =>
-          new URL(r.url()).pathname === "/api/passenger-app/review-demo/otp" &&
-          r.request().method() === "POST",
-      );
-      await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
-      expect((await requested).ok()).toBe(true);
-      await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-      await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
+      await signInOnReviewPage(pax, 50);
       expect(
         await pax.evaluate(() =>
           localStorage.getItem("drts.passenger.functional-demo.v1"),
