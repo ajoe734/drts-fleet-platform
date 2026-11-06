@@ -19,7 +19,7 @@ const DISPATCH_TIMEOUT_OFFSET = 88;
 const SPEC_OFFSETS = [0, 50, 77, 88, 89];
 
 const pageReading = (...answers: { status?: number; canBook?: unknown }[]) => {
-  const get = vi.fn(async (_url: string) => {
+  const get = vi.fn(async () => {
     const { status = 200, canBook } = answers.shift()!;
     return {
       status: () => status,
@@ -28,6 +28,8 @@ const pageReading = (...answers: { status?: number; canBook?: unknown }[]) => {
   });
   return { request: { get } } as never;
 };
+const signInStub = () =>
+  vi.fn<(phone: string) => Promise<void>>(async () => undefined);
 
 beforeEach(() => {
   vi.stubEnv("GITHUB_RUN_ID", FAILED_RUN);
@@ -36,7 +38,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 test("a bookable first phone is the same phone the run id always drew", async () => {
-  const signIn = vi.fn(async (_phone: string) => undefined);
+  const signIn = signInStub();
 
   const phone = await signInBookablePassenger(
     pageReading({ canBook: true }),
@@ -51,7 +53,7 @@ test("a bookable first phone is the same phone the run id always drew", async ()
 
 test("a phone that cannot book is signed out before the next phone signs in", async () => {
   const order: string[] = [];
-  vi.mocked(logoutFromAccount).mockImplementation(async () => {
+  vi.mocked(logoutFromAccount).mockImplementationOnce(async () => {
     order.push("sign out");
   });
 
@@ -68,7 +70,7 @@ test("a phone that cannot book is signed out before the next phone signs in", as
 });
 
 test("the run fails by name when no phone can book", async () => {
-  const signIn = vi.fn(async (_phone: string) => undefined);
+  const signIn = signInStub();
   const answers = Array.from({ length: 5 }, () => ({ canBook: false }));
 
   await expect(
@@ -87,7 +89,7 @@ test.each([
   ["an error status", { status: 500 }],
   ["an unreadable answer", { canBook: "unknown" }],
 ])("%s from the check fails the step, not a retry", async (_name, answer) => {
-  const signIn = vi.fn(async (_phone: string) => undefined);
+  const signIn = signInStub();
 
   await expect(
     signInBookablePassenger(

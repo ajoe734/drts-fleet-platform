@@ -48,11 +48,7 @@ export async function signInBookablePassenger(
   const phones = rehearsalPhones(offset);
   for (const phone of phones) {
     await signIn(phone);
-    // TEMPORARY, reverted before merge: under Playwright every first phone reads
-    // as blocked, so CI drives the retry path in a real browser.
-    const forced =
-      process.env.TEST_WORKER_INDEX !== undefined && phone === phones[0];
-    if ((await accountCanBook(page)) && !forced) return phone;
+    if (await accountCanBook(page)) return phone;
     console.log(
       `[shared-order] rehearsal phone ${phone} cannot book; trying the next one`,
     );
