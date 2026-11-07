@@ -7,6 +7,7 @@ const external = vi.hoisted(() => ({
   clear: vi.fn(async () => {}),
 }));
 vi.mock("react-native", () => ({
+  Platform: { OS: "web", Version: 0 },
   View: "View",
   ScrollView: "ScrollView",
   Text: "Text",
@@ -21,6 +22,13 @@ vi.mock("react-native", () => ({
     addEventListener: vi.fn(() => ({ remove: vi.fn() })),
   },
 }));
+vi.mock("expo-constants", () => ({ default: { expoConfig: {} } }));
+vi.mock("react-native-maps", () => ({
+  default: "NativeMapView",
+  Marker: "NativeMapMarker",
+  PROVIDER_GOOGLE: "google",
+}));
+vi.mock("react-native-webview", () => ({ WebView: "WebView" }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: external.read,
   setItemAsync: external.write,

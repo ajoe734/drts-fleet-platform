@@ -44,6 +44,7 @@ const TOPOLOGY = [
     "/control-plane-proxy/identity/context",
   ],
   ["passenger-app-web", "PASSENGER_APP", 3009, "/api/passenger-app/me"],
+  ["agency-portal-web", "AGENCY_PORTAL", 3012, "/api/auth/session"],
 ];
 const AUTH_FIELDS = [
   "AUTH_MODE",
@@ -66,11 +67,16 @@ const OPTIONAL_API_FIELDS = [
   "PSP_PROVIDER",
   "PSP_MERCHANT_ID",
   "PSP_SANDBOX",
+  "PSP_RETURN_URL",
+  "PSP_ORDER_RESULT_URL",
+  "PSP_BINDING_AUTH_AMOUNT_TWD",
   "PAX_PAYMENT_CAPTURE_ENABLED",
   "PAX_PAYMENT_CAPTURE_POLICY",
   "PAX_PAYMENT_RECOVERY_NOTICE_EXPIRES_AT",
   "PASSENGER_OTP_IP_HOURLY_LIMIT",
   "PASSENGER_OTP_TRUSTED_PROXY_HOPS",
+  "TWILIO_HTTP_TIMEOUT_MS",
+  "TWILIO_STATUS_CALLBACK_URL",
   "NOTIFICATION_FROM_EMAIL",
   "REMOTE_SMTP_HOST",
   "REMOTE_SMTP_PORT",
@@ -104,6 +110,12 @@ const OPTIONAL_SECRET_FIELDS = [
   "OIDC_CLIENT_SECRET",
   "PASSENGER_OTP_PEPPER",
   "PSP_API_KEY",
+  "PSP_HASH_KEY",
+  "PSP_HASH_IV",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_API_KEY_SID",
+  "TWILIO_API_KEY_SECRET",
+  "TWILIO_FROM_NUMBER",
   "PSP_TOKEN_ENCRYPTION_KEY_NAME",
   "REMOTE_SMTP_USERNAME",
   "REMOTE_SMTP_PASSWORD",
@@ -379,6 +391,17 @@ function buildPlan(vars, sha, tag, deployer) {
     )
       reject("PROD_RELEASE_SMOKE_CONFIG_JSON.bank-console-web CSV fixture");
     if (
+      id === "agency-portal-web" &&
+      (probe.expect["data.active"] !== true ||
+        probe.expect["data.identity.realm"] !== "agency" ||
+        probe.expect["data.identity.actor_type"] !== "agency_user" ||
+        typeof probe.expect["data.identity.agency_id"] !== "string" ||
+        !probe.expect["data.identity.agency_id"].trim())
+    )
+      reject(
+        "PROD_RELEASE_SMOKE_CONFIG_JSON.agency-portal-web authenticated agency session predicate",
+      );
+    if (
       route.endsWith("identity/context") &&
       (typeof probe.expect["data.principalId"] !== "string" ||
         !probe.expect["data.principalId"].trim() ||
@@ -402,7 +425,13 @@ function buildPlan(vars, sha, tag, deployer) {
       env = apiEnv;
       secrets = secretNames;
     }
-    if (["tenant-console-web", "enterprise-dispatch-web"].includes(id))
+    if (
+      [
+        "tenant-console-web",
+        "enterprise-dispatch-web",
+        "agency-portal-web",
+      ].includes(id)
+    )
       secrets.BFF_STATE_SECRET = `${prefix}-bff-state-secret`;
     if (id === "tenant-console-web")
       Object.assign(env, {
@@ -509,8 +538,8 @@ function buildPlan(vars, sha, tag, deployer) {
     };
   });
   if (
-    new Set(services.map((s) => s.name)).size !== 10 ||
-    new Set(services.map((s) => s.origin)).size !== 10
+    new Set(services.map((s) => s.name)).size !== TOPOLOGY.length ||
+    new Set(services.map((s) => s.origin)).size !== TOPOLOGY.length
   )
     reject("unique service names/origins");
   const origins = need("PROD_AUTH_ALLOWED_ORIGINS").split(/[;,]/);
@@ -521,7 +550,9 @@ function buildPlan(vars, sha, tag, deployer) {
       .every((s) => origins.includes(s.origin))
   )
     reject("PROD_AUTH_ALLOWED_ORIGINS (all active browser origins)");
-  apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(";");
+  apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(",");
+  const agency = services.find((s) => s.id === "agency-portal-web");
+  apiEnv.AGENCY_INVITATION_ACCEPT_URL_BASE = `${agency.origin}/invite`;
   const migrationJob = need("PROD_GCP_MIGRATION_JOB");
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(migrationJob))
     reject("PROD_GCP_MIGRATION_JOB");

@@ -36,7 +36,7 @@ function imageManifest(plan, directory) {
     images[item.id] = `${plan.registry}/${item.id}@${item.digest}`;
   }
   if (Object.keys(images).length !== plan.builds.length)
-    reject("complete eleven-image manifest");
+    reject("complete twelve-image manifest");
   return images;
 }
 function migrate(plan, images, cloud = sdk) {

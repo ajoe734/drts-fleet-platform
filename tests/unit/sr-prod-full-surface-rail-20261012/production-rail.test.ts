@@ -59,6 +59,7 @@ const ids = [
   "enterprise-dispatch-web",
   "channel-partner-portal-web",
   "passenger-app-web",
+  "agency-portal-web",
 ];
 const imagesFor = (plan: any) =>
   Object.fromEntries(
@@ -686,12 +687,13 @@ describe("production complete topology and strict startup rail", () => {
     );
   });
   it("executes the real preflight, deploy and migration builders with all ten ports and immutable source", () => {
-    const { plan } = candidate();
+    const { plan, vars } = candidate();
     expect(plan.services.map((s: any) => s.id)).toEqual(ids);
     expect(plan.services.map((s: any) => s.port)).toEqual([
-      3001, 3002, 3003, 3007, 3004, 3008, 3014, 3010, 3013, 3009,
+      3001, 3002, 3003, 3007, 3004, 3008, 3014, 3010, 3013, 3009, 3012,
     ]);
-    expect(plan.builds).toHaveLength(11);
+    expect(plan.services).toHaveLength(11);
+    expect(plan.builds).toHaveLength(12);
     const commands: string[][] = [];
     const cloud = (args: string[]) => {
       commands.push(args);
@@ -699,7 +701,7 @@ describe("production complete topology and strict startup rail", () => {
     };
     deploy(plan, imagesFor(plan), cloud);
     const deployments = commands.filter((args) => args[1] === "deploy");
-    expect(deployments).toHaveLength(10);
+    expect(deployments).toHaveLength(11);
     for (const args of deployments) {
       expect(args).toContain("--no-allow-unauthenticated");
       expect(args[args.indexOf("--ingress") + 1]).toBe(
@@ -728,6 +730,37 @@ describe("production complete topology and strict startup rail", () => {
     expect(
       plan.services.find((s: any) => s.id === "bank-console-web").secrets,
     ).toHaveProperty("BANK_SESSION_SECRET");
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    expect(agency.port).toBe(3012);
+    expect(agency.dockerfile).toBe("apps/agency-portal-web/Dockerfile");
+    expect(agency.env.DRTS_API_URL).toBe(plan.services[0].origin);
+    expect(agency.env.DRTS_API_AUTH_AUDIENCE).toBe(
+      plan.services[0].transportAudience,
+    );
+    expect(agency.secrets.BFF_STATE_SECRET).toBe(
+      "drts-prod-bff-state-secret:7",
+    );
+    expect(agency.probe).toEqual({
+      path: "/api/auth/session",
+      expect: {
+        "data.active": true,
+        "data.identity.realm": "agency",
+        "data.identity.actor_type": "agency_user",
+        "data.identity.agency_id": "agency-fixture",
+      },
+    });
+    expect(plan.services[0].env.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(
+      `${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    );
+    const agencyArgs = deployArgs(plan, agency, imagesFor(plan)[agency.id]);
+    expect(agencyArgs[agencyArgs.indexOf("--set-secrets") + 1]).toContain(
+      "BFF_STATE_SECRET=drts-prod-bff-state-secret:7",
+    );
+    expect(
+      deployArgs(plan, plan.services[0], imagesFor(plan).api).join(" "),
+    ).toContain(
+      `AGENCY_INVITATION_ACCEPT_URL_BASE=${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    );
     commands.length = 0;
     migrate(plan, imagesFor(plan), cloud);
     expect(commands.filter((args) => args[2] === "execute")).toHaveLength(1);
@@ -1021,7 +1054,7 @@ describe("exact release evidence and protected smoke", () => {
             digest: `sha256:${"a".repeat(64)}`,
           }),
         );
-      expect(Object.keys(imageManifest(plan, dir))).toHaveLength(11);
+      expect(Object.keys(imageManifest(plan, dir))).toHaveLength(12);
       writeFileSync(
         path.join(dir, "api.json"),
         JSON.stringify({
@@ -1128,7 +1161,18 @@ describe("exact release evidence and protected smoke", () => {
                         authMode: "jwt_bearer",
                       },
                     }
-                  : { data: { fixture: true } },
+                  : service.id === "agency-portal-web"
+                    ? {
+                        data: {
+                          active: true,
+                          identity: {
+                            realm: "agency",
+                            actor_type: "agency_user",
+                            agency_id: "agency-fixture",
+                          },
+                        },
+                      }
+                    : { data: { fixture: true } },
               ),
       };
     };
@@ -1148,7 +1192,7 @@ describe("exact release evidence and protected smoke", () => {
               "Bearer opaque-transport-token"),
       ),
     ).toBe(true);
-    expect(reads.filter((r) => r[0] === "auth")).toHaveLength(8);
+    expect(reads.filter((r) => r[0] === "auth")).toHaveLength(9);
     expect(evidence.publicEntryPolicies).toHaveLength(2);
     expect(
       evidence.services

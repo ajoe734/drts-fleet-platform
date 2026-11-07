@@ -112,11 +112,11 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "65eeeaee7fcac40e5b11ed297fcce4840d2a7ff9618e2dc5e36a9da6c298b60c",
+      "b2d6f8582d70e7cbd2d257fa890842cac426126e88ec37ce49b225ab61be69b8",
     ],
     [
       "run.cjs",
-      "0eb35598d1a03e85d9852c9513da16ada767c84cce263a153b45218e62f5f276",
+      "7e72c0473f3ac6e2ab7e300b6c5d630d8b764edab42c23a5f5aaeebb3cfc46ff",
     ],
   ]) {
     if (
@@ -191,7 +191,7 @@ function trafficIdentity(data) {
     fail("INSUFFICIENT_OBSERVATION", "TRAFFIC");
 }
 const imageType = str(
-  /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
+  /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|agency-portal-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
 );
 const groupType = str(
   /^https:\/\/www\.googleapis\.com\/compute\/v1\/projects\/drts-prod-devcc-20260825\/regions\/us-central1\/networkEndpointGroups\/[a-z][a-z0-9-]{0,62}$/,
@@ -1369,15 +1369,15 @@ function serialize(report) {
     for (const [kind, count] of Object.entries({
       project: 1,
       sql: 1,
-      service: 10,
-      revision: 10,
+      service: TOPOLOGY.length,
+      revision: TOPOLOGY.length,
       job: 1,
       repository: 1,
       images: 1,
       versions: 19,
       account: 2,
-      policy: 10,
-      iap: 10,
+      policy: TOPOLOGY.length,
+      iap: TOPOLOGY.length,
     }))
       if (report.records.filter((r) => r.kind === kind).length < count)
         fail("INSUFFICIENT_OBSERVATION");
