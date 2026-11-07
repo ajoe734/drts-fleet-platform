@@ -1,3 +1,4 @@
+import type { TenantMasterDirectoryContext } from "../tenant-partner/tenant-partner.repository";
 import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
   PASSENGER_FEE_CONTENT_HASH,
@@ -1838,6 +1839,24 @@ export class OwnedMobilityService
       );
     }
 
+    if (
+      this.hasTenantMasterReferences(command) &&
+      this.tenantPartnerService?.isPersistenceEnabled()
+    ) {
+      return this.tenantPartnerService
+        .readTenantMasterDirectory(tenantId)
+        .then((directory) =>
+          this._executeCreateTenantBooking(
+            command,
+            tenantId,
+            identity,
+            requestId,
+            runtimeProfileCodeHeader,
+            options,
+            directory,
+          ),
+        );
+    }
     return this._executeCreateTenantBooking(
       command,
       tenantId,
@@ -1845,6 +1864,20 @@ export class OwnedMobilityService
       requestId,
       runtimeProfileCodeHeader,
       options,
+    );
+  }
+
+  private hasTenantMasterReferences(command: {
+    passengerId?: string | null;
+    pickupAddressId?: string | null;
+    dropoffAddressId?: string | null;
+    costCenter?: string | null;
+  }) {
+    return Boolean(
+      command.passengerId?.trim() ||
+      command.pickupAddressId?.trim() ||
+      command.dropoffAddressId?.trim() ||
+      command.costCenter?.trim(),
     );
   }
 
@@ -1876,6 +1909,13 @@ export class OwnedMobilityService
         ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
+        const directory =
+          this.hasTenantMasterReferences(command) &&
+          this.tenantPartnerService?.isPersistenceEnabled()
+            ? await this.tenantPartnerService.readTenantMasterDirectory(
+                tenantId,
+              )
+            : undefined;
         const bookingResult = await this._executeCreateTenantBooking(
           command,
           tenantId,
@@ -1883,6 +1923,7 @@ export class OwnedMobilityService
           requestId,
           runtimeProfileCodeHeader,
           options,
+          directory,
         );
         return {
           data: {
@@ -1907,6 +1948,7 @@ export class OwnedMobilityService
     requestId?: string,
     runtimeProfileCodeHeader?: string,
     options?: ReferralBookingOptions,
+    directory?: TenantMasterDirectoryContext,
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
@@ -1932,17 +1974,20 @@ export class OwnedMobilityService
       command.pickupAddressId ?? null,
       command.pickup,
       "pickup",
+      directory,
     );
     const dropoff = this.resolveTenantAddressPayload(
       tenantId,
       command.dropoffAddressId ?? null,
       command.dropoff,
       "dropoff",
+      directory,
     );
     const passenger = this.resolveTenantPassengerProfile(
       tenantId,
       command.passengerId ?? null,
       command.passenger,
+      directory,
     );
 
     const now = new Date().toISOString();
@@ -1996,6 +2041,7 @@ export class OwnedMobilityService
       costCenter: this.resolveTenantBookingCostCenter(
         tenantId,
         command.costCenter,
+        directory,
       ),
       vehiclePreference: this.normalizeNullableText(command.vehiclePreference),
       benefitReference:
@@ -4338,12 +4384,20 @@ export class OwnedMobilityService
           }
           // Refresh only this already committed row, never an attempted update.
           this.applyAuthoritativeOrder(locked.order);
+          const directory =
+            this.hasTenantMasterReferences(command) &&
+            this.tenantPartnerService?.isPersistenceEnabled()
+              ? await this.tenantPartnerService.readTenantMasterDirectory(
+                  tenantId,
+                )
+              : undefined;
           const result = await this.prepareTenantBookingUpdate(
             this.cloneOrder(locked.order),
             command,
             requestId,
             tx,
             afterCommit,
+            directory,
           );
           result.order.aggregateVersion = await repository.updateOrderWithCas(
             tx,
@@ -4384,6 +4438,7 @@ export class OwnedMobilityService
     requestId: string | undefined,
     tx: OwnedMobilityQueryExecutor | null,
     afterCommit: Array<() => void | Promise<void>>,
+    directory?: TenantMasterDirectoryContext,
   ) {
     const tenantId = order.tenantId!;
     const bookingId = order.bookingId!;
@@ -4449,6 +4504,7 @@ export class OwnedMobilityService
         nextPickupAddressId,
         command.pickup ?? order.pickup,
         "pickup",
+        directory,
       );
     }
     if (command.dropoffAddressId !== undefined || command.dropoff) {
@@ -4463,6 +4519,7 @@ export class OwnedMobilityService
         nextDropoffAddressId,
         command.dropoff ?? order.dropoff,
         "dropoff",
+        directory,
       );
     }
     if (command.passengerId !== undefined || command.passenger) {
@@ -4476,6 +4533,7 @@ export class OwnedMobilityService
         tenantId,
         nextPassengerId,
         command.passenger ?? order.passenger,
+        directory,
       );
     }
 
@@ -4499,7 +4557,11 @@ export class OwnedMobilityService
     order.costCenter =
       command.costCenter === undefined
         ? order.costCenter
-        : this.resolveTenantBookingCostCenter(tenantId, command.costCenter);
+        : this.resolveTenantBookingCostCenter(
+            tenantId,
+            command.costCenter,
+            directory,
+          );
     order.vehiclePreference =
       command.vehiclePreference === undefined
         ? order.vehiclePreference
@@ -4611,6 +4673,7 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     this.assertNonBlank(tenantId, "tenantId");
+    await this.resolvePersistedTenantBooking(tenantId, bookingId);
     const order = this.requireBookingOrder(bookingId, tenantId);
     const cancelled = await this.cancelOwnedOrder(
       order.orderId,
@@ -8445,6 +8508,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8463,6 +8527,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8484,6 +8549,7 @@ export class OwnedMobilityService
         assignment,
         order,
         proof,
+        command,
         requestId,
       );
       throw new ApiRequestError(
@@ -8765,6 +8831,8 @@ export class OwnedMobilityService
     if (proofPendingError) {
       const now = new Date().toISOString();
       task.status = "proof_pending";
+      task.actualDistanceKm = params.command.actualDistanceKm;
+      task.actualDurationSec = params.command.actualDurationSec;
       task.proof = params.proofHasEvidence ? params.proof : null;
       order.status = "proof_pending";
       order.updatedAt = now;
@@ -15115,11 +15183,14 @@ export class OwnedMobilityService
     assignment: DispatchAssignmentRecord,
     order: OwnedOrderRecord,
     proof: CompletionProofBundle,
+    command: DriverCompleteTaskCommand,
     requestId?: string,
   ): Promise<void> {
     const now = new Date().toISOString();
 
     task.status = "proof_pending";
+    task.actualDistanceKm = command.actualDistanceKm;
+    task.actualDurationSec = command.actualDurationSec;
     task.proof = this.hasCompletionProofEvidence(proof) ? proof : null;
     order.status = "proof_pending";
     order.updatedAt = now;
@@ -15303,6 +15374,7 @@ export class OwnedMobilityService
   private resolveTenantBookingCostCenter(
     tenantId: string,
     rawCode: string | null | undefined,
+    directory?: TenantMasterDirectoryContext,
   ): string | null {
     // Partial test mocks of TenantPartnerService may omit the validator; fall
     // through to text normalization when it is absent so unrelated tests do
@@ -15314,6 +15386,7 @@ export class OwnedMobilityService
       return this.tenantPartnerService.validateBookingCostCenter(
         tenantId,
         rawCode,
+        directory,
       ).value;
     }
     return this.normalizeNullableText(rawCode);
@@ -15323,6 +15396,7 @@ export class OwnedMobilityService
     tenantId: string,
     passengerId: string | null,
     fallback: PassengerProfile,
+    directory?: TenantMasterDirectoryContext,
   ): PassengerProfile {
     const normalizedPassengerId = this.normalizeNullableText(passengerId);
     if (!normalizedPassengerId) {
@@ -15349,6 +15423,7 @@ export class OwnedMobilityService
     const masterPassenger = this.tenantPartnerService.getPassengerMasterRecord(
       tenantId,
       normalizedPassengerId,
+      directory,
     );
     const phone =
       this.normalizeNullableText(masterPassenger.mobile) ??
@@ -15378,6 +15453,7 @@ export class OwnedMobilityService
     addressId: string | null,
     fallback: AddressPayload,
     fieldName: "pickup" | "dropoff",
+    directory?: TenantMasterDirectoryContext,
   ): AddressPayload {
     const normalizedAddressId = this.normalizeNullableText(addressId);
     if (!normalizedAddressId) {
@@ -15401,6 +15477,7 @@ export class OwnedMobilityService
     const masterAddress = this.tenantPartnerService.getAddressMasterRecord(
       tenantId,
       normalizedAddressId,
+      directory,
     );
     this.assertAddress(masterAddress.addressText, `${fieldName}.address`);
     return {

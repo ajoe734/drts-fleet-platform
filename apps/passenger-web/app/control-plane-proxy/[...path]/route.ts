@@ -45,6 +45,9 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (hasUnsafePathSegment(path)) {
     return false;
   }
+  if (path.length === 2 && path[0] === "passenger-app" && path[1] === "fares") {
+    return method === "GET";
+  }
   if (path.length === 2 && path[0] === "multi-taxi" && path[1] === "rides") {
     return method === "POST";
   }
@@ -72,7 +75,8 @@ function isAllowedPassengerPath(path: string[], method: string) {
   return (
     (["events", "receipt"].includes(action) && method === "GET") ||
     (["cancel", "ratings", "contact"].includes(action) && method === "POST") ||
-    (action === "push-subscriptions" && (method === "POST" || method === "DELETE"))
+    (action === "push-subscriptions" &&
+      (method === "POST" || method === "DELETE"))
   );
 }
 

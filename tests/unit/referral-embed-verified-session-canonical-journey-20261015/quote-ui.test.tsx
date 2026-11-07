@@ -1069,3 +1069,111 @@ async function confirmCurrentOrder(host: HTMLElement) {
   );
   if (checkbox && !checkbox.checked) fireEvent.click(checkbox);
 }
+
+it("retains the original request and asks for revalidation for canonical JWT_INVALID", async () => {
+  const assign = navigationPort();
+  const commands: Array<{ body: Record<string, unknown>; key: string | null }> =
+    [];
+  let quotes = 0;
+  stubFeeAwareFetch(
+    "fetch",
+    vi.fn(async (url: string, init: RequestInit) => {
+      if (url === "/api/referral/quote") {
+        quotes++;
+        return ok(quote());
+      }
+      expect(url).toBe("/api/referral/booking");
+      commands.push({
+        body: JSON.parse(String(init.body)),
+        key: new Headers(init.headers).get("Idempotency-Key"),
+      });
+      if (commands.length === 1)
+        throw new Error("controlled lost original ACK");
+      if (commands.length === 2) {
+        // Actual BootstrapAuthGuard code, preserved by the booking BFF.
+        return Response.json(
+          { ok: false, error: { code: "JWT_INVALID" } },
+          { status: 401 },
+        );
+      }
+      return ok({
+        orderId: "same-original-reauth-order",
+        quote: {
+          quoteId: commands[0]!.body.quoteId,
+          feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+        },
+        confirmedAt: "2026-10-29T02:00:00Z",
+        feeConfirmation: {
+          orderId: "same-original-reauth-order",
+          quoteId: commands[0]!.body.quoteId,
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          contentHash: PASSENGER_FEE_CONTENT_HASH,
+          feeConfirmedAt: "2026-10-29T02:00:01Z",
+        },
+      });
+    }),
+  );
+  let host = mount(<BookScreen context={context as never} />);
+  await confirmCurrentOrder(host);
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() => expect(host.textContent).toContain("重送原叫車要求"));
+  expect(commands).toHaveLength(1);
+  const saved = JSON.parse(
+    sessionStorage.getItem(
+      `referral.booking.recovery.v1:${context.session.recoveryScope}`,
+    )!,
+  );
+  expect(saved.command).toEqual(commands[0]!.body);
+  expect(saved.command.idempotencyKey).toBe(commands[0]!.key);
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() => expect(commands).toHaveLength(2));
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  expect(commands[1]).toEqual(commands[0]);
+  expect(host.textContent).toContain("請重新驗證身分，再重送原叫車要求");
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(
+        `referral.booking.recovery.v1:${context.session.recoveryScope}`,
+      )!,
+    ).command,
+  ).toEqual(saved.command);
+
+  flushSync(() => root!.unmount());
+  root = undefined;
+  host.remove();
+  // Controlled same-subject SSR context after the existing handoff succeeds.
+  // This supplies no real login/grant and changes no canonical recovery scope.
+  host = mount(
+    <BookScreen
+      context={
+        {
+          ...context,
+          session: {
+            ...context.session,
+            handoffId: "revalidated-same-subject-handoff",
+          },
+        } as never
+      }
+    />,
+  );
+  await waitFor(() =>
+    expect(submit(host).textContent).toContain("重送原叫車要求"),
+  );
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() => expect(assign).toHaveBeenCalledOnce());
+  expect(commands).toHaveLength(3);
+  expect(commands[2]).toEqual(commands[0]);
+  expect(quotes).toBe(1);
+  expect(assign.mock.calls[0]![0]).toContain(
+    "orderId=same-original-reauth-order",
+  );
+  expect(
+    sessionStorage.getItem(
+      `referral.booking.recovery.v1:${context.session.recoveryScope}`,
+    ),
+  ).toBeNull();
+});

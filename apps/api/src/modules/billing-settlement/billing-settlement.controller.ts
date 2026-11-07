@@ -461,7 +461,7 @@ export class BillingSettlementController {
   }
 
   @Get("reimbursements")
-  listReimbursementBatches(
+  async listReimbursementBatches(
     @Query("status") status?: "pending" | "paid",
     @Query("periodMonth") periodMonth?: string,
     @Query("driverId") driverId?: string,
@@ -475,7 +475,9 @@ export class BillingSettlementController {
       ...(statementId ? { statementId } : {}),
     };
     const items =
-      this.billingSettlementService.listReimbursementBatches(filters);
+      await this.billingSettlementService.listReimbursementBatchesFresh(
+        filters,
+      );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -711,12 +713,12 @@ export class BillingSettlementController {
   }
 
   @Get("reimbursements/:batchId")
-  getReimbursementBatch(
+  async getReimbursementBatch(
     @Param("batchId") batchId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getReimbursementBatch(batchId),
+      await this.billingSettlementService.getReimbursementBatchFresh(batchId),
       requestId,
     );
   }

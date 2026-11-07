@@ -10,6 +10,8 @@ import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantIssuerVars } from "@/lib/tenant-display";
 import {
   type BookingActorRealm,
+  BOOKING_STATE_PRESENTATION,
+  formatBookingDateTime,
   bookingReturnFilters,
   type BookingDirection,
   type BookingOpsLinkState,
@@ -17,35 +19,12 @@ import {
 } from "@/lib/bookings";
 import { t, type Locale } from "@/lib/translations";
 
-const bookingPillTone: Record<
-  BookingState,
-  "info" | "warn" | "success" | "danger"
-> = {
-  assigned: "info",
-  en_route: "warn",
-  completed: "success",
-  cancelled: "danger",
-};
-
 const directionLabelKey: Record<
   BookingDirection,
   "bookings.direction.outbound" | "bookings.direction.inbound"
 > = {
   outbound: "bookings.direction.outbound",
   inbound: "bookings.direction.inbound",
-};
-
-const stateLabelKey: Record<
-  BookingState,
-  | "bookings.state.assigned"
-  | "bookings.state.en_route"
-  | "bookings.state.completed"
-  | "bookings.state.cancelled"
-> = {
-  assigned: "bookings.state.assigned",
-  en_route: "bookings.state.en_route",
-  completed: "bookings.state.completed",
-  cancelled: "bookings.state.cancelled",
 };
 
 const timelineStepKeys = [
@@ -56,24 +35,22 @@ const timelineStepKeys = [
   "bookings.detail.timeline.done",
 ] as const;
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}
-
 function getCurrentStep(state: BookingState) {
-  if (state === "assigned") {
-    return 2;
-  }
-  if (state === "en_route") {
+  if (state === "assigned") return 2;
+  if (
+    [
+      "en_route",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ].includes(state)
+  )
     return 3;
-  }
-  return 4;
+  if (state === "completed" || state === "cancelled") return 4;
+  // Waiting or exception states do not establish completed assignment/trip stages.
+  return 0;
 }
 
 function getOpsLinkCopy(state: BookingOpsLinkState, locale: Locale) {
@@ -179,12 +156,15 @@ export default async function BookingDetailPage({
         title={
           <span className="bank-title-block">
             {booking.orderNo}
-            <CanvasPill tone={bookingPillTone[booking.state]} dot>
-              {t(stateLabelKey[booking.state], locale)}
+            <CanvasPill
+              tone={BOOKING_STATE_PRESENTATION[booking.state].tone}
+              dot
+            >
+              {t(BOOKING_STATE_PRESENTATION[booking.state].labelKey, locale)}
             </CanvasPill>
           </span>
         }
-        description={`${t(directionLabelKey[booking.direction], locale)} · ${booking.flightNo} · ${booking.terminal} · ${formatDateTime(booking.scheduledAt)}`}
+        description={`${t(directionLabelKey[booking.direction], locale)} · ${booking.flightNo} · ${booking.terminal} · ${formatBookingDateTime(booking.scheduledAt)}`}
       />
 
       <section className="issuer-strip">
@@ -284,7 +264,8 @@ export default async function BookingDetailPage({
             <div className="booking-stage-strip">
               {timelineStepKeys.map((key, index) => {
                 const isCurrent = index === stepIndex;
-                const isCompleted = index < stepIndex;
+                const isCompleted =
+                  booking.state !== "cancelled" && index < stepIndex;
                 const isFinalCancelled =
                   booking.state === "cancelled" && index === stepIndex;
 
@@ -308,7 +289,7 @@ export default async function BookingDetailPage({
                   <div className="booking-timeline-body">
                     <div className="booking-timeline-row">
                       <strong>{event.title}</strong>
-                      <span>{formatDateTime(event.occurredAt)}</span>
+                      <span>{formatBookingDateTime(event.occurredAt)}</span>
                     </div>
                     <div className="booking-timeline-row booking-timeline-row--meta">
                       <RealmChip realm={event.actorRealm} label={event.actor} />
@@ -362,7 +343,7 @@ export default async function BookingDetailPage({
               </div>
               <div className="booking-meta-item">
                 <dt>{t("bookings.detail.airport.window", locale)}</dt>
-                <dd>{formatDateTime(booking.scheduledAt)}</dd>
+                <dd>{formatBookingDateTime(booking.scheduledAt)}</dd>
               </div>
               <div className="booking-meta-item">
                 <dt>{t("bookings.detail.airport.greeting", locale)}</dt>
@@ -401,8 +382,14 @@ export default async function BookingDetailPage({
               <div className="booking-summary-item">
                 <dt>{t("bookings.detail.header.state", locale)}</dt>
                 <dd>
-                  <CanvasPill tone={bookingPillTone[booking.state]} dot>
-                    {t(stateLabelKey[booking.state], locale)}
+                  <CanvasPill
+                    tone={BOOKING_STATE_PRESENTATION[booking.state].tone}
+                    dot
+                  >
+                    {t(
+                      BOOKING_STATE_PRESENTATION[booking.state].labelKey,
+                      locale,
+                    )}
                   </CanvasPill>
                 </dd>
               </div>

@@ -8,7 +8,9 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 import {
+  loadBankAuditData,
   loadBankBookingsData,
+  loadBankContractsData,
   loadBankHomeSnapshot,
   loadBankStatementsData,
 } from "../../lib/bank-dev-read-models";
@@ -590,5 +592,30 @@ describe("bank dev read models", () => {
       "Partially degraded: endpoints unavailable (settlement-statements).",
     );
     expect(result.data.statements).toEqual([]);
+  });
+
+  it("reads the tenant audit trail only on the audit page", async () => {
+    // Each audit read also records evidence-access entries in that trail;
+    // other pages must not fill it with the console's own page views.
+    const fetchMock = vi.mocked(fetch);
+    const paths = () =>
+      fetchMock.mock.calls
+        .map(
+          ([input]) =>
+            new URL(String(input instanceof Request ? input.url : input)),
+        )
+        .filter((url) => url.hostname !== "metadata.google.internal")
+        .map((url) => url.pathname);
+
+    await loadBankHomeSnapshot("tenant_acme", "bank_program_admin");
+    await loadBankBookingsData("tenant_acme", "bank_program_admin");
+    await loadBankContractsData("tenant_acme", "bank_program_admin");
+    expect(paths()).not.toContain("/api/tenant/audit");
+    expect(paths()).not.toContain("/api/tenant/users");
+
+    fetchMock.mockClear();
+    const audit = await loadBankAuditData("tenant_acme", "bank_program_admin");
+    expect(paths()).toContain("/api/tenant/audit");
+    expect(audit.degradedMessage).toBeNull();
   });
 });

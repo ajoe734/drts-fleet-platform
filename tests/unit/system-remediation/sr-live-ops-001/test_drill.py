@@ -43,7 +43,7 @@ class RestoreDrillTest(unittest.TestCase):
         fixture = Path(__file__).with_name("fake_cli.py")
         for binary, kind in (("gcloud", "gcloud"), ("psql", "psql"), ("cloud-sql-proxy", "proxy"), ("gh", "gh")):
             wrapper = self.root / binary
-            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fixture}" "{kind}" "$@"\n')
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" -S "{fixture}" "{kind}" "$@"\n')
             wrapper.chmod(0o755)
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
         self.env = {"PATH": str(self.root) + ":" + os.environ["PATH"], "DRILL_FAKE_DIR": str(self.root),
@@ -55,7 +55,7 @@ class RestoreDrillTest(unittest.TestCase):
         self.target = "drts-dev-db-drill-123-1"
         self.output = self.root / "evidence.json"
         self.clock = Clock()
-        for mock in (patch.dict(os.environ, self.env), patch.object(drill.time, "monotonic", self.clock.monotonic), patch.object(drill.time, "sleep", self.clock.sleep)):
+        for mock in (patch.dict(os.environ, self.env), patch.object(drill, "time", self.clock), patch.object(sweep, "time", self.clock)):
             mock.start()
             self.addCleanup(mock.stop)
 

@@ -21,6 +21,7 @@ const labels = {
 const statuses: Record<string, string> = {
   new: "manualComplaint.status.new",
   assigned: "manualComplaint.status.assigned",
+  under_investigation: "manualComplaint.status.in_progress",
   in_progress: "manualComplaint.status.in_progress",
   resolved: "manualComplaint.status.resolved",
   closed: "manualComplaint.status.closed",

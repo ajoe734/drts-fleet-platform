@@ -1407,8 +1407,8 @@ export default function JobsScreen() {
     }
   }
 
-  function openTripWorkspace() {
-    router.push("/trip");
+  function openTripWorkspace(taskId?: string) {
+    router.push(taskId ? { pathname: "/trip", params: { taskId } } : "/trip");
   }
 
   function renderNoticeBanner() {
@@ -1514,7 +1514,11 @@ export default function JobsScreen() {
             此功能目前未啟用，請稍後再試或改從行程作業查看目前任務。
           </Text>
           <View style={styles.emptyActionRow}>
-            <Btn variant="primary" size="sm" onPress={openTripWorkspace}>
+            <Btn
+              variant="primary"
+              size="sm"
+              onPress={() => openTripWorkspace()}
+            >
               {driverStrings.jobs.openTripWorkspace}
             </Btn>
           </View>
@@ -1580,7 +1584,7 @@ export default function JobsScreen() {
                   order={orderMap[task.orderId] ?? null}
                   accepting={submittingTaskId === task.taskId}
                   onAccept={() => void handleSwipeAction(task, "accept")}
-                  onOpen={openTripWorkspace}
+                  onOpen={() => openTripWorkspace(task.taskId)}
                 />
               ))
             )}
@@ -1617,7 +1621,7 @@ export default function JobsScreen() {
                 task={task}
                 order={orderMap[task.orderId] ?? null}
                 busy={submittingTaskId === task.taskId}
-                onOpen={openTripWorkspace}
+                onOpen={() => openTripWorkspace(task.taskId)}
                 onAccept={() => void handleSwipeAction(task, "accept")}
                 onReject={() => void handleSwipeAction(task, "reject")}
               />

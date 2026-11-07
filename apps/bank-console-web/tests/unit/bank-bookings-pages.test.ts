@@ -367,3 +367,176 @@ it("display branding cannot rewrite canonical order IDs or program identifiers/l
     expect(html).not.toContain("ord_contoso_original");
   }
 });
+// Real pages and projection; only the existing identity/transport ports are controlled.
+function serveCanonicalStatuses(
+  values: Array<{
+    status: string;
+    scheduledAt?: string;
+    approvalState?: string;
+  }>,
+) {
+  request.mockImplementation(async (url: string) =>
+    envelope(
+      String(url).includes("service-programs")
+        ? []
+        : values.map((value, index) => ({
+            ...formalOrder(index + 1),
+            status: value.status,
+            approval_state: value.approvalState ?? "pending",
+            reservation_window_start:
+              value.scheduledAt ?? formalOrder().reservation_window_start,
+          })),
+    ),
+  );
+}
+
+it("canonical created booking stays unassigned in its real list, detail, filter and progress", async () => {
+  serveCanonicalStatuses([{ status: "created" }]);
+  const pages = loadPages();
+  const list = renderToStaticMarkup(
+    await pages.list({
+      searchParams: Promise.resolve({ locale: "en", state: "created" }),
+    }),
+  );
+  expect(list).toContain("FORMAL-1</a>");
+  expect(list).toContain('Created</span><span class="users-filter-badge">1');
+  const row = list.match(/<tr>.*?FORMAL-1.*?<\/tr>/)?.[0];
+  expect(row).toContain(">Created<");
+  expect(row).not.toContain(">Assigned<");
+  const detail = renderToStaticMarkup(
+    await pages.detail({
+      params: Promise.resolve({ bookingId: "ord_1" }),
+      searchParams: Promise.resolve({ locale: "en" }),
+    }),
+  );
+  expect(detail).toContain(">Created<");
+  expect(detail).not.toContain("booking-stage-pill is-completed");
+  expect(detail).not.toContain("已指派");
+  expect(detail).not.toContain("資格審批通過");
+  // Approval state has no independent event timestamp in this read contract.
+  serveCanonicalStatuses([{ status: "created", approvalState: "approved" }]);
+  const approvedSnapshot = renderToStaticMarkup(
+    await pages.detail({
+      params: Promise.resolve({ bookingId: "ord_1" }),
+      searchParams: Promise.resolve({ locale: "en" }),
+    }),
+  );
+  expect(approvedSnapshot).not.toContain("資格審批通過");
+});
+
+it.each([
+  ["dispatch_failed", "Dispatch failed", "派車失敗"],
+  ["no_supply", "No available supply", "無可用運能"],
+  ["dispatch_timeout", "Dispatch timed out", "派車逾時"],
+])(
+  "canonical %s retains its real reason instead of assigned/completed",
+  async (status, en, zh) => {
+    serveCanonicalStatuses([{ status }]);
+    const pages = loadPages();
+    const list = renderToStaticMarkup(
+      await pages.list({
+        searchParams: Promise.resolve({
+          locale: "en",
+          state: status,
+          program: "program_1",
+        }),
+      }),
+    );
+    expect(list).toContain("FORMAL-1</a>");
+    expect(list).toContain(`>${en}<`);
+    const detail = renderToStaticMarkup(
+      await pages.detail({
+        params: Promise.resolve({ bookingId: "ord_1" }),
+        searchParams: Promise.resolve({ locale: "zh" }),
+      }),
+    );
+    expect(detail).toContain(`>${zh}<`);
+    expect(detail).toContain(`目前狀態：${status}`);
+    expect(detail).not.toContain("booking-stage-pill is-completed");
+    expect(detail).not.toContain("已指派");
+  },
+);
+
+it("canonical on-trip keeps its own label and all five real trip phases remain reachable through legacy en_route", async () => {
+  const phases = [
+    "driver_accepted",
+    "enroute_pickup",
+    "arrived_pickup",
+    "on_trip",
+    "proof_pending",
+  ];
+  serveCanonicalStatuses([
+    ...phases.map((status) => ({ status })),
+    { status: "assigned" },
+    { status: "recording_pending" },
+  ]);
+  const pages = loadPages();
+  const all = renderToStaticMarkup(
+    await pages.list({ searchParams: Promise.resolve({ locale: "en" }) }),
+  );
+  const metrics = all.match(
+    /<section class="surface-grid">(.*?)<\/section>/,
+  )?.[1];
+  expect(metrics).toContain("<h3>6</h3>");
+  expect(metrics).toContain("<h3>7</h3>");
+  const legacy = renderToStaticMarkup(
+    await pages.list({
+      searchParams: Promise.resolve({ locale: "en", state: "en_route" }),
+    }),
+  );
+  for (let index = 1; index <= 5; index++)
+    expect(legacy).toContain(`FORMAL-${index}</a>`);
+  expect(legacy).not.toContain("FORMAL-6</a>");
+  expect(legacy).not.toContain("FORMAL-7</a>");
+  expect(legacy).toContain('En route</span><span class="users-filter-badge">5');
+  expect(legacy).toContain(">On trip<");
+  const exact = renderToStaticMarkup(
+    await pages.list({
+      searchParams: Promise.resolve({ locale: "en", state: "on_trip" }),
+    }),
+  );
+  expect(exact).toContain("FORMAL-4</a>");
+  expect(exact).not.toContain("FORMAL-1</a>");
+  expect(exact).toContain('On trip</span><span class="users-filter-badge">1');
+  const detail = renderToStaticMarkup(
+    await pages.detail({
+      params: Promise.resolve({ bookingId: "ord_4" }),
+      searchParams: Promise.resolve({ locale: "zh" }),
+    }),
+  );
+  expect(detail).toContain(">行程中<");
+  expect(detail).not.toContain('booking-stage-pill is-current">Completed');
+});
+
+it.each([
+  ["2026-10-31T16:30:00Z", "2026-11", "2026-10", "2026-11-01 00:30"],
+  ["2026-12-31T16:15:00Z", "2027-01", "2026-12", "2027-01-01 00:15"],
+])(
+  "canonical UTC instant %s uses one Taipei month and displayed time in both pages",
+  async (instant, period, wrongPeriod, display) => {
+    serveCanonicalStatuses([{ status: "assigned", scheduledAt: instant }]);
+    const pages = loadPages();
+    const list = renderToStaticMarkup(
+      await pages.list({
+        searchParams: Promise.resolve({ locale: "en", period }),
+      }),
+    );
+    expect(list).toContain("FORMAL-1</a>");
+    expect(list).toContain(display);
+    expect(list).toContain(`<option value="${period}"`);
+    const excluded = renderToStaticMarkup(
+      await pages.list({
+        searchParams: Promise.resolve({ locale: "en", period: wrongPeriod }),
+      }),
+    );
+    expect(excluded).not.toContain("FORMAL-1</a>");
+    const detail = renderToStaticMarkup(
+      await pages.detail({
+        params: Promise.resolve({ bookingId: "ord_1" }),
+        searchParams: Promise.resolve({ locale: "en", period }),
+      }),
+    );
+    expect(detail).toContain(display);
+    expect(detail).toContain(`period=${period}`);
+  },
+);

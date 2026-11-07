@@ -53,7 +53,13 @@ import {
 } from "./passenger-complaint-intake";
 
 export type ComplaintCommandIdentity = { scope: string; key: string };
+export type ComplaintAuditActor = Pick<
+  AuditLogRecord,
+  "actorId" | "actorType" | "tenantId"
+>;
 type ComplaintActionOptions<Capture extends boolean> = {
+  /** Server identity of the operator, independent of the case assignee. */
+  auditActor?: ComplaintAuditActor;
   captureAudit?: Capture;
   commandIdentity?: ComplaintCommandIdentity;
   /** Original caller payload when domain preparation adds generated IDs. */
@@ -63,10 +69,17 @@ type ComplaintActionOptions<Capture extends boolean> = {
    * timeline entry itself, never decoded from the note text. */
   fleetReplyAttachments?: ComplaintTimelineEntry["fleetReplyAttachments"];
 };
-type IdentifiedComplaintPayload = {
+type ComplaintAuditContext = {
+  originalRequestId?: string;
+  originalAuditActor?: ComplaintAuditActor;
+};
+type AuditedLegacyComplaintPayload = ComplaintAuditContext & {
+  complaintLegacyAuditContext: true;
+  payload: unknown;
+};
+type IdentifiedComplaintPayload = ComplaintAuditContext & {
   complaintCommandIdentity: ComplaintCommandIdentity;
   payload: unknown;
-  originalRequestId?: string;
 };
 
 type ComplaintActionResult<T, Capture extends boolean> = Capture extends true
@@ -364,7 +377,7 @@ export class ComplaintService implements OnModuleInit {
       .update(
         identity
           ? this.stableStringify([action, identity.scope, identity.key.trim()])
-          : `${action}:${caseNo}:${this.stableStringify(matchCommand)}`,
+          : `${action}:${caseNo}:${this.stableStringify(this.complaintBusinessPayload(matchCommand))}`,
       )
       .digest("hex");
   }
@@ -2676,9 +2689,12 @@ export class ComplaintService implements OnModuleInit {
     options?: ComplaintActionOptions<Capture>,
     onCommitted?: () => void,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
-    requestId =
-      this.identifiedPayload(pending.matchCommand)?.originalRequestId ??
-      requestId;
+    const original = this.complaintAuditContext(pending.matchCommand);
+    requestId = original?.originalRequestId ?? requestId;
+    options = { ...options };
+    delete options.auditActor;
+    if (original?.originalAuditActor)
+      options.auditActor = original.originalAuditActor;
     if (pending.confirmed && !this.identifiedPayload(pending.matchCommand)) {
       this.forgetComplaintCommand(pending);
       this.clearDurablePendingCommit(
@@ -2736,21 +2752,58 @@ export class ComplaintService implements OnModuleInit {
     return value as IdentifiedComplaintPayload;
   }
 
+  private legacyAuditPayload(
+    value: unknown,
+  ): AuditedLegacyComplaintPayload | undefined {
+    if (
+      value &&
+      typeof value === "object" &&
+      "complaintLegacyAuditContext" in value &&
+      value.complaintLegacyAuditContext === true &&
+      "payload" in value
+    )
+      return value as AuditedLegacyComplaintPayload;
+  }
+
+  private complaintBusinessPayload(value: unknown): unknown {
+    const envelope =
+      this.identifiedPayload(value) ?? this.legacyAuditPayload(value);
+    return envelope ? envelope.payload : value;
+  }
+
+  private complaintAuditContext(
+    value: unknown,
+  ): ComplaintAuditContext | undefined {
+    return this.identifiedPayload(value) ?? this.legacyAuditPayload(value);
+  }
+
   private bindComplaintCommand(
     command: unknown,
     options?: ComplaintActionOptions<boolean>,
     originalRequestId?: string,
   ): unknown {
-    return options?.commandIdentity
-      ? {
-          complaintCommandIdentity: {
-            ...options.commandIdentity,
-            key: options.commandIdentity.key.trim(),
-          },
-          payload: options.commandPayload ?? command ?? null,
-          ...(originalRequestId ? { originalRequestId } : {}),
-        }
-      : command;
+    const auditContext = {
+      ...(originalRequestId ? { originalRequestId } : {}),
+      ...(options?.auditActor
+        ? { originalAuditActor: { ...options.auditActor } }
+        : {}),
+    };
+    if (options?.commandIdentity)
+      return {
+        complaintCommandIdentity: {
+          ...options.commandIdentity,
+          key: options.commandIdentity.key.trim(),
+        },
+        payload: options.commandPayload ?? command ?? null,
+        ...auditContext,
+      };
+    if (options?.auditActor)
+      return {
+        complaintLegacyAuditContext: true,
+        payload: options.commandPayload ?? command ?? null,
+        ...auditContext,
+      };
+    return command;
   }
 
   private recoverPreparedCommand<Capture extends boolean>(
@@ -2761,9 +2814,14 @@ export class ComplaintService implements OnModuleInit {
     options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> | undefined {
     const pending = this.findComplaintCommand(action, caseNo, command, options);
-    requestId =
-      this.identifiedPayload(pending?.matchCommand)?.originalRequestId ??
-      requestId;
+    if (pending) {
+      const original = this.complaintAuditContext(pending.matchCommand);
+      requestId = original?.originalRequestId ?? requestId;
+      options = { ...options };
+      delete options.auditActor;
+      if (original?.originalAuditActor)
+        options.auditActor = original.originalAuditActor;
+    }
     if (pending?.confirmed)
       return this.existingComplaintAction(
         this.cloneComplaintCase(pending.complaintCase),
@@ -2823,9 +2881,7 @@ export class ComplaintService implements OnModuleInit {
     pending: PendingUncertainComplaintCommit,
   ): Record<string, unknown> {
     const record = pending.complaintCase;
-    const raw =
-      this.identifiedPayload(pending.matchCommand)?.payload ??
-      pending.matchCommand;
+    const raw = this.complaintBusinessPayload(pending.matchCommand);
     const payload =
       raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
     switch (pending.action) {
@@ -2927,7 +2983,7 @@ export class ComplaintService implements OnModuleInit {
             complaintCommandIdentity: identified.complaintCommandIdentity,
             payload: identified.payload,
           }
-        : (value ?? null);
+        : (this.complaintBusinessPayload(value) ?? null);
     };
     return (
       this.stableStringify(normalize(left)) ===
@@ -3100,7 +3156,12 @@ export class ComplaintService implements OnModuleInit {
         ? this.auditNotificationService
             .getAuditLogsSnapshot()
             .find((entry) => entry.auditId === auditId)
-        : undefined) ?? this.recordAudit(input, requestId, auditId);
+        : undefined) ??
+      this.recordAudit(
+        { ...input, ...(options?.auditActor ?? {}) },
+        requestId,
+        auditId,
+      );
     return (
       options?.captureAudit ? { data, auditLog } : data
     ) as ComplaintActionResult<T, Capture>;

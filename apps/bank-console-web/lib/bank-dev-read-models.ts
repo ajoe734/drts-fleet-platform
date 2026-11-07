@@ -6,10 +6,9 @@ import type {
   OwnedOrderRecord,
   TenantProgramUsageRecord,
   TenantServiceProgramRecord,
-  TenantUserRoleRecord,
 } from "@drts/contracts";
 
-import { bankApiGet, bankApiGetList } from "./server-bank-api";
+import { bankApiGetList } from "./server-bank-api";
 import type { BankUserIdentity } from "./bank-user-identity";
 export type { BankUserRow } from "./users-data";
 import {
@@ -555,7 +554,16 @@ function normalizeContractKeys(value: unknown): unknown {
   return value;
 }
 
-async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
+// Only the audit page reads the tenant audit trail. Every read of it also
+// records two evidence-access entries in that same trail, so loading it with
+// every page filled the recent window with the console's own page views
+// (shared dev, 2026-11-03). No page reads the tenant users here; user
+// management has its own verified read (loadBankUsersData).
+async function loadCoreBankData(
+  tenantId: string,
+  role: BankConsoleRole,
+  { audit: includeAudit = false }: { audit?: boolean } = {},
+) {
   const actorId = `bank-console:${tenantId}:${role}`;
   const [
     programsResult,
@@ -563,7 +571,6 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
     ordersResult,
     contractsResult,
     statementsResult,
-    usersResult,
     auditResult,
   ] = await Promise.allSettled([
     bankApiGetList<TenantServiceProgramRecord>(
@@ -587,12 +594,9 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
       tenantId,
       actorId,
     ),
-    bankApiGet<TenantUserRoleRecord[] | { items: TenantUserRoleRecord[] }>(
-      "api/tenant/users",
-      tenantId,
-      actorId,
-    ),
-    bankApiGetList<AuditLogRecord>("api/tenant/audit", tenantId, actorId),
+    includeAudit
+      ? bankApiGetList<AuditLogRecord>("api/tenant/audit", tenantId, actorId)
+      : Promise.resolve([] as AuditLogRecord[]),
   ]);
 
   const failures: string[] = [];
@@ -602,7 +606,6 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   if (contractsResult.status === "rejected") failures.push("contracts");
   if (statementsResult.status === "rejected")
     failures.push("settlement-statements");
-  if (usersResult.status === "rejected") failures.push("users");
   if (auditResult.status === "rejected") failures.push("audit");
 
   const programs =
@@ -618,13 +621,6 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
       : [];
   const statements =
     statementsResult.status === "fulfilled" ? statementsResult.value : [];
-  const rawUsers = usersResult.status === "fulfilled" ? usersResult.value : [];
-  const users = Array.isArray(rawUsers)
-    ? rawUsers
-    : rawUsers &&
-        Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
-      ? (rawUsers as { items: TenantUserRoleRecord[] }).items
-      : [];
   const audit = auditResult.status === "fulfilled" ? auditResult.value : [];
 
   const degradedMessage =
@@ -638,7 +634,6 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
     orders,
     contracts,
     statements,
-    users,
     audit,
     degradedMessage,
   };
@@ -969,7 +964,7 @@ export async function loadBankAuditData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ records: BankAuditRow[] }>> {
   try {
-    const core = await loadCoreBankData(tenantId, role);
+    const core = await loadCoreBankData(tenantId, role, { audit: true });
     return {
       data: {
         records: core.audit.map((record) => ({

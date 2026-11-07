@@ -2,6 +2,11 @@
 
 import "./enterprise-booking-form-accessibility.css";
 import Link from "next/link";
+import type {
+  TenantPassengerRecord,
+  TenantAddressRecord,
+  TenantCostCenterRecord,
+} from "@drts/contracts";
 import {
   useState,
   type CSSProperties,
@@ -484,9 +489,9 @@ export function EnterpriseBookingForm({
   bookingId,
 }: {
   initialDraft: EnterpriseBookingDraftForm;
-  passengers: string[];
-  addresses: string[];
-  costCenters: string[];
+  passengers: Array<string | TenantPassengerRecord>;
+  addresses: Array<string | TenantAddressRecord>;
+  costCenters: Array<string | TenantCostCenterRecord>;
   bookingId?: string | undefined;
 }) {
   const { locale, t: tr } = useTranslation();
@@ -527,10 +532,50 @@ export function EnterpriseBookingForm({
   const canContinue =
     isEnterpriseDraftComplete(draft) && timeValidation.isValid;
 
-  const costCenterOptions = costCenters.map((label) => ({
-    value: label.split("·")[0]?.trim() ?? label,
-    label,
-  }));
+  const passengerOptions = passengers
+    .filter((row) => typeof row === "string" || row.activeFlag)
+    .map((row) =>
+      typeof row === "string"
+        ? { key: row, label: row, name: row, passengerId: undefined }
+        : {
+            key: row.passengerId,
+            label: [row.fullName, row.employeeNo || row.mobile]
+              .filter(Boolean)
+              .join(" · "),
+            name: row.fullName,
+            passengerId: row.passengerId,
+          },
+    );
+  const addressOptions = addresses
+    .filter((row) => typeof row === "string" || row.activeFlag)
+    .map((row) =>
+      typeof row === "string"
+        ? { key: row, label: row, address: row, addressId: undefined }
+        : {
+            key: row.addressId,
+            label: `${row.addressName} · ${row.addressText}`,
+            address: row.addressText,
+            addressId: row.addressId,
+          },
+    );
+  const hasCostCenterOptions = costCenters.some(
+    (row) => typeof row === "string" || row.activeFlag,
+  );
+  const costCenterOptions = costCenters
+    .filter((row) => typeof row === "string" || row.activeFlag)
+    .map((row) =>
+      typeof row === "string"
+        ? { value: row.split("·")[0]?.trim() ?? row, label: row }
+        : { value: row.code, label: `${row.code} · ${row.name}` },
+    );
+  if (
+    !costCenterOptions.some((option) => option.value === draft.costCenterCode)
+  ) {
+    costCenterOptions.unshift({
+      value: draft.costCenterCode,
+      label: draft.costCenterLabel || tr("new.costCenter.hint"),
+    });
+  }
   const vehicleOptions: {
     value: EnterpriseVehiclePreference;
     label: string;
@@ -550,6 +595,7 @@ export function EnterpriseBookingForm({
     patch({
       passengerMode: mode,
       passenger: nextPassenger,
+      passengerId: undefined,
       ...(!isPlacardCustomized
         ? { placard: formatDefaultPlacard(nextPassenger) }
         : {}),
@@ -559,6 +605,7 @@ export function EnterpriseBookingForm({
   function setPassengerName(newPassenger: string) {
     patch({
       passenger: newPassenger,
+      passengerId: undefined,
       ...(!isPlacardCustomized
         ? { placard: formatDefaultPlacard(newPassenger) }
         : {}),
@@ -574,7 +621,7 @@ export function EnterpriseBookingForm({
     const selected = costCenterOptions.find((option) => option.value === code);
     patch({
       costCenterCode: code,
-      costCenterLabel: selected?.label ?? draft.costCenterLabel,
+      costCenterLabel: selected?.label ?? code,
     });
   }
 
@@ -717,23 +764,24 @@ export function EnterpriseBookingForm({
                   marginTop: 12,
                 }}
               >
-                {passengers.map((passenger) => (
+                {passengerOptions.map((option) => (
                   <button
-                    key={passenger}
+                    key={option.key}
                     type="button"
                     className="ent-booking-chip-btn"
                     onClick={() => {
                       patch({
                         passengerMode: "other",
-                        passenger,
+                        passenger: option.name,
+                        passengerId: option.passengerId,
                         ...(!isPlacardCustomized
-                          ? { placard: formatDefaultPlacard(passenger) }
+                          ? { placard: formatDefaultPlacard(option.name) }
                           : {}),
                       });
                     }}
                     style={chipButtonStyle()}
                   >
-                    {passenger}
+                    {option.label}
                   </button>
                 ))}
               </div>
@@ -790,7 +838,9 @@ export function EnterpriseBookingForm({
                 icon="pin"
                 required
                 value={draft.pickup}
-                onChange={(pickup) => patch({ pickup })}
+                onChange={(pickup) =>
+                  patch({ pickup, pickupAddressId: undefined })
+                }
                 onFocus={() => setAddressTarget("pickup")}
               />
             </BookingField>
@@ -805,7 +855,9 @@ export function EnterpriseBookingForm({
                 icon="pin"
                 required
                 value={draft.dropoff}
-                onChange={(dropoff) => patch({ dropoff })}
+                onChange={(dropoff) =>
+                  patch({ dropoff, dropoffAddressId: undefined })
+                }
                 onFocus={() => setAddressTarget("dropoff")}
               />
             </BookingField>
@@ -876,21 +928,27 @@ export function EnterpriseBookingForm({
               marginTop: 12,
             }}
           >
-            {addresses.map((address) => (
+            {addressOptions.map((option) => (
               <button
-                key={address}
+                key={option.key}
                 type="button"
                 className="ent-booking-chip-btn"
                 onClick={() =>
                   patch(
                     addressTarget === "pickup"
-                      ? { pickup: address }
-                      : { dropoff: address },
+                      ? {
+                          pickup: option.address,
+                          pickupAddressId: option.addressId,
+                        }
+                      : {
+                          dropoff: option.address,
+                          dropoffAddressId: option.addressId,
+                        },
                   )
                 }
                 style={chipButtonStyle()}
               >
-                {address}
+                {option.label}
               </button>
             ))}
           </div>
@@ -989,14 +1047,24 @@ export function EnterpriseBookingForm({
               hint={tr("new.costCenter.hint")}
               hintId={costCenterHintId}
             >
-              <SelectControl
-                id={costCenterFieldId}
-                required
-                value={draft.costCenterCode}
-                onChange={setCostCenterCode}
-                options={costCenterOptions}
-                aria-describedby={costCenterHintId}
-              />
+              {hasCostCenterOptions ? (
+                <SelectControl
+                  id={costCenterFieldId}
+                  required
+                  value={draft.costCenterCode}
+                  onChange={setCostCenterCode}
+                  options={costCenterOptions}
+                  aria-describedby={costCenterHintId}
+                />
+              ) : (
+                <TextControl
+                  id={costCenterFieldId}
+                  required
+                  value={draft.costCenterCode}
+                  onChange={setCostCenterCode}
+                  aria-describedby={costCenterHintId}
+                />
+              )}
             </BookingField>
             <BookingField
               fieldId={bookedByFieldId}
@@ -1012,6 +1080,7 @@ export function EnterpriseBookingForm({
                     ...(draft.passengerMode === "self"
                       ? {
                           passenger: bookedBy,
+                          passengerId: undefined,
                           ...(!isPlacardCustomized
                             ? { placard: formatDefaultPlacard(bookedBy) }
                             : {}),
