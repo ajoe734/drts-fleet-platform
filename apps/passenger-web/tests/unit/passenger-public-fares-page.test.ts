@@ -13,7 +13,11 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PassengerRideAuthorityView } from "@drts/contracts";
 
-import { GET as proxyGet } from "@/app/control-plane-proxy/[...path]/route";
+import {
+  DELETE as proxyDelete,
+  GET as proxyGet,
+  POST as proxyPost,
+} from "@/app/control-plane-proxy/[...path]/route";
 import { PassengerRidePage } from "@/components/passenger-ride-page";
 
 const token = "L".repeat(48);
@@ -302,4 +306,195 @@ describe("legacy public fares through the actual Page and proxy", () => {
     expectNoRidePresentation();
     expectOnlyPublicReads(io, 2);
   });
+});
+
+describe("public fare proxy request boundaries", () => {
+  it.each([
+    ["POST", proxyPost],
+    ["DELETE", proxyDelete],
+  ] as const)(
+    "rejects the exact fare path for %s without HTTP calls",
+    async (method, handler) => {
+      const transport = vi.fn();
+      vi.stubGlobal("fetch", transport);
+      // Even a configured upstream identity must not be minted for a denied path.
+      vi.stubEnv(
+        "DRTS_API_AUTH_AUDIENCE",
+        "https://synthetic-api-audience.test",
+      );
+
+      const response = await handler(
+        new NextRequest(`${browserOrigin}${publicFarePath}`, { method }),
+        { params: Promise.resolve({ path: ["passenger-app", "fares"] }) },
+      );
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        error: "PASSENGER_PROXY_PATH_NOT_ALLOWED",
+      });
+      expect(transport).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["missing fare segment", ["passenger-app"]],
+    ["singular fare lookalike", ["passenger-app", "fare"]],
+    ["fare-prefix lookalike", ["passenger-app", "fares-preview"]],
+    ["extra fare child", ["passenger-app", "fares", "current"]],
+    ["empty segment", ["passenger-app", ""]],
+    ["current-directory segment", ["passenger-app", "."]],
+    ["parent-directory segment", ["passenger-app", ".."]],
+    ["slash-bearing segment", ["passenger-app", "fares/current"]],
+    ["backslash-bearing segment", ["passenger-app", "fares\\current"]],
+  ])("rejects %s without HTTP calls", async (_label, path) => {
+    const transport = vi.fn();
+    vi.stubGlobal("fetch", transport);
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "https://synthetic-api-audience.test");
+
+    const response = await proxyGet(
+      new NextRequest(`${browserOrigin}${publicFarePath}`),
+      // Supply decoded catch-all params directly so URL normalization cannot
+      // erase the unsafe segment before the actual route inspects it.
+      { params: Promise.resolve({ path: path as string[] }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "PASSENGER_PROXY_PATH_NOT_ALLOWED",
+    });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("strips browser identity and private headers from the exact public GET while retaining ordinary headers and query", async () => {
+    const forgedHeaders = {
+      cookie: "synthetic-session=browser-only",
+      "x-drts-internal-key": "synthetic-browser-internal-key",
+      "x-drts-google-id-token": "synthetic-browser-google-token",
+      "x-serverless-authorization": "Bearer synthetic-browser-invoker",
+      "x-actor-id": "synthetic-forged-actor",
+      "x-actor-type": "system",
+      "x-auth-mode": "internal",
+      "x-realm": "platform",
+      "x-role-families": "platform",
+      "x-roles": "admin",
+      "x-scopes": "*",
+      "x-forwarded-for": "192.0.2.9",
+      "x-forwarded-host": "synthetic-forged-host.test",
+      "x-forwarded-port": "443",
+      "x-forwarded-proto": "https",
+    };
+    const transport = vi.fn().mockResolvedValue(publicFareResponse());
+    vi.stubGlobal("fetch", transport);
+
+    const response = await proxyGet(
+      new NextRequest(
+        `${browserOrigin}${publicFarePath}?locale=zh-TW&version=approved`,
+        {
+          headers: {
+            ...forgedHeaders,
+            accept: "application/json",
+            "accept-language": "zh-TW",
+            "x-request-id": "synthetic-public-fare-read",
+          },
+        },
+      ),
+      { params: Promise.resolve({ path: ["passenger-app", "fares"] }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: { current_version: publishedVersion },
+    });
+    expect(transport).toHaveBeenCalledTimes(1);
+    const [target, init] = transport.mock.calls[0] as [URL, RequestInit];
+    expect(target.href).toBe(
+      `${upstreamOrigin}${upstreamFarePath}?locale=zh-TW&version=approved`,
+    );
+    expect(init.method).toBe("GET");
+    expect(init.cache).toBe("no-store");
+    expect(init.redirect).toBe("manual");
+    const headers = new Headers(init.headers);
+    for (const name of Object.keys(forgedHeaders)) {
+      expect(headers.has(name), name).toBe(false);
+    }
+    expect(headers.get("accept")).toBe("application/json");
+    expect(headers.get("accept-language")).toBe("zh-TW");
+    expect(headers.get("x-request-id")).toBe("synthetic-public-fare-read");
+  });
+
+  it.each([
+    {
+      label: "configured audience",
+      origin: upstreamOrigin,
+      configuredAudience: "https://synthetic-api-audience.test",
+    },
+    {
+      label: "Cloud Run origin audience",
+      origin: "https://synthetic-passenger-api.a.run.app",
+      configuredAudience: "",
+    },
+  ])(
+    "uses server-minted upstream identity for the public GET with $label",
+    async ({ origin, configuredAudience }) => {
+      vi.stubEnv("DRTS_API_URL", origin);
+      vi.stubEnv("DRTS_API_AUTH_AUDIENCE", configuredAudience);
+      const identityToken = "synthetic-metadata-identity-token";
+      const transport = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.href
+                : input.url,
+          );
+          if (url.hostname === "metadata.google.internal") {
+            expect(url.pathname).toBe(
+              "/computeMetadata/v1/instance/service-accounts/default/identity",
+            );
+            expect(url.searchParams.get("audience")).toBe(
+              configuredAudience || origin,
+            );
+            expect(url.searchParams.get("format")).toBe("full");
+            expect(new Headers(init?.headers).get("Metadata-Flavor")).toBe(
+              "Google",
+            );
+            expect(init?.cache).toBe("no-store");
+            return new Response(identityToken);
+          }
+          if (url.origin === origin && url.pathname === upstreamFarePath) {
+            return publicFareResponse();
+          }
+          throw new Error(
+            `Unexpected HTTP boundary: ${url.origin}${url.pathname}`,
+          );
+        },
+      );
+      vi.stubGlobal("fetch", transport);
+
+      const response = await proxyGet(
+        new NextRequest(`${browserOrigin}${publicFarePath}`, {
+          headers: {
+            "x-drts-google-id-token": "synthetic-browser-google-token",
+            "x-serverless-authorization": "Bearer synthetic-browser-invoker",
+          },
+        }),
+        { params: Promise.resolve({ path: ["passenger-app", "fares"] }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: { current_version: publishedVersion },
+      });
+      expect(transport).toHaveBeenCalledTimes(2);
+      const [target, init] = transport.mock.calls[1]!;
+      expect(String(target)).toBe(`${origin}${upstreamFarePath}`);
+      expect(init?.method).toBe("GET");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-drts-google-id-token")).toBe(identityToken);
+      expect(headers.get("x-serverless-authorization")).toBe(
+        `Bearer ${identityToken}`,
+      );
+    },
+  );
 });
