@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
+import { signInOnReviewPage } from "./pax-review-shared-order/rehearsal-passenger";
 import {
   OPS,
   PAX,
@@ -96,75 +97,12 @@ test("the real reservation acceptance deadline expires automatically, then recov
     });
     await registerDriver(ops, driver, driverBase, step);
     await step("Timeout Passenger actual OTP login", async () => {
-      await pax.goto(`${PAX}/review`);
-      // Reuse the trial entry's five-sign-in bound and existing synthetic pool.
-      // Readiness never clears debt; booking still enforces its original guard.
-      const loginAttempts = 5;
-      const firstSuffix = (Number(process.env.GITHUB_RUN_ID ?? 1) + 88) % 100;
-      for (let attempt = 0; attempt < loginAttempts; attempt++) {
-        const suffix = (firstSuffix + attempt) % 100;
-        await pax
-          .getByLabel("演練手機", { exact: true })
-          .fill(`09000000${String(suffix).padStart(2, "0")}`);
-        await pax.getByRole("checkbox").check();
-        const requested = pax.waitForResponse(
-          (r) =>
-            new URL(r.url()).pathname ===
-              "/api/passenger-app/review-demo/otp" &&
-            r.request().method() === "POST",
-        );
-        await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
-        expect((await requested).ok()).toBe(true);
-        await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-        await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
-        expect(
-          await pax.evaluate(() =>
-            localStorage.getItem("drts.passenger.functional-demo.v1"),
-          ),
-        ).toBeNull();
-        const readinessUrl = `${PAX}/api/passenger-app/review-demo/trial/readiness`;
-        const canBook = await step(
-          `Timeout Passenger existing booking readiness (${attempt + 1}/${loginAttempts})`,
-          async () => {
-            const readiness = await pax.request.get(readinessUrl);
-            progress.response("pax", "GET", readinessUrl, readiness.status());
-            expect(
-              readiness.status(),
-              `Trial readiness HTTP${readiness.status()}`,
-            ).toBe(200);
-            const ready = camel(await readiness.json()).data?.canBook;
-            expect(
-              typeof ready,
-              "Trial readiness must return boolean canBook",
-            ).toBe("boolean");
-            return ready === true;
-          },
-        );
-        if (canBook) return;
-        // Only leave this attempt's own session. No card, payment or order is
-        // touched for an account the existing unpaid-payment guard refuses.
-        await step(
-          `Timeout Passenger leaves an unbookable account (${attempt + 1}/${loginAttempts})`,
-          async () => {
-            const loggedOut = pax.waitForResponse(
-              (response) =>
-                new URL(response.url()).pathname ===
-                  "/api/passenger-app/auth/logout" &&
-                response.request().method() === "POST",
-            );
-            await pax
-              .getByRole("button", { name: "登出／換乘客", exact: true })
-              .click();
-            expect((await loggedOut).ok()).toBe(true);
-            await expect(
-              pax.getByLabel("演練手機", { exact: true }),
-            ).toBeVisible();
-          },
-        );
-      }
-      throw new Error(
-        "No bookable rehearsal passenger after 5 attempts: trial readiness canBook=false (pending_payment_block); no booking attempted.",
-      );
+      await signInOnReviewPage(pax, 88);
+      expect(
+        await pax.evaluate(() =>
+          localStorage.getItem("drts.passenger.functional-demo.v1"),
+        ),
+      ).toBeNull();
     });
     const method = await step(
       "Bind external simulated PSP through actual API",
