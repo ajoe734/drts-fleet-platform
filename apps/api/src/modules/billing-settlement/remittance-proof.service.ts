@@ -389,6 +389,9 @@ export class RemittanceProofService {
    */
   async markPaidWithProof(
     input: MarkRemittanceProofPaidInput,
+    persist?: (
+      input: MarkRemittanceProofPaidInput,
+    ) => Promise<MarkRemittanceProofPaidResult>,
   ): Promise<RemittanceProofPaymentReceipt> {
     this.assertPersistenceAvailable();
     if (
@@ -405,7 +408,9 @@ export class RemittanceProofService {
       );
     }
     if (this.useDurablePersistence()) {
-      const result = await this.repository!.markRemittanceProofPaid(input);
+      const result = persist
+        ? await persist(input)
+        : await this.repository!.markRemittanceProofPaid(input);
       return this.assertReceiptMatches(
         this.resolveMarkPaidResult(result),
         input,

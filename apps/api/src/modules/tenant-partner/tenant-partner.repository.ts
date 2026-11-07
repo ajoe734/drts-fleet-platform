@@ -27,6 +27,23 @@ import type {
 
 import { DatabaseService } from "../../common/db";
 
+export type TenantMasterDirectoryContext = {
+  passengers: TenantPassengerRecord[];
+  addresses: TenantAddressRecord[];
+  costCenters: TenantCostCenterRecord[];
+};
+
+export class TenantMasterDirectoryOwnershipConflict extends Error {
+  readonly name = "TenantMasterDirectoryOwnershipConflict";
+
+  constructor(
+    readonly kind: "passenger" | "address",
+    readonly recordId: string,
+  ) {
+    super(`The tenant ${kind} could not be found.`);
+  }
+}
+
 type JsonRecordRow = {
   record: unknown;
 };
@@ -426,6 +443,71 @@ export class TenantPartnerRepository {
             : undefined,
         )
         .find((record) => record?.entrySlug === normalizedSlug) ?? null
+    );
+  }
+
+  async readTenantMasterDirectory(
+    tenantId: string,
+  ): Promise<TenantMasterDirectoryContext> {
+    if (!this.isEnabled())
+      return { passengers: [], addresses: [], costCenters: [] };
+    const [passengers, addresses, costCenters] = await Promise.all([
+      this.databaseService!.query<JsonRecordRow>(
+        "SELECT record FROM core.phase1_tenant_passengers WHERE tenant_id = $1 ORDER BY updated_at DESC, created_at DESC",
+        [tenantId],
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        "SELECT record FROM core.phase1_tenant_addresses WHERE tenant_id = $1 ORDER BY updated_at DESC, created_at DESC",
+        [tenantId],
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        "SELECT record FROM core.phase1_tenant_cost_centers WHERE tenant_id = $1 ORDER BY updated_at DESC, created_at DESC",
+        [tenantId],
+      ),
+    ]);
+    return {
+      passengers: passengers.rows
+        .map((row) =>
+          this.parseRecord<TenantPassengerRecord>(
+            row.record,
+            "core.phase1_tenant_passengers",
+          ),
+        )
+        .filter((row) => row.tenantId === tenantId),
+      addresses: addresses.rows
+        .map((row) =>
+          this.parseRecord<TenantAddressRecord>(
+            row.record,
+            "core.phase1_tenant_addresses",
+          ),
+        )
+        .filter((row) => row.tenantId === tenantId),
+      costCenters: costCenters.rows
+        .map((row) =>
+          this.parseRecord<TenantCostCenterRecord>(
+            row.record,
+            "core.phase1_tenant_cost_centers",
+          ),
+        )
+        .filter((row) => row.tenantId === tenantId),
+    };
+  }
+
+  async findSlaProfile(tenantId: string): Promise<TenantSlaProfile | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM admin.phase1_tenant_sla_profiles WHERE tenant_id = $1",
+      [tenantId],
+    );
+    return (
+      result.rows
+        .map((row) =>
+          this.parseRecord<TenantSlaProfile>(
+            row.record,
+            "admin.phase1_tenant_sla_profiles",
+          ),
+        )
+        .find((profile) => profile.tenantId === tenantId) ?? null
     );
   }
 
@@ -990,9 +1072,21 @@ export class TenantPartnerRepository {
   async persistChanges(
     changes: PersistTenantPartnerChanges,
     executor?: TenantPartnerQueryExecutor,
-  ) {
+  ): Promise<void> {
     if (!this.isEnabled()) {
       return;
+    }
+
+    // A rejected directory row must also roll back any earlier writes from the
+    // same command. Reuse an enclosing transaction when its owner supplied one.
+    if (
+      !executor &&
+      ((changes.passengers?.length ?? 0) > 0 ||
+        (changes.addresses?.length ?? 0) > 0)
+    ) {
+      return this.withTransaction((client) =>
+        this.persistChanges(changes, client),
+      );
     }
 
     const target = executor ?? this.databaseService!;
@@ -1428,9 +1522,10 @@ export class TenantPartnerRepository {
 
     for (const passenger of changes.passengers ?? []) {
       writes.push(
-        target.query(
-          `
-            INSERT INTO core.phase1_tenant_passengers (
+        target
+          .query(
+            `
+            INSERT INTO core.phase1_tenant_passengers AS tenant_passenger (
               passenger_id,
               tenant_id,
               active_flag,
@@ -1441,29 +1536,39 @@ export class TenantPartnerRepository {
               $1, $2, $3, $4, $5, $6::jsonb
             )
             ON CONFLICT (passenger_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
               active_flag = EXCLUDED.active_flag,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
+            WHERE tenant_passenger.tenant_id = EXCLUDED.tenant_id
+            RETURNING passenger_id
           `,
-          [
-            passenger.passengerId,
-            passenger.tenantId,
-            passenger.activeFlag,
-            passenger.createdAt,
-            passenger.updatedAt,
-            JSON.stringify(passenger),
-          ],
-        ),
+            [
+              passenger.passengerId,
+              passenger.tenantId,
+              passenger.activeFlag,
+              passenger.createdAt,
+              passenger.updatedAt,
+              JSON.stringify(passenger),
+            ],
+          )
+          .then((result) => {
+            if (result.rows.length !== 1) {
+              throw new TenantMasterDirectoryOwnershipConflict(
+                "passenger",
+                passenger.passengerId,
+              );
+            }
+          }),
       );
     }
 
     for (const address of changes.addresses ?? []) {
       writes.push(
-        target.query(
-          `
-            INSERT INTO core.phase1_tenant_addresses (
+        target
+          .query(
+            `
+            INSERT INTO core.phase1_tenant_addresses AS tenant_address (
               address_id,
               tenant_id,
               active_flag,
@@ -1474,21 +1579,30 @@ export class TenantPartnerRepository {
               $1, $2, $3, $4, $5, $6::jsonb
             )
             ON CONFLICT (address_id) DO UPDATE SET
-              tenant_id = EXCLUDED.tenant_id,
               active_flag = EXCLUDED.active_flag,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
+            WHERE tenant_address.tenant_id = EXCLUDED.tenant_id
+            RETURNING address_id
           `,
-          [
-            address.addressId,
-            address.tenantId,
-            address.activeFlag,
-            address.createdAt,
-            address.updatedAt,
-            JSON.stringify(address),
-          ],
-        ),
+            [
+              address.addressId,
+              address.tenantId,
+              address.activeFlag,
+              address.createdAt,
+              address.updatedAt,
+              JSON.stringify(address),
+            ],
+          )
+          .then((result) => {
+            if (result.rows.length !== 1) {
+              throw new TenantMasterDirectoryOwnershipConflict(
+                "address",
+                address.addressId,
+              );
+            }
+          }),
       );
     }
 

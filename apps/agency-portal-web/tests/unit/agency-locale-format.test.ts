@@ -167,7 +167,7 @@ describe("Agency portal locale catalog and formatters", () => {
     expect(displayMinor(undefined, "TWD", "en")).toBe("Not provided");
     expect(displayMinor(0, "TWD", "zh")).toBe("0 TWD");
     expect(displayMinor(0, "TWD", "en")).toBe("0 TWD");
-    expect(displayMinor(1250, "TWD", "en")).toBe("1,250 TWD");
+    expect(displayMinor(125000, "TWD", "en")).toBe("1,250 TWD");
 
     expect(displayPercent(null, "zh")).toBe("未提供");
     expect(displayPercent(undefined, "en")).toBe("Not provided");

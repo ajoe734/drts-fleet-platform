@@ -1,8 +1,8 @@
 import { vi } from "vitest";
 import { TenantPartnerRepository } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 
-// SQL boundary double only: stores the JSON passed by the production repository.
-// No schema/SQL/business rules are reimplemented; PostgreSQL checks are hosted.
+// SQL boundary double: stores JSON and models master-directory RETURNING ACKs.
+// PostgreSQL schema, constraints, and locking checks are hosted.
 export function persistenceHarness() {
   let records = new Map<string, Map<string, unknown>>();
   type Session = {
@@ -54,8 +54,26 @@ export function persistenceHarness() {
         const key = table.endsWith("quota_policies")
           ? JSON.stringify(values.slice(0, 3))
           : String(values[0]);
+        const masterDirectory =
+          table === "core.phase1_tenant_passengers" ||
+          table === "core.phase1_tenant_addresses";
+        const existing = rows.get(key) as { tenantId?: string } | undefined;
+        if (
+          masterDirectory &&
+          /\bWHERE\s+\w+\.tenant_id\s*=\s*EXCLUDED\.tenant_id\b/.test(sql) &&
+          existing &&
+          existing.tenantId !== values[1]
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
         rows.set(key, record);
         state.set(table, rows);
+        const returningColumn = masterDirectory
+          ? /\bRETURNING\s+(passenger_id|address_id)\b/.exec(sql)?.[1]
+          : undefined;
+        if (returningColumn) {
+          return { rows: [{ [returningColumn]: values[0] }], rowCount: 1 };
+        }
       }
       if (table && sql.includes("DELETE FROM")) {
         if (++session.insertCount === rejectInsert) {

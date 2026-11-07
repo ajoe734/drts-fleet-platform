@@ -208,7 +208,10 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await SecureStore.setItemAsync(pendingKey, JSON.stringify(pendingPayload));
+      await SecureStore.setItemAsync(
+        pendingKey,
+        JSON.stringify(pendingPayload),
+      );
 
       // Verify pending completion is loadable
       const loadedBefore = await getPendingDriverTaskCompletion();
@@ -254,8 +257,42 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
       await initializeDriverIdentity();
       expect(isDriverIdentityProvisioned()).toBe(true);
 
-      // Revoke binding
-      await revokeDriverDeviceBinding();
+      // Simulate only the remote acknowledgement; exercise the real SDK request.
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              bindingId: dummySession.bindingId,
+              deviceId: dummySession.deviceId,
+              driverId: dummySession.driverId,
+              revokedAt: "2026-10-29T00:00:00.000Z",
+            },
+            meta: {
+              requestId: "driver-revoke-test",
+              timestamp: "2026-10-29T00:00:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      try {
+        await revokeDriverDeviceBinding();
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.stringMatching(/\/api\/auth\/driver\/device\/revoke$/),
+          expect.objectContaining({
+            method: "POST",
+            body: JSON.stringify({
+              bindingId: dummySession.bindingId,
+              deviceId: dummySession.deviceId,
+            }),
+            headers: expect.objectContaining({
+              Authorization: `Bearer ${dummySession.accessToken}`,
+            }),
+          }),
+        );
+      } finally {
+        fetchMock.mockRestore();
+      }
 
       expect(isDriverIdentityProvisioned()).toBe(false);
       expect(mockStore.has("drts.driver.session")).toBe(false);

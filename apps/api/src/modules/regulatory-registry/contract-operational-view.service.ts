@@ -10,6 +10,8 @@ import type {
   ContractOperationalDataStatus,
   ContractOperationalTerms,
   ContractOperationalViewRecord,
+  PartnerChannelEntryRecord,
+  TenantSlaProfile,
   VehicleContractRecord,
 } from "@drts/contracts";
 import { SYSTEM_REMEDIATION_ERROR_CODES } from "@drts/contracts";
@@ -140,7 +142,56 @@ export class ContractOperationalViewService {
     contractId: string,
     scopeContext?: ContractOperationalScopeContext,
   ): VehicleContractRecord {
-    const contract = this.findContract(contractId);
+    return this.validateResolvedContractScope(
+      contractId,
+      this.findContract(contractId),
+      scopeContext,
+    );
+  }
+
+  async validateContractScopeFromPersistence(
+    contractId: string,
+    scopeContext?: ContractOperationalScopeContext,
+  ): Promise<VehicleContractRecord> {
+    const context = await this.resolveContractContextFromPersistence(
+      contractId,
+      scopeContext,
+    );
+    return context.contract;
+  }
+
+  private async resolveContractContextFromPersistence(
+    contractId: string,
+    scopeContext?: ContractOperationalScopeContext,
+  ) {
+    const contract =
+      await this.regulatoryRegistryService.findContractFromPersistence(
+        contractId,
+      );
+    const partnerEntry =
+      contract && this.tenantPartnerService
+        ? this.lookupPartnerEntry(
+            contract,
+            await this.tenantPartnerService.listPlatformPartnerEntriesFromPersistence(),
+          )
+        : null;
+    return {
+      contract: this.validateResolvedContractScope(
+        contractId,
+        contract,
+        scopeContext,
+        partnerEntry,
+      ),
+      partnerEntry,
+    };
+  }
+
+  private validateResolvedContractScope(
+    contractId: string,
+    contract: VehicleContractRecord | null,
+    scopeContext?: ContractOperationalScopeContext,
+    resolvedPartnerEntry?: PartnerChannelEntryRecord | null,
+  ): VehicleContractRecord {
     if (!contract) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -183,7 +234,10 @@ export class ContractOperationalViewService {
       }
 
       if (tenantId && tenantId.trim().length > 0) {
-        const partnerEntry = this.lookupPartnerEntry(contract);
+        const partnerEntry =
+          resolvedPartnerEntry === undefined
+            ? this.lookupPartnerEntry(contract)
+            : resolvedPartnerEntry;
         if (
           partnerEntry &&
           partnerEntry.tenantId &&
@@ -215,6 +269,38 @@ export class ContractOperationalViewService {
   ): ContractOperationalViewRecord {
     const contract = this.validateContractScope(contractId, scopeContext);
     return this.projectContractToOperationalView(contract);
+  }
+
+  async getOperationalViewFromPersistence(
+    contractId: string,
+    scopeContext?: ContractOperationalScopeContext,
+  ): Promise<ContractOperationalViewRecord> {
+    const { contract, partnerEntry } =
+      await this.resolveContractContextFromPersistence(
+        contractId,
+        scopeContext,
+      );
+    const slaProfile =
+      partnerEntry && this.tenantPartnerService
+        ? await this.tenantPartnerService.getSlaProfileFromPersistence(
+            partnerEntry.tenantId,
+          )
+        : null;
+    return this.projectContractToOperationalView(contract, {
+      partnerEntry,
+      slaProfile,
+    });
+  }
+
+  async getOperationalTermsFromPersistence(
+    contractId: string,
+    scopeContext?: ContractOperationalScopeContext,
+  ): Promise<ContractOperationalTerms> {
+    const view = await this.getOperationalViewFromPersistence(
+      contractId,
+      scopeContext,
+    );
+    return this.projectOperationalViewToTerms(view);
   }
 
   /**
@@ -256,11 +342,10 @@ export class ContractOperationalViewService {
     );
   }
 
-  private lookupPartnerEntry(contract: VehicleContractRecord) {
-    if (!this.tenantPartnerService) {
-      return null;
-    }
-    const entries = this.tenantPartnerService.listPlatformPartnerEntries();
+  private lookupPartnerEntry(
+    contract: VehicleContractRecord,
+    entries = this.tenantPartnerService?.listPlatformPartnerEntries() ?? [],
+  ) {
     return (
       entries.find(
         (entry) =>
@@ -273,8 +358,14 @@ export class ContractOperationalViewService {
 
   private projectContractToOperationalView(
     contract: VehicleContractRecord,
+    context?: {
+      partnerEntry: PartnerChannelEntryRecord | null;
+      slaProfile: TenantSlaProfile | null;
+    },
   ): ContractOperationalViewRecord {
-    const partnerEntry = this.lookupPartnerEntry(contract);
+    const partnerEntry = context
+      ? context.partnerEntry
+      : this.lookupPartnerEntry(contract);
     const scopeKey =
       partnerEntry?.businessDispatchSubtype ?? contract.serviceScope;
     const policy = SCOPE_POLICIES[scopeKey] ?? null;
@@ -348,28 +439,29 @@ export class ContractOperationalViewService {
     let slaProfile: ContractOperationalViewRecord["slaProfile"] = null;
     let slaStatus: ContractOperationalDataStatus = "missing_data";
     if (partnerEntry && this.tenantPartnerService) {
-      const tenantSla = this.tenantPartnerService.getSlaProfile(
-        partnerEntry.tenantId,
-      );
-      slaProfile = {
-        profileId: `sla_${partnerEntry.programId}`,
-        targetResponseMinutes: tenantSla.waitThresholdMin,
-        pickupWindowMinutes: tenantSla.arrivalThresholdMin,
-        businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
-      };
-      slaStatus = "available";
+      const tenantSla = context
+        ? context.slaProfile
+        : this.tenantPartnerService.getSlaProfile(partnerEntry.tenantId);
+      if (tenantSla) {
+        slaProfile = {
+          profileId: `sla_${partnerEntry.programId}`,
+          targetResponseMinutes: tenantSla.waitThresholdMin,
+          pickupWindowMinutes: tenantSla.arrivalThresholdMin,
+          businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
+        };
+        slaStatus = "available";
+      }
     } else if (policy && policy.slaTargetResponseMinutes !== null) {
       const area = contract.operatingAreaId ?? "default";
       const subtype =
         contract.serviceScope === "standard_taxi"
           ? "standard_taxi"
           : "business_dispatch";
-      const prefix =
-        contract.vehicleId?.startsWith("veh-av-")
-          ? "sla_av_business"
-          : subtype === "standard_taxi"
-            ? "sla_standard_taxi"
-            : "sla_enterprise";
+      const prefix = contract.vehicleId?.startsWith("veh-av-")
+        ? "sla_av_business"
+        : subtype === "standard_taxi"
+          ? "sla_standard_taxi"
+          : "sla_enterprise";
       slaProfile = {
         profileId: `${prefix}_${area}`,
         targetResponseMinutes: policy.slaTargetResponseMinutes,
@@ -388,14 +480,22 @@ export class ContractOperationalViewService {
         Boolean(contract.updatedAt) &&
         Boolean(contract.createdAt) &&
         contract.updatedAt !== contract.createdAt;
-      const versionNumber = hasUpdates ? 2 : 1;
-      effectiveVersion = {
-        versionNumber,
-        versionTag: `v${versionNumber}.0`,
-        effectiveFrom: hasUpdates ? contract.updatedAt : contract.startAt,
-        effectiveTo: contract.endAt ?? null,
-      };
-      versionStatus = "available";
+      // A later lifecycle update can supersede this contract without changing
+      // the original approval. It is not the approved version's start time.
+      const effectiveFrom = hasUpdates ? contract.approvedAt : contract.startAt;
+      if (
+        effectiveFrom &&
+        (!hasUpdates || Number.isFinite(Date.parse(effectiveFrom)))
+      ) {
+        const versionNumber = hasUpdates ? 2 : 1;
+        effectiveVersion = {
+          versionNumber,
+          versionTag: `v${versionNumber}.0`,
+          effectiveFrom,
+          effectiveTo: contract.endAt ?? null,
+        };
+        versionStatus = "available";
+      }
     }
 
     // 7. Auth Mode

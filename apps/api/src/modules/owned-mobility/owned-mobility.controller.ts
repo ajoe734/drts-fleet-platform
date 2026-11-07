@@ -673,11 +673,15 @@ export class OwnedMobilityController {
 
   @Get("tenant/bookings/:bookingId")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getTenantBooking(
+  async getTenantBooking(
     @Param("bookingId") bookingId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.ownedMobilityService.resolvePersistedTenantBooking(
+      this.requireTenantId(tenantId),
+      bookingId,
+    );
     return toApiSuccessEnvelope(
       this.ownedMobilityService.getTenantBooking(
         this.requireTenantId(tenantId),
@@ -1132,10 +1136,21 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const task = await this.assertDriverTaskAccess(taskId, identity);
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.getOrderForRead(task.orderId),
-      requestId,
-    );
+    const order = await this.ownedMobilityService.getOrderForRead(task.orderId);
+    if (
+      (identity?.realm === "driver" || identity?.actorType === "driver_user") &&
+      order.referralPassengerLifecycle
+    ) {
+      // R04: a normal Driver must not link an individual rating to this
+      // order's passenger. Keep original trip/contact/fee data unchanged.
+      const lifecycle = { ...order.referralPassengerLifecycle };
+      delete lifecycle.rating;
+      return toApiSuccessEnvelope(
+        { ...order, referralPassengerLifecycle: lifecycle },
+        requestId,
+      );
+    }
+    return toApiSuccessEnvelope(order, requestId);
   }
 
   @Post("driver/tasks/:taskId/accept")
