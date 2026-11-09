@@ -308,3 +308,67 @@ This document records the completion and verification of the live invoice mail E
 **Completed Local Verification**:
 - `git diff --check HEAD^ HEAD`: clean (exit 0).
 - `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`: (will be completed in candidate validation).
+
+## Owner Cycle 2026-11-09: source wiring gap fix + outstanding external authorization decision
+
+Context: PR #2425 (candidate `e901ba057a09e4590fa723211bdc1f6ad482ac98`) was reviewed, CI-green, and
+merged (`e788524839c6b7640b64b110b62786815f3e7b51`) on 2026-10-07. No hosted dispatch was ever attempted
+after that merge. Two unblock helpers
+(`SR-LIVE-INVOICE-MAIL-20261007-UNBLOCK-HISTORY-REPAIR`, `-UNBLOCK-MANUAL-UNBLOCK`) re-confirmed this and
+described the blocker only as "an authorized operator must dispatch the workflow." A third helper,
+`SR-LIVE-INVOICE-MAIL-20261007-UNBLOCK-PLANNING-DECISION` (PR #3206, merged 2026-11-09, see
+`support/unblock/SR-LIVE-INVOICE-MAIL-20261007/SR-LIVE-INVOICE-MAIL-20261007-UNBLOCK-PLANNING-DECISION.md`),
+traced this further and found a concrete **source defect**, not just a provisioning gap:
+`.github/workflows/live-invoice-mail-acceptance.yml` never set
+`DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST`, which `session-bootstrap.ts:474-480`
+(`bootstrapMailSession`) requires to contain the derived `+invoice` alias before it will mint a mail
+session — so the harness as merged could not pass even with every external value supplied.
+
+**F15 [P1, NEW: workflow never wires the observed allowlist the harness requires]**
+- Trigger: `deriveAliasRecipient` (session-bootstrap.ts:334-360) computes
+  `<drts-dev-smtp-username local-part>+invoice@<domain>` at run time, then
+  `bootstrapMailSession` (session-bootstrap.ts:474-480) throws
+  `"Derived recipient is not present in the observed effective allowlist."` unless
+  `env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST` already contains that address or its domain. The
+  workflow never populated this variable from any source (`grep -c EFFECTIVE_ALLOWLIST
+  .github/workflows/live-invoice-mail-acceptance.yml` was 0 before this fix).
+- Repaired: added a `Resolve observed SMTP recipient allowlist` step to
+  `.github/workflows/live-invoice-mail-acceptance.yml`, placed after the existing WIF
+  `auth`/`setup-gcloud` steps and before the session-minting step. It reads the live
+  `drts-dev-smtp-recipient-allowlist` secret via `gcloud secrets versions access latest` (the same
+  mechanism `readMailbox` in `session-bootstrap.ts:524-536` already uses for
+  `drts-dev-smtp-username`, and the same comma-separated format `remote-smtp-mail.transport.ts:89-90`
+  and `deploy-dev.yml:912-919` already assume for this exact secret), masks each comma-separated entry
+  with `::add-mask::`, then exports the raw value to `DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST` via
+  `GITHUB_ENV` so the later TypeScript step observes it through `process.env`, matching how the harness
+  was designed to consume it. No repository variable or fixture string is substituted; the value always
+  reflects whatever the secret actually contains at dispatch time.
+- No candidate/source TypeScript or Python files changed in this cycle; only the workflow YAML (within
+  this task's `write_scopes`).
+
+**Completed Local Verification (2026-11-09, this worktree)**:
+- `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/live-invoice-mail-acceptance.yml'))"`:
+  parses cleanly, 20 steps in the `mail-acceptance` job.
+- Isolated bash reproduction of the new step's comma-split/mask loop against a multi-alias sample string:
+  each entry masked individually, no empty/malformed entries. (No `actionlint`/`shellcheck` binary
+  available on this VM to lint the step directly; verified by direct interpretation instead.)
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py'`: PASS 13/13, exit 0 (unchanged; confirms this cycle did not regress existing source).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: PASS 38/38 across 2 files, exit 0.
+- `pnpm exec tsc -p tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json --noEmit`: PASS, exit 0.
+- No hosted CI/workflow dispatch, cloud auth, Secret Manager read/write, GitHub secret/variable write,
+  mailbox access, or VM product/browser/Playwright/Compose process was performed, per the VM restriction
+  and this task's dispatch guardrails.
+
+**Still outstanding (external decision, not resolvable by this cycle):** per
+`SR-LIVE-INVOICE-MAIL-20261007-UNBLOCK-PLANNING-DECISION.md` §3 and §5, dispatching the now-wiring-complete
+workflow still requires the user to (1) add two new WIF grants (a `tenant_viewer`/`tenant:billing:read`-only
+actor under tenant `...0201`, and a `tenant_admin` actor under a second, distinct tenant) to
+`drts-dev-workload-identity-google-service-principals`, (2) seed or choose one real dev invoice row under
+each of the three fixture tenants, (3) extend `drts-dev-smtp-recipient-allowlist` to include the
+`+invoice` alias of the existing dev SMTP mailbox, and (4) set the 11 `DRTS_LIVE_INVOICE_MAIL_*` repository
+variables and flip `DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED=true`. None of these are Secret Manager/GitHub
+secret writes or authorization-gate flips this agent is permitted to perform (see project memory
+`project-live-acceptance-infrastructure` §"What Claude cannot do here"). All four `required_acceptance`
+keys (`reviewed_invoice_live_harness_same_sha_ci`, `authorized_invoice_runtime_recipient_and_fixture`,
+`genuine_invoice_mail_provider_inbox_and_download`, `invoice_idempotency_failure_readback_and_cleanup`)
+remain NOT satisfied pending that decision and a subsequent hosted dispatch of workflow `377833148`.
