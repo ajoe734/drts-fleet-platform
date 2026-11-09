@@ -137,10 +137,9 @@ function parseMonthOrBoundaryDate(
   }
   const periodMonth = text.slice(0, 7);
   const [year, month] = periodMonth.split("-").map(Number) as [number, number];
-  const lastDay = String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(
-    2,
-    "0",
-  );
+  const lastDay = String(
+    new Date(Date.UTC(year, month, 0)).getUTCDate(),
+  ).padStart(2, "0");
   const expectedDate =
     boundary === "from" ? `${periodMonth}-01` : `${periodMonth}-${lastDay}`;
   if (text !== expectedDate) {
@@ -389,11 +388,12 @@ export class AgencyPortalService {
       resourceId: jobId,
       filter: {},
       execute: async () => {
-        const view = this.reportingFilingService.getMultiTaxiTripExportJob(
-          jobId,
-          this.evidenceIdentity(identity!),
-          meta.requestId ?? undefined,
-        );
+        const view =
+          await this.reportingFilingService.getMultiTaxiTripExportJobForRead(
+            jobId,
+            this.evidenceIdentity(identity!),
+            meta.requestId ?? undefined,
+          );
         return { result: view, rowCount: 0, totalCount: view.recordCount };
       },
     });
@@ -412,7 +412,7 @@ export class AgencyPortalService {
       filter: {},
       execute: async () => {
         const download =
-          this.reportingFilingService.issueMultiTaxiTripExportDownload(
+          await this.reportingFilingService.issueMultiTaxiTripExportDownloadForRead(
             jobId,
             this.evidenceIdentity(identity!),
             meta.requestId ?? undefined,

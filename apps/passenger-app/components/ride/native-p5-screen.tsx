@@ -7,7 +7,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import type { RatePassengerRideCommand } from "@drts/contracts";
+import type {
+  PassengerRideContactOption,
+  RatePassengerRideCommand,
+} from "@drts/contracts";
 import type { NativePassengerRidePresentation } from "@drts/passenger-client";
 import { getPassengerTrackingMapPositions } from "@drts/passenger-client";
 import { PASSENGER_P5_COLORS as p5 } from "@drts/ui-tokens";
@@ -23,6 +26,8 @@ export interface NativeP5ScreenActions {
     url: string;
   }): Promise<void>;
   contactSupport(): void | Promise<void>;
+  contactDriver?(): Promise<PassengerRideContactOption>;
+  openDriverContact?(): void | Promise<void>;
   openSupport(category: "service" | "lost_item"): void | Promise<void>;
   openHistory(): void | Promise<void>;
 }
@@ -97,6 +102,78 @@ function ErrorFeedback({ message }: { message: string | null }) {
       {message}
     </Text>
   ) : null;
+}
+
+function DriverContactCard({ actions }: { actions: NativeP5ScreenActions }) {
+  const [contact, setContact] = useState<PassengerRideContactOption | null>(
+    null,
+  );
+  const feedback = useActionFeedback();
+  const masked = contact?.mode === "masked_call" && !!contact.contactUri;
+  async function request() {
+    await feedback.run(async () => {
+      setContact(null);
+      if (!actions.contactDriver)
+        throw new Error("聯絡司機功能尚未提供，請改聯絡客服協助。");
+      setContact(await actions.contactDriver());
+    });
+  }
+  async function open() {
+    await feedback.run(async () => {
+      if (!actions.openDriverContact)
+        throw new Error("電話功能尚未提供，請改聯絡客服協助。");
+      await actions.openDriverContact();
+    });
+  }
+  return (
+    <View testID="native-driver-contact-card" style={styles.card}>
+      <ActionButton
+        id="native-contact-driver"
+        label={
+          feedback.busy && !contact
+            ? "正在建立安全通話"
+            : contact
+              ? "重新嘗試聯絡司機"
+              : "聯絡司機"
+        }
+        disabled={feedback.busy}
+        onPress={request}
+      />
+      {contact && (
+        <>
+          <Text style={styles.text}>
+            {masked ? "安全通話已準備，可撥打司機。" : "目前無法直接聯絡司機。"}
+          </Text>
+          {!masked && (
+            <Text style={styles.muted}>
+              {contact.unavailableReason ===
+              "masked_call_provider_not_configured"
+                ? "通話服務尚未提供，請改聯絡客服協助轉達。"
+                : contact.unavailableReason === "masked_call_provider_error"
+                  ? "通話服務暫時無法使用，請重試或改聯絡客服。"
+                  : "請重試或改聯絡客服協助轉達。"}
+            </Text>
+          )}
+          {masked ? (
+            <ActionButton
+              id="native-dial-driver"
+              label="撥打司機"
+              disabled={feedback.busy}
+              onPress={open}
+            />
+          ) : contact.mode === "support_fallback" && contact.contactUri ? (
+            <ActionButton
+              id="native-driver-contact-support"
+              label="改聯絡客服"
+              disabled={feedback.busy}
+              onPress={open}
+            />
+          ) : null}
+        </>
+      )}
+      <ErrorFeedback message={feedback.error} />
+    </View>
+  );
 }
 
 function RatingCard({
@@ -504,6 +581,12 @@ function NativeP5ScreenBody({
             <Text style={styles.text}>乘車請繫妥安全帶。</Text>
           ) : null}
         </View>
+      ) : null}
+      {fixture.canContact && fixture.actionMode === "driver_contact_ready" ? (
+        <DriverContactCard
+          key={`${fixture.assignment?.assignmentId}-${fixture.assignment?.assignmentVersion}`}
+          actions={actions}
+        />
       ) : null}
       {!receiptOnly && !disclosureUnavailable ? (
         <View testID="native-fare-card" style={styles.card}>

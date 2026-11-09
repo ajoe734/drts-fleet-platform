@@ -38,6 +38,7 @@ const en: Dict = {
   "case.status.resolved": "Resolved",
   "case.status.reopened": "Reopened",
   "case.status.under_investigation": "Under investigation",
+  "case.status.investigating": "Under investigation",
   "app.name": "Fleet Partner Portal",
   "app.sub": "Fleet Partner Workspace",
   "app.brandMark": "FLP",
@@ -116,8 +117,7 @@ const en: Dict = {
     "Approved vehicle plate already registered",
   "supply.vehicleNew.plateExistsRenewalBody":
     "This plate is already registered as an approved vehicle in your fleet. To renew its insurance policy or fleet participation contract, create an approved supply renewal submission instead of onboarding a duplicate vehicle.",
-  "supply.vehicleNew.plateExistsRenewalAction":
-    "Open approved supply renewal",
+  "supply.vehicleNew.plateExistsRenewalAction": "Open approved supply renewal",
   "supply.renewalNew.title": "Renew approved supply",
   "supply.renewalNew.subtitle":
     "Select an approved vehicle or driver -> update policy/contract/license draft -> upload renewed documents -> submit for Platform review",
@@ -628,6 +628,7 @@ const en: Dict = {
   "case.responsibility.unattributed": "Unattributed",
   "case.sla.breached": "Breached",
   "case.sla.on_track": "On track",
+  "case.sla.unknown": "Unknown",
   "case.status.in_review": "In review",
   "case.status.open": "Open",
   "case.status.pending": "Pending",
@@ -652,6 +653,7 @@ const zh: Dict = {
   "case.status.resolved": "已解決",
   "case.status.reopened": "重新開啟",
   "case.status.under_investigation": "調查中",
+  "case.status.investigating": "調查中",
   "app.name": "車行夥伴入口",
   "app.sub": "車行夥伴工作台",
   "app.brandMark": "FLP",
@@ -726,12 +728,10 @@ const zh: Dict = {
   "supply.vehicleNew.subtitle":
     "Vehicle draft · create -> upload docs -> submit",
   "supply.vehicleNew.cardTitle": "VehicleSupplyDraft",
-  "supply.vehicleNew.plateExistsRenewalTitle":
-    "此車牌已存在於車隊核可車輛主檔",
+  "supply.vehicleNew.plateExistsRenewalTitle": "此車牌已存在於車隊核可車輛主檔",
   "supply.vehicleNew.plateExistsRenewalBody":
     "此車牌已完成首次核准建檔。若需辦理同車續保（insurance_update）或續約（contract_update），請改由「既有供給續期送審」建立更新送審件，無須重複建檔。",
-  "supply.vehicleNew.plateExistsRenewalAction":
-    "前往既有供給續期送審",
+  "supply.vehicleNew.plateExistsRenewalAction": "前往既有供給續期送審",
   "supply.renewalNew.title": "既有供給續期送審",
   "supply.renewalNew.subtitle":
     "選擇已核可車輛或司機 -> 更新續保／續約／證照效期草稿 -> 上傳新效期證明文件 -> 送交平台審核",
@@ -739,10 +739,8 @@ const zh: Dict = {
   "supply.renewalNew.fallback":
     "目前顯示 fallback 續期標的資料；fleet-partner supply API 可用時會切換成 live data。",
   "supply.renewal.typeLabel": "續期送審類型",
-  "supply.renewal.type.insurance_update":
-    "同車續保更新（insurance_update）",
-  "supply.renewal.type.contract_update":
-    "同車續約更新（contract_update）",
+  "supply.renewal.type.insurance_update": "同車續保更新（insurance_update）",
+  "supply.renewal.type.contract_update": "同車續約更新（contract_update）",
   "supply.renewal.type.profile_correction":
     "司機證照／執業登記證續期（profile_correction）",
   "supply.renewal.targetVehicleLabel": "選擇已核可車輛（Canonical Vehicle）",
@@ -1196,6 +1194,7 @@ const zh: Dict = {
   "case.responsibility.unattributed": "尚未歸屬",
   "case.sla.breached": "已逾時",
   "case.sla.on_track": "正常",
+  "case.sla.unknown": "未知",
   "case.status.in_review": "審查中",
   "case.status.open": "處理中",
   "case.status.pending": "待處理",

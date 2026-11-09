@@ -296,11 +296,11 @@ describe("MultiTaxiController ride intake", () => {
         status: "pending",
         idempotentReplay: false,
       }),
-      getMultiTaxiTripExportJob: vi.fn().mockReturnValue({
+      getMultiTaxiTripExportJobForRead: vi.fn().mockResolvedValue({
         jobId: "JOB-001",
         status: "completed",
       }),
-      issueMultiTaxiTripExportDownload: vi.fn().mockReturnValue({
+      issueMultiTaxiTripExportDownloadForRead: vi.fn().mockResolvedValue({
         jobId: "JOB-001",
         download: { downloadUrl: "https://downloads.example.test/JOB-001" },
       }),
@@ -327,12 +327,12 @@ describe("MultiTaxiController ride intake", () => {
       identity,
       "req-create-001",
     );
-    const status = controller.getTripOperationalExportJob(
+    const status = await controller.getTripOperationalExportJob(
       "JOB-001",
       identity,
       "req-status-001",
     );
-    const download = controller.downloadTripOperationalExport(
+    const download = await controller.downloadTripOperationalExport(
       "JOB-001",
       identity,
       "req-download-001",

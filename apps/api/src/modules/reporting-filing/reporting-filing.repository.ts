@@ -217,6 +217,20 @@ export class ReportingFilingRepository {
     return result.rows.map((row) => row.job_id);
   }
 
+  async listReportJobs(): Promise<StoredReportJobRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_report_jobs
+       ORDER BY updated_at DESC, created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<StoredReportJobRecord>(
+        row.record,
+        "admin.phase1_report_jobs",
+      ),
+    );
+  }
+
   async loadReportJob(jobId: string): Promise<StoredReportJobRecord | null> {
     const result = await this.databaseService!.query<JsonRecordRow>(
       "SELECT record FROM admin.phase1_report_jobs WHERE job_id = $1",

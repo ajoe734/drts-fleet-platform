@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   DriverMatchingSuppression,
@@ -7,6 +7,90 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import { ApiRequestError } from "../../common/api-envelope";
+
+export interface FleetIncidentReplyData {
+  fleetPartnerId: string;
+  idempotencyKey: string;
+  bodyHash: string;
+  content: string;
+  attachments: {
+    attachmentId: string;
+    name: string;
+    size: string;
+    fileSize: number;
+  }[];
+}
+
+export interface FleetIncidentReplyTimelineEntry extends IncidentTimelineEntry {
+  fleetReply: FleetIncidentReplyData;
+}
+
+export function isFleetIncidentReplyEntry(
+  entry: IncidentTimelineEntry,
+): entry is FleetIncidentReplyTimelineEntry {
+  if (
+    !("fleetReply" in entry) ||
+    !entry.fleetReply ||
+    typeof entry.fleetReply !== "object"
+  )
+    return false;
+  const data = entry.fleetReply;
+  return (
+    "fleetPartnerId" in data &&
+    typeof data.fleetPartnerId === "string" &&
+    "idempotencyKey" in data &&
+    typeof data.idempotencyKey === "string" &&
+    "bodyHash" in data &&
+    typeof data.bodyHash === "string" &&
+    "content" in data &&
+    typeof data.content === "string" &&
+    "attachments" in data &&
+    Array.isArray(data.attachments) &&
+    data.attachments.every(
+      (item: unknown) =>
+        !!item &&
+        typeof item === "object" &&
+        "attachmentId" in item &&
+        typeof item.attachmentId === "string" &&
+        "name" in item &&
+        typeof item.name === "string" &&
+        "size" in item &&
+        typeof item.size === "string" &&
+        "fileSize" in item &&
+        typeof item.fileSize === "number",
+    )
+  );
+}
+
+export function cloneFleetIncidentReply(
+  entry: FleetIncidentReplyTimelineEntry,
+): FleetIncidentReplyTimelineEntry {
+  return {
+    ...entry,
+    fleetReply: {
+      ...entry.fleetReply,
+      attachments: entry.fleetReply.attachments.map((item) => ({ ...item })),
+    },
+  };
+}
+
+export function assertSameFleetIncidentReply(
+  existing: FleetIncidentReplyTimelineEntry,
+  incoming: FleetIncidentReplyTimelineEntry,
+) {
+  if (
+    existing.incidentId !== incoming.incidentId ||
+    existing.fleetReply.fleetPartnerId !== incoming.fleetReply.fleetPartnerId ||
+    existing.fleetReply.idempotencyKey !== incoming.fleetReply.idempotencyKey ||
+    existing.fleetReply.bodyHash !== incoming.fleetReply.bodyHash
+  )
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "IDEMPOTENCY_CONFLICT",
+      "This incident reply key already belongs to a different reply body.",
+    );
+}
 
 type JsonRecordRow = {
   record: unknown;
@@ -649,6 +733,104 @@ export class IncidentRepository {
           "ops.phase1_incidents",
         )
       : null;
+  }
+
+  /** Append a Fleet reply on the original Incident row; preserve the first receipt. */
+  async commitFleetReply(entry: FleetIncidentReplyTimelineEntry): Promise<{
+    entry: FleetIncidentReplyTimelineEntry;
+    deduplicated: boolean;
+  }> {
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const initial = await client.query<JsonRecordRow>(
+        "SELECT record FROM ops.phase1_incidents WHERE incident_id = $1",
+        [entry.incidentId],
+      );
+      const initialIncident = initial.rows[0]
+        ? this.parseRecord<IncidentRecord>(
+            initial.rows[0].record,
+            "ops.phase1_incidents",
+          )
+        : null;
+      if (initialIncident?.relatedDriverId)
+        await client.query(
+          "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+          [initialIncident.relatedDriverId],
+        );
+      const current = await client.query<JsonRecordRow>(
+        "SELECT record FROM ops.phase1_incidents WHERE incident_id = $1 FOR UPDATE",
+        [entry.incidentId],
+      );
+      const row = current.rows[0];
+      if (!row)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Incident not found.",
+        );
+      const incident = this.parseRecord<IncidentRecord>(
+        row.record,
+        "ops.phase1_incidents",
+      );
+      if (incident.status === "closed")
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "CASE_CLOSED_NO_REPLY",
+          "Closed incidents are read-only.",
+        );
+      const readReceipt = async () => {
+        const result = await client.query<JsonRecordRow>(
+          "SELECT record FROM ops.phase1_incident_timelines WHERE incident_id = $1 ORDER BY created_at ASC",
+          [entry.incidentId],
+        );
+        return result.rows
+          .map((item) =>
+            this.parseRecord<IncidentTimelineEntry>(
+              item.record,
+              "ops.phase1_incident_timelines",
+            ),
+          )
+          .find((item) => item.entryId === entry.entryId);
+      };
+      const prior = await readReceipt();
+      if (prior) {
+        if (!isFleetIncidentReplyEntry(prior))
+          throw new Error("Stored incident reply receipt is invalid.");
+        assertSameFleetIncidentReply(prior, entry);
+        await client.query("COMMIT");
+        return { entry: cloneFleetIncidentReply(prior), deduplicated: true };
+      }
+      await client.query(
+        `INSERT INTO ops.phase1_incident_timelines
+        (entry_id, incident_id, action, actor_id, created_at, record)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+        ON CONFLICT (entry_id) DO NOTHING`,
+        [
+          entry.entryId,
+          entry.incidentId,
+          entry.action,
+          entry.actor,
+          entry.createdAt,
+          JSON.stringify(entry),
+        ],
+      );
+      const saved = await readReceipt();
+      if (!saved || !isFleetIncidentReplyEntry(saved))
+        throw new Error("Incident reply was not read back after append.");
+      assertSameFleetIncidentReply(saved, entry);
+      await client.query("COMMIT");
+      return { entry: cloneFleetIncidentReply(saved), deduplicated: false };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* retain original error */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

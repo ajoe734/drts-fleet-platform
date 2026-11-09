@@ -181,9 +181,35 @@ describe("SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致",
       expect(formatEnterpriseBookingTime("not-a-date")).toBe("not-a-date");
     });
 
-    it("格式化為 MM/DD HH:mm", () => {
-      const iso = new Date(2026, 8, 6, 14, 5).toISOString();
-      expect(formatEnterpriseBookingTime(iso)).toBe("09/06 14:05");
+    it("以產品時區格式化明確 ISO instant 為 MM/DD HH:mm", () => {
+      expect(formatEnterpriseBookingTime("2026-09-06T06:05:00Z")).toBe(
+        "09/06 14:05",
+      );
+    });
+
+    it("跨年預約顯示與同一天日期篩選使用同一產品時區", () => {
+      const query = buildEnterpriseBookingSearchQuery(
+        {
+          ...DEFAULT_ENTERPRISE_BOOKING_SEARCH_FILTERS,
+          dateFrom: "2027-01-01",
+          dateTo: "2027-01-01",
+        },
+        1,
+        10,
+      );
+      expect(query.dateFrom).toBe("2027-01-01T00:00:00+08:00");
+      expect(query.dateTo).toBe("2027-01-02T00:00:00+08:00");
+      const bookingInstant = "2026-12-31T16:05:00Z";
+      expect(Date.parse(bookingInstant)).toBeGreaterThanOrEqual(
+        Date.parse(query.dateFrom!),
+      );
+      expect(Date.parse(bookingInstant)).toBeLessThan(
+        Date.parse(query.dateTo!),
+      );
+      expect(formatEnterpriseBookingTime(bookingInstant)).toBe("01/01 00:05");
+      expect(formatEnterpriseBookingTime("2027-01-01T00:05:00+08:00")).toBe(
+        "01/01 00:05",
+      );
     });
   });
 

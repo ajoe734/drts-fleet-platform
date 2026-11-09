@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { Text, View } from "react-native";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { NativePassengerApplication } from "../components/application/native-passenger-application";
 import { NativePassengerRuntime } from "./native-passenger-runtime";
 import {
@@ -29,6 +31,15 @@ export function createNativePassengerBootstrap(
   const ports = createNativePassengerPlatformPorts({
     baseUrl: config.baseUrl,
     callbackUri: config.callbackUri,
+    fileSystem: FileSystem,
+    async openSavedFile(uri, contentType) {
+      if (!(await Sharing.isAvailableAsync()))
+        throw new Error("目前無法開啟檔案分享，請稍後重試。");
+      await Sharing.shareAsync(uri, {
+        mimeType: contentType.split(";")[0]?.trim() || contentType,
+        dialogTitle: "乘車證明",
+      });
+    },
   });
   return {
     mode: "configured" as const,

@@ -2667,7 +2667,9 @@ export default async function DispatchPage({
     loadHealthPayload(),
   ]);
 
-  const ownedOrders = ownedOrdersResult.items;
+  const ownedOrders = ownedOrdersResult.items.filter(
+    (order) => order.status !== "completed" && order.status !== "cancelled",
+  );
   const dispatchJobs = dispatchJobsResult.items;
   const driverTasks = driverTasksResult.items;
   const drivers = driversResult.items;

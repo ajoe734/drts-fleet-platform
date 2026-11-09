@@ -62,6 +62,27 @@ export function earliestBookingTime(
   }
 }
 
+/**
+ * Minutes the time the app proposes keeps above the lead. The lead is checked
+ * again at the quote and at the submit, and a proposal exactly on it fails both
+ * from the next whole minute, before anyone can finish the booking. Only the
+ * proposal moves: a passenger can still pick any time the lead allows.
+ */
+export const BOOKING_PROPOSAL_MARGIN_MINUTES = 5;
+/** How often an open form moves a proposal along with the clock. */
+export const BOOKING_PROPOSAL_REFRESH_MS = 15_000;
+
+/** The time to offer a passenger who has not picked one. */
+export function proposedBookingTime(
+  settings: PassengerBookingSettingsResponse,
+  now: number = Date.now(),
+): string {
+  return earliestBookingTime(
+    settings,
+    now + BOOKING_PROPOSAL_MARGIN_MINUTES * 60_000,
+  );
+}
+
 /** Revalidate at every quote and submit boundary, using the current clock. */
 export function isBookingTimeAllowed(
   iso: string,
@@ -73,4 +94,27 @@ export function isBookingTimeAllowed(
   return (
     Number.isFinite(scheduled) && scheduled >= now + minLeadTimeMinutes * 60_000
   );
+}
+
+/** A picked time that can still be booked stays; anything else gets a proposal. */
+export function withBookableTime<
+  T extends { localTime: string; localTimeAuto?: boolean },
+>(
+  draft: T,
+  settings: PassengerBookingSettingsResponse,
+  now: number = Date.now(),
+): T {
+  if (!draft.localTimeAuto) {
+    try {
+      const iso = fromLocalDateTime(draft.localTime);
+      if (isBookingTimeAllowed(iso, settings, now)) return draft;
+    } catch {
+      /* Empty or unparsable: nothing worth keeping. */
+    }
+  }
+  return {
+    ...draft,
+    localTime: proposedBookingTime(settings, now),
+    localTimeAuto: true,
+  };
 }
