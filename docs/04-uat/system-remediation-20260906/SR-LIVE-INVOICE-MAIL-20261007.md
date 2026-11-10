@@ -372,3 +372,90 @@ secret writes or authorization-gate flips this agent is permitted to perform (se
 keys (`reviewed_invoice_live_harness_same_sha_ci`, `authorized_invoice_runtime_recipient_and_fixture`,
 `genuine_invoice_mail_provider_inbox_and_download`, `invoice_idempotency_failure_readback_and_cleanup`)
 remain NOT satisfied pending that decision and a subsequent hosted dispatch of workflow `377833148`.
+
+## Owner Cycle 2026-11-10: concrete provisioning mechanism found (still external/user-only; no source changed)
+
+Context: 16 consecutive `acceptance_ready_dispatch` cycles since 2026-11-09T20:21Z re-confirmed the same
+unchanged blocker (`gh variable list` still shows zero `DRTS_LIVE_INVOICE_MAIL_*` vars; two `AskUserQuestion`
+attempts at 2026-11-09T21:07Z and 2026-11-10T10:14Z got no reply). Rather than re-verify the same absence a
+17th time, this cycle traced exactly *how* each item in
+`SR-LIVE-INVOICE-MAIL-20261007-UNBLOCK-PLANNING-DECISION.md` §5 must be produced, since that document named
+the gaps but not the concrete mechanism. Read-only research this cycle (`gh variable list/get`, `grep`,
+file reads only; no secret values read, no cloud mutation, no file outside this doc touched):
+
+1. **The 14 (not 11) actual `DRTS_LIVE_INVOICE_MAIL_*` vars**, enumerated from
+   `.github/workflows/live-invoice-mail-acceptance.yml:47-61` (ground truth over the earlier helper's count):
+   `TEST_AUTHORIZED`, `API_ORIGIN`, `PORTAL_ORIGIN`, `ALLOWED_TARGETS`, `TEST_TENANT_ID`, `TENANT_ACTOR_ID`,
+   `TEST_INVOICE_ID`, `NON_ALLOWLISTED_TENANT_ID`, `NON_ALLOWLISTED_INVOICE_ID`, `NON_ALLOWLISTED_ACTOR_ID`,
+   `READ_ONLY_TENANT_ID`, `READ_ONLY_INVOICE_ID`, `READ_ONLY_ACTOR_ID`, `INVITATION_ROLE_CODE`. Five of these
+   are directly reusable today from the already-live `SR-LIVE-MAIL-001` vars (`gh variable list`, verified
+   live this cycle): `API_ORIGIN`/`ALLOWED_TARGETS` = `https://drts-dev-api-r6ykdme3wa-uc.a.run.app`
+   (`DRTS_LIVE_MAIL_API_ORIGIN`/`ALLOWED_TARGETS`), `TEST_TENANT_ID` = `10000000-0000-0000-0000-000000000201`,
+   `TENANT_ACTOR_ID` = `10000000-0000-0000-0000-000000000901` (`DRTS_LIVE_MAIL_TENANT_ACTOR_ID`). `PORTAL_ORIGIN`
+   is new but already deployed: `tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec.ts`
+   builds `/invoices` and `/control-plane-proxy/tenant/invoices/...` URLs from it, and `/invoices` is served by
+   `apps/tenant-console-web/app/invoices/page.tsx` — so `PORTAL_ORIGIN` = the existing
+   `DRTS_dev_TENANT_CONSOLE_ORIGIN` var's value, `https://drts-dev-tenant-console-web-r6ykdme3wa-uc.a.run.app`
+   (verified live via `gh variable get DEV_TENANT_CONSOLE_ORIGIN`), not a value needing new infrastructure.
+2. **The read-only and non-allowlisted actors are not just a WIF-registry edit — they need a real IAM
+   identity.** `apps/api/src/modules/auth/google-workload-identity.adapter.ts:43-47,546-564`
+   (`resolveCiTenantActorGrant`) only checks that a `{tenantId, actorType, actorId}` tuple exists in the
+   registered principal's `ciTenantActorGrants` array (confirmed shape via
+   `apps/api/tests/unit/google-workload-identity.adapter.test.ts:106-124,406-414`: the registry env var is
+   `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, a JSON array; the existing `github-actions-deployer`
+   principal already has one grant `{tenantId: "...0201", actorType: "tenant_admin", actorId: "...0901"}`).
+   **`actorType` in this tuple must be the literal string `"tenant_admin"` for every grant regardless of the
+   actor's real role** — `session-bootstrap.ts:453,459,464` (`tryMint`) always passes `"tenant_admin"` as the
+   `x-actor-type` header for all three sessions; the *actual* minted role (`tenant_viewer` for read-only) comes
+   from that actor's real membership row in `iam.identity_memberships`/`iam.identity_role_bindings`
+   (`infra/migrations/V0068__canonical_identity_authority.sql:33-67`), looked up server-side by
+   `(tenantId, actorId)` — not from the WIF grant. So provisioning the read-only actor needs **two** things,
+   not one: (a) a new `ciTenantActorGrants` entry `{tenantId: "10000000-0000-0000-0000-000000000201",
+   actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000903"}` appended to the
+   `github-actions-deployer` principal in `drts-dev-workload-identity-google-service-principals`, AND (b) that
+   actor `...0903` must actually exist under tenant `...0201` with role `tenant_viewer` / scope
+   `tenant:billing:read` — created the same way any real tenant user is invited, via `POST tenant/users`
+   (the existing `tenant:users:create` step-up flow `session-bootstrap.ts` already documents, or the
+   `apps/tenant-console-web/app/users` invite UI), **not** a raw SQL insert against `iam.*` tables (no
+   invoice/membership seed script exists under `infra/migrations/`; hand-written inserts would skip
+   `record` jsonb population and status-machine invariants the real write path enforces).
+3. **The non-allowlisted case needs a second tenant, which is heavier than a user invite.** No second tenant
+   UUID is referenced anywhere in the existing test suite (`grep` across `tests/e2e` found only `...0201`), so
+   this is not reusable from another task; a genuinely new tenant must go through this project's normal
+   tenant onboarding/approval flow (see `apps/platform-admin-web/app/tenants` for the admin view, and the
+   `sr-qa-tenant-001` tenant-approval-and-quota-lifecycle tests for the flow it must pass through) — **check first
+   whether an already-approved spare dev tenant exists before creating a new one**; only the user can see the
+   live tenant list to decide. If a new one is required: propose
+   `NON_ALLOWLISTED_TENANT_ID = 10000000-0000-0000-0000-000000000202` and
+   `NON_ALLOWLISTED_ACTOR_ID = 10000000-0000-0000-0000-000000000904` (next free slots after the existing
+   `...0201`/`...0901`/`...0902`), with its own new `ciTenantActorGrants` entry
+   `{tenantId: "...0202", actorType: "tenant_admin", actorId: "...0904"}` (this actor's *real* role should be
+   `tenant_admin` under that tenant, matching `session-bootstrap.ts:464`'s `expRole`).
+4. **Invoice fixture rows have a real creation endpoint — not a DB seed.**
+   `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts:161-172`
+   (`POST tenant/invoices/generate`, scope `tenant:billing:write`) is the only invoice-creation path found
+   (no `infra/migrations/*.sql` file creates invoice rows). Once an actor with `tenant:billing:write` exists
+   for a tenant, that actor's own session (e.g. the already-authorized primary actor `...0901` for tenant
+   `...0201`, or a human admin logged into `apps/tenant-console-web/app/billing`) can call this endpoint to
+   produce `TEST_INVOICE_ID` and (reusing the same tenant) `READ_ONLY_INVOICE_ID` could simply be the same
+   invoice id viewed by the read-only actor, not a second generate call — the read-only role differs by actor,
+   not by invoice. `NON_ALLOWLISTED_INVOICE_ID` needs one `generate` call under the new tenant once it exists.
+   This agent cannot call this endpoint itself: it requires a session token minted via the hosted
+   `google-github-actions/auth` OIDC flow (GitHub-Actions-only) or a human console login, neither available
+   from this read-only worker dispatch.
+5. **SMTP allowlist and the 14 vars** are unchanged from §5 of the planning-decision doc: extend
+   `drts-dev-smtp-recipient-allowlist` with the `+invoice` alias of the existing `drts-dev-smtp-username`
+   mailbox, then set the 14 vars above (5 reused verbatim, `PORTAL_ORIGIN` reused from
+   `DEV_TENANT_CONSOLE_ORIGIN`, the rest from steps 2-4 once provisioned) and flip
+   `DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED=true`.
+
+**Net change from the prior helper's checklist:** steps 1 (vars) and `PORTAL_ORIGIN` are now fully resolved
+with live values; steps 2-4 are now named by their real mechanism (IAM user-invite + `tenant/invoices/generate`
+API calls, not registry-only edits or SQL seeds) instead of being described as a single generic "seed fixture
+rows" action. This does not reduce the number of user-only decisions (still: which new actors/tenant to
+create, whether to reuse an existing spare tenant, and the Secret Manager/GitHub-variable/`TEST_AUTHORIZED`
+writes themselves) — those remain explicitly outside this agent's permitted actions per
+`project-live-acceptance-infrastructure` memory. No source file, workflow, secret, or GitHub variable was
+written this cycle; only this document (within `write_scopes`) changed. `gh variable list` was re-run and
+still shows zero `DRTS_LIVE_INVOICE_MAIL_*` vars at the time of this edit. All four `required_acceptance`
+keys remain NOT satisfied for the same reason as the prior cycle.
