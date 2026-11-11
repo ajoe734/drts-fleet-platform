@@ -1603,6 +1603,17 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - name: Run OTP, cancellation, reliability, aftercare and matching bureau branches
         run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
+      - name: Run the Agency portal business journey using the completed Passenger trip
+        run: pnpm exec playwright test -c playwright.agency-portal-business.config.ts
+      - name: Upload Agency portal business evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agency-portal-business-${{ github.run_id }}
+          path: .artifacts/agency-portal-business
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload bureau acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
