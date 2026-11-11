@@ -2095,7 +2095,10 @@ export default function TripScreen() {
               />
             }
             title={
-              <View style={styles.bannerTitleRow}>
+              <View
+                testID="driver-trip-authority"
+                style={styles.bannerTitleRow}
+              >
                 <Text style={styles.bannerTitleText}>
                   {tripAuthorityBanner.title}
                 </Text>

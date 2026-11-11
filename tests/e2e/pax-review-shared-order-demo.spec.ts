@@ -2000,7 +2000,14 @@ test("a wheelchair booking keeps its UUID and requirement through ordinary Ops a
       false,
       assigned.taskId,
     );
-    await expect(driver.getByText("輪椅需求", { exact: true })).toBeVisible();
+    await expect(
+      driver.getByText(`${assigned.taskId} · ${orderId}`, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      driver
+        .getByTestId("driver-trip-authority")
+        .getByText("輪椅需求", { exact: true }),
+    ).toBeVisible();
     await step(
       "Wheelchair completed order, requirement and entered fare persist across Passenger reload and Ops reads",
       async () => {
