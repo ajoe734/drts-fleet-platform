@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 import { startAgencySmtpInbox } from "./smtp-inbox";
+import { seedAgencyPlatformPersonnel } from "./platform-personnel-fixture";
 
 // Only Google authorization and external SMTP delivery are simulated.
 // The hosted job first completes its existing real Passenger journeys, then
@@ -81,19 +82,54 @@ function csvRows(text: string): string[][] {
 
 test.beforeAll(async ({ playwright }) => {
   inbox = await startAgencySmtpInbox();
+  const personnel = await seedAgencyPlatformPersonnel();
   const admin = await playwright.request.newContext({ baseURL: API });
   try {
     const issued = await admin.post("/api/auth/token", {
       headers: {
         "x-actor-type": "platform_admin",
-        "x-actor-id": "agency-business-admin",
+        "x-actor-id": personnel.actorId,
         "x-realm": "platform",
       },
     });
-    expect(issued.ok(), "normal platform test-session issuance").toBe(true);
-    const { token } = (await issued.json()) as { token: string };
-    expect(typeof token).toBe("string");
+    const issuedBody = (await issued.json().catch(() => null)) as {
+      token?: unknown;
+      error?: { code?: unknown };
+    } | null;
+    const errorCode = issuedBody?.error?.code;
+    const diagnosticCode =
+      typeof errorCode === "string" && /^[A-Z0-9_]{1,96}$/.test(errorCode)
+        ? errorCode
+        : "NO_ERROR_CODE";
+    expect(
+      issued.ok(),
+      `normal platform test-session issuance: HTTP ${issued.status()}, code ${diagnosticCode}`,
+    ).toBe(true);
+    expect(typeof issuedBody?.token).toBe("string");
+    const token = String(issuedBody?.token ?? "");
+    expect(token.length).toBeGreaterThan(0);
     const headers = { Authorization: `Bearer ${token}` };
+    const platformSession = await data<{
+      active: boolean;
+      identity: {
+        actor_id: string;
+        principal_id: string;
+        membership_id: string;
+        realm: string;
+      };
+    }>(
+      await admin.get("/api/auth/session", { headers }),
+      "verify the API-issued platform fixture session",
+    );
+    expect(platformSession).toMatchObject({
+      active: true,
+      identity: {
+        actor_id: personnel.actorId,
+        principal_id: personnel.actorId,
+        membership_id: personnel.membershipId,
+        realm: "platform",
+      },
+    });
     const displayName = `Hosted synthetic transport review agency ${randomUUID()}`;
     const agency = await data<{ agency_id: string }>(
       await admin.post("/api/platform-admin/agencies", {
