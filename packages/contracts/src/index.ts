@@ -7,6 +7,7 @@ import type {
   BookingQualification,
 } from "./booking-requirements";
 export * from "./booking-requirements";
+import type { PassengerServiceSelection } from "./passenger-app";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 export * from "./iam-contracts";
@@ -657,6 +658,9 @@ export const VEHICLE_LICENSE_TYPES = [
   "airport_transfer_vehicle",
 ] as const;
 export type VehicleLicenseType = (typeof VEHICLE_LICENSE_TYPES)[number];
+
+/** Existing reg.vehicle_form_t values, per vehicle rather than license class. */
+export type VehicleForm = "sedan" | "wagon" | "mpv" | "accessible" | "other";
 
 export interface VehicleEligibilityMatrixRecord {
   capabilityId: string;
@@ -3565,6 +3569,7 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   orderId: string;
@@ -3926,6 +3931,7 @@ export interface TenantOrderListQuery {
 }
 
 export interface DispatchCandidate {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   vehicleId: string;
@@ -4041,6 +4047,7 @@ export interface DispatchTimeoutRecord {
 }
 
 export interface DispatchAssignmentRecord {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   assignmentId: string;
@@ -4072,6 +4079,7 @@ export interface WaypointRecord {
 }
 
 export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;
@@ -4152,9 +4160,11 @@ export type DriverTaskOrderSummary = Pick<
   | "dispatchSemantics"
   | "fixedPrice"
   | "quotedFare"
+  | "serviceSelection"
 >;
 
 export interface UnifiedDriverTaskView {
+  serviceSelection?: PassengerServiceSelection;
   taskId: string;
   orderId: string;
   orderDomain: OrderDomain;
@@ -4426,6 +4436,7 @@ export interface VehicleRegistryRecord {
    */
   createdAt: string;
   licenseType?: VehicleLicenseType | null;
+  vehicleForm?: VehicleForm | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
   dispatchableFlag: boolean;
@@ -5353,7 +5364,10 @@ export interface ManageFleetHumanRoleCommand {
   entrySlug: string;
   /** Already-linked IdP subject, not an email or client-selected role claim. */
   partnerUserRef: string;
-  roleCode: "fleet_partner_admin" | "fleet_partner_ops" | "fleet_partner_finance";
+  roleCode:
+    | "fleet_partner_admin"
+    | "fleet_partner_ops"
+    | "fleet_partner_finance";
   enabled: boolean;
   /** Optional explicit expiry; null means the manager has not set an expiry. */
   validTo?: string | null;
@@ -8075,11 +8089,7 @@ export interface AgencyTripRecordView {
     | "manual_recovery"
     | "unknown";
   tollMinor: number | null;
-  tollSource:
-    | "driver_proof"
-    | "electronic_receipt"
-    | "none"
-    | "unavailable";
+  tollSource: "driver_proof" | "electronic_receipt" | "none" | "unavailable";
   currency: string;
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";

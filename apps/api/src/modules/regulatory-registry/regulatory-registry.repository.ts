@@ -16,6 +16,7 @@ import type {
   DriverRegistryRecord,
   InsurancePolicyRecord,
   VehicleLicenseType,
+  VehicleForm,
   VehicleContractRecord,
   VehicleRegistryRecord,
   VehiclePassengerDisclosureProfile,
@@ -91,6 +92,7 @@ type DriverLocationRow = {
 type VehicleLicenseClassRow = {
   vehicle_id: string;
   license_class: string;
+  vehicle_form: string | null;
 };
 
 type DriverLocationEventRow = {
@@ -964,7 +966,7 @@ export class RegulatoryRegistryRepository {
       ),
       this.databaseService!.query<VehicleLicenseClassRow>(
         `
-          SELECT vehicle_id, license_class
+          SELECT vehicle_id, license_class, vehicle_form
           FROM reg.vehicles
         `,
       ),
@@ -984,6 +986,12 @@ export class RegulatoryRegistryRepository {
       ),
     ]);
 
+    const vehicleForms = new Map(
+      vehicleLicenseClassResult.rows.map((row) => [
+        row.vehicle_id,
+        this.mapVehicleForm(row.vehicle_form),
+      ]),
+    );
     const vehicleLicenseTypes = new Map(
       vehicleLicenseClassResult.rows
         .map(
@@ -1009,7 +1017,16 @@ export class RegulatoryRegistryRepository {
           record.licenseType ??
           vehicleLicenseTypes.get(record.vehicleId) ??
           null;
-        return licenseType ? { ...record, licenseType } : record;
+        return {
+          ...record,
+          ...(licenseType ? { licenseType } : {}),
+          vehicleForm: this.resolveVehicleForm(
+            record.vehicleId,
+            vehicleForms.has(record.vehicleId),
+            vehicleForms.get(record.vehicleId),
+            record.vehicleForm,
+          ),
+        };
       }),
       drivers: driversResult.rows.map((row) =>
         this.parseRecord<DriverRegistryRecord>(
@@ -1050,13 +1067,80 @@ export class RegulatoryRegistryRepository {
     };
   }
 
+  private resolveVehicleForm(
+    vehicleId: string,
+    canonicalPresent: boolean,
+    canonicalForm: unknown,
+    snapshotForm: unknown,
+  ): VehicleForm | null {
+    // A real master row, including an explicitly unknown form, takes priority.
+    if (canonicalPresent) return this.mapVehicleForm(canonicalForm);
+    // Existing runtime SIM records use text IDs. A removed UUID master must
+    // never regain capability from a stale JSON snapshot.
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        vehicleId,
+      )
+    )
+      return null;
+    return this.mapVehicleForm(snapshotForm);
+  }
+
+  private mapVehicleForm(value: unknown): VehicleForm | null {
+    return value === "sedan" ||
+      value === "wagon" ||
+      value === "mpv" ||
+      value === "accessible" ||
+      value === "other"
+      ? value
+      : null;
+  }
+
+  async findVehicleForms(
+    vehicleIds: string[],
+    executor?: RegulatoryRegistryQueryExecutor,
+  ) {
+    this.assertDatabaseEnabled("read per-vehicle form");
+    const result = await (executor ?? this.databaseService!).query<{
+      vehicle_id: string;
+      canonical_vehicle_id: string | null;
+      vehicle_form: string | null;
+      snapshot_vehicle_form: string | null;
+    }>(
+      `WITH selected AS (SELECT unnest($1::text[]) AS vehicle_id),
+       canonical AS (
+         SELECT vehicle_id::text AS vehicle_id, vehicle_form
+         FROM reg.vehicles WHERE vehicle_id::text = ANY($1::text[])
+       )
+       SELECT s.vehicle_id, c.vehicle_id AS canonical_vehicle_id,
+         c.vehicle_form, v.record->>'vehicleForm' AS snapshot_vehicle_form
+       FROM selected s
+       LEFT JOIN canonical c ON c.vehicle_id = s.vehicle_id
+       LEFT JOIN reg.phase1_registry_vehicles v ON v.vehicle_id = s.vehicle_id`,
+      [vehicleIds],
+    );
+    return result.rows.map((row) => ({
+      vehicleId: row.vehicle_id,
+      vehicleForm: this.resolveVehicleForm(
+        row.vehicle_id,
+        row.canonical_vehicle_id != null,
+        row.vehicle_form,
+        row.snapshot_vehicle_form,
+      ),
+    }));
+  }
+
   /** One MVCC snapshot, restricted to supply for the requested service bucket.
    * Include unavailable drivers as well, so stale availability cannot survive.
    */
   async findDispatchSupplyContext(serviceBucket: string) {
     this.assertDatabaseEnabled("read dispatch supply authority");
     const result = await this.databaseService!.query<{
-      vehicles: (JsonRecordRow & { license_class: string | null })[];
+      vehicles: (JsonRecordRow & {
+        canonical_vehicle_id: string | null;
+        license_class: string | null;
+        vehicle_form: string | null;
+      })[];
       drivers: JsonRecordRow[];
       pairs: JsonRecordRow[];
       contracts: JsonRecordRow[];
@@ -1067,7 +1151,7 @@ export class RegulatoryRegistryRepository {
       locations: DriverLocationRow[];
     }>(
       `WITH vehicles AS MATERIALIZED (
-         SELECT v.vehicle_id, v.record, c.license_class
+         SELECT v.vehicle_id, v.record, c.vehicle_id::text AS canonical_vehicle_id, c.license_class, c.vehicle_form
          FROM reg.phase1_registry_vehicles v
          LEFT JOIN reg.vehicles c ON c.vehicle_id::text = v.vehicle_id
          WHERE v.record->'supportedServiceBuckets' ? $1
@@ -1110,7 +1194,16 @@ export class RegulatoryRegistryRepository {
           (r.license_class
             ? this.mapVehicleLicenseClass(r.license_class)
             : null);
-        return licenseType ? { ...record, licenseType } : record;
+        return {
+          ...record,
+          ...(licenseType ? { licenseType } : {}),
+          vehicleForm: this.resolveVehicleForm(
+            record.vehicleId,
+            r.canonical_vehicle_id != null,
+            r.vehicle_form,
+            record.vehicleForm,
+          ),
+        };
       }),
       drivers: records(row.drivers, "reg.phase1_registry_drivers"),
       supplyPairs: records(row.pairs, "reg.phase1_registry_supply_pairs"),

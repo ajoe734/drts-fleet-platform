@@ -197,6 +197,12 @@
       "amended_at": "2026-10-25",
       "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
       "reason": "Registers the R11 per-trip operational record truth, telemetry.driver_location_events route provenance, historical backfill/reconciliation, payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
+    },
+    {
+      "amended_by_task_id": "SR-ACCEPT-001",
+      "amended_at": "2026-11-11",
+      "scope": "Append V0136__passenger_service_selection.sql to the existing passenger_app_allocations and this amendment only; preserve all prior allocation objects, amendments and task ownership entries.",
+      "reason": "Source-only provider support for PR #3213 pending Main adoption: registers the existing optional service_selection column on passenger.fare_quote_snapshots so the unchanged allocation collision, filename and maximum-version checks account for V0136. No task status, ownership, deployment or live acceptance is claimed."
     }
   ],
   "voice_application_allocations": [
@@ -693,6 +699,22 @@
       "description": "既有 token 評分的原始聯繫選擇與 canonical CRM 案件關聯保存；不建立虛構第一方帳號，沿用既有評分／CRM 同交易與重送語意。",
       "downstream_tasks": ["PAX-QA-20261009", "PAX-WEB-RIDE-UI-20261009"],
       "allocation_decision_ref": "docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json"
+    },
+    {
+      "task_id": "SR-ACCEPT-001",
+      "version": "V0136",
+      "migration_filename": "V0136__passenger_service_selection.sql",
+      "domain": "passenger_service_selection",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.fare_quote_snapshots"],
+      "referenced_tables": [],
+      "description": "Extends the existing V0112 owned fare snapshot with the optional Passenger service selection consumed by normal quote and booking paths; no duplicate snapshot table or tariff changes. This is source support for PR #3213, not a claim of Main adoption or deployment.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "ALTER TABLE passenger.fare_quote_snapshots ADD COLUMN IF NOT EXISTS service_selection jsonb NULL preserves the existing V0112 table and rows.",
+        "Existing snapshots and ordinary quote inserts retain SQL NULL when no service selection was supplied; the migration does not fabricate an accessible requirement, backfill fares, change fare versions or rewrite stored quote facts.",
+        "The nullable JSONB column stores the optional service selection bound to the owned snapshot; eligibility, dispatch and selection validation remain the existing production application responsibilities, not new constraints claimed by this allocation."
+      ]
     }
   ],
   "fleet_statement_decision_allocations": [

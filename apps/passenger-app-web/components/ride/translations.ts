@@ -91,6 +91,7 @@ export const t = {
   DispatchIncomplete: "派車資訊尚未完整",
   CurrentRegulation: "本頁依主管機關公告之現行運價揭露",
   ArrangingVehicle: "正在為您安排合適的車輛",
+  WheelchairRequirement: "輪椅需求",
   ArrangingAnother: "正在為您安排另一輛車",
   Unassigned: "已取消指派",
   DriverContact: "聯繫司機",

@@ -63,6 +63,7 @@ import type {
   PassengerRideAccessGrant,
   PassengerRideAccessToken,
   PassengerRideAuthorityView,
+  PassengerServiceSelection,
   PassengerRideContactOption,
   PassengerRatingModerationAuditRecord,
   PassengerRatingModerationView,
@@ -495,7 +496,8 @@ export class MultiTaxiService implements OnModuleInit {
       return null;
     }
     if (typeof this.repository?.findTripOperationalRecordById === "function") {
-      const found = await this.repository.findTripOperationalRecordById(trimmed);
+      const found =
+        await this.repository.findTripOperationalRecordById(trimmed);
       if (found) {
         return this.toOperationalRecordAdminView(found);
       }
@@ -653,6 +655,7 @@ export class MultiTaxiService implements OnModuleInit {
       orderId: string,
       persistRide: (executor: OwnedMobilityQueryExecutor) => Promise<void>,
     ) => Promise<void>,
+    serviceSelection?: PassengerServiceSelection,
   ) {
     await this.prepareServiceProductPolicy();
     this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
@@ -698,6 +701,7 @@ export class MultiTaxiService implements OnModuleInit {
             }
           });
         },
+        serviceSelection,
       );
       return { ride: order, passengerAccess: passengerAccess! };
     } catch (error) {
@@ -743,6 +747,9 @@ export class MultiTaxiService implements OnModuleInit {
 
     return {
       order: {
+        ...(order.serviceSelection
+          ? { serviceSelection: { ...order.serviceSelection } }
+          : {}),
         orderId: order.orderId,
         orderNo: order.orderNo,
         status: order.status,
@@ -1030,6 +1037,9 @@ export class MultiTaxiService implements OnModuleInit {
 
     return {
       order: {
+        ...(order.serviceSelection
+          ? { serviceSelection: { ...order.serviceSelection } }
+          : {}),
         orderId: order.orderId,
         orderNo: order.orderNo,
         status: order.status,
@@ -2712,7 +2722,9 @@ export class MultiTaxiService implements OnModuleInit {
       paymentStatus === "unknown" &&
       typeof this.repository?.findPassengerPayment === "function"
     ) {
-      const payment = await this.repository.findPassengerPayment(stored.orderId);
+      const payment = await this.repository.findPassengerPayment(
+        stored.orderId,
+      );
       if (payment) {
         paymentStatus = payment.status;
         collectedFareMinor =
