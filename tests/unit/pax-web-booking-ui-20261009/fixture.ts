@@ -49,6 +49,8 @@ export function bookingFixture() {
     emptyCandidates: false,
     quoteExpires: "2099-10-11T12:00:00Z",
     serviceable: true,
+    quoteSnapshotId: "synthetic-owned-quote",
+    echoServiceSelection: true,
     createResponder: undefined as undefined | (() => Promise<Response>),
     errors: new Map<string, { status: number; code: string }>(),
     calls: [] as {
@@ -154,7 +156,14 @@ export function bookingFixture() {
             estimatedMin: 320,
             estimatedMax: 380,
             fareVersion: f.fare.version,
-            fareSnapshotId: "synthetic-owned-quote",
+            fareSnapshotId: f.quoteSnapshotId,
+            ...(f.echoServiceSelection &&
+            typeof body.serviceSelection === "object" &&
+            body.serviceSelection !== null &&
+            "accessible" in body.serviceSelection &&
+            body.serviceSelection.accessible === true
+              ? { serviceSelection: { accessible: true } }
+              : {}),
             expiresAt: f.quoteExpires,
           }
         : { serviceAreaResult: "not_serviceable" };

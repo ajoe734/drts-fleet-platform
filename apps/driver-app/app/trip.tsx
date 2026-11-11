@@ -910,6 +910,14 @@ export default function TripScreen() {
     actualFareState.taskId === taskDetail?.taskId
       ? actualFareState.draft
       : emptyActualFareDraft();
+  const requiresCompletionFare =
+    !isForwardedTask(taskDetail) &&
+    completionOrder?.runtimeProfileCode === "multi_taxi_direct" &&
+    !completionOrder.fixedPrice &&
+    ["on_trip", "proof_pending"].includes(taskDetail?.status ?? "");
+  const actualFareHint = requiresCompletionFare
+    ? "本行程完單需填齊四項車資與實際總額；未發生的項目請填 0。"
+    : driverStrings.trip.actualFare.hint;
   const actualFareInput = readActualFareInput(
     actualFareDraft,
     Boolean(completionOrder?.fixedPrice),
@@ -917,7 +925,9 @@ export default function TripScreen() {
   );
   const actualFareError = actualFareInput.issue
     ? driverStrings.trip.actualFare.errors[actualFareInput.issue]
-    : null;
+    : requiresCompletionFare && !actualFareInput.command.fare
+      ? actualFareHint
+      : null;
   const proofRequirements = getCompletionProofRequirements(completionOrder);
   const proofRequirementsUnavailable = Boolean(
     taskDetail?.orderId && !completionOrder,
@@ -2092,6 +2102,12 @@ export default function TripScreen() {
                 <Pill theme={driverCanvasTheme} tone="neutral">
                   {tripAuthorityBanner.authorityLabel}
                 </Pill>
+                {(taskDetail.serviceSelection ?? orderDetail?.serviceSelection)
+                  ?.accessible ? (
+                  <Pill theme={driverCanvasTheme} tone="info">
+                    輪椅需求
+                  </Pill>
+                ) : null}
               </View>
             }
             body={tripAuthorityBanner.description}
@@ -2253,7 +2269,7 @@ export default function TripScreen() {
             <Card
               theme={driverCanvasTheme}
               title={driverStrings.trip.actualFare.title}
-              subtitle={driverStrings.trip.actualFare.hint}
+              subtitle={actualFareHint}
             >
               <View style={styles.fieldStack}>
                 {actualFareFields.map((field) => (
@@ -2261,6 +2277,7 @@ export default function TripScreen() {
                     key={field}
                     theme={driverCanvasTheme}
                     label={driverStrings.trip.actualFare.fields[field]}
+                    required={requiresCompletionFare}
                   >
                     <Input
                       theme={driverCanvasTheme}
@@ -2288,6 +2305,7 @@ export default function TripScreen() {
                   <Field
                     theme={driverCanvasTheme}
                     label={driverStrings.trip.actualFare.fields.aggregate}
+                    required={requiresCompletionFare}
                     hint={driverStrings.trip.actualFare.aggregateHint}
                   >
                     <Input

@@ -3327,6 +3327,15 @@ function PassengerScreen({
           flexDirection: "column",
         }}
       >
+        {fixture.serviceSelection?.accessible ? (
+          <div
+            role="note"
+            data-testid="passenger-wheelchair-requirement"
+            style={{ margin: "12px 14px", padding: "10px 14px" }}
+          >
+            輪椅需求
+          </div>
+        ) : null}
         <RideContent
           fixture={fixture}
           token={token}

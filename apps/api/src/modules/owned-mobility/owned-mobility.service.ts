@@ -56,6 +56,8 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import type {
   ActualTripFareBreakdown,
   PassengerRideContactOption,
+  PassengerServiceSelection,
+  VehicleForm,
   PassengerContactUnavailableReason,
   DriverDeclaredSurnameSnapshot,
   DriverTaskStatus,
@@ -1188,6 +1190,7 @@ export class OwnedMobilityService
     requestId?: string,
     callContext?: MultiTaxiCallContext,
     commitCreation?: MultiTaxiCreationCommit,
+    serviceSelection?: PassengerServiceSelection,
   ): MaybePromise<OwnedOrderRecord> {
     const requestedPickupAt = this.validateMultiTaxiRideRequest(command);
     if (callContext && !callContext.callId?.trim()) {
@@ -1216,6 +1219,7 @@ export class OwnedMobilityService
             requestId,
             callContext,
             commitCreation,
+            serviceSelection,
           ),
         );
       }
@@ -1228,6 +1232,7 @@ export class OwnedMobilityService
         requestId,
         callContext,
         commitCreation,
+        serviceSelection,
       );
     };
     const preparing =
@@ -1246,6 +1251,7 @@ export class OwnedMobilityService
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
     commitCreation?: MultiTaxiCreationCommit,
+    serviceSelection?: PassengerServiceSelection,
   ): MaybePromise<OwnedOrderRecord> {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
@@ -1272,6 +1278,9 @@ export class OwnedMobilityService
         ).toISOString()
       : null;
     const order: OwnedOrderRecord = {
+      ...(serviceSelection
+        ? { serviceSelection: { ...serviceSelection } }
+        : {}),
       orderId: randomUUID(),
       orderNo: this.nextOrderNo(),
       orderSource: callContext ? "phone" : "app",
@@ -6637,7 +6646,11 @@ export class OwnedMobilityService
           }
           order = current.order;
           dispatchJob = currentJob;
-          await this.prepareDispatchEligibility(order, [vehicleId]);
+          const preparedVehicleForms = await this.prepareDispatchEligibility(
+            order,
+            [vehicleId],
+            tx,
+          );
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -6708,6 +6721,7 @@ export class OwnedMobilityService
             dispatchJob.dispatchJobId,
             vehicleId,
             driverId,
+            preparedVehicleForms,
           );
           await this.assertSandboxDispatchGate(
             bundle.order,
@@ -6818,7 +6832,7 @@ export class OwnedMobilityService
 
     const eligibilityRecheckResult = this.afterMaybePromise(
       this.prepareDispatchEligibility(order, [vehicleId]),
-      () =>
+      (preparedVehicleForms) =>
         this.afterMaybePromise(
           this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
             driverId,
@@ -6829,6 +6843,7 @@ export class OwnedMobilityService
               dispatchJob.dispatchJobId,
               vehicleId,
               driverId,
+              preparedVehicleForms,
             ),
         ),
     );
@@ -7733,6 +7748,9 @@ export class OwnedMobilityService
       dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
       dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
         ...assignment,
+        ...(assignment.serviceSelection
+          ? { serviceSelection: { ...assignment.serviceSelection } }
+          : {}),
         ...(assignment.bookingRequirements
           ? {
               bookingRequirements: structuredClone(
@@ -12010,12 +12028,25 @@ export class OwnedMobilityService
   private prepareDispatchEligibility(
     order: OwnedOrderRecord,
     vehicleIds?: string[],
-  ): MaybePromise<void> {
+    executor?: OwnedMobilityQueryExecutor,
+  ): MaybePromise<ReadonlyMap<string, VehicleForm | null> | undefined> {
     const matchingSuppressions =
       this.regulatoryRegistryService.prepareMatchingSuppressions();
     const operatorBinding = order.operatingAuthorizationId
       ? this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
           order.operatingAuthorizationId,
+        )
+      : undefined;
+    const vehicleForms = order.serviceSelection?.accessible
+      ? this.regulatoryRegistryService.prepareVehicleForms?.(
+          vehicleIds ??
+            this.regulatoryRegistryService
+              .listVehicles()
+              .filter((v) =>
+                v.supportedServiceBuckets.includes(order.serviceBucket),
+              )
+              .map((v) => v.vehicleId),
+          executor,
         )
       : undefined;
     const capabilities =
@@ -12029,13 +12060,20 @@ export class OwnedMobilityService
             order.serviceProductCode,
           )
         : undefined;
-    if (capabilities || product || matchingSuppressions || operatorBinding)
+    if (
+      capabilities ||
+      product ||
+      matchingSuppressions ||
+      operatorBinding ||
+      vehicleForms
+    )
       return Promise.all([
         capabilities,
+        vehicleForms,
         product,
         matchingSuppressions,
         operatorBinding,
-      ]).then(() => undefined);
+      ]).then(([, preparedVehicleForms]) => preparedVehicleForms);
   }
 
   private assertAssignmentEligibilityRecheck(
@@ -12043,9 +12081,14 @@ export class OwnedMobilityService
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): MaybePromise<void> {
     try {
-      this.assertBookingRequirementCandidate(order, vehicleId);
+      this.assertBookingRequirementCandidate(
+        order,
+        vehicleId,
+        preparedVehicleForms,
+      );
       this.assertQualifiedVoiceDispatch(
         order,
         dispatchJobId,
@@ -12387,6 +12430,9 @@ export class OwnedMobilityService
       );
     }
     const assignment: DispatchAssignmentRecord = {
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -12412,6 +12458,9 @@ export class OwnedMobilityService
       updatedAt: now,
     };
     const task: DriverTaskRecord = {
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -14039,25 +14088,42 @@ export class OwnedMobilityService
   }
 
   private bookingRequirementCandidateAllowed(
-    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
     vehicleId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): boolean {
-    if (!order.bookingRequirements) return true;
+    if (!order.bookingRequirements && !order.serviceSelection) return true;
     const capability =
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       ) ?? null;
+    const vehicleForm = preparedVehicleForms
+      ? (preparedVehicleForms.get(vehicleId) ?? null)
+      : capability?.vehicleForm;
+    if (
+      order.serviceSelection?.accessible &&
+      (!capability?.active || vehicleForm !== "accessible")
+    )
+      return false;
     return (
+      !order.bookingRequirements ||
       bookingRequirementFailures(order.bookingRequirements, capability)
         .length === 0
     );
   }
 
   private assertBookingRequirementCandidate(
-    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
     vehicleId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ) {
-    if (!this.bookingRequirementCandidateAllowed(order, vehicleId)) {
+    if (
+      !this.bookingRequirementCandidateAllowed(
+        order,
+        vehicleId,
+        preparedVehicleForms,
+      )
+    ) {
       throw new ApiRequestError(
         409,
         "BOOKING_REQUIREMENTS_NOT_MET",
@@ -14116,6 +14182,9 @@ export class OwnedMobilityService
           ? {
               bookingQualification: structuredClone(order.bookingQualification),
             }
+          : {}),
+        ...(order.serviceSelection
+          ? { serviceSelection: { ...order.serviceSelection } }
           : {}),
         ...(order.bookingRequirements
           ? { bookingRequirements: structuredClone(order.bookingRequirements) }
@@ -14274,6 +14343,9 @@ export class OwnedMobilityService
 
           return {
             ...candidate,
+            ...(order.serviceSelection
+              ? { serviceSelection: { ...order.serviceSelection } }
+              : {}),
             ...(order.bookingRequirements
               ? {
                   bookingRequirements: structuredClone(
@@ -14305,7 +14377,7 @@ export class OwnedMobilityService
         }),
     );
 
-    if (order.bookingRequirements)
+    if (order.bookingRequirements || order.serviceSelection)
       return evaluatedCandidates.filter(
         (candidate) => candidate.eligibilityDecision === "eligible",
       );
@@ -17916,6 +17988,9 @@ export class OwnedMobilityService
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -18107,6 +18182,9 @@ export class OwnedMobilityService
         : authoritativeOrder;
     return {
       ...this.cloneTaskWithDetachedActualFare(task),
+      ...(task.serviceSelection
+        ? { serviceSelection: { ...task.serviceSelection } }
+        : {}),
       ...(task.bookingQualification
         ? { bookingQualification: structuredClone(task.bookingQualification) }
         : {}),
