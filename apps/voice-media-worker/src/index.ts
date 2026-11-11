@@ -17,6 +17,7 @@ export * from "./dialogue/dialogue-engine";
 export * from "./dialogue/call-turn-coordinator";
 export * from "./dialogue/confirmation/confirmation-controller";
 export * from "./handoff";
+export * from "./assist/agent-assist-transcript-forwarder";
 export * from "./server/media-worker-server";
 export * from "./server/websocket-channel";
 export * from "./server/internal-auth";

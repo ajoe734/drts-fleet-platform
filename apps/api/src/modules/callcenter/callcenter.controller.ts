@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Optional,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   AnnounceCallAgentIdentityCommand,
@@ -13,13 +22,18 @@ import type {
   TransferCallToIncidentCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { CallcenterAssistService } from "../callcenter-assist/callcenter-assist.service";
 import { ComplaintService } from "../complaint/complaint.service";
 import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { IncidentService } from "../incident/incident.service";
 import { CallcenterService } from "./callcenter.service";
+import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
 
 @Controller("callcenter")
 export class CallcenterController {
@@ -28,7 +42,128 @@ export class CallcenterController {
     private readonly complaintService: ComplaintService,
     private readonly incidentService: IncidentService,
     private readonly sandboxWebhookAdapter: SandboxWebhookAdapter,
+    @Optional() private readonly assistService?: CallcenterAssistService,
+    @Optional() private readonly handoffQueue?: VoiceHandoffQueueService,
   ) {}
+
+  private requireAssist() {
+    if (!this.assistService) {
+      throw new ApiRequestError(
+        503,
+        "CALLCENTER_ASSIST_UNAVAILABLE",
+        "The AI booking assist is not configured on this API.",
+      );
+    }
+    return this.assistService;
+  }
+
+  /**
+   * CALLCENTER-AI-ASSIST-20261111: calls the voice AI handed to a human and
+   * that are still open, most urgent first, limited to calls this operator
+   * may read. Each item carries the AI's handoff summary.
+   */
+  @Get("handoffs")
+  @RequireRealms("platform", "ops")
+  async listHandoffs(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.handoffQueue
+      ? await this.handoffQueue.listQueuedItems()
+      : [];
+    const readable = new Set(
+      (
+        await this.callcenterService.listCallSessionsForRead(
+          requestId,
+          identity,
+        )
+      ).map((session) => session.callId),
+    );
+    return toApiSuccessEnvelope(
+      { items: items.filter((item) => readable.has(item.callId)) },
+      requestId,
+    );
+  }
+
+  /** The AI-prefilled booking draft for a call (null when none exists). */
+  @Get("sessions/:callId/assist")
+  @RequireRealms("platform", "ops")
+  async getAssistDraft(
+    @Param("callId") callId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    // Same read authorization as the call itself.
+    await this.callcenterService.getCallSessionForRead(
+      callId,
+      requestId,
+      identity,
+    );
+    return toApiSuccessEnvelope(
+      { draft: await this.requireAssist().getDraft(callId) },
+      requestId,
+    );
+  }
+
+  /**
+   * Final speech-recognition segments of a live call, sent by the voice
+   * media worker while a human agent talks with the caller (service
+   * identity only). The AI re-extracts the booking fields after each batch.
+   */
+  @Post("sessions/:callId/assist/transcript")
+  @RequireRealms("system")
+  async ingestAssistTranscript(
+    @Param("callId") callId: string,
+    @Body() body: unknown,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const draft = await this.requireAssist().ingestTranscript(callId, body);
+    return toApiSuccessEnvelope(
+      {
+        callId: draft.callId,
+        draftVersion: draft.draftVersion,
+        extractor: draft.extractor,
+      },
+      requestId,
+    );
+  }
+
+  /** Which AI-filled fields the agent kept or corrected on the submitted order. */
+  @Post("sessions/:callId/assist/outcomes")
+  @RequireRealms("platform", "ops")
+  async recordAssistOutcomes(
+    @Param("callId") callId: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    await this.callcenterService.getCallSessionForRead(
+      callId,
+      requestId,
+      identity,
+    );
+    return toApiSuccessEnvelope(
+      await this.requireAssist().recordOutcomes(callId, {
+        ...body,
+        agentId: body?.agentId ?? identity?.actorId ?? null,
+      }),
+      requestId,
+    );
+  }
+
+  /** How often agents keep the AI's values, per field and per source. */
+  @Get("assist/accuracy")
+  @RequireRealms("platform", "ops")
+  async getAssistAccuracy(
+    @Query("since") since?: string,
+    @Query("until") until?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.requireAssist().getAccuracy({ since, until }),
+      requestId,
+    );
+  }
 
   @Post("webhooks/sandbox")
   async ingestSandboxWebhook(
@@ -268,13 +403,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/takeover")
-  takeoverAiCallSession(
+  async takeoverAiCallSession(
     @Param("callId") callId: string,
     @Body() command: { operatorId: string; reason?: string },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.takeoverAiCallSession(callId, command, requestId),
+      await this.callcenterService.takeoverAiCallSession(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

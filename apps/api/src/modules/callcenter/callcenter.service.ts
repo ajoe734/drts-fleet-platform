@@ -1646,7 +1646,7 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  takeoverAiCallSession(
+  async takeoverAiCallSession(
     callId: string,
     command: { operatorId: string; reason?: string },
     requestId?: string,
@@ -1667,7 +1667,9 @@ export class CallcenterService implements OnModuleInit {
 
     if (this.voiceHandoffQueueService) {
       try {
-        this.voiceHandoffQueueService.claimSession({
+        // The shared, durable queue (CALLCENTER-AI-ASSIST-20261111) marks the
+        // AI's waiting handoff as taken by this operator.
+        await this.voiceHandoffQueueService.claimSession({
           callId,
           operatorId: command.operatorId,
         });
