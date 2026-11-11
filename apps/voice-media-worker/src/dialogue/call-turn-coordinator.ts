@@ -1452,7 +1452,7 @@ export class VoiceCallTurnCoordinator {
       mediaEpoch: event.mediaEpoch,
       segmentIds: [event.payload.segmentId],
       transcript: event.payload.text,
-      verifiedContext: {},
+      verifiedContext: turnSession.state.promptContext(),
       deadline: Date.now() + this.turnTimeoutMs,
       signal: abortController.signal,
     };

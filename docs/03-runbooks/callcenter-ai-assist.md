@@ -41,6 +41,21 @@ The callcenter page in the ops console shows the following.
   - The AI therefore answers in Mandarin unless the caller's language is listed in `VOICE_REPLY_VERIFIED_LANGUAGES` (for example `nan-TW,hak-TW`).
   - List a language only after a person has checked its reply scripts (SD §11.3).
 
+## How the AI talks (owner decision SD-DP-20261111-001)
+
+- **Ordinary turns**: the AI speaks its own reply, natural Taiwan Mandarin with short sentences, one question at a time. Before speaking, `reply-guard` rejects a reply that:
+  - promises or states a booking, dispatch, driver arrival or price;
+  - contains a link;
+  - mentions numbers or street addresses the caller did not say and no tool returned.
+
+  A rejected reply falls back to the fixed prompt for the current state.
+
+- **After tools run**:
+  - Address lookup: the caller hears the provider's candidates ("請問是「A」，還是「B」？").
+  - Status lookup: the caller hears the verified status sentence.
+- **Booking confirmation**: still the verified read-back script plus an explicit "對" or key 1.
+- **Shared rules**: the text model and the realtime speech model use the same rules (`VOICE_SPOKEN_REPLY_RULES`).
+
 ## API
 
 | Route                                                 | Caller                | Purpose                                                     |

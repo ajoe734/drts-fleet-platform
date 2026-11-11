@@ -235,6 +235,31 @@ export class VoiceDialogueState {
     this.unclearTurns = content.unclearTurns ?? 0;
   }
 
+  /**
+   * CALLCENTER-AI-ASSIST-20261111: what the dialogue model needs to phrase
+   * the next question naturally -- the caller's own values so far and what
+   * is still missing. Only data the caller gave in this call; nothing from
+   * stored history (the caller ID is not an identity check).
+   */
+  promptContext(): {
+    collected: Record<string, string>;
+    missing: string[];
+    unclearTurns: number;
+  } {
+    const collected = Object.fromEntries(
+      Object.entries(this.slots).flatMap(([field, slot]) =>
+        slot ? [[field, slot.candidate]] : [],
+      ),
+    );
+    return {
+      collected,
+      missing: (["pickup", "dropoff", "passengerContact"] as const).filter(
+        (field) => !this.slots[field],
+      ),
+      unclearTurns: this.unclearTurns,
+    };
+  }
+
   handoffSummary() {
     return structuredClone({
       reason: this.handoff,

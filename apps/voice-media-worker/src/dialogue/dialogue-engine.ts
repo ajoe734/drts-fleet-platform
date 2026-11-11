@@ -1,5 +1,6 @@
 import type { VoiceDialogueOutput, VoiceToolProposal } from "@drts/contracts";
 import { VoiceDialogueState } from "./dialogue-state";
+import { guardSpokenReply, heardFromSlots } from "./reply-guard";
 import {
   runVoiceDialogue,
   type VoiceDialogueProvider,
@@ -31,9 +32,13 @@ export interface VoiceDialogueTurnPorts {
   ): Promise<unknown[]>;
 }
 
-/** Model text is diagnostic data, never a playback script or booking receipt.
- * Domain results are returned to the trusted coordinator; only its verified
- * snapshot templates may read back prices, addresses or transaction status. */
+/** Model text is never a booking receipt or confirmation: only the trusted
+ * coordinator's verified snapshot templates read back a booking (SD §6.2).
+ * CALLCENTER-AI-ASSIST-20261111 (owner decision 2026-11-11): in ordinary
+ * conversation turns the model's own reply is spoken when it passes
+ * `guardSpokenReply` (no unverified numbers/addresses, no commitments);
+ * otherwise the fixed prompt for the state is used. After tools ran, the
+ * caller hears what the tools found (e.g. the address candidates). */
 export class VoiceDialogueEngine {
   private running = false;
   constructor(
@@ -117,10 +122,10 @@ export class VoiceDialogueEngine {
           ? "如有立即危險，請聯絡當地緊急救援服務。"
           : decidedHandoff()?.reason === "speech_not_understood"
             ? "抱歉，我沒有聽清楚。現在幫您轉接客服人員，請稍候。"
-            : "已停止叫車資料蒐集。"
+            : "好的，現在幫您轉接客服人員，請稍候。"
         : results.length
-          ? ""
-          : this.collectionPrompt(state, output.intent);
+          ? (toolResultPrompt(output, results) ?? "")
+          : this.spokenReply(output, request, state);
       return {
         prompt,
         terminal: state.handoff ? ("handoff" as const) : output.terminal,
@@ -163,6 +168,22 @@ export class VoiceDialogueEngine {
       clearTimeout(timer);
       request.signal.removeEventListener("abort", cancel);
     }
+  }
+
+  /** The model's own words when they pass the guard, else the fixed prompt. */
+  private spokenReply(
+    output: VoiceDialogueOutput,
+    request: VoiceDialogueRequest,
+    state: VoiceDialogueState,
+  ): string {
+    const guarded = guardSpokenReply(output.text, {
+      transcript: request.transcript,
+      heard: heardFromSlots(state.slots),
+      toolFacts: [],
+    });
+    return guarded.ok
+      ? guarded.text
+      : this.collectionPrompt(state, output.intent);
   }
 
   private collectionPrompt(
@@ -221,4 +242,45 @@ export function withHandoffRequest(
     terminal: "handoff",
     tools: [{ name: "request_handoff", args: { reason } }],
   };
+}
+
+/**
+ * What the caller hears after this turn's tools ran, built only from the
+ * tool results. Booking read-back plans are spoken by the coordinator from
+ * the verified plan instead, so they return null here.
+ */
+export function toolResultPrompt(
+  output: VoiceDialogueOutput,
+  results: readonly unknown[],
+): string | null {
+  for (let index = 0; index < output.tools.length; index += 1) {
+    const tool = output.tools[index]!;
+    const result = results[index];
+    if (tool.name === "resolve_location") {
+      const labels = (
+        (result as { candidates?: Array<{ label?: unknown }> } | null)
+          ?.candidates ?? []
+      )
+        .map((candidate) =>
+          typeof candidate.label === "string" ? candidate.label.trim() : "",
+        )
+        .filter(Boolean)
+        .slice(0, 3);
+      if (labels.length === 0) {
+        return "抱歉，找不到這個地點。請再說一次縣市、路名，或附近的地標。";
+      }
+      if (labels.length === 1) {
+        return `請問是「${labels[0]}」嗎？`;
+      }
+      const options = labels.map((label) => `「${label}」`);
+      return `請問是${options.slice(0, -1).join("、")}，還是${options.at(-1)}？如果都不是，請再說一次。`;
+    }
+    if (tool.name === "get_bound_booking_status") {
+      const status = (result as { status?: unknown } | null)?.status;
+      return typeof status === "string" && status.trim()
+        ? status.trim()
+        : "目前查不到這通電話的訂單狀態。請問還需要什麼協助？";
+    }
+  }
+  return null;
 }
