@@ -3333,7 +3333,7 @@ function PassengerScreen({
             data-testid="passenger-wheelchair-requirement"
             style={{ margin: "12px 14px", padding: "10px 14px" }}
           >
-            輪椅需求
+            {t.WheelchairRequirement}
           </div>
         ) : null}
         <RideContent

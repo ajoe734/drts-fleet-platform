@@ -261,11 +261,11 @@ export function BookingForm({
         />
         <p style={PLAN.muted}>{T.lead(settings.minLeadTimeMinutes)}</p>
       </P5Card>
-      <P5Card title="乘車需求">
+      <P5Card title={T.serviceRequirements}>
         <label>
           <input
             type="checkbox"
-            aria-label="輪椅需求"
+            aria-label={T.wheelchairRequirement}
             checked={draft.serviceSelection?.accessible === true}
             disabled={busy}
             onChange={(event) => {
@@ -278,9 +278,9 @@ export function BookingForm({
               });
             }}
           />
-          輪椅需求
+          {T.wheelchairRequirement}
         </label>
-        <p>需求將隨預約送出，實際供應以派車結果為準。</p>
+        <p>{T.serviceRequirementsNotice}</p>
       </P5Card>
       <div style={{ margin: "4px 14px 8px" }}>
         <P5Btn
