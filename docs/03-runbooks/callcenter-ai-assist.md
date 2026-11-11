@@ -27,6 +27,20 @@ The callcenter page in the ops console shows the following.
   - A field the AI marked uncertain blocks submit until the agent confirms it or changes it.
 - **KPI**: AI fill accuracy over 30 days, meaning the share of AI-filled fields the agent kept unchanged. The KPI also shows counts of kept, corrected and missed fields.
 
+## Fewer misunderstandings and faster human help
+
+- **Frequent pickups by caller ID**:
+  - The agent sees up to three pickup places this phone number used on dispatched trips in the last year. One click fills the pickup with the original pin.
+  - When the AI's pickup text matches one of these places, the form uses that pin directly instead of a map lookup.
+  - On the AI line, address candidates at one of these places are offered first. Nothing is added to the provider's results.
+  - The caller ID is not an identity check (voice SD §4 item 5), so stored addresses are never read out to the caller.
+- **Two turns not understood**: when the AI understands nothing in two turns in a row (no intent, no detail), it says it will connect a person and hands the call over (`speech_not_understood`). Any understood turn resets the count. Handoffs the AI decides on its own now always reach the human queue; before, a handoff without an explicit tool call never left the worker.
+- **Press 0**: pressing 0 at any time hands an AI-handled call to a person. The language menu announces it ("要找客服人員，隨時請按0"). Digits 1–3 stay for language selection and 1 for booking confirmation.
+- **Reply language**:
+  - Taiwan Mobile TTS has Mandarin, Taiwanese and Hakka voices. The AI's replies, however, are written in Mandarin.
+  - The AI therefore answers in Mandarin unless the caller's language is listed in `VOICE_REPLY_VERIFIED_LANGUAGES` (for example `nan-TW,hak-TW`).
+  - List a language only after a person has checked its reply scripts (SD §11.3).
+
 ## API
 
 | Route                                                 | Caller                | Purpose                                                     |

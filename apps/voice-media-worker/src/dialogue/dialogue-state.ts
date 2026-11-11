@@ -13,6 +13,10 @@ export interface SlotEvidence {
   validationState: "unvalidated" | "validated";
   confirmedByCustomerAt: string | null;
 }
+/** Two "I did not understand" turns in a row are enough: elderly callers
+ * should reach a person rather than repeat themselves a third time. */
+export const MAX_UNCLEAR_TURNS = 2;
+
 export interface AddressCandidate {
   placeId: string;
   label: string;
@@ -41,6 +45,11 @@ export class VoiceDialogueState {
     candidates: AddressCandidate[];
   }> = [];
   handoff: { reason: string; intent: string } | null = null;
+  /** CALLCENTER-AI-ASSIST-20261111: consecutive turns in which nothing was
+   * understood (no intent, no slot, no tool). Reaching
+   * `MAX_UNCLEAR_TURNS` hands the caller to a human instead of asking a
+   * third time. Any understood turn resets it. */
+  unclearTurns = 0;
   /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
    * canonical 2026-10-03T20:13:00Z): the `expectedSnapshotSessionVersion`
    * this attachment's dialogue CONTENT was last durably committed under --
@@ -117,6 +126,19 @@ export class VoiceDialogueState {
       this.confirmationId = null;
       return;
     }
+    if (
+      output.intent === "unknown" &&
+      output.slots.length === 0 &&
+      output.tools.length === 0
+    ) {
+      this.unclearTurns++;
+      if (this.unclearTurns >= MAX_UNCLEAR_TURNS) {
+        this.handoff = { reason: "speech_not_understood", intent: "unknown" };
+        this.confirmationId = null;
+      }
+      return;
+    }
+    this.unclearTurns = 0;
     for (const slot of output.slots) {
       const old = this.slots[slot.field];
       if (old?.candidate === slot.candidate && old.rawText === slot.rawText)
@@ -178,6 +200,9 @@ export class VoiceDialogueState {
         this.addressHistory,
       ) as VoiceDialogueSnapshotContent["addressHistory"],
       handoff: this.handoff ? { ...this.handoff } : null,
+      // Omitted at zero so snapshots written before this field existed and
+      // ones with nothing to carry over stay byte-identical.
+      ...(this.unclearTurns > 0 ? { unclearTurns: this.unclearTurns } : {}),
     };
   }
 
@@ -207,6 +232,7 @@ export class VoiceDialogueState {
       ...(structuredClone(content.addressHistory) as typeof this.addressHistory),
     );
     this.handoff = content.handoff ? { ...content.handoff } : null;
+    this.unclearTurns = content.unclearTurns ?? 0;
   }
 
   handoffSummary() {

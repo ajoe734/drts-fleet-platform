@@ -18,7 +18,10 @@ import {
   confirmAssistField,
   editAssistField,
   emptyAssistForm,
+  frequentPlaceToAddress,
+  matchFrequentPlace,
   sameAddress,
+  type FrequentPlaceView,
   type AssistAccuracyView,
   type AssistDraftView,
   type AssistField,
@@ -74,6 +77,9 @@ export function useCallcenterAiAssist({
   >({ pickup: "idle", dropoff: "idle" });
   const [handoffs, setHandoffs] = useState<HandoffQueueItemView[]>([]);
   const [accuracy, setAccuracy] = useState<AssistAccuracyView | null>(null);
+  const [frequentPlaces, setFrequentPlaces] = useState<FrequentPlaceView[]>([]);
+  const frequentPlacesRef = useRef<FrequentPlaceView[]>([]);
+  frequentPlacesRef.current = frequentPlaces;
 
   const formRef = useRef(form);
   formRef.current = form;
@@ -102,12 +108,25 @@ export function useCallcenterAiAssist({
   const resolveAddress = useCallback(
     async (field: AddressField, text: string, forCallId: string) => {
       const request = ++addressRequestRef.current[field];
-      setAddressStatus((current) => ({ ...current, [field]: "resolving" }));
       const {
         provider: geo,
         actorId: actor,
         locale: lang,
       } = callbacksRef.current;
+      // A pickup the caller has used before keeps its exact old pin: no map
+      // lookup, nothing new to recognise.
+      const known =
+        field === "pickup"
+          ? matchFrequentPlace(text, frequentPlacesRef.current)
+          : null;
+      if (known) {
+        const address = frequentPlaceToAddress(known, actor);
+        appliedAddressRef.current[field] = address;
+        callbacksRef.current.onApplyAddress(field, address);
+        setAddressStatus((current) => ({ ...current, [field]: "history" }));
+        return;
+      }
+      setAddressStatus((current) => ({ ...current, [field]: "resolving" }));
       try {
         const response = await geo.search({
           q: text,
@@ -163,6 +182,26 @@ export function useCallcenterAiAssist({
     },
     [resolveAddress],
   );
+
+  // Pickups this phone number used before, shown to the agent.
+  useEffect(() => {
+    setFrequentPlaces([]);
+    if (!callId) return;
+    let cancelled = false;
+    void getOpsClient()
+      .get<{ items: FrequentPlaceView[] }>(
+        `/api/callcenter/sessions/${encodeURIComponent(callId)}/frequent-places`,
+      )
+      .then((result) => {
+        if (!cancelled) setFrequentPlaces(result.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setFrequentPlaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [callId]);
 
   // A different call starts from a clean assist state.
   useEffect(() => {
@@ -311,6 +350,12 @@ export function useCallcenterAiAssist({
     [],
   );
 
+  /** The agent picked one of the caller's frequent pickups. */
+  const pickFrequentPlace = useCallback((place: FrequentPlaceView) => {
+    const address = frequentPlaceToAddress(place, callbacksRef.current.actorId);
+    callbacksRef.current.onApplyAddress("pickup", address);
+  }, []);
+
   const blocking = useMemo(
     () => blockingUncertainFields(form, draft),
     [draft, form],
@@ -359,6 +404,8 @@ export function useCallcenterAiAssist({
     blocking,
     handoffs,
     accuracy,
+    frequentPlaces,
+    pickFrequentPlace,
     edit,
     confirm,
     acceptOffer,

@@ -68,7 +68,7 @@ export class VoiceDialogueTransport {
             "Human, complaint, lost_property and emergency requests stop booking; use terminal handoff and no booking tools.",
             "Output keys: intent, text (non-authoritative suggestion), slots, tools, usage, terminal.",
             "Each slot: field (pickup/dropoff/bookerContact/passengerContact/time/passengerCount/notes), rawText (verbatim), candidate (string), sourceSegmentIds, providerConfidence (0..1 or null).",
-            "Tools: resolve_location args {query}; check_booking_eligibility, prepare_booking_readback, get_bound_booking_status args {}; request_handoff args {reason: customer_requested/location_unresolved/service_unsupported/urgent_safety/provider_unavailable}.",
+            "Tools: resolve_location args {query}; check_booking_eligibility, prepare_booking_readback, get_bound_booking_status args {}; request_handoff args {reason: customer_requested/location_unresolved/service_unsupported/urgent_safety/provider_unavailable/speech_not_understood}.",
             "Never select drivers, invent coordinates/prices, claim booking completion, emit mutations or confirmation proof. Maximum three tools. usage: {inputTokens:null,outputTokens:null}. terminal: turn_complete/tool_required/handoff.",
           ].join("\n"),
         },

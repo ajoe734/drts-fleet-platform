@@ -251,6 +251,82 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(done.rows[0]).toEqual({ state: "completed" });
     });
 
+    it("finds a phone number's dispatched pickups across stored spellings", async () => {
+      const { repository } = services(h.database);
+      const insert = async (
+        orderId: string,
+        status: string,
+        phone: string,
+        lat: number,
+        createdAt: string,
+        contactPath: "passenger" | "bookingRequirements" = "passenger",
+      ) => {
+        const record =
+          contactPath === "passenger"
+            ? {
+                passenger: { name: "王先生", phone },
+                pickup: { address: `p-${orderId}`, lat, lng: 121.52 },
+              }
+            : {
+                passenger: { name: "", phone: "0200000000" },
+                bookingRequirements: { passengerContact: { name: "", phone } },
+                pickup: { address: `p-${orderId}`, lat, lng: 121.52 },
+              };
+        await h.database.query(
+          `INSERT INTO ops.phase1_owned_orders
+             (order_id, order_no, status, order_source, service_bucket,
+              dispatch_semantics, created_at, updated_at, record)
+           VALUES ($1, $1, $2, 'phone', 'standard', 'realtime', $3, $3, $4::jsonb)`,
+          [orderId, status, createdAt, JSON.stringify(record)],
+        );
+      };
+      const suffix = randomUUID().slice(0, 8);
+      await insert(
+        `fp-a-${suffix}`,
+        "completed",
+        "0912345678",
+        25.05,
+        "2026-11-01T00:00:00Z",
+      );
+      await insert(
+        `fp-b-${suffix}`,
+        "completed",
+        "+886912345678",
+        25.06,
+        "2026-11-02T00:00:00Z",
+        "bookingRequirements",
+      );
+      await insert(
+        `fp-c-${suffix}`,
+        "cancelled",
+        "0912345678",
+        25.07,
+        "2026-11-03T00:00:00Z",
+      );
+      await insert(
+        `fp-d-${suffix}`,
+        "completed",
+        "0911111111",
+        25.08,
+        "2026-11-04T00:00:00Z",
+      );
+      await insert(
+        `fp-e-${suffix}`,
+        "completed",
+        "0912345678",
+        25.09,
+        "2024-01-01T00:00:00Z",
+      );
+      const rows = await repository.findRecentPickupsByPhone(
+        ["0912345678", "+886912345678"],
+        ["completed"],
+        new Date("2025-11-11T00:00:00Z"),
+      );
+      expect(
+        rows.map((row) => (row.pickup as { address: string }).address),
+      ).toEqual([`p-fp-b-${suffix}`, `p-fp-a-${suffix}`]);
+    });
+
     it("rejects values outside the V0136 constraints", async () => {
       await expect(
         h.database.query(

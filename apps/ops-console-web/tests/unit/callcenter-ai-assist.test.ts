@@ -13,7 +13,9 @@ import {
   emptyAssistForm,
   formatAccuracy,
   formatCapabilities,
+  frequentPlaceToAddress,
   handoffWaitMinutes,
+  matchFrequentPlace,
   sameAddress,
   type AssistDraftView,
   type AssistFieldView,
@@ -233,5 +235,60 @@ describe("helpers", () => {
     expect(sameAddress(a, { ...a, lat: 25.05 })).toBe(false);
     expect(sameAddress(null, undefined)).toBe(true);
     expect(sameAddress(a, null)).toBe(false);
+  });
+});
+
+describe("frequent pickups", () => {
+  const places = [
+    {
+      label: "家",
+      address: {
+        address: "臺北市中山區中山北路二段45巷3號",
+        addressName: "家",
+        lat: 25.05,
+        lng: 121.52,
+        placeId: "p-home",
+        geocodeProvider: "mock-geo",
+        coordinateSource: "provider_candidate",
+      },
+      tripCount: 5,
+      lastUsedAt: "2026-11-01T00:00:00Z",
+    },
+  ];
+
+  it("matches what the caller said against stored places, ignoring 臺/台 and spacing", () => {
+    expect(matchFrequentPlace("中山北路二段 45巷3號", places)?.label).toBe(
+      "家",
+    );
+    expect(
+      matchFrequentPlace("台北市中山區中山北路二段45巷3號", places)?.label,
+    ).toBe("家");
+    expect(matchFrequentPlace("車站", places)).toBeNull();
+    expect(matchFrequentPlace("松山機場第一航廈", places)).toBeNull();
+  });
+
+  it("keeps the stored pin and provenance and records who chose it", () => {
+    const address = frequentPlaceToAddress(
+      places[0]!,
+      "AGENT-1",
+      "2026-11-11T00:00:00Z",
+    );
+    expect(address).toMatchObject({
+      address: "臺北市中山區中山北路二段45巷3號",
+      lat: 25.05,
+      lng: 121.52,
+      placeId: "p-home",
+      coordinateSource: "provider_candidate",
+      selectedByActorId: "AGENT-1",
+      surface: "callcenter",
+    });
+    const noSource = frequentPlaceToAddress(
+      {
+        ...places[0]!,
+        address: { ...places[0]!.address, coordinateSource: null },
+      },
+      "AGENT-1",
+    );
+    expect(noSource).not.toHaveProperty("coordinateSource");
   });
 });

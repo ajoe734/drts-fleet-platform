@@ -6,6 +6,7 @@ import { VoiceHandoffQueueRepository } from "../callcenter/voice-handoff-queue.r
 import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
 import { CallcenterAssistRepository } from "./callcenter-assist.repository";
 import { CallcenterAssistService } from "./callcenter-assist.service";
+import { CallcenterFrequentPlacesService } from "./frequent-places.service";
 
 /**
  * CALLCENTER-AI-ASSIST-20261111. Owns the single human handoff queue and the
@@ -20,7 +21,12 @@ import { CallcenterAssistService } from "./callcenter-assist.service";
     VoiceHandoffQueueService,
     CallcenterAssistRepository,
     CallcenterAssistService,
+    CallcenterFrequentPlacesService,
   ],
-  exports: [VoiceHandoffQueueService, CallcenterAssistService],
+  exports: [
+    VoiceHandoffQueueService,
+    CallcenterAssistService,
+    CallcenterFrequentPlacesService,
+  ],
 })
 export class CallcenterAssistModule {}

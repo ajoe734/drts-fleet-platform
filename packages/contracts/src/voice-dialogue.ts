@@ -73,6 +73,9 @@ export const voiceToolProposalSchema = z.discriminatedUnion("name", [
             "service_unsupported",
             "urgent_safety",
             "provider_unavailable",
+            // CALLCENTER-AI-ASSIST-20261111: two consecutive turns the AI
+            // could not understand hand the caller to a human.
+            "speech_not_understood",
           ]),
         })
         .strict(),
@@ -244,6 +247,8 @@ export const voiceDialogueSnapshotContentSchema = z
       .object({ reason: z.string().max(200), intent: z.string().max(100) })
       .strict()
       .nullable(),
+    /** Consecutive turns with nothing understood (absent in older rows). */
+    unclearTurns: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type VoiceDialogueSnapshotContent = z.infer<

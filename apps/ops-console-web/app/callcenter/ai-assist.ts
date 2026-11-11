@@ -342,3 +342,84 @@ export function sameAddress(
     (left.address ?? "") === (right.address ?? "")
   );
 }
+
+/** A pickup place this caller's phone number used on earlier trips. */
+export interface FrequentPlaceView {
+  label: string;
+  address: {
+    address: string;
+    addressName?: string | null;
+    normalizedAddress?: string | null;
+    lat: number;
+    lng: number;
+    placeId?: string | null;
+    geocodeProvider?: string | null;
+    coordinateSource?: string | null;
+  };
+  tripCount: number;
+  lastUsedAt: string;
+}
+
+function compactText(value: string | null | undefined) {
+  return (value ?? "")
+    .replace(/[\s，,。.、()（）-]/g, "")
+    .replace(/臺/g, "台")
+    .toLowerCase();
+}
+
+/**
+ * The frequent place the caller's spoken address refers to, if any: one of
+ * the two contains the other, ignoring spaces, punctuation and 臺/台. Short
+ * fragments (under four characters) never match, so "車站" alone cannot
+ * pick a stored place.
+ */
+export function matchFrequentPlace(
+  spoken: string,
+  places: readonly FrequentPlaceView[],
+): FrequentPlaceView | null {
+  const said = compactText(spoken);
+  if (said.length < 4) return null;
+  for (const place of places) {
+    for (const text of [
+      place.label,
+      place.address.address,
+      place.address.addressName,
+      place.address.normalizedAddress,
+    ]) {
+      const known = compactText(text);
+      if (known.length >= 4 && (known.includes(said) || said.includes(known))) {
+        return place;
+      }
+    }
+  }
+  return null;
+}
+
+/** The order-form address for a frequent place, keeping its original pin
+ * and provenance; it records who chose it now. */
+export function frequentPlaceToAddress(
+  place: FrequentPlaceView,
+  actorId: string,
+  now: string = new Date().toISOString(),
+): AddressPayload {
+  const { address } = place;
+  return {
+    address: address.address,
+    addressName: address.addressName ?? null,
+    normalizedAddress: address.normalizedAddress ?? null,
+    lat: address.lat,
+    lng: address.lng,
+    placeId: address.placeId ?? null,
+    geocodeProvider: address.geocodeProvider ?? null,
+    ...(address.coordinateSource
+      ? {
+          coordinateSource: address.coordinateSource as NonNullable<
+            AddressPayload["coordinateSource"]
+          >,
+        }
+      : {}),
+    selectedByActorId: actorId,
+    selectedAt: now,
+    surface: "callcenter",
+  };
+}

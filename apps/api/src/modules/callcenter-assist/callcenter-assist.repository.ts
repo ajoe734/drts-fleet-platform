@@ -285,6 +285,41 @@ export class CallcenterAssistRepository {
     }));
   }
 
+  /**
+   * Pickups of dispatched trips booked for any spelling of one phone number
+   * (passenger phone, or the passenger contact of an AI booking), newest
+   * first. Feeds the frequent-pickup suggestions; returns [] without a DB.
+   */
+  async findRecentPickupsByPhone(
+    phoneVariants: readonly string[],
+    statuses: readonly string[],
+    since: Date,
+    limit = 60,
+  ): Promise<Array<{ pickup: unknown; createdAt: string }>> {
+    if (!this.isEnabled() || phoneVariants.length === 0) {
+      return [];
+    }
+    const result = await this.databaseService!.query<
+      QueryResultRow & { pickup: unknown; created_at: Date | string }
+    >(
+      `SELECT record->'pickup' AS pickup, created_at
+       FROM ops.phase1_owned_orders
+       WHERE status = ANY($2::text[])
+         AND created_at >= $3
+         AND (
+           record->'passenger'->>'phone' = ANY($1::text[])
+           OR record->'bookingRequirements'->'passengerContact'->>'phone' = ANY($1::text[])
+         )
+       ORDER BY created_at DESC
+       LIMIT $4`,
+      [[...phoneVariants], [...statuses], since.toISOString(), limit],
+    );
+    return result.rows.map((row) => ({
+      pickup: row.pickup,
+      createdAt: iso(row.created_at),
+    }));
+  }
+
   /** Delete expired drafts (caller transcripts are personal data). */
   async purgeExpired(now: Date = new Date(), limit = 500): Promise<number> {
     if (!this.isEnabled()) {

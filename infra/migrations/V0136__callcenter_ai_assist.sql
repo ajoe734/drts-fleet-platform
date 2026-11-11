@@ -14,6 +14,9 @@
 -- 3. crm.callcenter_assist_field_outcomes: per submitted order, whether each
 --    AI-filled field was kept, corrected by the agent, or missed by the AI.
 --    Stores no field values, only the outcome, for the AI accuracy metric.
+-- 4. Expression indexes for looking up a phone number's past pickups
+--    (frequent-pickup suggestions for the agent and address ranking for
+--    the AI); the existing active-order-by-phone lookup benefits as well.
 
 ALTER TABLE voice.handoff
   ADD COLUMN IF NOT EXISTS call_id varchar(100),
@@ -117,3 +120,11 @@ CREATE TABLE IF NOT EXISTS crm.callcenter_assist_field_outcomes (
 
 CREATE INDEX IF NOT EXISTS idx_callcenter_assist_field_outcomes_recorded
   ON crm.callcenter_assist_field_outcomes (recorded_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_phase1_owned_orders_passenger_phone
+  ON ops.phase1_owned_orders ((record->'passenger'->>'phone'), created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_phase1_owned_orders_passenger_contact_phone
+  ON ops.phase1_owned_orders (
+    (record->'bookingRequirements'->'passengerContact'->>'phone'),
+    created_at DESC
+  );

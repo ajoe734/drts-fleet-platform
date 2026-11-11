@@ -1,4 +1,4 @@
-import type { VoiceDialogueOutput } from "@drts/contracts";
+import type { VoiceDialogueOutput, VoiceToolProposal } from "@drts/contracts";
 import { VoiceDialogueState } from "./dialogue-state";
 import {
   runVoiceDialogue,
@@ -63,6 +63,9 @@ export class VoiceDialogueEngine {
     if (state.handoff)
       return { prompt: "", terminal: "handoff" as const, results: [] };
     this.running = true;
+    // Read through a function: TypeScript keeps `state.handoff` narrowed to
+    // null after the early return above, but `apply` may set it this turn.
+    const decidedHandoff = (): VoiceDialogueState["handoff"] => state.handoff;
     const isStale = () =>
       request.inputEpoch !== currentEpoch() ||
       (currentMediaEpoch !== undefined &&
@@ -102,7 +105,9 @@ export class VoiceDialogueEngine {
       Object.assign(state, next);
       state.unresolvedCommit = liveUnresolvedCommit;
       const results = await this.boundedStage(request, isStale, (bounded) =>
-        ports.execute(output, bounded),
+        // `state.handoff` was null on entry (early return above), so any
+        // value now was decided by this very turn.
+        ports.execute(withHandoffRequest(output, decidedHandoff()), bounded),
       );
       request.signal.throwIfAborted();
       if (isStale() || Date.now() >= request.deadline)
@@ -110,7 +115,9 @@ export class VoiceDialogueEngine {
       const prompt = state.handoff
         ? output.intent === "emergency"
           ? "如有立即危險，請聯絡當地緊急救援服務。"
-          : "已停止叫車資料蒐集。"
+          : decidedHandoff()?.reason === "speech_not_understood"
+            ? "抱歉，我沒有聽清楚。現在幫您轉接客服人員，請稍候。"
+            : "已停止叫車資料蒐集。"
         : results.length
           ? ""
           : this.collectionPrompt(state, output.intent);
@@ -169,4 +176,49 @@ export class VoiceDialogueEngine {
       return "司機應聯絡哪位乘客？請提供聯絡電話。";
     return "資料仍需驗證，尚未完成叫車。";
   }
+}
+
+type HandoffReason = Extract<
+  VoiceToolProposal,
+  { name: "request_handoff" }
+>["args"]["reason"];
+
+const HANDOFF_REASONS: readonly HandoffReason[] = [
+  "customer_requested",
+  "location_unresolved",
+  "service_unsupported",
+  "urgent_safety",
+  "provider_unavailable",
+  "speech_not_understood",
+];
+
+/**
+ * CALLCENTER-AI-ASSIST-20261111: a handoff this turn's state decided on its
+ * own (e.g. the caller was not understood twice, or an intent such as
+ * "human" arrived without a tool call) must still reach the human queue.
+ * The coordinator only calls the tool gateway when the output carries a
+ * tool, so the decision is expressed as the single `request_handoff` the
+ * gateway would force anyway. Outputs that already request a handoff, and
+ * turns where no new handoff was decided, pass through unchanged.
+ */
+export function withHandoffRequest(
+  output: VoiceDialogueOutput,
+  newHandoff: { reason: string } | null,
+): VoiceDialogueOutput {
+  if (
+    !newHandoff ||
+    output.tools.some((tool) => tool.name === "request_handoff")
+  ) {
+    return output;
+  }
+  const reason = (HANDOFF_REASONS as readonly string[]).includes(
+    newHandoff.reason,
+  )
+    ? (newHandoff.reason as HandoffReason)
+    : "customer_requested";
+  return {
+    ...output,
+    terminal: "handoff",
+    tools: [{ name: "request_handoff", args: { reason } }],
+  };
 }

@@ -1023,14 +1023,15 @@
         "crm.callcenter_assist_drafts",
         "crm.callcenter_assist_field_outcomes"
       ],
-      "modifies_existing_tables": ["voice.handoff"],
+      "modifies_existing_tables": ["voice.handoff", "ops.phase1_owned_orders"],
       "referenced_tables": ["voice.session", "crm.phase1_call_sessions"],
-      "description": "AI-prefilled phone booking drafts (voice handoff and live agent assist), per-field agent correction outcomes for the AI accuracy metric, and the durable human handoff queue columns on voice.handoff.",
+      "description": "AI-prefilled phone booking drafts (voice handoff and live agent assist), per-field agent correction outcomes for the AI accuracy metric, and the durable human handoff queue columns on voice.handoff. Also indexes owned orders by passenger phone for frequent-pickup lookups.",
       "downstream_tasks": [],
       "table_invariants": [
         "voice.handoff gains call_id, resource_scope_id, priority, queue_status, target_kind, target, summary, redispatch_count, bridge_attempts, last_error and enqueued_at; the V0086 coarse state column and its one-active-handoff-per-session index keep their meaning.",
         "crm.callcenter_assist_drafts: one row per call_id; fields/transcript hold caller personal data, so expires_at is mandatory (> created_at) and readers ignore expired rows; the application purges expired rows.",
-        "crm.callcenter_assist_field_outcomes stores only the outcome (accepted / corrected / ai_missing), AI status and confidence per (call_id, order_id, field) — never field values; ai_status is NULL exactly when outcome = ai_missing."
+        "crm.callcenter_assist_field_outcomes stores only the outcome (accepted / corrected / ai_missing), AI status and confidence per (call_id, order_id, field) — never field values; ai_status is NULL exactly when outcome = ai_missing.",
+        "ops.phase1_owned_orders gains expression indexes on record->'passenger'->>'phone' and record->'bookingRequirements'->'passengerContact'->>'phone' (with created_at DESC) for phone-number pickup-history lookups; no column or data change."
       ]
     }
   ]

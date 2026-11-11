@@ -29,6 +29,7 @@ import {
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CallcenterAssistService } from "../callcenter-assist/callcenter-assist.service";
+import { CallcenterFrequentPlacesService } from "../callcenter-assist/frequent-places.service";
 import { ComplaintService } from "../complaint/complaint.service";
 import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { IncidentService } from "../incident/incident.service";
@@ -44,6 +45,8 @@ export class CallcenterController {
     private readonly sandboxWebhookAdapter: SandboxWebhookAdapter,
     @Optional() private readonly assistService?: CallcenterAssistService,
     @Optional() private readonly handoffQueue?: VoiceHandoffQueueService,
+    @Optional()
+    private readonly frequentPlaces?: CallcenterFrequentPlacesService,
   ) {}
 
   private requireAssist() {
@@ -81,6 +84,33 @@ export class CallcenterController {
     );
     return toApiSuccessEnvelope(
       { items: items.filter((item) => readable.has(item.callId)) },
+      requestId,
+    );
+  }
+
+  /**
+   * Pickup places the caller's phone number used on earlier trips, for the
+   * agent to pick instead of searching. Staff-only: the caller ID is not an
+   * identity check, so agents must not read these out to the caller.
+   */
+  @Get("sessions/:callId/frequent-places")
+  @RequireRealms("platform", "ops")
+  async getFrequentPlaces(
+    @Param("callId") callId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const session = await this.callcenterService.getCallSessionForRead(
+      callId,
+      requestId,
+      identity,
+    );
+    return toApiSuccessEnvelope(
+      {
+        items: this.frequentPlaces
+          ? await this.frequentPlaces.forPhoneBestEffort(session.callerPhone)
+          : [],
+      },
       requestId,
     );
   }

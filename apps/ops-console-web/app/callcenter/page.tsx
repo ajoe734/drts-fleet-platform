@@ -72,7 +72,12 @@ import {
 } from "./map-booking";
 import { CallcenterInteractiveMap } from "./callcenter-interactive-map";
 import { formatAccuracy } from "./ai-assist";
-import { AiAssistPanel, HandoffQueueList, assistCopy } from "./ai-assist-panel";
+import {
+  AiAssistPanel,
+  FrequentPickupChips,
+  HandoffQueueList,
+  assistCopy,
+} from "./ai-assist-panel";
 import { useCallcenterAiAssist } from "./use-ai-assist";
 import { resolveOpsMapTileUrlTemplate } from "../dispatch/ops-map-board";
 import {
@@ -3289,6 +3294,12 @@ export default function CallcenterPage() {
                         data-address-map-picker="callcenter-pickup-map"
                         data-provider-status={pickupProviderState.reasonCode}
                       >
+                        <FrequentPickupChips
+                          theme={theme}
+                          locale={currentLocale}
+                          places={assist.frequentPlaces}
+                          onPick={assist.pickFrequentPlace}
+                        />
                         <AddressMapPicker
                           id="callcenter-pickup-map"
                           provider={mapBookingProvider}

@@ -19,6 +19,7 @@ import {
   type AssistField,
   type AssistFieldStatusView,
   type AssistFormState,
+  type FrequentPlaceView,
   type HandoffQueueItemView,
 } from "./ai-assist";
 
@@ -28,6 +29,7 @@ type Locale = "zh" | "en";
 export type AssistAddressStatus =
   | "idle"
   | "resolving"
+  | "history"
   | "applied"
   | "not_found"
   | "error";
@@ -58,6 +60,10 @@ const COPY = {
     speakerUnknown: "—",
     addressResolving: "正在地圖上查詢 AI 填的地址…",
     addressApplied: "已依 AI 填的地址帶入地圖，請核對位置",
+    addressHistory: "和這支電話之前的上車地點相符，已帶入原本的位置",
+    frequentTitle: "這支電話常用的上車地點",
+    frequentNote: "僅供客服參考；乘客身分未核對前，請勿唸出完整地址。",
+    frequentTrips: (count: number) => `${count} 次`,
     addressNotFound: "地圖找不到這個地址，請在下方地圖搜尋或釘選",
     addressError: "地圖查詢失敗，請在下方地圖搜尋或釘選",
     status: {
@@ -90,6 +96,7 @@ const COPY = {
       service_unsupported: "AI 不支援的需求",
       urgent_safety: "安全緊急",
       provider_unavailable: "語音服務異常",
+      speech_not_understood: "AI 連續聽不懂",
     } as Record<string, string>,
   },
   en: {
@@ -118,6 +125,12 @@ const COPY = {
     speakerUnknown: "—",
     addressResolving: "Looking up the AI's address on the map…",
     addressApplied: "Placed from the AI's address; check the pin",
+    addressHistory:
+      "Matches an earlier pickup of this phone number; its pin was used",
+    frequentTitle: "Frequent pickups of this phone number",
+    frequentNote:
+      "For agents only: do not read a full address to a caller whose identity is not checked.",
+    frequentTrips: (count: number) => `${count} trips`,
     addressNotFound: "Address not found on the map; search or pin it below",
     addressError: "Map lookup failed; search or pin it below",
     status: {
@@ -150,6 +163,7 @@ const COPY = {
       service_unsupported: "Request not supported by AI",
       urgent_safety: "Safety emergency",
       provider_unavailable: "Voice service problem",
+      speech_not_understood: "AI could not understand twice",
     } as Record<string, string>,
   },
 };
@@ -350,18 +364,21 @@ export function AiAssistPanel({
                         style={{
                           ...mutedStyle,
                           color:
-                            addressStatus[field] === "applied"
+                            addressStatus[field] === "applied" ||
+                            addressStatus[field] === "history"
                               ? theme.textMuted
                               : theme.warn,
                         }}
                       >
                         {addressStatus[field] === "resolving"
                           ? copy.addressResolving
-                          : addressStatus[field] === "applied"
-                            ? copy.addressApplied
-                            : addressStatus[field] === "not_found"
-                              ? copy.addressNotFound
-                              : copy.addressError}
+                          : addressStatus[field] === "history"
+                            ? copy.addressHistory
+                            : addressStatus[field] === "applied"
+                              ? copy.addressApplied
+                              : addressStatus[field] === "not_found"
+                                ? copy.addressNotFound
+                                : copy.addressError}
                       </span>
                     )}
                   {ai?.rawText && ai.rawText !== ai.value && (
@@ -521,5 +538,50 @@ export function HandoffQueueList({
         </div>
       )}
     </CanvasCard>
+  );
+}
+
+export interface FrequentPickupChipsProps {
+  theme: Theme;
+  locale: Locale;
+  places: readonly FrequentPlaceView[];
+  onPick: (place: FrequentPlaceView) => void;
+}
+
+/** CALLCENTER-AI-ASSIST-20261111: one click fills the pickup with a place
+ * this caller's phone number used before, keeping its original pin. */
+export function FrequentPickupChips({
+  theme,
+  locale,
+  places,
+  onPick,
+}: FrequentPickupChipsProps) {
+  if (!places.length) return null;
+  const copy = COPY[locale];
+  return (
+    <div
+      data-callcenter-frequent-pickups
+      style={{ display: "grid", gap: 4, marginBottom: 8 }}
+    >
+      <span style={{ fontSize: 12.5, color: theme.textMuted }}>
+        {copy.frequentTitle}
+      </span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {places.map((place) => (
+          <CanvasBtn
+            key={`${place.address.lat},${place.address.lng}`}
+            theme={theme}
+            size="xs"
+            variant="secondary"
+            onClick={() => onPick(place)}
+          >
+            {place.label}（{copy.frequentTrips(place.tripCount)}）
+          </CanvasBtn>
+        ))}
+      </div>
+      <span style={{ fontSize: 11.5, color: theme.textDim }}>
+        {copy.frequentNote}
+      </span>
+    </div>
   );
 }
