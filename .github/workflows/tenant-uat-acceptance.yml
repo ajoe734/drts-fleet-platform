@@ -198,6 +198,7 @@ jobs:
               allowedTokenAudiences: [$aud],
               routeScopes: [
                 "GET partner/entries/*",
+                "POST partner/ingress/handoff",
                 "POST partner/ingress/referral-embed-handoff",
                 "POST partner/ingress/referral-embed-handoff/consume",
                 "POST partner/ingress/referral-embed-handoff/consent"
@@ -248,6 +249,7 @@ jobs:
           set -o pipefail
           pnpm --filter @drts/platform-admin-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
           pnpm --filter @drts/referral-embed-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+          DRTS_API_URL="$DRTS_UAT_API_URL" pnpm --filter @drts/partner-booking-web... build 2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
       - name: Seed disposable tenant A/B sessions through the authoritative service
         id: seed
@@ -464,10 +466,42 @@ jobs:
             --outputFile.json=.artifacts/tenant-uat-acceptance/partner-notify-unit-report.json \
             2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
 
+      - name: Start normal Partner booking UI with external metadata transport SIM
+        id: start_partner_booking_ui
+        env:
+          DRTS_API_URL: http://127.0.0.1:4102
+          DRTS_API_AUTH_AUDIENCE: ${{ env.WORKLOAD_IDENTITY_GOOGLE_AUDIENCE }}
+          DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN: ${{ env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN }}
+        run: |
+          set -euo pipefail
+          (
+            cd apps/partner-booking-web
+            NODE_OPTIONS="${NODE_OPTIONS:-} --require=$GITHUB_WORKSPACE/tests/e2e/helpers/partner-metadata-transport.cjs" \
+              pnpm exec next start --hostname 127.0.0.1 --port 3007 \
+              > ../../.artifacts/tenant-uat-acceptance/partner-booking-web.log 2>&1 &
+            echo $! > ../../.artifacts/tenant-uat-acceptance/partner-booking-web.pid
+          )
+          for i in $(seq 1 60); do
+            code="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3007 || true)"
+            if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then exit 0; fi
+            sleep 1
+          done
+          echo "::error::Partner booking UI did not become ready"
+          exit 1
+
+      - name: Run C032 normal travel and insurance browser bookings against real API and PG
+        id: c032_partner_booking_e2e
+        run: |
+          set -o pipefail
+          python3 tests/unit/system-remediation/sr-partner-notify-qa-20260917/run-reported.py test-results/c032-partner-program-business-report.json \
+            pnpm exec playwright test -c playwright.partner-program-business.config.ts \
+            --output test-results/c032-partner-program-artifacts \
+            2>&1 | tee -a .artifacts/tenant-uat-acceptance/execution-log.txt
+
       - name: Stop background API server
         if: always()
         run: |
-          for name in api-server admin-web referral-web; do
+          for name in api-server admin-web referral-web partner-booking-web; do
             if [ -f ".artifacts/tenant-uat-acceptance/$name.pid" ]; then
               kill "$(cat ".artifacts/tenant-uat-acceptance/$name.pid")" 2>/dev/null || true
             fi
@@ -744,6 +778,8 @@ jobs:
           WEBHOOK_UNIT_OUTCOME: ${{ steps.webhook_unit.outcome }}
           PARTNER_NOTIFY_E2E_OUTCOME: ${{ steps.partner_notify_e2e.outcome }}
           PARTNER_NOTIFY_UNIT_OUTCOME: ${{ steps.partner_notify_unit.outcome }}
+          START_PARTNER_BOOKING_UI_OUTCOME: ${{ steps.start_partner_booking_ui.outcome }}
+          C032_PARTNER_BOOKING_E2E_OUTCOME: ${{ steps.c032_partner_booking_e2e.outcome }}
           C113_C115_ACCEPTANCE_OUTCOME: ${{ steps.c113_c115_acceptance.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
           RESTART_API_OUTCOME: ${{ steps.restart_api.outcome }}
@@ -775,6 +811,8 @@ jobs:
                   "WEBHOOK_UNIT_OUTCOME",
                   "PARTNER_NOTIFY_E2E_OUTCOME",
                   "PARTNER_NOTIFY_UNIT_OUTCOME",
+                  "START_PARTNER_BOOKING_UI_OUTCOME",
+                  "C032_PARTNER_BOOKING_E2E_OUTCOME",
                   "C113_C115_ACCEPTANCE_OUTCOME",
                   "GATE_OUTCOME",
                   "RESTART_API_OUTCOME",
@@ -803,6 +841,8 @@ jobs:
               and outcomes["WEBHOOK_UNIT_OUTCOME"] == "success"
               and outcomes["PARTNER_NOTIFY_E2E_OUTCOME"] == "success"
               and outcomes["PARTNER_NOTIFY_UNIT_OUTCOME"] == "success"
+              and outcomes["START_PARTNER_BOOKING_UI_OUTCOME"] == "success"
+              and outcomes["C032_PARTNER_BOOKING_E2E_OUTCOME"] == "success"
               and outcomes["C113_C115_ACCEPTANCE_OUTCOME"] == "success"
               and outcomes["GATE_OUTCOME"] == "success"
               and outcomes["RESTART_API_OUTCOME"] == "success"
@@ -834,6 +874,9 @@ jobs:
             .artifacts/tenant-uat-acceptance/api-server.log
             .artifacts/tenant-uat-acceptance/admin-web.log
             .artifacts/tenant-uat-acceptance/referral-web.log
+            .artifacts/tenant-uat-acceptance/partner-booking-web.log
+            .artifacts/tenant-uat-acceptance/c032-metadata-transport.ndjson
+            .artifacts/tenant-uat-acceptance/c032-booking/
             .artifacts/tenant-uat-acceptance/system-remediation-report.json
             .artifacts/tenant-uat-acceptance/unit-test-report.json
             .artifacts/tenant-uat-acceptance/webhook-unit-report.json

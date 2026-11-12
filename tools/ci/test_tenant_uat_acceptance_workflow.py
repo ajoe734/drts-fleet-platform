@@ -319,7 +319,12 @@ class HostedBoundaryTests(unittest.TestCase):
 
     def test_reports_are_independent_and_every_command_uses_provenance_runner(self):
         text = WORKFLOW.read_text()
-        self.assertEqual(text.count("run-reported.py "), 6)
+        self.assertEqual(text.count("run-reported.py "), 7)
+        c032 = text.split("id: c032_partner_booking_e2e", 1)[1].split("      - name:", 1)[0]
+        self.assertIn(
+            "run-reported.py test-results/c032-partner-program-business-report.json",
+            c032,
+        )
         webhook = text.split("id: webhook_e2e", 1)[1].split("      - name:", 1)[0]
         self.assertNotIn("sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", webhook)
         self.assertEqual(text.count("--reporter=list,json"), 3)
@@ -469,6 +474,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         webhook_unit: str = "success",
         partner_notify_e2e: str = "success",
         partner_notify_unit: str = "success",
+        start_partner_booking_ui: str = "success",
+        c032_partner_booking_e2e: str = "success",
         c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
@@ -493,6 +500,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "WEBHOOK_UNIT_OUTCOME": webhook_unit,
                 "PARTNER_NOTIFY_E2E_OUTCOME": partner_notify_e2e,
                 "PARTNER_NOTIFY_UNIT_OUTCOME": partner_notify_unit,
+                "START_PARTNER_BOOKING_UI_OUTCOME": start_partner_booking_ui,
+                "C032_PARTNER_BOOKING_E2E_OUTCOME": c032_partner_booking_e2e,
                 "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
@@ -549,6 +558,24 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
     def test_failed_partner_notify_unit_is_not_passed(self) -> None:
         status = self._run(partner_notify_unit="failure")
         self.assertEqual(status["status"], "failed")
+
+    def test_failed_partner_booking_ui_is_failed(self) -> None:
+        status = self._run(
+            start_partner_booking_ui="failure",
+            c032_partner_booking_e2e="skipped",
+        )
+        # Original environment setup succeeded. Failure in this additional
+        # surface is failed, not a successful original-only run or not_run.
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["start_partner_booking_ui_outcome"], "failure")
+        self.assertEqual(status["c032_partner_booking_e2e_outcome"], "skipped")
+
+    def test_unsuccessful_c032_browser_cases_are_not_passed(self) -> None:
+        for outcome in ("failure", "skipped", "cancelled", "unknown"):
+            with self.subTest(outcome=outcome):
+                status = self._run(c032_partner_booking_e2e=outcome)
+                self.assertEqual(status["status"], "failed")
+                self.assertEqual(status["c032_partner_booking_e2e_outcome"], outcome)
 
     def test_failed_c113_c115_acceptance_is_not_passed(self) -> None:
         status = self._run(c113_c115_acceptance="failure")
