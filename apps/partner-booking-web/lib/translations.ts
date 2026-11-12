@@ -3,6 +3,27 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "read.confirmation": "Booking confirmation",
+  "read.record": "Booking record",
+  "read.history": "Partner / program bookings",
+  "read.historyScope":
+    "Bookings available to this partner entry and program. This is not a personal-only trip history.",
+  "read.navigation": "Booking navigation",
+  "read.quotation": "Quotation",
+  "read.quotationSource": "Quotation source",
+  "read.notPaidReceipt":
+    "This is a booking record and quotation, not confirmation of payment.",
+  "read.noQuotation": "No quotation recorded",
+  "read.empty": "No bookings in this partner / program scope.",
+  "read.emptyPage": "No bookings on this page. Return to the first page.",
+  "read.first": "First page",
+  "read.error":
+    "The booking data could not be loaded. Check the original partner entry and booking reference, then retry.",
+  "read.previous": "Previous page",
+  "read.next": "Next page",
+  "read.page": "Page {page} of {total}",
+  "read.status": "Order status",
+  "read.details": "Program details",
   "app.title": "Partner Booking",
   "app.description":
     "White-label partner booking surface. Tenant identity is selected via the tenant slug route segment.",
@@ -505,6 +526,25 @@ const en = {
 } as const;
 
 const zh = {
+  "read.confirmation": "預約確認",
+  "read.record": "預約紀錄",
+  "read.history": "合作通路／方案預約",
+  "read.historyScope":
+    "此清單依合作入口與方案的既有讀取範圍顯示，並非個人專屬行程紀錄。",
+  "read.navigation": "預約導覽",
+  "read.quotation": "報價",
+  "read.quotationSource": "報價來源",
+  "read.notPaidReceipt": "此頁為預約紀錄與報價，不代表已付款或實付收據。",
+  "read.noQuotation": "尚未記錄報價",
+  "read.empty": "此合作通路／方案目前沒有預約。",
+  "read.emptyPage": "此頁沒有預約資料，請返回第一頁查看。",
+  "read.first": "第一頁",
+  "read.error": "無法讀取預約資料，請確認原合作入口與預約編號後重試。",
+  "read.previous": "上一頁",
+  "read.next": "下一頁",
+  "read.page": "第 {page}／{total} 頁",
+  "read.status": "訂單狀態",
+  "read.details": "方案資料",
   "app.title": "合作預約",
   "app.description":
     "DRTS 白標合作預約入口，依合作夥伴路由提供卡友機場接送與其他方案流程。",

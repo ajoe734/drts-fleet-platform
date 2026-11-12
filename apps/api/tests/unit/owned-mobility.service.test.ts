@@ -7823,3 +7823,128 @@ describe("C032 noncore booking detail persistence", () => {
     },
   );
 });
+
+describe("partner booking history uses the existing single-booking read relation", () => {
+  function seededPartnerBookings() {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const make = (
+      id: string,
+      overrides: Omit<Parameters<typeof buildOrderFixture>[0], "orderId">,
+    ) =>
+      buildOrderFixture({
+        bookingId: "booking-" + id,
+        tenantId: "SIM-tenant",
+        partnerId: "SIM-partner",
+        partnerProgramId: "SIM-program",
+        partnerEntrySlug: "sim-entry",
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: "travel_agency_transfer",
+        status: "created",
+        createdAt: "2026-11-12T10:00:00Z",
+        reservationWindowStart: "2099-01-01T10:00:00Z",
+        reservationWindowEnd: "2099-01-01T11:00:00Z",
+        ...overrides,
+        orderId: id,
+      });
+    Reflect.set(service, "orders", [
+      make("SIM-other-entry", {
+        partnerEntrySlug: "another-entry",
+        createdAt: "2026-11-12T15:00:00Z",
+      }),
+      make("SIM-other-program", {
+        partnerProgramId: "another-program",
+        createdAt: "2026-11-12T14:00:00Z",
+      }),
+      make("SIM-other-passenger", {
+        passenger: {
+          passengerId: "another-resident",
+          name: "SIM Other",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T13:00:00Z",
+      }),
+      make("SIM-legacy", {
+        passenger: {
+          passengerId: null,
+          name: "SIM Legacy",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T12:00:00Z",
+      }),
+      make("SIM-current", {
+        passenger: {
+          passengerId: "SIM-resident",
+          name: "SIM Current",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T11:00:00Z",
+      }),
+      make("SIM-other-tenant", { tenantId: "another-tenant" }),
+    ]);
+    const identity = {
+      authMode: "jwt_bearer",
+      actorType: "referral_passenger",
+      actorId: "SIM-resident",
+      drtsPassengerId: "SIM-resident",
+      realm: "partner",
+      tenantId: "SIM-tenant",
+      partnerId: "SIM-partner",
+      partnerProgramId: "SIM-program",
+      partnerEntrySlug: "sim-entry",
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: ["partner:book"],
+    } as NonNullable<Parameters<typeof service.listTenantBookings>[2]>;
+    return { service, identity };
+  }
+
+  it("filters current and legacy allowed records before total and pagination", async () => {
+    const { service, identity } = seededPartnerBookings();
+    // Existing callable on the unmodified product: valid feature RED is wrong
+    // visible records/total, never a missing method/module or auth fixture.
+    const first = await service.listTenantBookings(
+      "SIM-tenant",
+      { dateField: "createdAt", page: 1, pageSize: 1 },
+      identity,
+    );
+    expect(first.pagination.totalItems).toBe(2);
+    expect(first.items.map((item) => item.orderId)).toEqual(["SIM-legacy"]);
+    const second = await service.listTenantBookings(
+      "SIM-tenant",
+      { dateField: "createdAt", page: 2, pageSize: 1 },
+      identity,
+    );
+    expect(second.items.map((item) => item.orderId)).toEqual(["SIM-current"]);
+    expect(second.pagination.totalItems).toBe(2);
+  });
+
+  it("preserves entry-key and ordinary tenant read behavior without inventing personal ownership", async () => {
+    const { service, identity } = seededPartnerBookings();
+    const entryKey = {
+      ...identity,
+      actorType: "partner_api_key",
+      actorId: "SIM-key",
+    } as typeof identity;
+    const partner = await service.listTenantBookings(
+      "SIM-tenant",
+      { pageSize: 20 },
+      entryKey,
+    );
+    expect(partner.items.map((item) => item.orderId).sort()).toEqual([
+      "SIM-current",
+      "SIM-legacy",
+      "SIM-other-passenger",
+    ]);
+    const tenant = {
+      ...identity,
+      realm: "tenant",
+      actorType: "tenant_admin",
+    } as typeof identity;
+    const ordinary = await service.listTenantBookings(
+      "SIM-tenant",
+      { pageSize: 20 },
+      tenant,
+    );
+    expect(ordinary.pagination.totalItems).toBe(5);
+  });
+});

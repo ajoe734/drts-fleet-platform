@@ -97,6 +97,7 @@ export default async function PartnerBookPage({
         entry={entry}
         eligibilityVerificationId={eligibilityVerificationId}
         initialDraft={initialDraft}
+        partnerUserRef={partnerUserRef}
         {...(isNoncore ? { submitBookingAction: submitBooking } : {})}
       />
     );

@@ -378,6 +378,19 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("partner/bookings")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listPartnerBookings(
+    @Query() query: TenantBookingListQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.listPartnerBookings(query, identity),
+      requestId,
+    );
+  }
+
   @Get("partner/bookings/:bookingId")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   async getPartnerBooking(

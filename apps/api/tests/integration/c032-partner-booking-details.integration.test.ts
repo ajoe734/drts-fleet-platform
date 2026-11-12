@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import type {
+  CreateTenantBookingCommand,
+  PartnerChannelEntryRecord,
+} from "@drts/contracts";
+import type { BootstrapRequestIdentity } from "../../src/common/auth/auth.types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseService } from "../../src/common/db";
 import { IdempotencyRepository } from "../../src/common/idempotency/idempotency.repository";
@@ -12,6 +17,7 @@ import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 const databaseUrl = process.env.DATABASE_URL;
 // This existing API integration scope runs after formal migrations in hosted CI.
@@ -56,6 +62,7 @@ describe("C032 real JSONB booking persistence and cold replay", () => {
   function instance(
     database: DatabaseService,
     subtype: "travel_agency_transfer" | "insurance_replacement_vehicle",
+    partners?: TenantPartnerService,
   ) {
     const audit = new AuditNotificationService();
     const products = new ServiceProductService(audit);
@@ -81,7 +88,7 @@ describe("C032 real JSONB booking persistence and cold replay", () => {
       tasks,
       ops,
       new OwnedMobilityRepository(database),
-      undefined,
+      partners,
       undefined,
       products,
       undefined,
@@ -193,6 +200,247 @@ describe("C032 real JSONB booking persistence and cold replay", () => {
       expect(stored.rows[0]!.record).toMatchObject({
         partnerBookingDetails: details,
       });
+    },
+  );
+
+  it.runIf(Boolean(databaseUrl))(
+    "cold PG partner history filters owners before count and pagination while preserving legacy and entry-key access",
+    async () => {
+      const database = new DatabaseService();
+      databases.push(database);
+      const tenantId = randomUUID();
+      const otherTenantId = randomUUID();
+      resources.push({ tenantId }, { tenantId: otherTenantId });
+      // Public master-data methods supply real create-command context. Orders,
+      // count, filtering and pagination use the actual migrated PG repository.
+      const partners = new TenantPartnerService(new AuditNotificationService());
+      try {
+        const resident = await partners.upsertPassenger(tenantId, {
+          fullName: "SIM History Resident",
+          mobile: "0912000032",
+        });
+        const anotherResident = await partners.upsertPassenger(tenantId, {
+          fullName: "SIM Other History Resident",
+          mobile: "0912000033",
+        });
+        const programId = randomUUID();
+        const makeEntry = (entryTenantId: string) => {
+          const marker = randomUUID();
+          return partners.createPlatformPartnerEntry({
+            tenantId: entryTenantId,
+            partnerCode: "c032_history_" + marker.replaceAll("-", ""),
+            partnerType: "travel_agency",
+            programId,
+            entrySlug: "c032-history-" + marker,
+            displayName: "SIM PG history entry",
+            businessDispatchSubtype: "travel_agency_transfer",
+            authMode: "partner_api_key",
+            eligibilityMode: "none",
+            status: "active",
+            activeFlag: true,
+          });
+        };
+        const entry = await makeEntry(tenantId);
+        const otherEntry = await makeEntry(tenantId);
+        const otherTenantEntry = await makeEntry(otherTenantId);
+        const entryIdentity = (
+          source: PartnerChannelEntryRecord,
+        ): BootstrapRequestIdentity => ({
+          authMode: "jwt_bearer",
+          actorType: "partner_api_key",
+          actorId: "SIM-PG-entry-key",
+          realm: "partner",
+          tenantId: source.tenantId,
+          partnerId: source.partnerId,
+          partnerProgramId: source.programId,
+          partnerEntrySlug: source.entrySlug,
+          roleFamilies: ["partner"],
+          roles: ["partner_api_key"],
+          scopes: ["partner:book"],
+          requestId: null,
+        });
+        const writer = instance(database, "travel_agency_transfer", partners);
+        const create = async (
+          source: PartnerChannelEntryRecord,
+          day: number,
+          passengerId?: string,
+        ) => {
+          const command: CreateTenantBookingCommand = {
+            businessDispatchSubtype: "travel_agency_transfer",
+            partnerEntrySlug: source.entrySlug,
+            ...(passengerId ? { passengerId } : {}),
+            idempotencyKey: "C032-history-" + randomUUID(),
+            reservationWindowStart:
+              "2099-06-" + String(day).padStart(2, "0") + "T02:00:00.000Z",
+            reservationWindowEnd:
+              "2099-06-" + String(day).padStart(2, "0") + "T03:00:00.000Z",
+            pickup: { address: "SIM PG history pickup" },
+            dropoff: { address: "SIM PG history dropoff" },
+            passenger: { name: "SIM History Passenger", phone: "0912000032" },
+            partnerBookingDetails: {
+              subtype: "travel_agency_transfer",
+              groupCode: "SIM-HISTORY-" + day,
+              groupSize: 1,
+              itineraryLink: "https://travel.example.test/history/" + day,
+              rosterPassengers: ["SIM History Passenger"],
+              meetingPoint: "SIM PG meeting point",
+            },
+          };
+          const result = await writer.createPartnerBooking(
+            command,
+            entryIdentity(source),
+            source.tenantId,
+          );
+          await vi.waitFor(async () => {
+            expect(
+              await new OwnedMobilityRepository(database).findOrderById(
+                result.data.orderId,
+              ),
+            ).toMatchObject({
+              orderId: result.data.orderId,
+              bookingId: result.data.bookingId,
+              tenantId: source.tenantId,
+              partnerId: source.partnerId,
+              partnerProgramId: source.programId,
+              partnerEntrySlug: source.entrySlug,
+              passenger: { passengerId: passengerId ?? null },
+            });
+          });
+          return result.data;
+        };
+        const current = await create(entry, 5, resident.passengerId);
+        const legacy = await create(entry, 6);
+        const otherPassenger = await create(
+          entry,
+          7,
+          anotherResident.passengerId,
+        );
+        // A genuine entry update permits a same-entry/same-partner old-program
+        // record. Restore the current program before normal reads.
+        const anotherProgramEntry = await partners.updatePlatformPartnerEntry(
+          entry.entrySlug,
+          { programId: randomUUID() },
+        );
+        const otherProgram = await create(anotherProgramEntry, 8);
+        await partners.updatePlatformPartnerEntry(entry.entrySlug, {
+          programId,
+        });
+        const otherChannel = await create(otherEntry, 9);
+        const otherTenant = await create(otherTenantEntry, 10);
+        const coldDatabase = new DatabaseService();
+        databases.push(coldDatabase);
+        // New service and connection: the writer's in-memory order feed cannot
+        // supply either the page or its total.
+        const cold = instance(coldDatabase, "travel_agency_transfer", partners);
+        const identity: BootstrapRequestIdentity = {
+          ...entryIdentity(entry),
+          actorType: "referral_passenger",
+          actorId: resident.passengerId,
+          drtsPassengerId: resident.passengerId,
+          roles: ["referral_passenger"],
+        };
+        const first = (
+          await cold.listPartnerBookings({ page: 1, pageSize: 1 }, identity)
+        ).data;
+        expect(first.pagination).toEqual({
+          page: 1,
+          pageSize: 1,
+          totalItems: 2,
+          totalPages: 2,
+        });
+        expect(first.items.map((item) => item.orderId)).toEqual([
+          legacy.orderId,
+        ]);
+        expect(first.items[0]).toMatchObject({
+          bookingId: legacy.bookingId,
+          partnerEntrySlug: entry.entrySlug,
+        });
+        const second = (
+          await cold.listPartnerBookings({ page: 2, pageSize: 1 }, identity)
+        ).data;
+        expect(second.pagination).toEqual({
+          page: 2,
+          pageSize: 1,
+          totalItems: 2,
+          totalPages: 2,
+        });
+        expect(second.items.map((item) => item.orderId)).toEqual([
+          current.orderId,
+        ]);
+        expect(second.items[0]).toMatchObject({
+          bookingId: current.bookingId,
+          passenger: { passengerId: resident.passengerId },
+        });
+        const pastEnd = (
+          await cold.listPartnerBookings({ page: 3, pageSize: 1 }, identity)
+        ).data;
+        expect(pastEnd.items).toEqual([]);
+        expect(pastEnd.pagination).toEqual({
+          page: 3,
+          pageSize: 1,
+          totalItems: 2,
+          totalPages: 2,
+        });
+        for (const wrongScope of [
+          { partnerId: randomUUID() },
+          { partnerProgramId: randomUUID() },
+          { partnerEntrySlug: otherEntry.entrySlug },
+          { tenantId: otherTenantId },
+        ]) {
+          const empty = (
+            await cold.listPartnerBookings(
+              { page: 1, pageSize: 1 },
+              { ...identity, ...wrongScope },
+            )
+          ).data;
+          expect(empty.items).toEqual([]);
+          expect(empty.pagination).toMatchObject({
+            totalItems: 0,
+            totalPages: 0,
+          });
+        }
+        const keyHistory = (
+          await cold.listPartnerBookings(
+            { page: 1, pageSize: 20 },
+            entryIdentity(entry),
+          )
+        ).data;
+        expect(keyHistory.pagination.totalItems).toBe(3);
+        expect(keyHistory.items.map((item) => item.orderId)).toEqual([
+          otherPassenger.orderId,
+          legacy.orderId,
+          current.orderId,
+        ]);
+        const ordinary = (
+          await cold.listTenantBookings(
+            { page: 1, pageSize: 20 },
+            null,
+            tenantId,
+          )
+        ).data;
+        expect(ordinary.pagination.totalItems).toBe(5);
+        expect(ordinary.items.map((item) => item.orderId).sort()).toEqual(
+          [
+            current.orderId,
+            legacy.orderId,
+            otherPassenger.orderId,
+            otherProgram.orderId,
+            otherChannel.orderId,
+          ].sort(),
+        );
+        expect(ordinary.items.map((item) => item.orderId)).not.toContain(
+          otherTenant.orderId,
+        );
+        expect(
+          (await cold.getPartnerBooking(current.bookingId, identity, tenantId))
+            .data.orderId,
+        ).toBe(current.orderId);
+        await expect(
+          cold.getPartnerBooking(otherPassenger.bookingId, identity, tenantId),
+        ).rejects.toMatchObject({ code: "PARTNER_SCOPE_MISMATCH" });
+      } finally {
+        partners.onModuleDestroy();
+      }
     },
   );
 });

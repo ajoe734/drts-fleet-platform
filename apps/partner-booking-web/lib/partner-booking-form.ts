@@ -515,3 +515,19 @@ export type PartnerBookingActionResult =
       errorMessage: string;
       eligibilityVerificationId?: string;
     };
+
+/** Read links carry normal ingress context and real IDs, never a bearer/key. */
+export function partnerBookingReadHref(
+  entrySlug: string,
+  screen: "confirmed" | "receipt" | "trips",
+  partnerUserRef: string,
+  ids: { bookingId?: string; orderId?: string; page?: number } = {},
+): string {
+  const query = new URLSearchParams({ partnerUserRef });
+  if (ids.bookingId) query.set("bookingId", ids.bookingId);
+  if (ids.orderId) query.set("orderId", ids.orderId);
+  if (ids.page) query.set("page", String(ids.page));
+  return (
+    "/" + encodeURIComponent(entrySlug) + "/" + screen + "?" + query.toString()
+  );
+}

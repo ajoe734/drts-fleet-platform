@@ -27,6 +27,7 @@ import {
 } from "@drts/ui-web";
 import {
   formatDateTimeLocalInputValue,
+  partnerBookingReadHref,
   getPartnerBookingFieldErrors,
   getPartnerMapSubmitGate,
   getPartnerProgramCoverage,
@@ -163,6 +164,7 @@ export function PartnerBookingForm({
   eligibilityVerificationId,
   initialDraft,
   submitBookingAction,
+  partnerUserRef,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -171,6 +173,7 @@ export function PartnerBookingForm({
   >;
   eligibilityVerificationId: string | null;
   initialDraft: PartnerBookingDraftValues;
+  partnerUserRef?: string | null;
   submitBookingAction?: (
     submission: PartnerBookingSubmission,
   ) => Promise<PartnerBookingActionResult>;
@@ -952,6 +955,44 @@ export function PartnerBookingForm({
               style={fieldStyle}
             >
               <strong>{t("book.create.success")}</strong>
+              {partnerUserRef ? (
+                <nav aria-label={t("read.navigation")}>
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "confirmed",
+                      partnerUserRef,
+                      bookingResult.confirmation,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.confirmation")}
+                  </Link>
+                  {" · "}
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "receipt",
+                      partnerUserRef,
+                      bookingResult.confirmation,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.record")}
+                  </Link>
+                  {" · "}
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "trips",
+                      partnerUserRef,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.history")}
+                  </Link>
+                </nav>
+              ) : null}
               <dl>
                 <dt>{t("book.create.bookingId")}</dt>
                 <dd data-testid="partner-booking-id">

@@ -4,6 +4,8 @@ import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
   ApiSuccessEnvelope,
   BookingRecord,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
   CreatePartnerIngressHandoffCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBookingCommand,
@@ -94,7 +96,9 @@ async function getServerAuthorityHeaders(): Promise<Record<string, string>> {
   const targetUrl = new URL(API_URL);
   const audience =
     configuredAudience ||
-    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX)
+      ? targetUrl.origin
+      : null);
   if (audience) {
     const identityToken = await mintMetadataIdentityToken(audience);
     if (identityToken) {
@@ -684,6 +688,21 @@ export async function createPartnerBooking(
       headers: buildPartnerHeaders(session),
       body: JSON.stringify(command),
     },
+  );
+}
+
+export async function listPartnerBookings(
+  session: PartnerSessionRecord,
+  query: Pick<TenantBookingListQuery, "page" | "pageSize" | "status"> = {},
+): Promise<TenantBookingsPageRecord> {
+  const params = new URLSearchParams();
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.pageSize !== undefined)
+    params.set("pageSize", String(query.pageSize));
+  if (query.status !== undefined) params.set("status", String(query.status));
+  return requestAuthority<TenantBookingsPageRecord>(
+    "/api/partner/bookings?" + params.toString(),
+    { method: "GET", headers: buildPartnerHeaders(session) },
   );
 }
 

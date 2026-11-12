@@ -319,6 +319,109 @@ function assertSnapshot(
   expect(data.stored.dropoff).toEqual(data.order.dropoff);
 }
 
+async function readPersistedPages(
+  page: Page,
+  scope: Scope,
+  partnerUserRef: string,
+  bookingId: string,
+  orderId: string,
+  details: PartnerBookingDetails,
+) {
+  const originalBookUrl = page.url();
+  const notPaid =
+    "This is a booking record and quotation, not confirmation of payment.";
+  const assertRoute = (screen: "confirmed" | "receipt" | "trips") => {
+    const url = new URL(page.url());
+    expect(url.pathname).toBe("/" + scope.entry.entrySlug + "/" + screen);
+    expect(url.searchParams.get("partnerUserRef")).toBe(partnerUserRef);
+    expect(url.searchParams.has("apiKey")).toBe(false);
+    expect(url.searchParams.has("accessToken")).toBe(false);
+    if (screen !== "trips") {
+      expect(url.searchParams.get("bookingId")).toBe(bookingId);
+      expect(url.searchParams.get("orderId")).toBe(orderId);
+    }
+  };
+  const assertRecord = async (heading: string) => {
+    const record = page.getByTestId("partner-persisted-booking");
+    await expect(record).toBeVisible();
+    await expect(record).toHaveAttribute("data-booking-id", bookingId);
+    await expect(record).toHaveAttribute("data-order-id", orderId);
+    await expect(
+      record.getByRole("heading", { name: heading, exact: true }),
+    ).toBeVisible();
+    await expect(record).toContainText(notPaid);
+    const fields = record.getByRole("region", {
+      name: "Program details",
+      exact: true,
+    });
+    await expect(fields).toBeVisible();
+    for (const [key, value] of Object.entries(details)) {
+      if (key === "subtype") continue;
+      for (const text of Array.isArray(value) ? value : [String(value)]) {
+        await expect(fields).toContainText(text);
+      }
+    }
+  };
+  // Use the real links from the successful normal booking. Every destination
+  // creates the existing normal session then re-reads API booking + order.
+  await page
+    .getByTestId("partner-booking-confirmation")
+    .getByRole("link", { name: "Booking confirmation", exact: true })
+    .click();
+  await assertRecord("Booking confirmation");
+  assertRoute("confirmed");
+  await page.reload();
+  await assertRecord("Booking confirmation");
+  assertRoute("confirmed");
+  await page
+    .getByTestId("partner-persisted-booking")
+    .getByRole("link", { name: "Booking record", exact: true })
+    .click();
+  await assertRecord("Booking record");
+  assertRoute("receipt");
+  await page.reload();
+  await assertRecord("Booking record");
+  assertRoute("receipt");
+  await page
+    .getByTestId("partner-persisted-booking")
+    .getByRole("link", { name: "Partner / program bookings", exact: true })
+    .click();
+  const history = page.getByTestId("partner-persisted-history");
+  await expect(history).toBeVisible();
+  assertRoute("trips");
+  await expect(
+    history.getByRole("heading", {
+      name: "Partner / program bookings",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(history).toContainText(
+    "Bookings available to this partner entry and program. This is not a personal-only trip history.",
+  );
+  const row = history.locator('li[data-booking-id="' + bookingId + '"]');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("data-booking-id", bookingId);
+  await expect(row).toContainText("Taipei 101");
+  await expect(row).toContainText("Taipei Main Station");
+  await expect(history).toContainText("Page 1 of 1");
+  await expect(
+    history.getByRole("link", { name: "Previous page", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    history.getByRole("link", { name: "Next page", exact: true }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(history).toBeVisible();
+  assertRoute("trips");
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("data-booking-id", bookingId);
+  await row.getByRole("link", { name: bookingId, exact: true }).click();
+  await assertRecord("Booking confirmation");
+  assertRoute("confirmed");
+  // Preserve the original normal /book reload + fresh-session/PG assertions.
+  expect((await page.goto(originalBookUrl))?.status()).toBe(200);
+}
+
 async function runNormalBooking(
   page: Page,
   testInfo: TestInfo,
@@ -505,8 +608,15 @@ async function runNormalBooking(
     businessDispatchSubtype: subtype,
   });
   expect(verification.referenceTokenHash).toMatch(/^sha256:/);
-  // Confirmation is local UI state; illustrative /trips is not real history.
-  // Reload, then fresh normally issued session + PG SELECT prove persistence.
+  await readPersistedPages(
+    page,
+    scope,
+    partnerUserRef,
+    bookingId,
+    orderId,
+    details,
+  );
+  // Preserve the original fresh normally issued session + PG SELECT checks.
   await page.reload();
   await expect(
     page.getByLabel("Passenger name", { exact: true }),
@@ -540,6 +650,8 @@ async function runNormalBooking(
       "normal-eligibility-create-GET",
       "PG-JSONB",
       "fresh-session-reads-after-reload",
+      "clicked-confirmation-record-channel-history",
+      "persisted-pages-reload-same-IDs",
     ],
     simulated: [
       "Google-metadata-transport-only-genuine-WIF-token",
@@ -566,7 +678,9 @@ async function runNormalBooking(
       "No CloudRun/prod",
       "No real issuer/map",
       "No driver-completion/payment",
-      "No persistent UI history claim",
+      "History is the existing entry/program read relation, not personal-only",
+      "No airport completion claim",
+      "No UI pagination beyond this one-record page; separate real PG pagination case required",
     ],
   };
   const directory = path.resolve(

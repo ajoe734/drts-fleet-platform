@@ -204,6 +204,7 @@ import {
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
   type OwnedOrderActionContext,
+  type PartnerBookingListScope,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
@@ -3412,6 +3413,40 @@ export class OwnedMobilityService
     };
   }
 
+  private partnerBookingListScope(
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): PartnerBookingListScope {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      !["partner_api_key", "referral_passenger"].includes(identity.actorType) ||
+      !identity.tenantId ||
+      !identity.partnerEntrySlug
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "A current partner entry identity is required to read partner bookings.",
+      );
+    }
+    return {
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId || null,
+      partnerProgramId: identity.partnerProgramId || null,
+      partnerEntrySlug: identity.partnerEntrySlug,
+      passengerId: (identity.drtsPassengerId ?? identity.actorId) || null,
+      comparePassenger: identity.actorType === "referral_passenger",
+    };
+  }
+
+  async listPartnerBookings(
+    query: TenantBookingListQuery | undefined,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): Promise<TenantBookingsPageRecord> {
+    const scope = this.partnerBookingListScope(identity);
+    return this.listTenantBookings(scope.tenantId, query, identity);
+  }
+
   listTenantBookings(
     tenantId: string,
     query?: TenantBookingListQuery,
@@ -3423,15 +3458,33 @@ export class OwnedMobilityService
     }
 
     const validated = this.validateTenantBookingListQuery(query);
+    const partnerScope =
+      identity?.realm === "partner"
+        ? this.partnerBookingListScope(identity)
+        : undefined;
 
     if (this.ownedMobilityRepository?.isEnabled()) {
       const executeDb = async (): Promise<TenantBookingsPageRecord> => {
-        const dbResult =
-          await this.ownedMobilityRepository!.queryTenantBookings(tenantId, {
-            ...query,
-            page: validated.page,
-            pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
-          });
+        const readQuery = {
+          ...query,
+          page: validated.page,
+          pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+        };
+        const dbResult = partnerScope
+          ? await this.ownedMobilityRepository!.queryTenantBookings(
+              tenantId,
+              readQuery,
+              partnerScope,
+            )
+          : await this.ownedMobilityRepository!.queryTenantBookings(
+              tenantId,
+              readQuery,
+            );
+        if (partnerScope) {
+          for (const order of dbResult.items) {
+            this.assertPartnerOrderIdentity(identity, order);
+          }
+        }
         const effectivePageSize =
           validated.pageSize > 0
             ? validated.pageSize
@@ -3468,6 +3521,21 @@ export class OwnedMobilityService
     let filtered = this.orders.filter(
       (order) => order.bookingId && order.tenantId === tenantId,
     );
+    if (partnerScope) {
+      filtered = filtered.filter((order) => {
+        try {
+          this.assertPartnerOrderIdentity(identity, order);
+          return true;
+        } catch (error) {
+          if (
+            error instanceof ApiRequestError &&
+            error.code === "PARTNER_SCOPE_MISMATCH"
+          )
+            return false;
+          throw error;
+        }
+      });
+    }
 
     if (validated.passengerId) {
       filtered = filtered.filter(

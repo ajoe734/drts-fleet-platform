@@ -1,8 +1,6 @@
 import { expect, type BrowserContext, type Page } from "@playwright/test";
-import type {
-  ReferralEmbedHandoffArtifact,
-  ReferralEmbedSession,
-} from "@drts/contracts";
+import type { ReferralEmbedHandoffArtifact } from "@drts/contracts";
+import type { PublicReferralEmbedSession } from "../../../../apps/referral-embed-web/lib/embed-partner-session";
 import type { PartnerFixture, PartnerFixtureEntry } from "./partner-fixture";
 
 // Next's production session cookie remains Secure. The browser and Playwright
@@ -96,9 +94,32 @@ export class NavigationFixture {
       200,
     );
     expect(envelope.ok).toBe(true);
-    const session = envelope.session as ReferralEmbedSession;
+    const session = envelope.session as PublicReferralEmbedSession;
     expect(session.identityActive).toBe(true);
-    expect(session.drtsPassengerId).toBe(nav.handoff.drtsPassengerId);
+    // Public BFF sessions expose the actual handoff/entry, not private passenger
+    // IDs. Bind that public reference to the original authoritative PG handoff.
+    expect(session.handoffId).toBe(nav.handoff.handoffId);
+    expect(session.partnerEntrySlug).toBe(nav.entry.entry.entrySlug);
+    expect(session.entryHost).toBe(nav.entry.entry.entryHost);
+    const persisted = await this.persisted(nav);
+    expect(persisted.drts_passenger_id).toBe(nav.handoff.drtsPassengerId);
+    expect(persisted.consumed_at).not.toBeNull();
+    // This existing GET revalidates the real signed bearer and durable session
+    // against /api/auth/session; no credential or fake principal is decoded here.
+    const readback = await context.request.get(
+      `${EMBED_ORIGIN}/api/referral/session`,
+    );
+    expect(readback.status()).toBe(200);
+    const active = await readback.json();
+    expect(active.ok).toBe(true);
+    expect(active.data.active).toBe(true);
+    expect(active.session).toMatchObject({
+      handoffId: nav.handoff.handoffId,
+      partnerEntrySlug: nav.entry.entry.entrySlug,
+      entryHost: nav.entry.entry.entryHost,
+      identityActive: true,
+      navigationContext: { orderId: nav.orderId, screen: "trip" },
+    });
     expect(session.navigationContext).toEqual({
       orderId: nav.orderId,
       screen: "trip",
