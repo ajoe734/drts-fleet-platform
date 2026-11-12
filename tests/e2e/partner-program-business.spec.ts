@@ -9,6 +9,7 @@ import type {
   BookingRecord,
   OwnedOrderRecord,
   PartnerBookingDetails,
+  PartnerBootstrapSession,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialIssued,
@@ -990,9 +991,34 @@ async function runAirportBooking(
   expect(continueHref.searchParams.get("partnerUserRef")).toBe(partnerUserRef);
   expect(continueHref.searchParams.has("apiKey")).toBe(false);
   expect(continueHref.searchParams.has("accessToken")).toBe(false);
+  if (!scope.apiKey) throw new Error("Normal issued credential is missing");
+  const verificationSession = await fixture.call<PartnerBootstrapSession>(
+    "auth/partner/bootstrap-session",
+    null,
+    "POST",
+    { entrySlug: scope.entry.entrySlug, apiKey: scope.apiKey },
+  );
+  expect(verificationSession.tokenType).toBe("Bearer");
+  expect(verificationSession.partnerEntry.entrySlug).toBe(
+    scope.entry.entrySlug,
+  );
+  expect(verificationSession.identity).toMatchObject({
+    actorType: "partner_api_key",
+    realm: "partner",
+    tenantId: scope.entry.tenantId,
+    partnerId: scope.entry.partnerId,
+    partnerProgramId: scope.entry.programId,
+    partnerEntrySlug: scope.entry.entrySlug,
+  });
+  expect(verificationSession.identity.scopes).toContain(
+    "partner:eligibility:read",
+  );
   const verification = await fixture.call<PartnerEligibilityVerificationRecord>(
     "partner/eligibility/" + encodeURIComponent(verificationId),
-    required("DRTS_UAT_TOKEN_PLATFORM"),
+    verificationSession.accessToken,
+    "GET",
+    undefined,
+    scope.entry.tenantId,
   );
   expect(verification).toMatchObject({
     eligibilityVerificationId: verificationId,

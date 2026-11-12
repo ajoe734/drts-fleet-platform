@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   startTransition,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -179,6 +180,7 @@ export function PartnerBookingForm({
   ) => Promise<PartnerBookingActionResult>;
 }) {
   const { locale, t } = useTranslation();
+  const fieldIdPrefix = useId();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(initialDraft);
   // The BFF sends offset-bearing defaults. Localize only those on hydration;
@@ -281,15 +283,28 @@ export function PartnerBookingForm({
     fullSpan?: boolean;
   }) {
     const error = errors[params.name];
+    const fieldId = `${fieldIdPrefix}-${params.name}`;
+    const labelId = `${fieldId}-label`;
+    const hintId = `${fieldId}-hint`;
+    const errorId = `${fieldId}-error`;
+    const descriptionIds =
+      [params.hint ? hintId : null, error ? errorId : null]
+        .filter(Boolean)
+        .join(" ") || undefined;
     const commonStyle = params.fullSpan
       ? { ...fieldStyle, ...fullSpanStyle }
       : fieldStyle;
 
     return (
-      <label key={params.name} style={commonStyle}>
-        <span style={{ ...labelStyle, color: theme.text }}>{params.label}</span>
+      <label key={params.name} htmlFor={fieldId} style={commonStyle}>
+        <span id={labelId} style={{ ...labelStyle, color: theme.text }}>
+          {params.label}
+        </span>
         {params.options ? (
           <select
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
             style={inputStyle(theme)}
@@ -303,6 +318,9 @@ export function PartnerBookingForm({
           </select>
         ) : params.textarea ? (
           <textarea
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
             style={textareaStyle(theme)}
@@ -310,6 +328,9 @@ export function PartnerBookingForm({
           />
         ) : (
           <input
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             type={params.type ?? "text"}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
@@ -318,11 +339,15 @@ export function PartnerBookingForm({
           />
         )}
         {params.hint ? (
-          <span style={{ ...hintStyle, color: theme.textMuted }}>
+          <span id={hintId} style={{ ...hintStyle, color: theme.textMuted }}>
             {params.hint}
           </span>
         ) : null}
-        {error ? <span style={errorStyle}>{error}</span> : null}
+        {error ? (
+          <span id={errorId} style={errorStyle}>
+            {error}
+          </span>
+        ) : null}
       </label>
     );
   }

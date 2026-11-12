@@ -412,6 +412,63 @@ async function chooseActualMapLocations(container: HTMLElement) {
 }
 
 describe("actual PartnerBookingForm", () => {
+  it.each(["travel_agency_transfer", "insurance_replacement_vehicle"] as const)(
+    "keeps the exact field name separate from validation and policy descriptions for %s",
+    (subtype) => {
+      vi.stubGlobal("React", React);
+      const f = transport(subtype);
+      render(
+        React.createElement(PartnerBookingForm, {
+          brand: BRAND_TEMPLATES.ACME,
+          entry: f.entry,
+          eligibilityVerificationId: null,
+          initialDraft: {
+            ...draftFor(),
+            passengerName: "",
+            passengerPhone: "",
+          },
+          submitBookingAction: vi.fn(f.submit),
+        }),
+      );
+      const passenger = screen.queryByRole("textbox", {
+        name: "乘客姓名",
+      });
+      expect(passenger).not.toBeNull();
+      expect(screen.getByLabelText("乘客姓名", { exact: true })).toBe(
+        passenger,
+      );
+      const description = (control: HTMLElement) =>
+        (control.getAttribute("aria-describedby") ?? "")
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((id) => document.getElementById(id)?.textContent ?? "")
+          .join(" ");
+      expect(description(passenger!)).toBe("乘客姓名為必填。");
+      expect(screen.getByRole("textbox", { name: "乘客電話" })).toBe(
+        screen.getByLabelText("乘客電話", { exact: true }),
+      );
+      const start = screen.getByLabelText("預約開始時間", { exact: true });
+      expect(description(start)).toBe(
+        "預約結束時間必須晚於開始時間；各方案可再套更細的期間規則。",
+      );
+      expect(screen.getByRole("textbox", { name: "備註" })).toBe(
+        screen.getByLabelText("備註", { exact: true }),
+      );
+      const labelId = passenger!.getAttribute("aria-labelledby");
+      expect(labelId).toBeTruthy();
+      expect(document.getElementById(labelId!)?.textContent).toBe("乘客姓名");
+      expect(document.getElementById(labelId!)?.closest("label")?.htmlFor).toBe(
+        passenger!.id,
+      );
+      fireEvent.change(passenger!, { target: { value: "SIM Named Rider" } });
+      expect(passenger!.getAttribute("aria-labelledby")).toBe(labelId);
+      expect(passenger!.hasAttribute("aria-describedby")).toBe(false);
+      expect(screen.getByLabelText("乘客姓名", { exact: true })).toBe(
+        passenger,
+      );
+    },
+  );
+
   it("submits real map payload, preserves its command on retry and gives edited bookings a new key", async () => {
     vi.stubGlobal("React", React);
     vi.stubEnv("TZ", "Asia/Taipei");

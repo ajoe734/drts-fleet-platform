@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import {
   normalisePlatformCurrency,
   type OwnedOrderRecord,
+  type PartnerBootstrapSession,
 } from "@drts/contracts";
 import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
@@ -368,9 +369,37 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     expect(before.order.eligibilityVerificationId).toBeTruthy();
     expect(before.order.fixedPrice).toBe(true);
     expect(before.order.quotedFare).toBeTruthy();
+    const verificationSession =
+      await fixture.fixture.call<PartnerBootstrapSession>(
+        "auth/partner/bootstrap-session",
+        null,
+        "POST",
+        {
+          entrySlug: scope.entry.entrySlug,
+          apiKey: scope.apiKey,
+        },
+      );
+    expect(verificationSession.tokenType).toBe("Bearer");
+    expect(verificationSession.partnerEntry.entrySlug).toBe(
+      scope.entry.entrySlug,
+    );
+    expect(verificationSession.identity).toMatchObject({
+      actorType: "partner_api_key",
+      realm: "partner",
+      tenantId: fixture.tenantId,
+      partnerId: scope.entry.partnerId,
+      partnerProgramId: scope.entry.programId,
+      partnerEntrySlug: scope.entry.entrySlug,
+    });
+    expect(verificationSession.identity.scopes).toContain(
+      "partner:eligibility:read",
+    );
     const verification = await fixture.fixture.call<any>(
       `partner/eligibility/${encodeURIComponent(before.order.eligibilityVerificationId)}`,
-      fixture.platform,
+      verificationSession.accessToken,
+      "GET",
+      undefined,
+      fixture.tenantId,
     );
     expect(verification).toMatchObject({
       verificationStatus: "eligible",
@@ -955,6 +984,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
             "map-provider",
             "existing-GPS-demo-track-not-route-geofence-or-physical-distance-verification",
             "vehicle-driver-qualification-documents",
+            "external-document-scanner-HTTP-verdict",
             "project-PNG-proof-image",
           ],
           real: [
@@ -969,6 +999,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
           ],
           notClaimed: [
             "physical-ride",
+            "genuine-malware-engine",
             "PSP-collection",
             "Passenger-ledger-payment",
             "negotiated-travel-pricing",

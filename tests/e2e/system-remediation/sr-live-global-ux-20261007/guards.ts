@@ -191,6 +191,12 @@ export function verifyIdentityReadback(
     expectedRuntimeSha?: string | undefined;
   },
 ): IdentityReadbackResult {
+  // The normal Partner booking session is server-side. This UX harness has no
+  // corresponding identity-readback adapter; generic JSON is not that reader.
+  assert(
+    session.app !== "partner-booking-web",
+    "partner-normal-ingress-identity-readback-adapter-missing",
+  );
   if (options?.status !== undefined) {
     assert.equal(options.status, 200, "identity readback HTTP 200 required");
   }
@@ -730,6 +736,14 @@ export function validateSessions(
   d: Deployment,
   inventory: Inventory,
 ) {
+  // Keep the active page inventory complete, while reporting this harness's
+  // missing Partner reader rather than inventing a local session endpoint.
+  assert(
+    !inventory.surfaces.some(
+      (surface) => surface.app === "partner-booking-web",
+    ),
+    "partner-normal-ingress-identity-readback-adapter-missing",
+  );
   const needed = inventory.surfaces.flatMap((s) =>
     s.roles.map((role) => `${s.app}|${role}`),
   );

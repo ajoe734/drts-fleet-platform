@@ -1051,7 +1051,18 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         encoding: "utf8",
       }).trim();
       const manifest = inventoryAt(head);
-      const allPairs = manifest.surfaces.flatMap((surface) =>
+      // Preserve the original 21 reader contracts. Partner's newly active pages
+      // remain in the full inventory, but its reader is separately blocked below.
+      const originalIdentityInventory = {
+        ...manifest,
+        surfaces: manifest.surfaces.filter(
+          (surface) => surface.app !== "partner-booking-web",
+        ),
+        screens: manifest.screens.filter(
+          (screen) => screen.app !== "partner-booking-web",
+        ),
+      };
+      const allPairs = originalIdentityInventory.surfaces.flatMap((surface) =>
         surface.roles.map((role) => ({ app: surface.app, role })),
       );
       expect(allPairs).toHaveLength(21);
@@ -1165,7 +1176,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         };
       });
 
-      validateSessions(sessions, deployment, manifest);
+      validateSessions(sessions, deployment, originalIdentityInventory);
 
       for (const session of sessions) {
         const body =
@@ -1334,6 +1345,69 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
           },
         }),
       ).toThrow();
+    }, 30_000);
+    it("records active Partner pages but blocks the missing normal identity reader instead of accepting a fake generic envelope", () => {
+      const head = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      const manifest = inventoryAt(head);
+      expect(
+        manifest.surfaces.flatMap((surface) => surface.roles),
+      ).toHaveLength(22);
+      expect(
+        manifest.surfaces.find(
+          (surface) => surface.app === "partner-booking-web",
+        ),
+      ).toEqual({
+        app: "partner-booking-web",
+        service: "drts-dev-partner-booking-web",
+        roles: ["referral_passenger"],
+        roleSource:
+          "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+      });
+      const deployment: Deployment = {
+        project: "drts-dev-devcc-20260825",
+        region: "us-central1",
+        runtimeSha: head,
+        observedAt: "2026-10-26T00:00:00.000Z",
+        services: [],
+      };
+      expect(() => validateSessions([], deployment, manifest)).toThrow(
+        "partner-normal-ingress-identity-readback-adapter-missing",
+      );
+      // Negative fixture: Partner has no such local endpoint. An invented JSON
+      // body must not turn its real ingress identity into a 22nd reader PASS.
+      expect(() =>
+        verifyIdentityReadback(
+          {
+            app: "partner-booking-web",
+            role: "referral_passenger",
+            identity: {
+              path: "/api/auth/session",
+              subjectPath: "data.identity.actor_id",
+              rolePath: "data.identity.roles",
+              expectedSubject: "synthetic-partner-reader-negative",
+            },
+          },
+          {
+            data: {
+              active: true,
+              identity: {
+                actor_id: "synthetic-partner-reader-negative",
+                actor_type: "referral_passenger",
+                realm: "partner",
+                roles: ["referral_passenger"],
+              },
+            },
+          },
+          {
+            expectedRole: "referral_passenger",
+            status: 200,
+            candidateSha: head,
+            expectedRuntimeSha: head,
+          },
+        ),
+      ).toThrow("partner-normal-ingress-identity-readback-adapter-missing");
     }, 30_000);
   });
 });
