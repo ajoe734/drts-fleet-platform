@@ -33,5 +33,17 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
     },
+    {
+      command:
+        "pnpm --filter @drts/tenant-console-web exec next start --hostname localhost --port 3004",
+      env: {
+        ...process.env,
+        DRTS_API_URL: "http://127.0.0.1:3001",
+        NEXT_PUBLIC_API_URL: "/control-plane-proxy",
+      },
+      url: "http://localhost:3004/healthz",
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
   ],
 });

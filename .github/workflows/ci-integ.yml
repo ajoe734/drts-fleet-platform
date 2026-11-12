@@ -1572,6 +1572,7 @@ jobs:
           cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
           pnpm --filter @drts/passenger-app-web... build
           DRTS_API_URL=http://127.0.0.1:3001 pnpm --filter @drts/partner-booking-web... build
+          DRTS_API_URL=http://127.0.0.1:3001 NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm --filter @drts/tenant-console-web... build
           EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
             EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
             pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist

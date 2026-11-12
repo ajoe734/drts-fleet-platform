@@ -10,6 +10,28 @@ export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
 }
 
 const en = {
+  "billing.generate.title": "Generate invoice",
+  "billing.generate.description":
+    "Select a closed billing period for eligible completed trips in your tenant.",
+  "billing.generate.periodHelp":
+    "Enter Asia/Taipei time (UTC+08:00). The period must end before now; it may include trips completed earlier today. Existing billing permissions and invoice rules apply.",
+  "billing.generate.start": "Period start (Taipei time)",
+  "billing.generate.end": "Period end (Taipei time)",
+  "billing.generate.submit": "Generate invoice",
+  "billing.generate.pending": "Generating…",
+  "billing.generate.required":
+    "Enter a valid start and end date and time in Taipei time.",
+  "billing.generate.failed":
+    "The invoice could not be confirmed. Check the invoice register before submitting again.",
+  "billing.generate.unconfirmed":
+    "The server did not return an invoice ID. Open the invoice register to check the result before submitting again.",
+  "billing.generate.created": "Invoice created. Opening its recorded details.",
+  "billing.generate.open": "Open generated invoice",
+  "billing.generate.unavailable":
+    "Invoice generation is currently unavailable. Refresh this page.",
+  "billing.generate.boundary":
+    "This creates your tenant's billing record. It does not issue an external tax invoice or establish passenger payment.",
+
   "platformNotice.section": "Platform notices",
   "platformNotice.read": "Read",
   "platformNotice.markRead": "Mark as read",
@@ -4148,6 +4170,26 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "billing.generate.title": "產生帳單",
+  "billing.generate.description":
+    "選擇已關閉的帳務期間，依本租戶符合條件的已完程紀錄產生帳單。",
+  "billing.generate.periodHelp":
+    "請輸入台北時間 Asia/Taipei（UTC+08:00），期間結束時間須早於現在，可包含今天稍早已完程的紀錄。仍適用既有帳務權限與產生規則。",
+  "billing.generate.start": "期間開始（台北時間）",
+  "billing.generate.end": "期間結束（台北時間）",
+  "billing.generate.submit": "產生帳單",
+  "billing.generate.pending": "產生中…",
+  "billing.generate.required": "請填寫有效的台北時間期間開始與結束日期時間。",
+  "billing.generate.failed":
+    "未能確認帳單結果，請先查看帳單清單再決定是否重新提交。",
+  "billing.generate.unconfirmed":
+    "伺服器未回傳帳單編號，請先開啟帳單清單確認結果，再決定是否重新提交。",
+  "billing.generate.created": "帳單已產生，正在開啟已記錄的明細。",
+  "billing.generate.open": "查看新產生的帳單",
+  "billing.generate.unavailable": "目前無法產生帳單，請重新整理此頁。",
+  "billing.generate.boundary":
+    "此為本租戶內部帳務紀錄，不代表外部稅務開票或乘客扣款。",
+
   "platformNotice.section": "平台公告",
   "platformNotice.read": "已讀",
   "platformNotice.markRead": "標示已讀",

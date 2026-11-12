@@ -11,6 +11,8 @@ import {
   type PartnerBootstrapSession,
 } from "@drts/contracts";
 import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
+import { TENANT_SESSION_COOKIE_NAME } from "../../packages/tenant-auth/src/constants";
+import { TENANT_LOCALE_COOKIE } from "../../apps/tenant-console-web/lib/locale-config";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { createDispatchInOrdinaryWorkspace } from "./pax-review-shared-order/ordinary-ops-dispatch";
 import { readAssignedTripAndAccept } from "./pax-review-shared-order/additional-journey";
@@ -24,6 +26,7 @@ import {
 
 const OPS = "http://127.0.0.1:3202";
 const DRIVER = "http://127.0.0.1:3101";
+const TENANT = "http://localhost:3004";
 const run = promisify(execFile);
 
 async function renewActualFixtureSessions() {
@@ -950,17 +953,117 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         expect(Date.parse(periodEnd)).toBeGreaterThan(
           Date.parse(task.completedAt),
         );
-        const issued = await fixture.fixture.call<any>(
-          "tenant/invoices/generate",
-          fixture.tenantToken,
-          "POST",
+        const tenant = await newPage();
+        // Reuse this journey's normally issued and durably verified tenant
+        // fixture session. This exercises the normal cookie/SSR/action path,
+        // not the external Tenant OIDC login flow or a second invoice writer.
+        await tenant.context().addCookies([
           {
-            tenantId: fixture.tenantId,
-            periodStart: start.toISOString(),
-            periodEnd,
+            name: TENANT_SESSION_COOKIE_NAME,
+            value: fixture.tenantToken,
+            url: TENANT,
+            httpOnly: true,
+            sameSite: "Lax",
           },
+          { name: TENANT_LOCALE_COOKIE, value: "en", url: TENANT },
+        ]);
+        const opened = await tenant.goto(`${TENANT}/billing`);
+        expect(opened?.status()).toBe(200);
+        await expect(tenant).toHaveURL(
+          (url) => url.origin === TENANT && url.pathname === "/billing",
+        );
+        const generation = tenant.getByRole("form", {
+          name: "Generate invoice",
+          exact: true,
+        });
+        await expect(generation).toBeVisible();
+        // These controls explicitly use Taipei wall-clock time. Preserve the
+        // existing closed UTC window, including its millisecond end boundary.
+        const taipeiLocal = (instant: string) =>
+          new Date(Date.parse(instant) + 8 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, -1);
+        await generation
+          .getByLabel("Period start (Taipei time)", { exact: true })
+          .fill(taipeiLocal(start.toISOString()));
+        await generation
+          .getByLabel("Period end (Taipei time)", { exact: true })
+          .fill(taipeiLocal(periodEnd));
+        await Promise.all([
+          tenant.waitForURL(
+            (url) =>
+              url.origin === TENANT &&
+              url.pathname === "/invoices" &&
+              Boolean(url.searchParams.get("invoiceId")),
+          ),
+          generation
+            .getByRole("button", { name: "Generate invoice", exact: true })
+            .click(),
+        ]);
+        const generatedInvoiceId = new URL(tenant.url()).searchParams.get(
+          "invoiceId",
+        );
+        expect(generatedInvoiceId).toBeTruthy();
+        if (!generatedInvoiceId)
+          throw new Error("Normal Generate UI did not return an invoice ID");
+        const invoicePage = await tenant.reload();
+        expect(invoicePage?.status()).toBe(200);
+        await expect(tenant).toHaveURL(
+          (url) =>
+            url.origin === TENANT &&
+            url.pathname === "/invoices" &&
+            url.searchParams.get("invoiceId") === generatedInvoiceId,
+        );
+        const selected = tenant
+          .getByText("Selected invoice", { exact: true })
+          .locator("xpath=ancestor::section[1]");
+        await expect(selected).toHaveCount(1);
+        await expect(selected).toBeVisible();
+        // The picker Link also repeats this ID. Require the original detail
+        // title div itself, so a different selected invoice cannot pass.
+        const detailTitle = selected
+          .getByText(generatedInvoiceId, { exact: true })
+          .and(selected.locator("div"));
+        await expect(detailTitle).toHaveCount(1);
+        await expect(detailTitle).toBeVisible();
+        const context = tenant
+          .getByText("Cross-app context", { exact: true })
+          .locator("xpath=ancestor::section[1]");
+        await expect(context).toHaveCount(1);
+        const tenantLine = context
+          .getByText(`orderId: ${exactOrderId}`, { exact: true })
+          .locator("xpath=../..");
+        await expect(tenantLine).toHaveCount(1);
+        await expect(tenantLine).toBeVisible();
+        // Generate's ServerAction exposes only the real returned ID. Read its
+        // full record through the existing tenant GET; this is not a fabricated
+        // POST response, and no API Generate request is issued by the test.
+        const issued = await fixture.fixture.call<any>(
+          `tenant/invoices/${encodeURIComponent(generatedInvoiceId)}`,
+          fixture.tenantToken,
+          "GET",
+          undefined,
           fixture.tenantId,
         );
+        expect(issued.invoiceId).toBe(generatedInvoiceId);
+        expect(issued.periodStart).toBe(start.toISOString());
+        expect(issued.periodEnd).toBe(periodEnd);
+        const tenantMoney = (amount: {
+          currency: string;
+          amountMinor: number;
+        }) =>
+          `${amount.currency === "TWD" ? "NT$" : amount.currency} ${new Intl.NumberFormat(
+            "en-US",
+            { maximumFractionDigits: 0 },
+          ).format(amount.amountMinor / 100)}`;
+        await expect(
+          selected.locator("dl").getByText(tenantMoney(issued.amount), {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          tenantLine.getByText(tenantMoney(task.fare), { exact: true }),
+        ).toBeVisible();
         const read = await fixture.fixture.call<any>(
           `tenant/invoices/${encodeURIComponent(issued.invoiceId)}`,
           fixture.tenantToken,
@@ -1097,6 +1200,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
             "PG-relational-completion",
             "normal-Partner-fresh-receipt",
             "tenant-admin-invoice-HTTP-PG",
+            "normal-Tenant-billing-Generate-UI-and-exact-invoice-detail",
           ],
           notClaimed: [
             "physical-ride",
@@ -1120,7 +1224,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       context.pages().map((page) => {
         const url = new URL(page.url());
         return {
-          role: ["partner", "ops", "driver"][index] ?? "unknown",
+          role: ["partner", "ops", "driver", "tenant"][index] ?? "unknown",
           origin: url.origin,
           pathname: url.pathname,
           closed: page.isClosed(),
