@@ -210,6 +210,10 @@ jobs:
             echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON<<WIF_REGISTRY_EOF"
             echo "$registry_json"
             echo "WIF_REGISTRY_EOF"
+            # Fixture-triggered API restarts inherit the native registry directly.
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS<<WIF_NATIVE_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_NATIVE_REGISTRY_EOF"
           } >> "$GITHUB_ENV"
           echo "DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN=${ID_TOKEN}" >> "$GITHUB_ENV"
 

@@ -530,7 +530,12 @@ describe("persisted partner booking pages", () => {
     );
     expect(html).toContain('data-testid="partner-actual-fare">NT$0.00</dd>');
     expect(html).toContain('data-testid="partner-payment-amount">NT$0.00</dd>');
-    expect(html).not.toContain("Not provided");
+    // Missing trip progress is separate from the recorded zero receipt facts.
+    const receiptSections = html.match(
+      /<section[^>]*data-testid="partner-(?:task-fare|passenger-payment)"[\s\S]*?<\/section>/g,
+    );
+    expect(receiptSections).toHaveLength(2);
+    expect(receiptSections!.join("")).not.toContain("Not provided");
   });
 
   it.each([
@@ -604,5 +609,215 @@ describe("persisted partner booking pages", () => {
         (path) => path === "/api/partner/bookings/booking-SIM-persisted",
       ),
     ).toHaveLength(1);
+  });
+});
+
+// Reuses the original real pages/BFF and original finite transport unchanged.
+function progressPageTransport() {
+  const api = transport();
+  const previousFetch = globalThis.fetch;
+  let current: Record<string, unknown> | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const response = await previousFetch(input, init);
+      if (
+        new URL(String(input)).pathname !==
+          "/api/partner/orders/SIM-persisted-order" ||
+        !current
+      )
+        return response;
+      const envelope = (await response.json()) as {
+        data: Record<string, unknown>;
+        meta: unknown;
+      };
+      return Response.json({
+        ...envelope,
+        data: { ...envelope.data, progress: current },
+      });
+    }),
+  );
+  return {
+    ...api,
+    changeProgress(value: Record<string, unknown> | undefined) {
+      current = value;
+    },
+  };
+}
+
+function pageProgress(status = "accepted") {
+  return {
+    orderId: "SIM-persisted-order",
+    orderStatus: "driver_accepted",
+    readAt: "2026-11-12T08:00:00Z",
+    availability: "available",
+    reason: null,
+    currentTask: {
+      taskId: "SIM-page-task",
+      assignmentId: "SIM-page-assignment",
+      dispatchJobId: "SIM-page-job",
+      driverId: "SIM-page-driver",
+      vehicleId: "SIM-page-vehicle",
+      status,
+      acceptedAt: "2026-11-12T07:50:00Z",
+      departedAt: null,
+      arrivedPickupAt: null,
+      startedAt: null,
+      completedAt: null,
+    },
+    driver: {
+      driverId: "SIM-page-driver",
+      driverSurname: "陳",
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: "2026-11-12T07:00:00Z",
+    },
+    vehicle: { vehicleId: "SIM-page-vehicle", plateNo: "SIM-PROGRESS-PLATE" },
+    location: {
+      status: "fresh",
+      position: { lat: 25, lng: 121 } as { lat: number; lng: number } | null,
+      recordedAt: "2026-11-12T08:00:00Z",
+      updatedAt: "2026-11-12T08:00:00Z",
+      accuracyM: 20,
+    },
+  };
+}
+
+describe("normal Partner same-order progress pages", () => {
+  it("renders assigned driver/vehicle and refreshes actual stages through the original confirmation page", async () => {
+    const api = progressPageTransport();
+    api.changeProgress(pageProgress());
+    const first = renderToStaticMarkup(
+      await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    expect(first).toContain('data-testid="partner-trip-progress"');
+    expect(first).toContain('data-task-id="SIM-page-task"');
+    expect(first).toContain("Driver accepted");
+    expect(first).toContain("陳");
+    expect(first).toContain("SIM-PROGRESS-PLATE");
+    expect(first).toContain("A fresh sample matches this task and vehicle");
+    const refresh = first.match(/href="([^"]+)">Update trip<\/a>/);
+    expect(refresh).not.toBeNull();
+    const url = new URL(
+      refresh![1]!.replaceAll("&amp;", "&"),
+      "https://unit.invalid",
+    );
+    expect(url.pathname).toBe("/sim-persisted/confirmed");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      partnerUserRef: "SIM-existing-ref",
+      bookingId: "booking-SIM-persisted",
+      orderId: "SIM-persisted-order",
+    });
+    for (const [status, label] of [
+      ["enroute_pickup", "Driver travelling to pickup"],
+      ["arrived_pickup", "Driver arrived at pickup"],
+      ["on_trip", "Passenger on board"],
+      ["completed", "Trip completed"],
+    ]) {
+      const progress = pageProgress(status);
+      if (status === "completed")
+        progress.location = {
+          ...progress.location,
+          status: "not_live",
+          position: null,
+        };
+      api.changeProgress(progress);
+      const next = renderToStaticMarkup(
+        await ConfirmedPage(
+          args({
+            bookingId: "booking-SIM-persisted",
+            orderId: "SIM-persisted-order",
+          }),
+        ),
+      );
+      expect(next).toContain(label);
+      expect(next).toContain('data-order-id="SIM-persisted-order"');
+      expect(next).not.toContain("SIM-unit-only-server-session");
+    }
+    expect(api.calls.filter((path) => path.endsWith("/receipt"))).toEqual([]);
+    expect(
+      api.calls.filter(
+        (path) => path === "/api/partner/orders/SIM-persisted-order",
+      ),
+    ).toHaveLength(5);
+  });
+
+  it("keeps the actual receipt and quotation intact beside same-order progress", async () => {
+    const api = progressPageTransport();
+    api.updateReceipt(completedReceipt());
+    api.changeProgress(pageProgress("completed"));
+    const html = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(html).toContain("Trip completed");
+    expect(html).toContain("SIM-PROGRESS-PLATE");
+    expect(html).toContain("not confirmation of payment");
+    expect(html).toContain('data-testid="partner-payment-receipt"');
+    expect(html).toContain("55.00");
+    expect(html).toContain("61.00");
+    expect(api.calls.filter((path) => path.endsWith("/receipt"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("shows an old API's absent progress as not provided without breaking a real booking", async () => {
+    transport();
+    const html = renderToStaticMarkup(
+      await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    expect(html).toContain("booking-SIM-persisted");
+    expect(html).toContain("Trip progress is not provided");
+    expect(html).not.toContain("<dd>Driver accepted</dd>");
+    expect(html).not.toContain("SIM-PROGRESS-PLATE");
+  });
+
+  it("replaces the old assignment display on fresh read and never invents a missing GPS sample", async () => {
+    const api = progressPageTransport();
+    api.changeProgress(pageProgress());
+    await ConfirmedPage(args({ orderId: "SIM-persisted-order" }));
+    const changed = pageProgress();
+    changed.driver.driverSurname = "林";
+    changed.vehicle.plateNo = "SIM-NEW-PLATE";
+    changed.currentTask.driverId = "SIM-new-driver";
+    changed.currentTask.taskId = "SIM-new-task";
+    changed.currentTask.vehicleId = "SIM-new-vehicle";
+    changed.driver.driverId = "SIM-new-driver";
+    changed.vehicle.vehicleId = "SIM-new-vehicle";
+    changed.location = {
+      ...changed.location,
+      status: "context_mismatch",
+      position: null,
+    };
+    api.changeProgress(changed);
+    const html = renderToStaticMarkup(
+      await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(html).toContain('data-task-id="SIM-new-task"');
+    expect(html).toContain("SIM-NEW-PLATE");
+    expect(html).toContain("林");
+    expect(html).not.toContain("SIM-PROGRESS-PLATE");
+    expect(html).toContain("No GPS sample matches this task and vehicle");
+    expect(html).not.toContain("A fresh sample matches this task and vehicle");
+  });
+
+  it("refuses a different order's progress instead of displaying it under the same booking", async () => {
+    const api = progressPageTransport();
+    api.changeProgress({ ...pageProgress(), orderId: "different-order" });
+    const html = renderToStaticMarkup(
+      await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    expect(html).toContain(
+      'data-read-error="PARTNER_BOOKING_READBACK_MISMATCH"',
+    );
+    expect(html).not.toContain("SIM-PROGRESS-PLATE");
+  });
+
+  it("leaves channel history as a scoped list without per-item tracking requests", async () => {
+    const api = progressPageTransport();
+    api.changeProgress(pageProgress());
+    const html = renderToStaticMarkup(await TripsPage(args()));
+    expect(html).toContain("SIM-persisted-order");
+    expect(
+      api.calls.filter((path) => path.startsWith("/api/partner/orders/")),
+    ).toEqual([]);
   });
 });

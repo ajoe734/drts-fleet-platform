@@ -417,7 +417,10 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.resolvePersistedOrder(orderId, identity),
+      await this.ownedMobilityService.resolvePartnerOrderView(
+        orderId,
+        identity,
+      ),
       requestId,
     );
   }

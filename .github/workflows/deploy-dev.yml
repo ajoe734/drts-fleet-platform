@@ -432,7 +432,7 @@ jobs:
     # Migration still waits for every image to succeed.
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 13
       matrix:
         image:
           [

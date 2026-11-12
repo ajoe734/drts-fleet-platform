@@ -3,6 +3,7 @@ import {
   normalisePlatformCurrency,
   type BookingRecord,
   type OwnedOrderRecord,
+  type PartnerOrderProgressRecord,
 } from "@drts/contracts";
 import { partnerBookingReadHref } from "@/lib/partner-booking-form";
 import { type Locale, t } from "@/lib/translations";
@@ -30,7 +31,7 @@ export function PartnerBookingRecord({
   screen,
 }: {
   booking: BookingRecord;
-  order: OwnedOrderRecord;
+  order: OwnedOrderRecord & { progress?: PartnerOrderProgressRecord };
   entrySlug: string;
   partnerUserRef: string;
   locale: Locale;
@@ -52,6 +53,49 @@ export function PartnerBookingRecord({
     ...(booking.direction
       ? [[label("field.direction"), booking.direction]]
       : []),
+  ];
+  const progress =
+    order.progress?.orderId === order.orderId ? order.progress : null;
+  const task = progress?.currentTask;
+  const progressRows = [
+    [
+      label("progress.stage"),
+      progress?.availability === "available"
+        ? task
+          ? label("progress.task." + task.status)
+          : label("progress.noTask")
+        : label("progress.unavailable"),
+    ],
+    [
+      label("progress.driverSurname"),
+      progress?.driver?.driverSurname || label("receipt.notProvided"),
+    ],
+    [
+      label("progress.plate"),
+      progress?.vehicle?.plateNo || label("receipt.notProvided"),
+    ],
+    ...(
+      [
+        "acceptedAt",
+        "departedAt",
+        "arrivedPickupAt",
+        "startedAt",
+        "completedAt",
+      ] as const
+    ).map((key) => [
+      label("progress." + key),
+      task?.[key] || label("receipt.notProvided"),
+    ]),
+    [
+      label("progress.gps"),
+      label(
+        "progress.location." + (progress?.location?.status ?? "unavailable"),
+      ),
+    ],
+    [
+      label("progress.sampleAt"),
+      progress?.location?.recordedAt || label("receipt.notProvided"),
+    ],
   ];
   const quotation = order.quotedFare;
   const money = quotation
@@ -77,6 +121,34 @@ export function PartnerBookingRecord({
           </div>
         ))}
       </dl>
+      <section
+        aria-label={label("progress.title")}
+        data-testid="partner-trip-progress"
+        data-order-id={order.orderId}
+        data-task-id={task?.taskId}
+        data-driver-id={task?.driverId}
+        data-vehicle-id={task?.vehicleId}
+      >
+        <h2>{label("progress.title")}</h2>
+        <dl>
+          {progressRows.map(([name, value]) => (
+            <div key={name}>
+              <dt>{name}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p>{label("progress.declaredScope")}</p>
+        <p>{label("progress.manualUpdate")}</p>
+        <a
+          href={partnerBookingReadHref(entrySlug, screen, partnerUserRef, {
+            bookingId: booking.bookingId,
+            orderId: order.orderId,
+          })}
+        >
+          {label("progress.refresh")}
+        </a>
+      </section>
       {booking.partnerBookingDetails ? (
         <section aria-label={label("read.details")}>
           <h2>{label("read.details")}</h2>

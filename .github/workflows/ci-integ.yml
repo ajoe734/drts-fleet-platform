@@ -1549,7 +1549,7 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN=${ID_TOKEN}" >> "$GITHUB_ENV"
 
-      - name: Run the real three-role shared-order journeys
+      - name: Prepare the real three-role shared-order journeys
         run: |
           PGPASSWORD=postgres psql \
             postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1559,8 +1559,6 @@ jobs:
           pnpm db:migrate
           pnpm db:seed
           mkdir -p .artifacts/pax-review-shared-order
-          # Same authoritative normal tenant/admin fixture used by Tenant UAT.
-          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts
           sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
             \( -iname "*google*" -o -iname "*chrome*" \) \
             -exec mv "{}" "{}.disabled" \; || true
@@ -1579,6 +1577,14 @@ jobs:
             pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
           pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
           pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+      # GITHUB_ENV is applied only to subsequent Actions steps, not the
+      # shell that just ran the seed. Keep setup fresh and visible to Playwright.
+      - name: Seed normal tenant sessions immediately before shared-order acceptance
+        run: |
+          # Same authoritative normal tenant/admin fixture used by Tenant UAT.
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts
+      - name: Run the real three-role shared-order journeys
+        run: |
           pnpm exec playwright test -c playwright.pax-review-noncore-shared-order.config.ts
       - name: Run additional real booking, accepted-cancellation and no-contact rating branches
         run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts

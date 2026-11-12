@@ -201,6 +201,58 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       },
     );
 
+    const declaredFacts = await step(
+      "Driver normally saves a declared surname, independently read from PG",
+      async () => {
+        await driver.goto(`${DRIVER}/settings`);
+        const surname = driver.getByLabel("姓氏（自行提供）", { exact: true });
+        await expect(surname).toBeEnabled();
+        await driver
+          .getByPlaceholder("司機姓名", { exact: true })
+          .fill("SIM hosted travel driver");
+        await surname.fill("演練");
+        const [saved] = await Promise.all([
+          driver.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname.endsWith("/driver/profile") &&
+              response.request().method() === "PATCH",
+          ),
+          driver.getByRole("button", { name: "儲存設定", exact: true }).click(),
+        ]);
+        expect(saved.status()).toBe(200);
+        expect(saved.request().postDataJSON()).toMatchObject({
+          driverSurname: "演練",
+        });
+        const profile = camel(await saved.json()).data;
+        expect(profile).toMatchObject({
+          driverId: supply.driverId,
+          driverSurname: "演練",
+        });
+        const persisted = await fixture.fixture.db.query(
+          `SELECT p.record AS profile_record, v.record AS vehicle_record
+           FROM ops.phase1_driver_profiles p
+           CROSS JOIN reg.phase1_registry_vehicles v
+           WHERE p.driver_id=$1 AND v.vehicle_id=$2`,
+          [supply.driverId, supply.vehicleId],
+        );
+        expect(persisted.rows).toHaveLength(1);
+        const row = persisted.rows[0]!;
+        expect(row.profile_record).toMatchObject({
+          driverId: supply.driverId,
+          driverSurname: "演練",
+          updatedAt: profile.updatedAt,
+        });
+        expect(row.vehicle_record).toMatchObject({
+          vehicleId: supply.vehicleId,
+        });
+        expect(row.vehicle_record.plateNo).toBeTruthy();
+        return {
+          surname: row.profile_record.driverSurname as string,
+          profileUpdatedAt: row.profile_record.updatedAt as string,
+          plateNo: row.vehicle_record.plateNo as string,
+        };
+      },
+    );
     await partner
       .context()
       .addCookies([
@@ -327,6 +379,24 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       businessDispatchSubtype: "travel_agency_transfer",
     });
 
+    const confirmationPath = `/${encodeURIComponent(scope.entry.entrySlug)}/confirmed`;
+    await step(
+      "Partner opens the created booking's normal confirmation link",
+      async () => {
+        await partner
+          .getByTestId("partner-booking-confirmation")
+          .getByRole("link", { name: "Booking confirmation", exact: true })
+          .click();
+        await expect(partner).toHaveURL(
+          (url) =>
+            url.pathname === confirmationPath &&
+            url.searchParams.get("bookingId") === bookingId &&
+            url.searchParams.get("orderId") === exactOrderId &&
+            url.searchParams.get("partnerUserRef") === partnerUserRef,
+        );
+      },
+    );
+
     const created = await step(
       "Create dispatch from the ordinary Ops page for this exact order",
       () => createDispatchInOrdinaryWorkspace(ops, OPS, exactOrderId, info),
@@ -377,6 +447,210 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         return result as { taskId: string; assignmentId: string };
       },
     );
+    const assertPartnerProgress = async (
+      stage:
+        | "accepted"
+        | "enroute_pickup"
+        | "arrived_pickup"
+        | "on_trip"
+        | "completed",
+    ) => {
+      await step(
+        `Partner normally refreshes and reads same-order ${stage}`,
+        async () => {
+          const stageLabels = {
+            accepted: "Driver accepted",
+            enroute_pickup: "Driver travelling to pickup",
+            arrived_pickup: "Driver arrived at pickup",
+            on_trip: "Passenger on board",
+            completed: "Trip completed",
+          };
+          const gpsLabels: Record<string, string> = {
+            fresh: "A fresh sample matches this task and vehicle",
+            missing: "No GPS sample is provided",
+            stale: "The GPS sample is stale",
+            low_accuracy: "The GPS sample has insufficient accuracy",
+            context_mismatch: "No GPS sample matches this task and vehicle",
+            not_live: "No active trip location is provided",
+          };
+          const read = async () => {
+            const actual = await fixture.fresh(
+              scope,
+              partnerUserRef,
+              bookingId,
+              exactOrderId,
+            );
+            expect(actual.order.status).toBe(
+              stage === "accepted" ? "driver_accepted" : stage,
+            );
+            const projected = actual.order.progress;
+            expect(projected).toMatchObject({
+              orderId: exactOrderId,
+              orderStatus: actual.order.status,
+              availability: "available",
+              reason: null,
+              currentTask: {
+                taskId: assigned.taskId,
+                assignmentId: assigned.assignmentId,
+                dispatchJobId: created.dispatchJobId,
+                driverId: supply.driverId,
+                vehicleId: supply.vehicleId,
+                status: stage,
+              },
+              driver: {
+                driverId: supply.driverId,
+                driverSurname: declaredFacts.surname,
+                driverSurnameSource: "driver_profile_declared",
+                driverSurnameProfileUpdatedAt: declaredFacts.profileUpdatedAt,
+              },
+              vehicle: {
+                vehicleId: supply.vehicleId,
+                plateNo: declaredFacts.plateNo,
+              },
+            });
+            expect(
+              stage === "completed"
+                ? ["not_live"]
+                : [
+                    "fresh",
+                    "missing",
+                    "stale",
+                    "low_accuracy",
+                    "context_mismatch",
+                  ],
+            ).toContain(projected.location.status);
+            if (projected.location.status === "fresh") {
+              expect(Number.isFinite(projected.location.position?.lat)).toBe(
+                true,
+              );
+              expect(Number.isFinite(projected.location.position?.lng)).toBe(
+                true,
+              );
+              expect(
+                Date.parse(projected.readAt) -
+                  Date.parse(projected.location.updatedAt),
+              ).toBeLessThanOrEqual(90_000);
+              if (projected.location.accuracyM !== null)
+                expect(projected.location.accuracyM).toBeLessThanOrEqual(100);
+            } else expect(projected.location.position).toBeNull();
+            return projected;
+          };
+          // Independent API/SSR reads can see a heartbeat between location/event
+          // writes (including fresh -> mismatch -> fresh). Check each API read's
+          // own semantics and explicit UI availability, never cross-read equality.
+          const beforeRefresh = await read();
+          const panel = partner.getByTestId("partner-trip-progress");
+          const [navigation] = await Promise.all([
+            partner.waitForResponse(
+              (response) =>
+                response.request().isNavigationRequest() &&
+                new URL(response.url()).pathname === confirmationPath,
+            ),
+            panel
+              .getByRole("link", { name: "Update trip", exact: true })
+              .click(),
+          ]);
+          expect(navigation.status()).toBe(200);
+          await partner.waitForLoadState("domcontentloaded");
+          const afterRefresh = await read();
+          await expect(
+            partner.getByTestId("partner-persisted-booking"),
+          ).toHaveAttribute("data-booking-id", bookingId);
+          await expect(
+            partner.getByTestId("partner-persisted-booking"),
+          ).toHaveAttribute("data-order-id", exactOrderId);
+          await expect(panel).toHaveAttribute("data-order-id", exactOrderId);
+          await expect(panel).toHaveAttribute("data-task-id", assigned.taskId);
+          await expect(panel).toHaveAttribute(
+            "data-driver-id",
+            supply.driverId,
+          );
+          await expect(panel).toHaveAttribute(
+            "data-vehicle-id",
+            supply.vehicleId,
+          );
+          const field = (label: string) =>
+            panel
+              .locator("dl > div")
+              .filter({
+                has: partner
+                  .locator("dt")
+                  .filter({ hasText: new RegExp(`^${label}$`) }),
+              })
+              .locator("dd");
+          await expect(field("Current trip stage")).toHaveText(
+            stageLabels[stage],
+          );
+          await expect(field("Declared driver surname")).toHaveText(
+            declaredFacts.surname,
+          );
+          await expect(field("Vehicle plate")).toHaveText(
+            declaredFacts.plateNo,
+          );
+          for (const [key, label] of [
+            ["acceptedAt", "Driver accepted at"],
+            ["departedAt", "Driver departed at"],
+            ["arrivedPickupAt", "Driver arrived at pickup"],
+            ["startedAt", "Passenger boarded at"],
+            ["completedAt", "Trip completed at"],
+          ] as const)
+            await expect(field(label)).toHaveText(
+              afterRefresh.currentTask[key] || "Not provided",
+            );
+          const renderedGps = (
+            await field("GPS sample availability").innerText()
+          ).trim();
+          expect(
+            stage === "completed"
+              ? [gpsLabels.not_live]
+              : Object.entries(gpsLabels)
+                  .filter(([status]) => status !== "not_live")
+                  .map(([, label]) => label),
+          ).toContain(renderedGps);
+          await expect(
+            panel.getByText(
+              "Use Update trip to read the current order again. This is not an automatic live map or an ETA.",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(
+            panel.getByText(
+              "The surname is self-declared profile data, not verification of legal identity. Missing driver or vehicle facts are not inferred.",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await info.attach(`normal-partner-progress-${stage}`, {
+            contentType: "application/json",
+            body: JSON.stringify(
+              {
+                orderId: exactOrderId,
+                bookingId,
+                taskId: assigned.taskId,
+                assignmentId: assigned.assignmentId,
+                dispatchJobId: created.dispatchJobId,
+                driverId: supply.driverId,
+                vehicleId: supply.vehicleId,
+                stage,
+                declaredSurname: declaredFacts.surname,
+                plateNo: declaredFacts.plateNo,
+                apiGpsBefore: beforeRefresh.location.status,
+                apiGpsAfter: afterRefresh.location.status,
+                renderedGps,
+                afterApiPositionProvided:
+                  afterRefresh.location.position !== null,
+                crossReadGpsConsistency:
+                  "not asserted for independent API/SSR reads",
+                externalPosition:
+                  "existing explicit SIM track, not physical GPS",
+                noEtaInferred: true,
+              },
+              null,
+              2,
+            ),
+          });
+        },
+      );
+    };
     await readAssignedTripAndAccept(
       driver,
       DRIVER,
@@ -384,6 +658,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       step,
       assigned.taskId,
     );
+    await assertPartnerProgress("accepted");
     const driverFulfillment = driver.getByTestId("driver-partner-fulfillment");
     for (const value of [
       details.groupCode,
@@ -412,6 +687,13 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         ]);
         expect(response.status()).toBe(201);
       });
+      await assertPartnerProgress(
+        action === "depart"
+          ? "enroute_pickup"
+          : action === "arrived_pickup"
+            ? "arrived_pickup"
+            : "on_trip",
+      );
     }
     await step(
       "Use actual tracked duration and normal required proof upload",
@@ -475,6 +757,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       ]);
       expect(response.status()).toBe(201);
     });
+    await assertPartnerProgress("completed");
     const pg = await fixture.fixture.db.query(
       `
       SELECT o.record AS order_record, j.record AS job_record,

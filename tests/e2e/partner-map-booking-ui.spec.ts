@@ -203,7 +203,9 @@ test.describe("partner map booking UI", () => {
       .filter({ has: page.getByTestId("partner-booking-review-summary") });
 
     await expect(
-      reviewSection.getByText(/派遣前需人工確認|Needs review before dispatch/),
+      reviewSection.getByText(
+        /地圖服務中斷.*本次預約將送交人工複核|Address provider down.*Sent for review/,
+      ),
     ).toBeVisible();
 
     await expect(

@@ -425,6 +425,67 @@ class ReferralEmbedWorkloadIdentityRegistryTests(unittest.TestCase):
         ):
             self.assertIn(route, route_scopes_text)
 
+    def test_derived_registry_reaches_later_fixture_child_processes(self):
+        # Only the actual workflow's GITHUB_ENV echo block executes here.
+        # This unit-only registry is not a Google assertion, key or API session.
+        derive = self.text.split(
+            "      - name: Derive Google workload identity registry for hosted UAT\n", 1
+        )[1].split("      - uses:", 1)[0]
+        block = re.search(
+            r'^          \{\n(.*?)^          \} >> "\$GITHUB_ENV"$',
+            derive,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(
+            block, "the existing derive step must publish its environment"
+        )
+        registry = [
+            {
+                "serviceAccountEmail": "unit-only@fixture.example.test",
+                "principalId": "unit-only-fixture-principal",
+                "allowedTokenAudiences": ["unit-only-audience"],
+                "routeScopes": [
+                    "GET partner/entries/*", "POST partner/ingress/handoff"
+                ],
+            }
+        ]
+        registry_json = json.dumps(registry)
+        native = "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS"
+        legacy = native + "_JSON"
+        with tempfile.TemporaryDirectory(prefix="uat-native-registry-") as directory:
+            env_file = Path(directory) / "github-env"
+            exported = subprocess.run(
+                ["bash", "-euc", "{\n" + block.group(1) + '} >> "$GITHUB_ENV"\n'],
+                env={"registry_json": registry_json, "GITHUB_ENV": str(env_file)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            # Model GitHub's multi-line GITHUB_ENV application to later steps,
+            # then let a real child inherit it without either API step's env map.
+            inherited = {}
+            lines = iter(env_file.read_text(encoding="utf-8").splitlines())
+            for header in lines:
+                name, delimiter = header.split("<<", 1)
+                value = []
+                for line in lines:
+                    if line == delimiter:
+                        break
+                    value.append(line)
+                else:
+                    self.fail("unterminated GITHUB_ENV value")
+                inherited[name] = "\n".join(value)
+            child = subprocess.run(
+                [sys.executable, "-c",
+                 "import json, os; print(json.dumps({name: os.environ.get(name) "
+                 "for name in " + repr((native, legacy)) + "}))"],
+                env=inherited, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(child.returncode, 0, child.stderr)
+            actual = json.loads(child.stdout)
+            self.assertEqual(actual[native], registry_json)
+            self.assertEqual(actual[legacy], registry_json)
+            self.assertEqual(json.loads(actual[native]), registry)
+
 
 class ReportProvenanceBehaviorTests(unittest.TestCase):
     def run_report(self, *, write=True, command_exit=0, candidate=None, metadata=None):

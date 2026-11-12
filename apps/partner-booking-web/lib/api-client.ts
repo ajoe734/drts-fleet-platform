@@ -12,6 +12,7 @@ import type {
   IdentityContext,
   OwnedOrderRecord,
   PartnerOrderReceiptRecord,
+  PartnerOrderReadRecord,
   PartnerEntryBrandingMetadata,
   PartnerRecordAuditMetadata,
   PartnerBootstrapSession,
@@ -725,8 +726,8 @@ export async function getPartnerConfirmation(
 export async function getPartnerTrip(
   session: PartnerSessionRecord,
   orderId: string,
-): Promise<OwnedOrderRecord> {
-  return requestAuthority<OwnedOrderRecord>(
+): Promise<PartnerOrderReadRecord> {
+  return requestAuthority<PartnerOrderReadRecord>(
     `/api/partner/orders/${encodeURIComponent(orderId)}`,
     {
       method: "GET",

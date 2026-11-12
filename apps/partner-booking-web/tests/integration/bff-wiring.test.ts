@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPartnerBookingRecord } from "@/lib/partner-booking-read-model";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BookingRecord,
   OwnedOrderRecord,
@@ -1067,5 +1068,95 @@ describe("normal Partner direct requests to a private Cloud Run API", () => {
       else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("normal Partner order progress wire compatibility", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    clearPartnerEntryAuthorityCacheForTests();
+  });
+
+  it("preserves fresh progress on the same ordinary order GET and its original bearer", async () => {
+    const progress = {
+      orderId: "SIM-wire-order",
+      availability: "available",
+      currentTask: { taskId: "SIM-wire-task" },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: { orderId: "SIM-wire-order", progress },
+        meta: {},
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      getPartnerTrip(session, "SIM-wire-order"),
+    ).resolves.toMatchObject({ orderId: "SIM-wire-order", progress });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/orders/SIM-wire-order`,
+      expect.objectContaining({
+        cache: "no-store",
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+        }),
+      }),
+    );
+  });
+
+  it("rejects cross-order progress through the original server read helper without exposing the session", async () => {
+    const privateToken = "SIM-wire-server-only";
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(path);
+        if (path === "/api/partner/entries/acme")
+          return jsonResponse({ data: activeEntry, meta: {} });
+        if (path === "/api/partner/ingress/handoff")
+          return jsonResponse({
+            data: {
+              accessToken: privateToken,
+              expiresIn: "15m",
+              tokenType: "Bearer",
+              identity: session.identity,
+            },
+            meta: {},
+          });
+        expect(new Headers(init?.headers).get("Authorization")).toBe(
+          "Bearer " + privateToken,
+        );
+        if (path === "/api/partner/bookings/SIM-wire-booking")
+          return jsonResponse({
+            data: { bookingId: "SIM-wire-booking", orderId: "SIM-wire-order" },
+            meta: {},
+          });
+        if (path === "/api/partner/orders/SIM-wire-order")
+          return jsonResponse({
+            data: {
+              bookingId: "SIM-wire-booking",
+              orderId: "SIM-wire-order",
+              progress: { orderId: "unrelated-order" },
+            },
+            meta: {},
+          });
+        throw new Error("Unexpected normal wire route: " + path);
+      }),
+    );
+    await expect(
+      loadPartnerBookingRecord("acme", {
+        partnerUserRef: "SIM-existing-owner",
+        bookingId: "SIM-wire-booking",
+      }),
+    ).rejects.toMatchObject({ code: "PARTNER_BOOKING_READBACK_MISMATCH" });
+    expect(calls).toEqual([
+      "/api/partner/entries/acme",
+      "/api/partner/ingress/handoff",
+      "/api/partner/bookings/SIM-wire-booking",
+      "/api/partner/orders/SIM-wire-order",
+    ]);
   });
 });

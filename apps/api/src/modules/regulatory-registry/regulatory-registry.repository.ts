@@ -1724,6 +1724,23 @@ export class RegulatoryRegistryRepository {
     }
   }
 
+  /** Narrow committed display read: no supply/disclosure prerequisite or lock. */
+  async findVehicleById(
+    vehicleId: string,
+  ): Promise<VehicleRegistryRecord | null> {
+    this.assertDatabaseEnabled("find vehicle by id");
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_vehicles WHERE vehicle_id = $1",
+      [vehicleId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<VehicleRegistryRecord>(
+          result.rows[0].record,
+          "reg.phase1_registry_vehicles",
+        )
+      : null;
+  }
+
   async findLatestDriverLocation(
     driverId: string,
   ): Promise<DriverLocationSnapshot | null> {

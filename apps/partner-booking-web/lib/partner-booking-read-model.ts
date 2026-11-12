@@ -76,6 +76,7 @@ export async function loadPartnerBookingRecord(
     booking.bookingId !== actualBookingId ||
     order.orderId !== booking.orderId ||
     order.bookingId !== booking.bookingId ||
+    (order.progress && order.progress.orderId !== order.orderId) ||
     (orderId && orderId !== order.orderId)
   )
     throw new PartnerAuthorityError(

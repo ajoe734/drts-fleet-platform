@@ -1,3 +1,7 @@
+import type {
+  PartnerOrderReadRecord,
+  PartnerOrderProgressRecord,
+} from "@drts/contracts";
 import type { TenantMasterDirectoryContext } from "../tenant-partner/tenant-partner.repository";
 import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
@@ -2846,6 +2850,217 @@ export class OwnedMobilityService
     }
     await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
+  }
+
+  /** Fresh normal partner display. No supply preparation, lifecycle or payment write. */
+  async resolvePartnerOrderView(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<PartnerOrderReadRecord> {
+    // Original ownership is checked before aggregate, identity or telemetry reads.
+    let order = await this.resolvePersistedOrder(orderId, identity);
+    const progress: PartnerOrderProgressRecord = {
+      orderId,
+      orderStatus: order.status,
+      readAt: new Date().toISOString(),
+      availability: "unavailable",
+      reason: "source_unavailable",
+      currentTask: null,
+      driver: null,
+      vehicle: null,
+      location: {
+        status: "unavailable",
+        position: null,
+        recordedAt: null,
+        updatedAt: null,
+        accuracyM: null,
+      },
+    };
+    const repository = this.ownedMobilityRepository;
+    if (!repository?.isEnabled()) return { ...order, progress };
+    const context = await repository.loadOrderActionContext({ orderId });
+    const snapshot = context?.orders.find((item) => item.orderId === orderId);
+    if (!context || !snapshot)
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PARTNER_PROGRESS_CONTEXT_UNAVAILABLE",
+        "The persisted trip context is unavailable.",
+      );
+    await this.assertPartnerOrderIdentityAsync(identity, snapshot);
+    order = this.cloneOrder(snapshot);
+    progress.orderStatus = order.status;
+    progress.availability = "available";
+    progress.reason = null;
+    progress.location.status = "not_live";
+    const activeOrder = [
+      "preassigned",
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ].includes(order.status);
+    const activeTask = [
+      "pending_acceptance",
+      "accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ];
+    // Include every non-rejected/cancelled tuple, not only the first pair
+    // that happens to be complete. A valid A must not hide a broken B.
+    const relevantTasks = context.driverTasks.filter(
+      (task) =>
+        task.orderId === orderId &&
+        (activeTask.includes(task.status) || task.status === "completed"),
+    );
+    const relevantAssignments = context.dispatchAssignments.filter(
+      (assignment) =>
+        assignment.orderId === orderId &&
+        ["assigned", "accepted", "completed"].includes(assignment.status),
+    );
+    const matches = (
+      task: DriverTaskRecord,
+      assignment: DispatchAssignmentRecord,
+    ) =>
+      assignment.orderId === task.orderId &&
+      assignment.taskId === task.taskId &&
+      assignment.assignmentId === task.assignmentId &&
+      assignment.dispatchJobId === task.dispatchJobId &&
+      assignment.driverId === task.driverId &&
+      assignment.vehicleId === task.vehicleId &&
+      (task.status === "completed"
+        ? assignment.status === "completed"
+        : ["assigned", "accepted"].includes(assignment.status));
+    const oneJob = (dispatchJobId: string) =>
+      context.dispatchJobs.filter(
+        (job) => job.orderId === orderId && job.dispatchJobId === dispatchJobId,
+      ).length === 1;
+    const complete =
+      relevantTasks.length === relevantAssignments.length &&
+      relevantTasks.every(
+        (task) =>
+          oneJob(task.dispatchJobId) &&
+          relevantAssignments.filter((assignment) => matches(task, assignment))
+            .length === 1,
+      ) &&
+      relevantAssignments.every(
+        (assignment) =>
+          oneJob(assignment.dispatchJobId) &&
+          relevantTasks.filter((task) => matches(task, assignment)).length ===
+            1,
+      );
+    const task = relevantTasks[0];
+    const compatibleStage =
+      !task ||
+      (order.status === "completed" && task.status === "completed") ||
+      (activeOrder && activeTask.includes(task.status));
+    // A partial/orphan tuple or multiple candidates means unavailable display,
+    // never a new dispatch guard or an arbitrary choice by timestamp/array order.
+    if (!complete || relevantTasks.length > 1 || !compatibleStage) {
+      progress.availability = "unavailable";
+      progress.reason = "inconsistent_context";
+      progress.location.status = "unavailable";
+      return { ...order, progress };
+    }
+    if (!task) return { ...order, progress };
+    progress.currentTask = {
+      taskId: task.taskId,
+      assignmentId: task.assignmentId,
+      dispatchJobId: task.dispatchJobId,
+      driverId: task.driverId,
+      vehicleId: task.vehicleId,
+      status: task.status,
+      acceptedAt: task.acceptedAt,
+      departedAt: task.departedAt,
+      arrivedPickupAt: task.arrivedPickupAt,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+    };
+    const registry = this.receiptRegistryRepository;
+    progress.driver = {
+      driverId: task.driverId,
+      driverSurname: null,
+      driverSurnameSource: null,
+      driverSurnameProfileUpdatedAt: null,
+    };
+    progress.vehicle = { vehicleId: task.vehicleId, plateNo: null };
+    if (!registry?.isEnabled()) {
+      progress.location.status = "unavailable";
+      return { ...order, progress };
+    }
+    const [driver, vehicle] = await Promise.all([
+      registry.lockDriver(task.driverId),
+      registry.findVehicleById(task.vehicleId),
+    ]);
+    if (vehicle?.vehicleId === task.vehicleId)
+      progress.vehicle.plateNo = vehicle.plateNo?.trim() || null;
+    // The fresh reader clears a missing persisted profile; never split name or
+    // fall back to the older in-memory declared-surname helper.
+    if (
+      driver?.driverId === task.driverId &&
+      typeof this.regulatoryRegistryService
+        .getDriverCompletionReceiptIdentity === "function"
+    ) {
+      const { surname } =
+        await this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+          task.driverId,
+        );
+      if (surname) Object.assign(progress.driver, surname);
+    }
+    if (task.status === "completed" || order.status === "cancelled")
+      return { ...order, progress };
+    const location = await registry.findLatestDriverLocation(task.driverId);
+    if (!location) {
+      progress.location.status = "missing";
+      return { ...order, progress };
+    }
+    const event = await registry.findDriverHeartbeatEventByRecordedAt(
+      task.driverId,
+      location.recordedAt,
+      location.updatedAt,
+    );
+    if (
+      location.driverId !== task.driverId ||
+      !event ||
+      event.driverId !== task.driverId ||
+      event.vehicleId !== task.vehicleId ||
+      event.taskId !== task.taskId ||
+      event.recordedAt !== location.recordedAt ||
+      event.receivedAt !== location.updatedAt ||
+      event.lat !== location.lat ||
+      event.lng !== location.lng ||
+      event.accuracyM !== location.accuracyM ||
+      !Number.isFinite(Date.parse(location.recordedAt)) ||
+      !Number.isFinite(Date.parse(location.updatedAt)) ||
+      !Number.isFinite(location.lat) ||
+      Math.abs(location.lat) > 90 ||
+      !Number.isFinite(location.lng) ||
+      Math.abs(location.lng) > 180 ||
+      (location.accuracyM !== null &&
+        (!Number.isFinite(location.accuracyM) || location.accuracyM < 0))
+    ) {
+      progress.location.status = "context_mismatch";
+      return { ...order, progress };
+    }
+    // Same freshness semantics as the existing registry tracking display.
+    const status =
+      Date.now() - Date.parse(location.updatedAt) > 90_000
+        ? "stale"
+        : location.accuracyM !== null && location.accuracyM > 100
+          ? "low_accuracy"
+          : "fresh";
+    progress.location = {
+      status,
+      position:
+        status === "fresh" ? { lat: location.lat, lng: location.lng } : null,
+      recordedAt: location.recordedAt,
+      updatedAt: location.updatedAt,
+      accuracyM: location.accuracyM,
+    };
+    return { ...order, progress };
   }
 
   /**

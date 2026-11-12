@@ -1,3 +1,15 @@
+import type { BootstrapRequestIdentity } from "../../src/common/auth";
+import type {
+  DispatchAssignmentRecord,
+  DispatchJobRecord,
+  DriverTaskRecord,
+  DriverProfileRecord,
+} from "@drts/contracts";
+import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
+import { RegulatoryRegistryRepository } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
+import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { domainFixture } from "../../../../tests/unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
@@ -7947,4 +7959,624 @@ describe("partner booking history uses the existing single-booking read relation
     );
     expect(ordinary.pagination.totalItems).toBe(5);
   });
+});
+
+// Actual existing controller/service/repositories, with only a finite SQL data port.
+// No HTTP listener, AppModule, PG, browser, supply/auth business mock or new callable RED.
+function partnerProgressFixture(
+  subtype:
+    | "credit_card_airport_transfer"
+    | "travel_agency_transfer"
+    | "insurance_replacement_vehicle" = "travel_agency_transfer",
+) {
+  const now = Date.parse("2026-11-12T08:00:00.000Z");
+  vi.spyOn(Date, "now").mockReturnValue(now);
+  const stamp = new Date(now).toISOString();
+  const order = buildOrderFixture({
+    orderId: "SIM-progress-order",
+    bookingId: "SIM-progress-booking",
+    orderSource: "web",
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: subtype,
+    tenantId: "SIM-progress-tenant",
+    partnerId: "SIM-progress-partner",
+    partnerProgramId: "SIM-progress-program",
+    partnerEntrySlug: "SIM-progress-entry",
+    passenger: {
+      name: "SIM Rider",
+      phone: "0900000000",
+      passengerId: "SIM-progress-passenger",
+    },
+    status: "driver_accepted",
+  });
+  const task = {
+    taskId: "SIM-progress-task",
+    orderId: order.orderId,
+    assignmentId: "SIM-progress-assignment",
+    dispatchJobId: "SIM-progress-job",
+    driverId: "SIM-progress-driver",
+    vehicleId: "SIM-progress-vehicle",
+    status: "accepted",
+    sourcePlatform: null,
+    routeProvided: false,
+    waypoints: [],
+    acceptedAt: stamp,
+    departedAt: null,
+    arrivedPickupAt: null,
+    startedAt: null,
+    completedAt: null,
+    actualDistanceKm: null,
+    actualDurationSec: null,
+    fare: null,
+    proof: null,
+  } as DriverTaskRecord;
+  const assignment = {
+    assignmentId: task.assignmentId,
+    dispatchJobId: task.dispatchJobId,
+    orderId: order.orderId,
+    taskId: task.taskId,
+    driverId: task.driverId,
+    vehicleId: task.vehicleId,
+    assignmentType: "fixed_price",
+    status: "accepted",
+    acceptedAt: stamp,
+    rejectedAt: null,
+    rejectReasonCode: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  } as DispatchAssignmentRecord;
+  const job = {
+    dispatchJobId: task.dispatchJobId,
+    orderId: order.orderId,
+    status: "assigned",
+    mode: "auto",
+    latestEtaMinutes: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  } as DispatchJobRecord;
+  const state = {
+    order,
+    contextOrder: order,
+    tasks: [task],
+    assignments: [assignment],
+    jobs: [job],
+    contextMissing: false,
+    failure: null as Error | null,
+    vehicle: { vehicleId: task.vehicleId, plateNo: "SIM-DURABLE-PLATE" } as {
+      vehicleId: string;
+      plateNo: string;
+    } | null,
+    driver: { driverId: task.driverId, name: "Do Not Infer This Surname" } as {
+      driverId: string;
+      name: string;
+    } | null,
+    profile: {
+      driverId: task.driverId,
+      name: "SIM Whole Name",
+      driverSurname: "林",
+      phone: null,
+      email: null,
+      photoUrl: null,
+      emergencyContact: null,
+      bankAccount: null,
+      deviceBindings: [],
+      updatedAt: stamp,
+    } as DriverProfileRecord | null,
+    location: {
+      driver_id: task.driverId,
+      lat: 25,
+      lng: 121,
+      accuracy_m: 20 as number | null,
+      recorded_at: stamp,
+      updated_at: stamp,
+    } as {
+      driver_id: string;
+      lat: number;
+      lng: number;
+      accuracy_m: number | null;
+      recorded_at: string;
+      updated_at: string;
+    } | null,
+    event: {
+      event_id: "SIM-progress-event",
+      device_id: "SIM-device",
+      driver_id: task.driverId,
+      vehicle_id: task.vehicleId,
+      task_id: task.taskId,
+      sequence_no: 1,
+      recorded_at: stamp,
+      received_at: stamp,
+      lat: 25,
+      lng: 121,
+      accuracy_m: 20 as number | null,
+      work_state: "available",
+      app_state: "foreground",
+      transport_mode: "foreground",
+      network_type: "wifi",
+    },
+  };
+  const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
+    const text = sql.replace(/\s+/g, " ").trim();
+    if (state.failure) throw state.failure;
+    if (text.startsWith("SELECT jsonb_build_object("))
+      return {
+        rows: state.contextMissing
+          ? []
+          : [
+              {
+                record: {
+                  orders: [structuredClone(state.contextOrder)],
+                  dispatchJobs: structuredClone(state.jobs),
+                  dispatchAttempts: [],
+                  dispatchAssignments: structuredClone(state.assignments),
+                  driverTasks: structuredClone(state.tasks),
+                  dispatchTraceLogs: [],
+                  passengerDisclosureSnapshots: [],
+                },
+              },
+            ],
+      };
+    if (text.includes("FROM ops.phase1_owned_orders"))
+      return {
+        rows:
+          values?.[0] === order.orderId
+            ? [{ record: structuredClone(state.order) }]
+            : [],
+      };
+    if (text.includes("FROM reg.phase1_registry_drivers"))
+      return {
+        rows: state.driver ? [{ record: structuredClone(state.driver) }] : [],
+      };
+    if (text.includes("FROM reg.phase1_registry_vehicles"))
+      return {
+        rows: state.vehicle ? [{ record: structuredClone(state.vehicle) }] : [],
+      };
+    if (text.includes("FROM ops.phase1_driver_profiles"))
+      return {
+        rows: state.profile ? [{ record: structuredClone(state.profile) }] : [],
+      };
+    if (text.includes("FROM reg.driver_public_registration_credentials"))
+      return { rows: [] };
+    if (text.includes("FROM ops.phase1_driver_locations"))
+      return { rows: state.location ? [structuredClone(state.location)] : [] };
+    if (text.includes("FROM telemetry.driver_location_events"))
+      return { rows: [structuredClone(state.event)] };
+    throw new Error("Unexpected finite progress SQL: " + text);
+  });
+  const database = { isEnabled: () => true, query };
+  const repository = new OwnedMobilityRepository(database as never);
+  const registryRepository = new RegulatoryRegistryRepository(
+    database as never,
+  );
+  const profileService = new DriverProfileService(
+    {} as never,
+    new DriverProfileRepository(database as never),
+  );
+  const registry = new RegulatoryRegistryService(
+    {} as never,
+    {} as never,
+    profileService,
+    registryRepository,
+  );
+  const { service } = createOwnedMobilityService();
+  Reflect.set(service, "ownedMobilityRepository", repository);
+  Reflect.set(service, "receiptRegistryRepository", registryRepository);
+  Reflect.set(service, "regulatoryRegistryService", registry);
+  // The cache is deliberately a newer-looking but stale state.
+  Reflect.set(service, "orders", [
+    { ...order, status: "created", updatedAt: "2099-01-01T00:00:00.000Z" },
+  ]);
+  const identity = {
+    realm: "partner",
+    actorType: "referral_passenger",
+    actorId: "SIM-progress-passenger",
+    drtsPassengerId: "SIM-progress-passenger",
+    tenantId: order.tenantId,
+    partnerId: order.partnerId,
+    partnerProgramId: order.partnerProgramId,
+    partnerEntrySlug: order.partnerEntrySlug,
+  } as BootstrapRequestIdentity;
+  const controller = new OwnedMobilityController(service, {} as never);
+  const read = async (owner = identity) => {
+    const response = await controller.getPartnerOrder(
+      order.orderId,
+      owner,
+      "SIM-progress-request",
+    );
+    // Existing callable RED is an actual missing-response-field assertion,
+    // never a missing new method/import or property-dereference TypeError.
+    expect(response.data).toHaveProperty("progress");
+    return response as unknown as {
+      data: {
+        orderId: string;
+        status: string;
+        progress: {
+          availability: string;
+          reason: string | null;
+          currentTask: DriverTaskRecord | null;
+          driver: { driverSurname: string | null } | null;
+          vehicle: { plateNo: string | null } | null;
+          location: {
+            status: string;
+            position: { lat: number; lng: number } | null;
+          };
+        };
+      };
+    };
+  };
+  return {
+    state,
+    service,
+    repository,
+    registryRepository,
+    identity,
+    controller,
+    read,
+    query,
+    now,
+    profileService,
+  };
+}
+
+describe("normal partner same-order durable progress", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    "credit_card_airport_transfer",
+    "travel_agency_transfer",
+    "insurance_replacement_vehicle",
+  ] as const)(
+    "reads a cold %s order through the existing controller without a P5 disclosure prerequisite",
+    async (subtype) => {
+      const f = partnerProgressFixture(subtype);
+      const result = await f.read();
+      expect(result).toMatchObject({
+        data: {
+          orderId: f.state.order.orderId,
+          status: "driver_accepted",
+          progress: {
+            availability: "available",
+            currentTask: {
+              taskId: "SIM-progress-task",
+              driverId: "SIM-progress-driver",
+              vehicleId: "SIM-progress-vehicle",
+              status: "accepted",
+            },
+            driver: {
+              driverSurname: "林",
+              driverSurnameSource: "driver_profile_declared",
+            },
+            vehicle: { plateNo: "SIM-DURABLE-PLATE" },
+            location: { status: "fresh", position: { lat: 25, lng: 121 } },
+          },
+        },
+      });
+      expect(
+        f.query.mock.calls.every(
+          ([sql]) => !/FOR UPDATE|^\s*(INSERT|UPDATE|DELETE)/.test(sql),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("reloads actual acceptance, departure, arrival, boarding and completion times for the same task", async () => {
+    const f = partnerProgressFixture();
+    const task = f.state.tasks[0]!;
+    for (const [status, orderStatus, field] of [
+      ["accepted", "driver_accepted", "acceptedAt"],
+      ["enroute_pickup", "enroute_pickup", "departedAt"],
+      ["arrived_pickup", "arrived_pickup", "arrivedPickupAt"],
+      ["on_trip", "on_trip", "startedAt"],
+      ["proof_pending", "proof_pending", "startedAt"],
+      ["completed", "completed", "completedAt"],
+    ] as const) {
+      task.status = status;
+      f.state.order.status = orderStatus;
+      task[field] = new Date(f.now - 1000).toISOString();
+      if (status === "completed") f.state.assignments[0]!.status = "completed";
+      const result = await f.read();
+      expect(result.data.progress.currentTask).toMatchObject({
+        taskId: task.taskId,
+        status,
+        [field]: task[field],
+      });
+      if (status === "completed")
+        expect(result.data.progress.location).toMatchObject({
+          status: "not_live",
+          position: null,
+        });
+    }
+  });
+
+  it("uses the valid reassignment and never displays the rejected driver or its latest telemetry", async () => {
+    const f = partnerProgressFixture();
+    const oldTask = {
+      ...f.state.tasks[0]!,
+      taskId: "old-task",
+      assignmentId: "old-assignment",
+      driverId: "old-driver",
+      vehicleId: "old-vehicle",
+      status: "rejected" as const,
+    };
+    f.state.tasks.unshift(oldTask);
+    f.state.assignments.unshift({
+      ...f.state.assignments[0]!,
+      taskId: oldTask.taskId,
+      assignmentId: oldTask.assignmentId,
+      driverId: oldTask.driverId,
+      vehicleId: oldTask.vehicleId,
+      status: "rejected",
+    });
+    const result = await f.read();
+    expect(result.data.progress.currentTask).toMatchObject({
+      taskId: "SIM-progress-task",
+      driverId: "SIM-progress-driver",
+    });
+    expect(JSON.stringify(result.data.progress)).not.toContain("old-driver");
+    f.state.order.status = "redispatch_required";
+    f.state.tasks[1]!.status = "cancelled";
+    f.state.assignments[1]!.status = "cancelled";
+    expect((await f.read()).data.progress).toMatchObject({
+      currentTask: null,
+      driver: null,
+      vehicle: null,
+      location: { status: "not_live", position: null },
+    });
+  });
+
+  it.each(["broken-link", "two-active"])(
+    "does not select an arbitrary task for %s",
+    async (mode) => {
+      const f = partnerProgressFixture();
+      if (mode === "broken-link")
+        f.state.assignments[0]!.vehicleId = "different-vehicle";
+      else {
+        f.state.tasks.push({
+          ...f.state.tasks[0]!,
+          taskId: "second-task",
+          assignmentId: "second-assignment",
+        });
+        f.state.assignments.push({
+          ...f.state.assignments[0]!,
+          taskId: "second-task",
+          assignmentId: "second-assignment",
+        });
+      }
+      expect((await f.read()).data.progress).toMatchObject({
+        availability: "unavailable",
+        reason: "inconsistent_context",
+        currentTask: null,
+        driver: null,
+        vehicle: null,
+      });
+    },
+  );
+
+  it.each([
+    [90000, 100, "fresh"],
+    [90001, 20, "stale"],
+    [0, 101, "low_accuracy"],
+    [0, null, "fresh"],
+  ] as const)(
+    "uses existing GPS semantics age=%s accuracy=%s",
+    async (age, accuracy, expected) => {
+      const f = partnerProgressFixture();
+      const stamp = new Date(f.now - age).toISOString();
+      Object.assign(f.state.location!, {
+        recorded_at: stamp,
+        updated_at: stamp,
+        accuracy_m: accuracy,
+      });
+      Object.assign(f.state.event, {
+        recorded_at: stamp,
+        received_at: stamp,
+        accuracy_m: accuracy,
+      });
+      const location = (await f.read()).data.progress.location;
+      expect(location.status).toBe(expected);
+      expect(location.position).toEqual(
+        expected === "fresh" ? { lat: 25, lng: 121 } : null,
+      );
+    },
+  );
+
+  it.each(["task_id", "vehicle_id", "driver_id", "received_at"] as const)(
+    "does not borrow the wrong telemetry %s",
+    async (field) => {
+      const f = partnerProgressFixture();
+      f.state.event[field] =
+        field === "received_at" ? "2026-11-12T07:59:59.000Z" : "unrelated";
+      expect((await f.read()).data.progress.location).toMatchObject({
+        status: "context_mismatch",
+        position: null,
+      });
+    },
+  );
+
+  it("distinguishes absent telemetry and durable display facts from source failures", async () => {
+    const f = partnerProgressFixture();
+    f.state.location = null;
+    f.state.vehicle = null;
+    f.state.profile = null;
+    expect((await f.read()).data.progress).toMatchObject({
+      driver: { driverSurname: null },
+      vehicle: { plateNo: null },
+      location: { status: "missing", position: null },
+    });
+    f.state.failure = new Error("real read unavailable");
+    await expect(f.read()).rejects.toBe(f.state.failure);
+  });
+
+  it("clears a previously read surname when the persisted profile has been removed", async () => {
+    const f = partnerProgressFixture();
+    expect((await f.read()).data.progress.driver?.driverSurname).toBe("林");
+    f.state.profile = null;
+    expect((await f.read()).data.progress.driver?.driverSurname).toBeNull();
+    expect(JSON.stringify((await f.read()).data.progress)).not.toContain(
+      "Do Not Infer",
+    );
+  });
+
+  it.each([
+    "partnerId",
+    "partnerProgramId",
+    "partnerEntrySlug",
+    "tenantId",
+    "drtsPassengerId",
+  ] as const)(
+    "keeps the original %s ownership rule before progress reads",
+    async (field) => {
+      const f = partnerProgressFixture();
+      await expect(
+        f.read({ ...f.identity, [field]: "another-scope" }),
+      ).rejects.toMatchObject({ code: "PARTNER_SCOPE_MISMATCH" });
+      expect(
+        f.query.mock.calls.every(
+          ([sql]) =>
+            !sql.includes("jsonb_build_object") &&
+            !sql.includes("reg.phase1") &&
+            !sql.includes("driver_location"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("rechecks the aggregate's newer owner before reading its driver or vehicle", async () => {
+    const f = partnerProgressFixture();
+    f.state.contextOrder = {
+      ...f.state.order,
+      partnerProgramId: "changed-owner",
+    };
+    await expect(f.read()).rejects.toMatchObject({
+      code: "PARTNER_SCOPE_MISMATCH",
+    });
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("reg.phase1"))).toBe(
+      false,
+    );
+  });
+
+  it("does not call a missing aggregate a known unassigned trip", async () => {
+    const f = partnerProgressFixture();
+    f.state.contextMissing = true;
+    await expect(f.read()).rejects.toMatchObject({
+      code: "PARTNER_PROGRESS_CONTEXT_UNAVAILABLE",
+    });
+  });
+
+  it("never borrows cached display or tracking facts when the registry reader is unavailable", async () => {
+    const f = partnerProgressFixture();
+    Reflect.set(f.service, "receiptRegistryRepository", undefined);
+    expect((await f.read()).data.progress).toMatchObject({
+      availability: "available",
+      currentTask: { taskId: "SIM-progress-task" },
+      driver: { driverSurname: null },
+      vehicle: { plateNo: null },
+      location: { status: "unavailable", position: null },
+    });
+    expect(
+      f.query.mock.calls.some(
+        ([sql]) =>
+          sql.includes("reg.phase1") || sql.includes("driver_location"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps progress unavailable when no durable adapter exists", async () => {
+    const f = partnerProgressFixture();
+    Reflect.set(f.service, "ownedMobilityRepository", undefined);
+    expect((await f.read()).data.progress).toMatchObject({
+      availability: "unavailable",
+      reason: "source_unavailable",
+      currentTask: null,
+      location: { status: "unavailable", position: null },
+    });
+  });
+});
+
+// R2: the old read callable exists and returns valid A, but cannot hide broken B.
+describe("normal partner progress accounts for every live tuple", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    "orphan-task",
+    "broken-second-pair",
+    "orphan-assignment",
+    "orphan-completed-task",
+    "orphan-completed-assignment",
+  ] as const)(
+    "keeps a complete A unavailable when the same order also has %s",
+    async (shape) => {
+      const f = partnerProgressFixture();
+      const taskB = {
+        ...f.state.tasks[0]!,
+        taskId: "SIM-second-task",
+        assignmentId: "SIM-second-assignment",
+        driverId: "SIM-second-driver",
+        vehicleId: "SIM-second-vehicle",
+      };
+      const assignmentB = {
+        ...f.state.assignments[0]!,
+        taskId: taskB.taskId,
+        assignmentId: taskB.assignmentId,
+        driverId: taskB.driverId,
+        vehicleId: taskB.vehicleId,
+      };
+      if (shape === "orphan-completed-task") taskB.status = "completed";
+      if (shape === "orphan-completed-assignment")
+        assignmentB.status = "completed";
+      if (
+        shape !== "orphan-assignment" &&
+        shape !== "orphan-completed-assignment"
+      )
+        f.state.tasks.push(taskB);
+      if (shape !== "orphan-task" && shape !== "orphan-completed-task")
+        f.state.assignments.push(assignmentB);
+      if (shape === "broken-second-pair")
+        assignmentB.driverId = "SIM-mismatched-driver";
+      const result = await f.read();
+      expect(result.data.progress).toMatchObject({
+        availability: "unavailable",
+        reason: "inconsistent_context",
+        currentTask: null,
+        driver: null,
+        vehicle: null,
+        location: { status: "unavailable", position: null },
+      });
+      expect(
+        f.query.mock.calls.some(
+          ([sql]) =>
+            sql.includes("reg.phase1") || sql.includes("driver_location"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["cancelled", "rejected"] as const)(
+    "ignores an old %s pair while reading the one real current A",
+    async (status) => {
+      const f = partnerProgressFixture();
+      const oldTask = {
+        ...f.state.tasks[0]!,
+        taskId: "SIM-old-task",
+        assignmentId: "SIM-old-assignment",
+        driverId: "SIM-old-driver",
+        vehicleId: "SIM-old-vehicle",
+        status,
+      };
+      f.state.tasks.unshift(oldTask);
+      f.state.assignments.unshift({
+        ...f.state.assignments[0]!,
+        taskId: oldTask.taskId,
+        assignmentId: oldTask.assignmentId,
+        driverId: oldTask.driverId,
+        vehicleId: oldTask.vehicleId,
+        status,
+      });
+      expect((await f.read()).data.progress).toMatchObject({
+        availability: "available",
+        currentTask: { taskId: "SIM-progress-task" },
+        vehicle: { plateNo: "SIM-DURABLE-PLATE" },
+      });
+    },
+  );
 });

@@ -4134,6 +4134,54 @@ export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot>
   forwardedStatus?: string | null;
 }
 
+/** Normal partner read projection only; never persisted into the owned order. */
+export interface PartnerOrderProgressRecord {
+  orderId: string;
+  orderStatus: OwnedOrderStatus;
+  readAt: string;
+  availability: "available" | "unavailable";
+  reason: "source_unavailable" | "inconsistent_context" | null;
+  currentTask: {
+    taskId: string;
+    assignmentId: string;
+    dispatchJobId: string;
+    driverId: string;
+    vehicleId: string;
+    status: DriverTaskStatus;
+    acceptedAt: string | null;
+    departedAt: string | null;
+    arrivedPickupAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  } | null;
+  driver: {
+    driverId: string;
+    driverSurname: string | null;
+    driverSurnameSource: "driver_profile_declared" | null;
+    driverSurnameProfileUpdatedAt: string | null;
+  } | null;
+  vehicle: { vehicleId: string; plateNo: string | null } | null;
+  location: {
+    status:
+      | "fresh"
+      | "missing"
+      | "stale"
+      | "low_accuracy"
+      | "context_mismatch"
+      | "not_live"
+      | "unavailable";
+    position: { lat: number; lng: number } | null;
+    recordedAt: string | null;
+    updatedAt: string | null;
+    accuracyM: number | null;
+  };
+}
+
+/** Additive normal GET response; general order records and writers stay unchanged. */
+export interface PartnerOrderReadRecord extends OwnedOrderRecord {
+  progress: PartnerOrderProgressRecord;
+}
+
 /**
  * Read-only same-order completion and payment facts after normal partner ownership.
  * A quote, completion fare or payment-method label never proves capture.

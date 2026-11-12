@@ -119,6 +119,10 @@ describe("OwnedMobilityController tenant booking routes", () => {
       resolvePersistedOrder: vi.fn().mockResolvedValue({
         orderId: "order-e2e-001",
       }),
+      resolvePartnerOrderView: vi.fn().mockResolvedValue({
+        orderId: "order-e2e-001",
+        progress: { orderId: "order-e2e-001" },
+      }),
       getTenantBooking: vi.fn().mockReturnValue({
         bookingId: "booking-e2e-001",
       }),
@@ -186,6 +190,10 @@ describe("OwnedMobilityController tenant booking routes", () => {
       identity,
     );
     expect(service.resolvePersistedOrder).toHaveBeenCalledWith(
+      "order-e2e-001",
+      identity,
+    );
+    expect(service.resolvePartnerOrderView).toHaveBeenCalledWith(
       "order-e2e-001",
       identity,
     );
