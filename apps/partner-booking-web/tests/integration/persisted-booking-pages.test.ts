@@ -985,3 +985,138 @@ describe("normal Partner same-SSR principal readback", () => {
     },
   );
 });
+
+// Existing real pages/BFF and actual shared coordinate renderer; only HTTP is SIM.
+function spatialProgressTransport() {
+  const api = progressPageTransport();
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const response = await previousFetch(input, init);
+      if (
+        new URL(String(input)).pathname !==
+        "/api/partner/orders/SIM-persisted-order"
+      )
+        return response;
+      const envelope = await response.json();
+      return Response.json({
+        ...envelope,
+        data: {
+          ...envelope.data,
+          pickup: { ...envelope.data.pickup, lat: 24.9, lng: 120.9 },
+          dropoff: { ...envelope.data.dropoff, lat: 25.1, lng: 121.1 },
+        },
+      });
+    }),
+  );
+  return api;
+}
+
+function driverPointTransform(html: string) {
+  return html.match(
+    /<g\b[^>]*transform="([^"]+)"[^>]*aria-label="Driver sample position"/,
+  )?.[1];
+}
+
+describe("normal Partner own coordinate snapshots", () => {
+  it("renders the actual fresh driver point and known stops on a readonly diagram, retaining the normal update href", async () => {
+    const api = spatialProgressTransport();
+    api.changeProgress(pageProgress());
+    const first = renderToStaticMarkup(
+      await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(first).toContain('data-testid="partner-position-snapshot"');
+    expect(first).toContain('data-position-lat="25"');
+    expect(first).toContain('data-position-lng="121"');
+    expect(first).toContain('data-position-recorded-at="2026-11-12T08:00:00Z"');
+    expect(first).toContain('data-position-read-at="2026-11-12T08:00:00Z"');
+    expect(first).toContain(
+      'role="img" aria-label="Driver and trip point coordinate diagram"',
+    );
+    expect(first).toContain('aria-label="Pickup point"');
+    expect(first).toContain('aria-label="Dropoff point"');
+    const projected = driverPointTransform(first)?.match(/-?\d+(?:\.\d+)?/g);
+    expect(Number(projected?.[0])).toBeCloseTo(50, 8);
+    expect(Number(projected?.[1])).toBeCloseTo(50, 8);
+    expect(first).toContain(
+      "Coordinate diagram only; not a road route or an ETA.",
+    );
+    expect(first).toContain("Position snapshot at the time of this read.");
+    expect(first).toContain(
+      'data-testid="partner-driver-coordinate">25, 121</p>',
+    );
+    expect(first).not.toContain('role="button"');
+    const firstHref = first.match(/href="([^"]+)">Update trip<\/a>/)?.[1];
+    expect(firstHref).toBeTruthy();
+    const changed = pageProgress();
+    changed.location.position = { lat: 25.08, lng: 121.07 };
+    api.changeProgress(changed);
+    const next = renderToStaticMarkup(
+      await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(next).toContain('data-position-lat="25.08"');
+    expect(next).toContain('data-position-lng="121.07"');
+    expect(driverPointTransform(next)).not.toBe(driverPointTransform(first));
+    expect(next.match(/href="([^"]+)">Update trip<\/a>/)?.[1]).toBe(firstHref);
+    expect(next).not.toContain("8 min");
+    expect(next).not.toContain("2.4 km");
+  });
+
+  it.each([
+    "stale",
+    "missing",
+    "low_accuracy",
+    "context_mismatch",
+    "not_live",
+    "unavailable",
+  ])(
+    "hides the driver point for %s even if the reply still carries coordinates",
+    async (status) => {
+      spatialProgressTransport().changeProgress({
+        ...pageProgress(),
+        location: { ...pageProgress().location, status },
+      });
+      const html = renderToStaticMarkup(
+        await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+      );
+      expect(html).not.toContain('aria-label="Driver sample position"');
+      expect(html).not.toContain("data-position-lat=");
+      expect(html).not.toContain('data-testid="partner-driver-coordinate"');
+      expect(html).toContain(
+        "No fresh same-trip driver position is provided for this snapshot.",
+      );
+      expect(html).toContain(">Update trip</a>");
+    },
+  );
+
+  it("does not substitute pickup or a default city for a missing fresh position", async () => {
+    const progress = pageProgress();
+    progress.location.position = null;
+    spatialProgressTransport().changeProgress(progress);
+    const html = renderToStaticMarkup(
+      await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(driverPointTransform(html)).toBeUndefined();
+    expect(html).not.toContain("data-position-lat=");
+    expect(html).not.toContain('aria-label="Pickup point"');
+  });
+
+  it("keeps completed trips and other-order progress from showing an active driver point", async () => {
+    const api = spatialProgressTransport();
+    api.changeProgress(pageProgress("completed"));
+    const completed = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(completed).not.toContain('aria-label="Driver sample position"');
+    expect(completed).toContain('data-testid="partner-payment-receipt"');
+    api.changeProgress({ ...pageProgress(), orderId: "SIM-other-order" });
+    const mismatch = renderToStaticMarkup(
+      await ConfirmedPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(mismatch).toContain(
+      'data-read-error="PARTNER_BOOKING_READBACK_MISMATCH"',
+    );
+    expect(mismatch).not.toContain("data-position-lat=");
+  });
+});

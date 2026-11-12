@@ -166,6 +166,10 @@ export const t = {
   ActiveRideTitle: "進行中行程",
   ViewRide: "查看行程",
   ComplaintReceived: "我們已收到您的問題",
+  ComplaintCaseNumber: "申訴案號",
+  ComplaintCaseReferenceHint:
+    "請保留此案號，聯絡客服時可提供案號及原行程資訊。",
+  ComplaintResultUnconfirmed: "尚未取得申訴案號，請保留原內容稍後重試。",
   ComplaintProcessingNotice: "客服專員將盡快為您處理，如有需要會主動與您聯繫。",
   IssueCategory: "問題類別",
   LostItemDesc: "遺失物描述",

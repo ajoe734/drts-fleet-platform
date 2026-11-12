@@ -8142,10 +8142,10 @@ function partnerProgressFixture(
       };
     if (text.includes("FROM reg.driver_public_registration_credentials"))
       return { rows: [] };
-    if (text.includes("FROM ops.phase1_driver_locations"))
-      return { rows: state.location ? [structuredClone(state.location)] : [] };
     if (text.includes("FROM telemetry.driver_location_events"))
       return { rows: [structuredClone(state.event)] };
+    if (text.includes("FROM ops.phase1_driver_locations"))
+      return { rows: state.location ? [structuredClone(state.location)] : [] };
     throw new Error("Unexpected finite progress SQL: " + text);
   });
   const database = { isEnabled: () => true, query };

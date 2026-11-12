@@ -1085,6 +1085,46 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
                 if (!observation) return false;
                 const ssrEvent = await assertPersistedObservation(observation);
                 expect(ssrEvent.has_submillisecond_precision).toBe(true);
+                const snapshot = panel.getByTestId("partner-position-snapshot");
+                await expect(snapshot).toHaveAttribute(
+                  "data-position-recorded-at",
+                  recordedAt,
+                );
+                await expect(snapshot).toHaveAttribute(
+                  "data-position-lat",
+                  String(observation.event.lat),
+                );
+                await expect(snapshot).toHaveAttribute(
+                  "data-position-lng",
+                  String(observation.event.lng),
+                );
+                await expect(
+                  snapshot.getByTestId("partner-driver-coordinate"),
+                ).toHaveText(
+                  `${observation.event.lat}, ${observation.event.lng}`,
+                );
+                await expect(
+                  snapshot.getByRole("img", {
+                    name: "Driver and trip point coordinate diagram",
+                    exact: true,
+                  }),
+                ).toBeVisible();
+                await expect(
+                  snapshot.locator('g[aria-label="Driver sample position"]'),
+                ).toHaveCount(1);
+                await expect(
+                  snapshot.getByText(
+                    "Coordinate diagram only; not a road route or an ETA.",
+                    { exact: true },
+                  ),
+                ).toBeVisible();
+                facts.ssrPositionDiagram = {
+                  recordedAt,
+                  lat: observation.event.lat,
+                  lng: observation.event.lng,
+                  sourceEventId: observation.event.eventId,
+                  externalGps: "SIM normal Driver producer",
+                };
                 facts.ssrEvent = ssrEvent;
                 facts.ssrEventId = observation.event.eventId;
                 return true;

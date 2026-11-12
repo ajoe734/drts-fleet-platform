@@ -3,6 +3,18 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "progress.positionTitle": "Driver position snapshot",
+  "progress.positionSnapshot":
+    "Position snapshot at the time of this read. Use Update trip for another snapshot.",
+  "progress.positionReadAt": "Snapshot read at",
+  "progress.positionDiagram": "Driver and trip point coordinate diagram",
+  "progress.positionNotRoute":
+    "Coordinate diagram only; not a road route or an ETA.",
+  "progress.positionDriver": "Driver sample position",
+  "progress.positionPickup": "Pickup point",
+  "progress.positionDropoff": "Dropoff point",
+  "progress.positionUnavailable":
+    "No fresh same-trip driver position is provided for this snapshot.",
   "progress.title": "Trip progress",
   "progress.stage": "Current trip stage",
   "progress.noTask": "No matching current driver task is provided",
@@ -618,6 +630,16 @@ const en = {
 } as const;
 
 const zh = {
+  "progress.positionTitle": "司機位置快照",
+  "progress.positionSnapshot":
+    "此為讀取當下的位置快照；請使用「更新行程」重新讀取。",
+  "progress.positionReadAt": "快照讀取時間",
+  "progress.positionDiagram": "司機與行程地點座標示意",
+  "progress.positionNotRoute": "僅為座標示意，非道路路線或預計抵達時間。",
+  "progress.positionDriver": "司機樣本位置",
+  "progress.positionPickup": "上車地點",
+  "progress.positionDropoff": "下車地點",
+  "progress.positionUnavailable": "本次快照未提供同筆行程的新鮮司機位置。",
   "progress.title": "搭車進度",
   "progress.stage": "目前行程階段",
   "progress.noTask": "尚未提供相符的目前司機任務",

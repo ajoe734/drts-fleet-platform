@@ -421,6 +421,11 @@ async function submitLostItemForCompletedRide(
   expect(response.status()).toBeLessThan(300);
   const caseNo = camel(await response.json()).data.complaintId as string;
   expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/);
+  await expect(pax.getByTestId("passenger-complaint-id")).toHaveText(caseNo);
+  await expect(pax.getByTestId("passenger-complaint-ack")).toHaveAttribute(
+    "data-order-id",
+    orderId,
+  );
   await expect(
     pax.getByText("我們已收到您的問題", { exact: true }),
   ).toBeVisible();

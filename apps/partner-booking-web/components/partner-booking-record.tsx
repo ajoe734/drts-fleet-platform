@@ -1,5 +1,10 @@
 import Link from "next/link";
 import {
+  AddressMapPreviewSurface,
+  type AddressMapPin,
+  type MapBounds,
+} from "@drts/ui-web";
+import {
   normalisePlatformCurrency,
   type BookingRecord,
   type OwnedOrderRecord,
@@ -54,6 +59,21 @@ export function PartnerPrincipalSummary({
       data-principal-api-request-id={principal.requestId ?? undefined}
     />
   );
+}
+
+function coordinatePoint(
+  value: { lat?: unknown; lng?: unknown } | null | undefined,
+) {
+  if (
+    typeof value?.lat !== "number" ||
+    typeof value.lng !== "number" ||
+    !Number.isFinite(value.lat) ||
+    !Number.isFinite(value.lng) ||
+    Math.abs(value.lat) > 90 ||
+    Math.abs(value.lng) > 180
+  )
+    return null;
+  return { lat: value.lat, lng: value.lng };
 }
 
 export function PartnerBookingRecord({
@@ -133,6 +153,52 @@ export function PartnerBookingRecord({
       progress?.location?.recordedAt || label("receipt.notProvided"),
     ],
   ];
+  const position =
+    progress?.availability === "available" &&
+    task &&
+    !["completed", "cancelled", "rejected"].includes(task.status) &&
+    order.status !== "completed" &&
+    order.status !== "cancelled" &&
+    progress.location.status === "fresh"
+      ? coordinatePoint(progress.location.position)
+      : null;
+  const pins: AddressMapPin[] = position
+    ? [
+        {
+          id: "driver",
+          point: position,
+          label: label("progress.positionDriver"),
+          tone: "success",
+        },
+      ]
+    : [];
+  if (position) {
+    for (const [id, address, title] of [
+      ["pickup", order.pickup, "progress.positionPickup"],
+      ["dropoff", order.dropoff, "progress.positionDropoff"],
+    ] as const) {
+      const point = coordinatePoint(address);
+      if (point) pins.push({ id, point, label: label(title), tone: "neutral" });
+    }
+  }
+  let bounds: MapBounds | undefined;
+  if (pins.length) {
+    const latitudes = pins.map((pin) => pin.point.lat);
+    const longitudes = pins.map((pin) => pin.point.lng);
+    const minLat = Math.min(...latitudes),
+      maxLat = Math.max(...latitudes);
+    const minLng = Math.min(...longitudes),
+      maxLng = Math.max(...longitudes);
+    // Padding frames only known points; it never creates a substitute location.
+    const latPadding = Math.max((maxLat - minLat) * 0.1, 0.0001);
+    const lngPadding = Math.max((maxLng - minLng) * 0.1, 0.0001);
+    bounds = {
+      minLat: minLat - latPadding,
+      maxLat: maxLat + latPadding,
+      minLng: minLng - lngPadding,
+      maxLng: maxLng + lngPadding,
+    };
+  }
   const quotation = order.quotedFare;
   const money = quotation
     ? new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -175,6 +241,40 @@ export function PartnerBookingRecord({
             </div>
           ))}
         </dl>
+        <section
+          aria-label={label("progress.positionTitle")}
+          data-testid="partner-position-snapshot"
+          data-position-recorded-at={
+            position ? (progress?.location.recordedAt ?? undefined) : undefined
+          }
+          data-position-read-at={progress?.readAt}
+          data-position-lat={position?.lat}
+          data-position-lng={position?.lng}
+        >
+          <h3>{label("progress.positionTitle")}</h3>
+          <p>{label("progress.positionSnapshot")}</p>
+          <dl>
+            <div>
+              <dt>{label("progress.positionReadAt")}</dt>
+              <dd>{progress?.readAt || label("receipt.notProvided")}</dd>
+            </div>
+          </dl>
+          {position && bounds ? (
+            <>
+              <AddressMapPreviewSurface
+                pins={pins}
+                bounds={bounds}
+                ariaLabel={label("progress.positionDiagram")}
+                caption={label("progress.positionNotRoute")}
+              />
+              <p data-testid="partner-driver-coordinate">
+                {position.lat}, {position.lng}
+              </p>
+            </>
+          ) : (
+            <p>{label("progress.positionUnavailable")}</p>
+          )}
+        </section>
         <p>{label("progress.declaredScope")}</p>
         <p>{label("progress.manualUpdate")}</p>
         <a
