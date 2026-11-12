@@ -6,7 +6,10 @@ import {
   type PartnerReadSearch,
 } from "@/lib/partner-booking-read-model";
 import { partnerBookingReadHref } from "@/lib/partner-booking-form";
-import { PartnerBookingReadError } from "@/components/partner-booking-record";
+import {
+  PartnerBookingReadError,
+  PartnerPrincipalSummary,
+} from "@/components/partner-booking-record";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -35,6 +38,7 @@ export default async function PartnerTripsPage({
     return (
       <section data-testid="partner-persisted-history">
         <h1>{t("read.history", undefined, locale)}</h1>
+        <PartnerPrincipalSummary principal={model.principal} />
         <p>{t("read.historyScope", undefined, locale)}</p>
         {items.length === 0 ? (
           <div>

@@ -257,6 +257,20 @@ function fixture(mode = "bank_card_inline") {
             partnerEntrySlug: entry.entrySlug,
           },
         });
+      if (url.pathname === "/api/auth/session")
+        return envelope({
+          active: true,
+          identity: {
+            actorType: "referral_passenger",
+            actorId: "SIM-airport-passenger",
+            realm: "partner",
+            roles: ["referral_passenger"],
+            tenantId: entry.tenantId,
+            partnerId: entry.partnerId,
+            partnerProgramId: entry.programId,
+            partnerEntrySlug: entry.entrySlug,
+          },
+        });
       if (url.pathname === "/api/partner/eligibility/verify") {
         if (verificationFailure)
           return Response.json(

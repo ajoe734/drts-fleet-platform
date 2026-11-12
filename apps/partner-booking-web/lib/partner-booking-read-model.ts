@@ -2,6 +2,7 @@ import {
   createPartnerIngressHandoff,
   createPartnerSessionFromIngressHandoff,
   getPartnerConfirmation,
+  getPartnerPrincipalReadback,
   getPartnerReceipt,
   getPartnerTrip,
   getPartnerRouteContext,
@@ -98,6 +99,7 @@ export async function loadPartnerBookingRecord(
       "PARTNER_BOOKING_READBACK_MISMATCH",
       "Receipt, booking and order references do not match.",
     );
+  const principal = await getPartnerPrincipalReadback(session);
   // Session/key never leaves this server helper.
   return {
     entry: context.entry!,
@@ -105,6 +107,7 @@ export async function loadPartnerBookingRecord(
     booking,
     order,
     receipt,
+    principal,
     partnerUserRef: partnerUserRef!,
   };
 }
@@ -120,10 +123,12 @@ export async function loadPartnerBookingHistory(
   );
   const page = partnerReadValue(query.page) ?? "1";
   const bookings = await listPartnerBookings(session, { page, pageSize: 20 });
+  const principal = await getPartnerPrincipalReadback(session);
   return {
     entry: context.entry!,
     brand: context.brand,
     bookings,
+    principal,
     partnerUserRef: partnerUserRef!,
   };
 }

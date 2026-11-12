@@ -205,21 +205,64 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     const declaredFacts = await step(
       "Driver normally saves a declared surname, independently read from PG",
       async () => {
-        await driver.goto(`${DRIVER}/settings`);
+        await test.step("Driver Settings: open the saved-session Settings page", async () => {
+          await driver.goto(`${DRIVER}/settings`);
+        });
         const surname = driver.getByLabel("姓氏（自行提供）", { exact: true });
-        await expect(surname).toBeEnabled();
-        await driver
-          .getByPlaceholder("司機姓名", { exact: true })
-          .fill("SIM hosted travel driver");
-        await surname.fill("演練");
-        const [saved] = await Promise.all([
-          driver.waitForResponse(
-            (response) =>
-              new URL(response.url()).pathname.endsWith("/driver/profile") &&
-              response.request().method() === "PATCH",
-          ),
-          driver.getByRole("button", { name: "儲存設定", exact: true }).click(),
-        ]);
+        await test.step("Driver Settings: surname field becomes enabled", async () => {
+          await expect(surname).toBeEnabled();
+        });
+        await test.step("Driver Settings: fill the original profile name", async () => {
+          await driver
+            .getByPlaceholder("司機姓名", { exact: true })
+            .fill("SIM hosted travel driver");
+        });
+        await test.step("Driver Settings: fill the declared surname", async () => {
+          await surname.fill("演練");
+        });
+        // Only boolean UI facts: no input values, text dumps, session data or
+        // error messages. Diagnostic failure must not replace the real action.
+        const saveAvailability = await driver
+          .getByRole("button")
+          .evaluateAll((buttons) =>
+            buttons
+              .filter((button) => button.textContent?.includes("儲存設定"))
+              .slice(0, 4)
+              .map((button) => ({
+                explicitLabelMatches:
+                  button.getAttribute("aria-label") === "儲存設定",
+                visibleTextMatches: button.textContent?.trim() === "儲存設定",
+                hasExtraVisibleText: Boolean(
+                  button.textContent?.replace("儲存設定", "").trim(),
+                ),
+                disabled:
+                  button.hasAttribute("disabled") ||
+                  button.getAttribute("aria-disabled") === "true",
+              })),
+          )
+          .catch(() => null);
+        await info
+          .attach("normal-travel-settings-save-availability", {
+            contentType: "application/json",
+            body: JSON.stringify({ saveAvailability }),
+          })
+          .catch(() => undefined);
+        const [saved] =
+          await test.step("Driver Settings: save through the original profile PATCH", async () =>
+            Promise.all([
+              // Keep the original response listener registered before click.
+              driver.waitForResponse(
+                (response) =>
+                  new URL(response.url()).pathname.endsWith(
+                    "/driver/profile",
+                  ) && response.request().method() === "PATCH",
+              ),
+              test.step("Driver Settings: click the original Save settings button", async () => {
+                await driver
+                  .getByRole("button", { name: "儲存設定", exact: true })
+                  .click();
+              }),
+            ]));
         expect(saved.status()).toBe(200);
         expect(saved.request().postDataJSON()).toMatchObject({
           driverSurname: "演練",
@@ -229,13 +272,15 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
           driverId: supply.driverId,
           driverSurname: "演練",
         });
-        const persisted = await fixture.fixture.db.query(
-          `SELECT p.record AS profile_record, v.record AS vehicle_record
+        const persisted =
+          await test.step("Driver Settings: independently read the actual profile and vehicle from PG", async () =>
+            fixture.fixture.db.query(
+              `SELECT p.record AS profile_record, v.record AS vehicle_record
            FROM ops.phase1_driver_profiles p
            CROSS JOIN reg.phase1_registry_vehicles v
            WHERE p.driver_id=$1 AND v.vehicle_id=$2`,
-          [supply.driverId, supply.vehicleId],
-        );
+              [supply.driverId, supply.vehicleId],
+            ));
         expect(persisted.rows).toHaveLength(1);
         const row = persisted.rows[0]!;
         expect(row.profile_record).toMatchObject({
@@ -1013,6 +1058,25 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       ),
     });
   } finally {
+    // Snapshot route locations before closing contexts. No query/fragment,
+    // DOM, input values, request headers or credentials are captured.
+    const pagesBeforeClose = contexts.flatMap((context, index) =>
+      context.pages().map((page) => {
+        const url = new URL(page.url());
+        return {
+          role: ["partner", "ops", "driver"][index] ?? "unknown",
+          origin: url.origin,
+          pathname: url.pathname,
+          closed: page.isClosed(),
+        };
+      }),
+    );
+    await info
+      .attach("normal-travel-terminal-page-routes", {
+        contentType: "application/json",
+        body: JSON.stringify({ pages: pagesBeforeClose }),
+      })
+      .catch(() => undefined);
     await info.attach("normal-travel-terminal-owned-ID", {
       contentType: "application/json",
       body: JSON.stringify({

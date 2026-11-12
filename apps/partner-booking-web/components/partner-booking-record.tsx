@@ -5,6 +5,7 @@ import {
   type OwnedOrderRecord,
   type PartnerOrderProgressRecord,
 } from "@drts/contracts";
+import type { PartnerPrincipalReadback } from "@/lib/api-client";
 import { partnerBookingReadHref } from "@/lib/partner-booking-form";
 import { type Locale, t } from "@/lib/translations";
 
@@ -22,6 +23,39 @@ export function PartnerBookingReadError({
   );
 }
 
+/** Same-request identity observation; it adds no visible or announced UI. */
+export function PartnerPrincipalSummary({
+  principal,
+}: {
+  principal: PartnerPrincipalReadback;
+}) {
+  if (principal.availability === "unavailable")
+    return (
+      <span
+        hidden
+        data-partner-principal="api_auth_session"
+        data-principal-availability="unavailable"
+        data-principal-reason={principal.reason}
+      />
+    );
+  return (
+    <span
+      hidden
+      data-partner-principal="api_auth_session"
+      data-principal-availability="available"
+      data-principal-subject={principal.actorId}
+      data-principal-actor-type={principal.actorType}
+      data-principal-realm={principal.realm}
+      data-principal-roles={JSON.stringify(principal.roles)}
+      data-principal-tenant-id={principal.tenantId ?? undefined}
+      data-principal-partner-id={principal.partnerId ?? undefined}
+      data-principal-program-id={principal.partnerProgramId ?? undefined}
+      data-principal-entry-slug={principal.partnerEntrySlug}
+      data-principal-api-request-id={principal.requestId ?? undefined}
+    />
+  );
+}
+
 export function PartnerBookingRecord({
   booking,
   order,
@@ -29,6 +63,7 @@ export function PartnerBookingRecord({
   partnerUserRef,
   locale,
   screen,
+  principal,
 }: {
   booking: BookingRecord;
   order: OwnedOrderRecord & { progress?: PartnerOrderProgressRecord };
@@ -36,6 +71,7 @@ export function PartnerBookingRecord({
   partnerUserRef: string;
   locale: Locale;
   screen: "confirmed" | "receipt";
+  principal?: PartnerPrincipalReadback;
 }) {
   const label = (key: string) => t(key, undefined, locale);
   const rows = [
@@ -113,6 +149,7 @@ export function PartnerBookingRecord({
       <h1>
         {label(screen === "confirmed" ? "read.confirmation" : "read.record")}
       </h1>
+      {principal ? <PartnerPrincipalSummary principal={principal} /> : null}
       <dl>
         {rows.map(([name, value]) => (
           <div key={name}>

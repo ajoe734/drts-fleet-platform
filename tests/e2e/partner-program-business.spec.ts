@@ -4,7 +4,13 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Page,
+  type Response,
+  type TestInfo,
+} from "@playwright/test";
 import type {
   GeoProviderHealthResponse,
   GeoRouteResponse,
@@ -22,6 +28,8 @@ import type {
 import type { ServiceProductRecord } from "../../apps/api/src/modules/service-product/service-product.types";
 import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
 import { PartnerFixture } from "./system-remediation/sr-partner-notify-qa-20260917/partner-fixture";
+import { verifyIdentityReadback } from "./system-remediation/sr-live-global-ux-20261007/guards";
+import type { Session } from "./system-remediation/sr-live-global-ux-20261007/model";
 
 type Subtype = "travel_agency_transfer" | "insurance_replacement_vehicle";
 type Scope = {
@@ -430,6 +438,87 @@ function assertSnapshot(
   expect(data.stored.dropoff).toEqual(data.order.dropoff);
 }
 
+/** Setup supplies the expected actor; only this business document supplies its SSR readback. */
+async function assertNormalPartnerPrincipal(
+  page: Page,
+  scope: Scope,
+  partnerUserRef: string,
+  expectedSubject: string,
+  response: Response | null,
+) {
+  expect(
+    response,
+    "Original normal page reload must return its SSR document",
+  ).not.toBeNull();
+  if (!response)
+    throw new Error("Normal Partner SSR document response is missing");
+  const document = new URL(response.url());
+  const current = new URL(page.url());
+  expect(document.origin).toBe(origin);
+  expect(document.pathname + document.search).toBe(
+    current.pathname + current.search,
+  );
+  const descriptor: Session = {
+    app: "partner-booking-web",
+    role: "referral_passenger",
+    kind: "authorized-isolation",
+    authorizationRef: "SR-ACCEPT-001/C032-existing-hosted-normal-booking",
+    subjectAlias: "C032 normally provisioned SIM Partner passenger",
+    sandboxOnly: true,
+    identity: {
+      path: document.pathname + document.search,
+      subjectPath: "subject",
+      rolePath: "roles",
+      expectedSubject,
+      readerFamily: "partner_normal_ingress_ssr",
+      classification: "partner_normal_ingress_ssr",
+      partnerContext: {
+        entrySlug: scope.entry.entrySlug,
+        partnerUserRef,
+        tenantId: scope.entry.tenantId ?? null,
+        partnerId: scope.entry.partnerId ?? null,
+        programId: scope.entry.programId ?? null,
+      },
+    },
+    storageState: { cookies: [], origins: [] },
+  };
+  const attributes = [
+    "data-partner-principal",
+    "data-principal-availability",
+    "data-principal-subject",
+    "data-principal-actor-type",
+    "data-principal-realm",
+    "data-principal-roles",
+    "data-principal-tenant-id",
+    "data-principal-partner-id",
+    "data-principal-program-id",
+    "data-principal-entry-slug",
+  ];
+  const principal = await page
+    .locator('[data-partner-principal="api_auth_session"]')
+    .evaluateAll(
+      (nodes, names) =>
+        nodes.map((node) =>
+          Object.fromEntries(
+            names.map((name) => [name, node.getAttribute(name)]),
+          ),
+        ),
+      attributes,
+    );
+  // No fixture token, locale cookie, second mint, or identity JSON request can
+  // replace the API self-read of the exact bearer used by this business SSR.
+  const verified = verifyIdentityReadback(descriptor, principal, {
+    expectedRole: descriptor.role,
+    status: response.status(),
+    candidateSha: response.headers()["x-drts-candidate-sha"],
+    expectedRuntimeSha: required("CANDIDATE_SHA"),
+    documentPath: current.pathname + current.search,
+  });
+  expect(verified.subject).toBe(expectedSubject);
+  expect(verified.effectiveRoles).toContain(descriptor.role);
+  expect(verified.classification).toBe("partner_normal_ingress_ssr");
+}
+
 async function readPersistedPages(
   page: Page,
   scope: Scope,
@@ -437,6 +526,7 @@ async function readPersistedPages(
   bookingId: string,
   orderId: string,
   details: PartnerBookingDetails,
+  expectedSubject: string,
 ) {
   const originalBookUrl = page.url();
   const notPaid =
@@ -481,18 +571,32 @@ async function readPersistedPages(
     .click();
   await assertRecord("Booking confirmation");
   assertRoute("confirmed");
-  await page.reload();
+  const confirmationResponse = await page.reload();
   await assertRecord("Booking confirmation");
   assertRoute("confirmed");
+  await assertNormalPartnerPrincipal(
+    page,
+    scope,
+    partnerUserRef,
+    expectedSubject,
+    confirmationResponse,
+  );
   await page
     .getByTestId("partner-persisted-booking")
     .getByRole("link", { name: "Booking record", exact: true })
     .click();
   await assertRecord("Booking record");
   assertRoute("receipt");
-  await page.reload();
+  const receiptResponse = await page.reload();
   await assertRecord("Booking record");
   assertRoute("receipt");
+  await assertNormalPartnerPrincipal(
+    page,
+    scope,
+    partnerUserRef,
+    expectedSubject,
+    receiptResponse,
+  );
   await page
     .getByTestId("partner-persisted-booking")
     .getByRole("link", { name: "Partner / program bookings", exact: true })
@@ -525,9 +629,16 @@ async function readPersistedPages(
   await expect(
     history.getByRole("link", { name: "Next page", exact: true }),
   ).toHaveCount(0);
-  await page.reload();
+  const historyResponse = await page.reload();
   await expect(history).toBeVisible();
   assertRoute("trips");
+  await assertNormalPartnerPrincipal(
+    page,
+    scope,
+    partnerUserRef,
+    expectedSubject,
+    historyResponse,
+  );
   await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-booking-id", bookingId);
   await row.getByRole("link", { name: bookingId, exact: true }).click();
@@ -755,6 +866,7 @@ async function runNormalBooking(
     bookingId,
     orderId,
     details,
+    beforeReload.drtsPassengerId,
   );
   // Preserve the original fresh normally issued session + PG SELECT checks.
   await page.reload();
@@ -792,6 +904,7 @@ async function runNormalBooking(
       "fresh-session-reads-after-reload",
       "clicked-confirmation-record-channel-history",
       "persisted-pages-reload-same-IDs",
+      "generic-same-SSR-principal-reader-on-original-document-reloads",
     ],
     simulated: [
       "Google-metadata-transport-only-genuine-WIF-token",

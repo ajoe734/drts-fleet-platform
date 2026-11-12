@@ -74,7 +74,10 @@ function completedReceipt(): ReceiptWire {
   };
 }
 
-function transport(subtype = "travel_agency_transfer") {
+function transport(subtype = "travel_agency_transfer", uniqueSessions = false) {
+  let handoffNumber = 0;
+  let principalReadNumber = 0;
+  let principalMode: "active" | "inactive" | "error" | "mismatch" = "active";
   let status = "created";
   let mode: "rows" | "empty" | "empty-page" | "error" = "rows";
   const calls: string[] = [];
@@ -169,9 +172,12 @@ function transport(subtype = "travel_agency_transfer") {
       });
       if (url.pathname === "/api/partner/entries/" + entry.entrySlug)
         return envelope(entry);
-      if (url.pathname === "/api/partner/ingress/handoff")
+      if (url.pathname === "/api/partner/ingress/handoff") {
+        handoffNumber++;
         return envelope({
-          accessToken: "SIM-unit-only-server-session",
+          accessToken: uniqueSessions
+            ? "SIM-private-session-" + handoffNumber
+            : "SIM-unit-only-server-session",
           tokenType: "Bearer",
           expiresIn: "15m",
           partnerEntrySlug: entry.entrySlug,
@@ -190,6 +196,7 @@ function transport(subtype = "travel_agency_transfer") {
             partnerEntrySlug: entry.entrySlug,
           },
         });
+      }
       if (mode === "error")
         return Response.json(
           {
@@ -200,6 +207,42 @@ function transport(subtype = "travel_agency_transfer") {
           },
           { status: 503 },
         );
+      if (url.pathname === "/api/auth/session") {
+        principalReadNumber++;
+        if (principalMode === "error")
+          return Response.json(
+            {
+              error: {
+                code: "PRINCIPAL_SOURCE_UNAVAILABLE",
+                message: "Synthetic self-read transport unavailable",
+              },
+            },
+            { status: 503 },
+          );
+        // This is the API's separate self-read response, not the handoff object.
+        return Response.json({
+          data: {
+            active: principalMode !== "inactive",
+            identity: {
+              actor_type: "referral_passenger",
+              actor_id: "SIM-resident",
+              realm: "partner",
+              roles: ["referral_passenger"],
+              tenant_id:
+                principalMode === "mismatch"
+                  ? "SIM-other-tenant"
+                  : entry.tenantId,
+              partner_id: entry.partnerId,
+              partner_program_id: entry.programId,
+              partner_entry_slug: entry.entrySlug,
+            },
+          },
+          meta: {
+            request_id: "SIM-principal-read-" + principalReadNumber,
+            timestamp: "2026-11-12T00:00:00Z",
+          },
+        });
+      }
       if (url.pathname === "/api/partner/orders/SIM-persisted-order/receipt") {
         if (receiptErrorCode)
           return Response.json(
@@ -234,6 +277,9 @@ function transport(subtype = "travel_agency_transfer") {
   return {
     calls,
     requestHeaders,
+    updatePrincipalMode: (value: typeof principalMode) => {
+      principalMode = value;
+    },
     updateReceipt: (value: ReceiptWire) => {
       receipt = value;
     },
@@ -820,4 +866,122 @@ describe("normal Partner same-order progress pages", () => {
       api.calls.filter((path) => path.startsWith("/api/partner/orders/")),
     ).toEqual([]);
   });
+});
+
+describe("normal Partner same-SSR principal readback", () => {
+  it.each(["confirmed", "receipt", "history"] as const)(
+    "projects the actual API self-read for %s using the exact order-read bearer",
+    async (screen) => {
+      const api = transport(undefined, true);
+      const element =
+        screen === "history"
+          ? await TripsPage(args())
+          : screen === "receipt"
+            ? await ReceiptPage(args({ bookingId: "booking-SIM-persisted" }))
+            : await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" }));
+      const html = renderToStaticMarkup(element);
+      expect(html).toContain('data-partner-principal="api_auth_session"');
+      expect(html).toContain('data-principal-availability="available"');
+      const projection = html.match(
+        /<[^>]+data-partner-principal="api_auth_session"[^>]*>/,
+      )?.[0];
+      expect(projection).toMatch(/\bhidden(?:="")?(?:\s|>)/);
+      expect(html).toContain('data-principal-subject="SIM-resident"');
+      expect(html).toContain('data-principal-actor-type="referral_passenger"');
+      expect(html).toContain('data-principal-realm="partner"');
+      expect(html).toContain('data-principal-tenant-id="SIM-tenant"');
+      expect(html).toContain('data-principal-partner-id="SIM-partner"');
+      expect(html).toContain('data-principal-program-id="SIM-program"');
+      expect(html).toContain('data-principal-entry-slug="sim-persisted"');
+      expect(html).toContain(
+        'data-principal-api-request-id="SIM-principal-read-1"',
+      );
+      expect(html).toContain("booking-SIM-persisted");
+      expect(html).not.toContain("SIM-private-session-1");
+      expect(
+        api.calls.filter((path) => path === "/api/partner/ingress/handoff"),
+      ).toHaveLength(1);
+      const business = api.requestHeaders.filter(
+        ({ path }) =>
+          path.startsWith("/api/partner/bookings") ||
+          path.startsWith("/api/partner/orders"),
+      );
+      const self = api.requestHeaders.filter(
+        ({ path }) => path === "/api/auth/session",
+      );
+      expect(self).toHaveLength(1);
+      expect(business.length).toBeGreaterThan(0);
+      expect(self[0]!.authorization).toBe("Bearer SIM-private-session-1");
+      expect(
+        business.every(
+          ({ authorization }) => authorization === self[0]!.authorization,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("re-reads principal on reload without minting a second bearer inside one SSR read", async () => {
+    const api = transport(undefined, true);
+    const first = renderToStaticMarkup(
+      await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    const second = renderToStaticMarkup(
+      await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    expect(first).toContain(
+      'data-principal-api-request-id="SIM-principal-read-1"',
+    );
+    expect(second).toContain(
+      'data-principal-api-request-id="SIM-principal-read-2"',
+    );
+    expect(
+      api.calls.filter((path) => path === "/api/partner/ingress/handoff"),
+    ).toHaveLength(2);
+    expect(
+      api.requestHeaders
+        .filter(({ path }) => path === "/api/auth/session")
+        .map(({ authorization }) => authorization),
+    ).toEqual(["Bearer SIM-private-session-1", "Bearer SIM-private-session-2"]);
+    expect(
+      api.requestHeaders
+        .filter(
+          ({ path }) => path === "/api/partner/orders/SIM-persisted-order",
+        )
+        .map(({ authorization }) => authorization),
+    ).toEqual(["Bearer SIM-private-session-1", "Bearer SIM-private-session-2"]);
+    expect(first + second).not.toContain("SIM-private-session-");
+  });
+
+  it.each(["inactive", "error", "mismatch"] as const)(
+    "keeps existing booking data readable while the %s principal read is explicitly unavailable",
+    async (mode) => {
+      const api = transport();
+      api.updatePrincipalMode(mode);
+      const html = renderToStaticMarkup(
+        await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" })),
+      );
+      expect(html).toContain('data-principal-availability="unavailable"');
+      expect(html).toContain(
+        'data-principal-reason="' +
+          {
+            inactive: "PARTNER_PRINCIPAL_INACTIVE",
+            error: "PRINCIPAL_SOURCE_UNAVAILABLE",
+            mismatch: "PARTNER_PRINCIPAL_READBACK_MISMATCH",
+          }[mode] +
+          '"',
+      );
+      const projection = html.match(
+        /<[^>]+data-partner-principal="api_auth_session"[^>]*>/,
+      )?.[0];
+      expect(projection).toMatch(/\bhidden(?:="")?(?:\s|>)/);
+      expect(html).toContain("booking-SIM-persisted");
+      expect(html).toContain("SIM-persisted-order");
+      expect(html).not.toContain("data-principal-subject=");
+
+      expect(html).not.toContain("SIM-unit-only-server-session");
+      expect(
+        api.calls.filter((path) => path === "/api/auth/session"),
+      ).toHaveLength(1);
+    },
+  );
 });

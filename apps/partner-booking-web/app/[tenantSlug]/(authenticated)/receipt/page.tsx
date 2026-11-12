@@ -29,6 +29,7 @@ export default async function PartnerReceiptPage({
       <>
         <PartnerBookingRecord
           booking={record.booking}
+          principal={record.principal}
           order={record.order}
           entrySlug={record.entry.entrySlug}
           partnerUserRef={record.partnerUserRef}

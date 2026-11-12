@@ -1411,3 +1411,184 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
     }, 30_000);
   });
 });
+
+// These are finite synthetic adapter inputs, not a provisioned Partner identity
+// or an additional hosted app-role PASS. The original 21 real-source contracts
+// and their fake-Partner JSON negative remain unchanged above.
+describe("Partner normal-ingress same-SSR identity reader adapter", () => {
+  function fixture(screen = "confirmed") {
+    const publicQuery =
+      "partnerUserRef=SIM-unit-normal-ref" +
+      (screen === "trips"
+        ? ""
+        : "&bookingId=SIM-unit-owned-booking&orderId=SIM-unit-owned-order");
+    const route = "/SIM-unit-entry/" + screen + "?" + publicQuery;
+    // Variable + assertion keeps this existing callable unit import valid on
+    // the old Session shape as well; baseline behavior is the old missing reader.
+    const session = {
+      app: "partner-booking-web",
+      role: "referral_passenger",
+      kind: "authorized-isolation",
+      authorizationRef: "synthetic-unit-adapter-only",
+      subjectAlias: "synthetic-unit-principal",
+      sandboxOnly: true,
+      identity: {
+        path: route,
+        subjectPath: "subject",
+        rolePath: "roles",
+        expectedSubject: "SIM-unit-api-principal",
+        readerFamily: "partner_normal_ingress_ssr",
+        classification: "partner_normal_ingress_ssr",
+        partnerContext: {
+          entrySlug: "SIM-unit-entry",
+          partnerUserRef: "SIM-unit-normal-ref",
+          tenantId: "SIM-unit-tenant",
+          partnerId: "SIM-unit-partner",
+          programId: "SIM-unit-program",
+        },
+      },
+      storageState: { cookies: [], origins: [] },
+    } as unknown as Session;
+    const attributes: Record<string, string | null> = {
+      "data-partner-principal": "api_auth_session",
+      "data-principal-availability": "available",
+      "data-principal-subject": "SIM-unit-api-principal",
+      "data-principal-actor-type": "referral_passenger",
+      "data-principal-realm": "partner",
+      "data-principal-roles": JSON.stringify(["referral_passenger"]),
+      "data-principal-tenant-id": "SIM-unit-tenant",
+      "data-principal-partner-id": "SIM-unit-partner",
+      "data-principal-program-id": "SIM-unit-program",
+      "data-principal-entry-slug": "SIM-unit-entry",
+    };
+    const options = {
+      expectedRole: "referral_passenger",
+      status: 200,
+      candidateSha: "c".repeat(40),
+      expectedRuntimeSha: "c".repeat(40),
+      documentPath: route,
+    };
+    return { session, attributes, options };
+  }
+
+  it.each(["confirmed", "receipt", "trips"])(
+    "normalizes the actual %s SSR principal projection without another JSON identity request",
+    (screen) => {
+      const { session, attributes, options } = fixture(screen);
+      expect(verifyIdentityReadback(session, [attributes], options)).toEqual({
+        subject: "SIM-unit-api-principal",
+        effectiveRoles: ["referral_passenger"],
+        classification: "partner_normal_ingress_ssr",
+      });
+      // No API request-id is required: it does not identify the whole SSR.
+      expect(attributes).not.toHaveProperty("data-principal-api-request-id");
+    },
+  );
+
+  it("allows a source-backed normal-ingress fixture without inventing a browser session cookie", () => {
+    const { session } = fixture();
+    const manifest = {
+      runtimeSha: "c".repeat(40),
+      surfaces: [
+        {
+          app: "partner-booking-web",
+          service: "drts-dev-partner-booking-web",
+          roles: ["referral_passenger"],
+          roleSource:
+            "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+        },
+      ],
+      screens: [],
+      excluded: {},
+    };
+    const deployment: Deployment = {
+      project: "drts-dev-devcc-20260825",
+      region: "us-central1",
+      runtimeSha: manifest.runtimeSha,
+      observedAt: "2026-11-12T00:00:00Z",
+      services: [
+        {
+          app: "partner-booking-web",
+          service: "drts-dev-partner-booking-web",
+          origin: "https://drts-dev-partner-booking-web.us-central1.run.app",
+          revisions: [],
+        },
+      ],
+    };
+    expect(() =>
+      validateSessions([session], deployment, manifest),
+    ).not.toThrow();
+    expect(session.storageState.cookies).toEqual([]);
+    const generic = structuredClone(session);
+    delete generic.identity.readerFamily;
+    expect(() => validateSessions([generic], deployment, manifest)).toThrow(
+      "partner-normal-ingress-identity-readback-adapter-missing",
+    );
+  });
+
+  it("preserves nullable API context without borrowing a tenant or partner identity", () => {
+    const { session, attributes, options } = fixture();
+    const context = session.identity.partnerContext!;
+    context.tenantId = null;
+    context.partnerId = null;
+    context.programId = null;
+    attributes["data-principal-tenant-id"] = null;
+    attributes["data-principal-partner-id"] = null;
+    attributes["data-principal-program-id"] = null;
+    expect(verifyIdentityReadback(session, [attributes], options).subject).toBe(
+      "SIM-unit-api-principal",
+    );
+    attributes["data-principal-tenant-id"] = "SIM-other-tenant";
+    expect(() =>
+      verifyIdentityReadback(session, [attributes], options),
+    ).toThrow("partner SSR context mismatch");
+  });
+
+  it("does not accept generic JSON, unavailable or duplicate markers, or another principal/role", () => {
+    const { session, attributes, options } = fixture();
+    for (const body of [
+      {
+        data: {
+          identity: {
+            actor_id: session.identity.expectedSubject,
+            roles: [session.role],
+          },
+        },
+      },
+      [],
+      [attributes, attributes],
+      [{ ...attributes, "data-principal-availability": "unavailable" }],
+      [{ ...attributes, "data-principal-subject": "SIM-other-principal" }],
+      [{ ...attributes, "data-principal-realm": "tenant" }],
+      [{ ...attributes, "data-principal-roles": '["tenant_admin"]' }],
+      [{ ...attributes, "data-principal-roles": "not-json" }],
+    ])
+      expect(() => verifyIdentityReadback(session, body, options)).toThrow();
+  });
+
+  it("binds the displayed observation to this real document context, HTTP status and runtime SHA", () => {
+    const { session, attributes, options } = fixture();
+    for (const changed of [
+      { ...options, status: 503 },
+      { ...options, candidateSha: "d".repeat(40) },
+      {
+        ...options,
+        documentPath:
+          "/SIM-other-entry/confirmed?partnerUserRef=SIM-unit-normal-ref&orderId=SIM-unit-owned-order",
+      },
+      {
+        ...options,
+        documentPath:
+          "/SIM-unit-entry/confirmed?partnerUserRef=SIM-other-ref&orderId=SIM-unit-owned-order",
+      },
+      {
+        ...options,
+        documentPath: "/SIM-unit-entry/book?partnerUserRef=SIM-unit-normal-ref",
+      },
+      { ...options, documentPath: "/api/auth/session" },
+    ])
+      expect(() =>
+        verifyIdentityReadback(session, [attributes], changed),
+      ).toThrow();
+  });
+});

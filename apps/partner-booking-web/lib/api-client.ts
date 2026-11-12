@@ -817,3 +817,83 @@ export async function routePartnerGeo(
     body: JSON.stringify(command),
   });
 }
+
+/** Read the principal of this exact BFF bearer; this does not create a session. */
+export type PartnerPrincipalReadback =
+  | {
+      availability: "available";
+      source: "api_auth_session";
+      actorId: string;
+      actorType: "referral_passenger";
+      realm: "partner";
+      roles: string[];
+      tenantId: string | null;
+      partnerId: string | null;
+      partnerProgramId: string | null;
+      partnerEntrySlug: string;
+      requestId: string | null;
+    }
+  | {
+      availability: "unavailable";
+      source: "api_auth_session";
+      reason: string;
+    };
+
+export async function getPartnerPrincipalReadback(
+  session: PartnerSessionRecord,
+): Promise<PartnerPrincipalReadback> {
+  const unavailable = (reason: string): PartnerPrincipalReadback => ({
+    availability: "unavailable",
+    source: "api_auth_session",
+    reason,
+  });
+  try {
+    const envelope = await requestAuthorityEnvelope<{
+      active: boolean;
+      identity: IdentityContext;
+    }>("/api/auth/session", {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    });
+    const identity = envelope.data?.identity;
+    if (envelope.data?.active !== true || !identity)
+      return unavailable("PARTNER_PRINCIPAL_INACTIVE");
+    // Read consistency, not a new authorization policy: the original order
+    // reads remain authoritative and remain readable if this observation fails.
+    if (
+      identity.actorType !== "referral_passenger" ||
+      identity.realm !== "partner" ||
+      typeof identity.actorId !== "string" ||
+      identity.actorId.length === 0 ||
+      identity.actorId !== session.identity.actorId ||
+      identity.tenantId !== session.identity.tenantId ||
+      (identity.partnerId ?? null) !== (session.identity.partnerId ?? null) ||
+      (identity.partnerProgramId ?? null) !==
+        (session.identity.partnerProgramId ?? null) ||
+      !identity.partnerEntrySlug ||
+      identity.partnerEntrySlug !== session.partnerEntry.entrySlug ||
+      !Array.isArray(identity.roles) ||
+      !identity.roles.includes("referral_passenger")
+    )
+      return unavailable("PARTNER_PRINCIPAL_READBACK_MISMATCH");
+    return {
+      availability: "available",
+      source: "api_auth_session",
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      realm: identity.realm,
+      roles: [...identity.roles],
+      tenantId: identity.tenantId ?? null,
+      partnerId: identity.partnerId ?? null,
+      partnerProgramId: identity.partnerProgramId ?? null,
+      partnerEntrySlug: identity.partnerEntrySlug,
+      requestId: normalizeEnvelopeRequestId(envelope.meta),
+    };
+  } catch (error) {
+    return unavailable(
+      error instanceof PartnerAuthorityError
+        ? error.code
+        : "PARTNER_PRINCIPAL_UNAVAILABLE",
+    );
+  }
+}
