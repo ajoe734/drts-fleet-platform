@@ -7,7 +7,7 @@ import { seedAgencyPlatformPersonnel } from "./platform-personnel-fixture";
 // Only Google authorization and external SMTP delivery are simulated.
 // The hosted job first completes its existing real Passenger journeys, then
 // reuses that database: no extra trip seed, DB reset or internal API mock here.
-const BASE = process.env.AGENCY_BUSINESS_BASE_URL ?? "http://127.0.0.1:3212";
+const BASE = process.env.AGENCY_BUSINESS_BASE_URL ?? "http://localhost:3212";
 const API = `http://127.0.0.1:${process.env.AGENCY_BUSINESS_API_PORT ?? "3141"}`;
 const EMAIL = "admin@acme.example";
 type WireRow = Record<string, unknown>;

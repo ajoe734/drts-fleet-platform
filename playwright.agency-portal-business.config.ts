@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 // Only Google authorization/code exchange and SMTP delivery are explicit SIM.
 // Do not run the browser/runtime suite on the development VM (AGENTS.md).
 const apiOrigin = "http://127.0.0.1:3141";
-const agencyOrigin = "http://127.0.0.1:3212";
+const agencyOrigin = "http://localhost:3212";
 
 export default defineConfig({
   testDir: "./tests/e2e",
