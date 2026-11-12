@@ -248,12 +248,38 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
 
   await test.step("Delivered invitation and simulated external Google return create a real Agency session", async () => {
     await page.goto(invitationUrl);
+    const callbackResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(BASE).origin &&
+        url.pathname === "/api/auth/agency/callback" &&
+        response.request().method() === "GET"
+      );
+    });
     await page
       .getByRole("link", { name: "Accept invitation with Google", exact: true })
       .click();
-    await expect(
-      page.getByRole("heading", { name: "Home", exact: true }),
-    ).toBeVisible();
+    const callback = await callbackResponse;
+    const location = await callback.headerValue("location");
+    const redirect = location ? new URL(location, BASE) : null;
+    const rawError = redirect?.searchParams.get("error") ?? null;
+    // Only these public diagnostics may reach a failing native assertion.
+    // Never report the callback URL, state, Google code, cookies or response body.
+    const callbackDiagnostic = {
+      status: callback.status(),
+      redirectPath: redirect?.pathname ?? null,
+      errorCode:
+        rawError === null
+          ? null
+          : /^[A-Z0-9_]{1,96}$/.test(rawError)
+            ? rawError
+            : "NON_ALLOWLISTED_ERROR_CODE",
+    };
+    expect(callbackDiagnostic, "real Agency BFF callback result").toEqual({
+      status: 307,
+      redirectPath: "/",
+      errorCode: null,
+    });
     const session = await data<{ active: boolean; identity: WireRow }>(
       await page.request.get(`${BASE}/api/auth/session`),
       "real Agency BFF session verification",
@@ -269,6 +295,9 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     expect(session.identity.roles).toEqual(
       expect.arrayContaining(["agency_exporter"]),
     );
+    await expect(
+      page.getByRole("heading", { name: "Home", exact: true }),
+    ).toBeVisible();
     await expect(page.locator("main dd").first()).toHaveText(agencyId);
   });
 
