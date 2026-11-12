@@ -57,7 +57,12 @@ test.describe("partner map booking UI", () => {
     expect(response?.status()).toBe(200);
 
     await fillCardProgramFields(page);
-    await selectPartnerMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectPartnerMapCandidate(
+      page,
+      0,
+      "taoyuan airport",
+      "Taoyuan Airport Terminal 1",
+    );
     await selectPartnerMapCandidate(
       page,
       1,
@@ -87,14 +92,14 @@ test.describe("partner map booking UI", () => {
     await selectPartnerMapCandidate(
       page,
       0,
-      "banqiao",
-      "Banqiao District Office",
+      "taoyuan airport",
+      "Taoyuan Airport Terminal 1",
     );
     await selectPartnerMapCandidate(
       page,
       1,
-      "taipei main",
-      "Taipei Main Station",
+      "banqiao",
+      "Banqiao District Office",
     );
 
     await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
@@ -124,7 +129,12 @@ test.describe("partner map booking UI", () => {
     expect(response?.status()).toBe(200);
 
     await fillCardProgramFields(page);
-    await selectPartnerMapCandidate(page, 0, "taipei 101", "Taipei 101");
+    await selectPartnerMapCandidate(
+      page,
+      0,
+      "taoyuan airport",
+      "Taoyuan Airport Terminal 1",
+    );
 
     // Dropoff uses manual coordinates outside the service area
     const dropoffPicker = page.locator("[data-address-map-picker]").nth(1);

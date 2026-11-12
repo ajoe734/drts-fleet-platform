@@ -225,6 +225,165 @@ let mockAddresses = [
   },
 ];
 
+// Explicit HTTP authority SIM for the hosted UI route suite, not a PG or
+// ServiceAreaService assertion. Keep the canonical Geo wire and airport-end
+// semantics; the full normal hosted lane separately exercises the real API.
+const geoFixtureClock = "2026-11-12T00:00:00.000Z";
+const geoFixtureCandidates = [
+  {
+    candidateId: "mock-taipei-101",
+    provider: "mock",
+    providerCandidateId: "place-101",
+    placeId: "place-101",
+    displayName: "Taipei 101",
+    address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+    location: { lat: 25.033964, lng: 121.564468 },
+    confidence: "exact",
+    accuracyM: 8,
+  },
+  {
+    candidateId: "mock-taipei-main",
+    provider: "mock",
+    providerCandidateId: "place-main",
+    placeId: "place-main",
+    displayName: "Taipei Main Station",
+    address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+    location: { lat: 25.047762, lng: 121.517017 },
+    confidence: "interpolated",
+    accuracyM: 25,
+  },
+  {
+    candidateId: "mock-banqiao",
+    provider: "mock",
+    providerCandidateId: "place-banqiao",
+    placeId: "place-banqiao",
+    displayName: "Banqiao District Office",
+    address: "No. 161, Section 1, Zhongshan Road, Banqiao District, New Taipei",
+    location: { lat: 25.011, lng: 121.4636 },
+    confidence: "approximate",
+    accuracyM: 120,
+  },
+  {
+    candidateId: "mock-taoyuan-airport-t1",
+    provider: "mock",
+    providerCandidateId: "mock:place:taoyuan-airport-t1",
+    placeId: "mock-place-taoyuan-airport-t1",
+    displayName: "Taoyuan Airport Terminal 1",
+    address: "桃園市大園區航站南路9號",
+    location: { lat: 25.0797, lng: 121.2342 },
+    confidence: "exact",
+    accuracyM: 30,
+  },
+];
+
+function geoFixturePoint(value) {
+  return (
+    value &&
+    Number.isFinite(value.lat) &&
+    Number.isFinite(value.lng) &&
+    value.lat >= -90 &&
+    value.lat <= 90 &&
+    value.lng >= -180 &&
+    value.lng <= 180
+  );
+}
+
+function geoFixtureDistance(left, right) {
+  const radians = (value) => (value * Math.PI) / 180;
+  const dLat = radians(right.lat - left.lat);
+  const dLng = radians(right.lng - left.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(left.lat)) *
+      Math.cos(radians(right.lat)) *
+      Math.sin(dLng / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function geoFixtureAirport(point) {
+  return geoFixtureDistance(point, { lat: 25.0797, lng: 121.2342 }) <= 6500;
+}
+
+function geoFixtureStop(kind, location) {
+  let decision = "not_serviceable";
+  let serviceAreaCodes = [];
+  if (geoFixtureAirport(location)) {
+    decision = "serviceable";
+    serviceAreaCodes = ["SIM-TPE-AIRPORT"];
+  } else if (
+    location.lat >= 24.99 &&
+    location.lat <= 25.12 &&
+    location.lng >= 121.45 &&
+    location.lng <= 121.62
+  ) {
+    const edge =
+      location.lat - 24.99 < 0.013 ||
+      25.12 - location.lat < 0.013 ||
+      location.lng - 121.45 < 0.017 ||
+      121.62 - location.lng < 0.017;
+    decision = edge ? "manual_review" : "serviceable";
+    serviceAreaCodes = ["SIM-TAIPEI-CITY"];
+  }
+  return {
+    kind,
+    location,
+    decision,
+    serviceAreaCodes,
+    policyCodes: [],
+    geometryVersionRefs: ["SIM-route-v1"],
+    reasonCodes: [`SIM_${kind}_${decision}`],
+    reasonMessages: [],
+  };
+}
+
+function geoFixtureAddress(candidate, payload) {
+  return {
+    address: candidate?.address ?? payload.addressText,
+    lat: candidate?.location.lat ?? payload.selectedPoint.lat,
+    lng: candidate?.location.lng ?? payload.selectedPoint.lng,
+    coordinateSource: candidate ? "provider_candidate" : "manual_pin",
+    geocodeConfidence: candidate?.confidence ?? "manual",
+    geocodeProvider: "mock",
+    coordinateAccuracyM: candidate?.accuracyM ?? null,
+    providerCandidateId: candidate?.providerCandidateId ?? null,
+    placeId: candidate?.placeId ?? null,
+    selectedByActorId: payload.selectedByActorId ?? null,
+    selectedAt: geoFixtureClock,
+    manualOverrideReason: payload.manualOverrideReason ?? null,
+    surface: payload.surface,
+    resolvedAt: geoFixtureClock,
+  };
+}
+
+function geoFixtureJson(res, data, status = 200) {
+  json(res, status, {
+    data,
+    meta: {
+      requestId: "req-SIM-canonical-geo",
+      timestamp: geoFixtureClock,
+    },
+  });
+}
+
+function geoFixtureBody(req, res, read) {
+  let body = "";
+  req.on("data", (chunk) => {
+    body += chunk.toString();
+  });
+  req.on("end", () => {
+    let payload;
+    try {
+      payload = JSON.parse(body || "{}");
+    } catch {
+      json(res, 400, {
+        error: { code: "VALIDATION_ERROR", message: "Invalid JSON." },
+      });
+      return;
+    }
+    read(payload);
+  });
+}
+
 const server = http.createServer((req, res) => {
   if (!req.url) {
     json(res, 400, { error: { code: "BAD_REQUEST", message: "Missing URL." } });
@@ -232,6 +391,189 @@ const server = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+
+  // Both Next instances share this one existing HTTP SIM. The outage base
+  // prefix only selects failed external Geo transport; booking/auth stubs stay
+  // exactly the normal fixture. No product header or auth rule is added.
+  const geoOutage = url.pathname.startsWith("/outage/api/");
+  if (geoOutage) url.pathname = url.pathname.slice("/outage".length);
+  if (geoOutage && url.pathname.startsWith("/api/geo/")) {
+    if (req.method === "GET" && url.pathname === "/api/geo/health") {
+      geoFixtureJson(res, {
+        provider: "mock",
+        mode: "disabled",
+        status: "unhealthy",
+        environment: "test",
+        generatedAt: geoFixtureClock,
+        failClosed: true,
+        mockAllowed: true,
+        requiredSecretNames: [],
+        missingSecretNames: [],
+      });
+    } else {
+      json(res, 503, {
+        error: {
+          code: "GEO_PROVIDER_UNAVAILABLE",
+          message: "Explicit SIM Geo provider outage.",
+          retryable: true,
+        },
+      });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/geo/search") {
+    const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const requestedLimit = Number(url.searchParams.get("limit") ?? 8);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(20, Math.max(1, requestedLimit))
+      : 8;
+    const candidates = query
+      ? geoFixtureCandidates
+          .filter((candidate) =>
+            `${candidate.displayName} ${candidate.address}`
+              .toLowerCase()
+              .includes(query),
+          )
+          .slice(0, limit)
+      : [];
+    geoFixtureJson(res, {
+      candidates,
+      provider: "mock",
+      generatedAt: geoFixtureClock,
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/geo/resolve") {
+    geoFixtureBody(req, res, (payload) => {
+      const candidate = geoFixtureCandidates.find(
+        (item) =>
+          item.candidateId === payload.candidateId ||
+          item.providerCandidateId === payload.providerCandidateId ||
+          item.placeId === payload.placeId,
+      );
+      if (!candidate && !geoFixturePoint(payload.selectedPoint)) {
+        json(res, 404, {
+          error: {
+            code: "GEO_CANDIDATE_NOT_FOUND",
+            message: "No SIM candidate matched.",
+          },
+        });
+        return;
+      }
+      geoFixtureJson(
+        res,
+        {
+          address: geoFixtureAddress(candidate, payload),
+          candidate: candidate ?? null,
+          provider: "mock",
+          resolvedAt: geoFixtureClock,
+        },
+        201,
+      );
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/geo/reverse") {
+    geoFixtureBody(req, res, (payload) => {
+      if (!geoFixturePoint(payload.location)) {
+        json(res, 400, {
+          error: { code: "VALIDATION_ERROR", message: "Coordinates required." },
+        });
+        return;
+      }
+      geoFixtureJson(
+        res,
+        {
+          address: {
+            address: `SIM pinned location (${payload.location.lat}, ${payload.location.lng})`,
+            lat: payload.location.lat,
+            lng: payload.location.lng,
+            coordinateSource: "reverse_geocode",
+            geocodeConfidence: "approximate",
+            geocodeProvider: "mock",
+            surface: payload.surface,
+            resolvedAt: geoFixtureClock,
+          },
+          provider: "mock",
+          resolvedAt: geoFixtureClock,
+        },
+        201,
+      );
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/geo/route") {
+    geoFixtureBody(req, res, (payload) => {
+      const direction = payload.airportTransfer?.direction;
+      if (
+        !geoFixturePoint(payload.origin) ||
+        !geoFixturePoint(payload.destination) ||
+        (payload.airportTransfer !== undefined &&
+          direction !== "pickup" &&
+          direction !== "dropoff")
+      ) {
+        json(res, 400, {
+          error: {
+            code: "VALIDATION_ERROR",
+            message:
+              "Both coordinates and a valid requested airport direction required.",
+          },
+        });
+        return;
+      }
+      const stops = [
+        geoFixtureStop("pickup", payload.origin),
+        geoFixtureStop("dropoff", payload.destination),
+      ];
+      const airportPoint =
+        direction === "pickup" ? payload.origin : payload.destination;
+      const airportMatched = geoFixtureAirport(airportPoint);
+      const decision =
+        !airportMatched ||
+        stops.some((stop) => stop.decision === "not_serviceable")
+          ? "not_serviceable"
+          : stops.some((stop) => stop.decision === "manual_review")
+            ? "manual_review"
+            : "serviceable";
+      const serviceAreaEvaluation = {
+        decision,
+        serviceProductType: "credit_card_airport_transfer",
+        evaluatedAt: geoFixtureClock,
+        stops,
+        serviceAreaCodes: [
+          ...new Set(stops.flatMap((stop) => stop.serviceAreaCodes)),
+        ],
+        geometryVersionRefs: ["SIM-route-v1"],
+        reasonCodes: airportMatched
+          ? stops.flatMap((stop) => stop.reasonCodes)
+          : [
+              direction === "pickup"
+                ? "AIRPORT_PICKUP_REQUIRED"
+                : "AIRPORT_DROPOFF_REQUIRED",
+            ],
+        reasonMessages: [],
+      };
+      const distanceMeters = Math.round(
+        geoFixtureDistance(payload.origin, payload.destination) * 1.2,
+      );
+      geoFixtureJson(
+        res,
+        {
+          provider: "mock",
+          distanceMeters,
+          durationSeconds: Math.round(distanceMeters / 9),
+          encodedPolyline: null,
+          generatedAt: geoFixtureClock,
+          ...(payload.airportTransfer !== undefined
+            ? { serviceAreaEvaluation }
+            : {}),
+        },
+        201,
+      );
+    });
+    return;
+  }
 
   if (
     req.method === "GET" &&
