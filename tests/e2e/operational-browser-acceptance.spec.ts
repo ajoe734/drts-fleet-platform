@@ -1324,9 +1324,7 @@ for (const journey of manifest.journeys) {
   });
 }
 
-test("paused Partner Booking and retired Concierge remain unreachable", async ({
-  request,
-}) => {
+test("retired Concierge remains unreachable", async ({ request }) => {
   for (const retired of manifest.retiredSurfaces) {
     const response = await request.get(
       new URL(retired.path, requiredOrigin(retired.baseUrlEnv)).toString(),

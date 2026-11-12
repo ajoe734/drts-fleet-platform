@@ -386,6 +386,7 @@ exit 1
     ["rogue-service", 1],
   ])("resolves passenger target '%s' with exit %i", (target, status) => {
     const result = run(step(deploy, "Resolve dev config"), {
+      DEV_PARTNER_BOOKING_ENTRY_SLUG: "unit-persisted-entry",
       DEV_GCP_PROJECT_ID: "test-project",
       DEV_GCP_REGION: "us-central1",
       DEV_GCP_CLOUDSQL_INSTANCE: "test-project:us-central1:db",
@@ -503,7 +504,11 @@ printf '%s' "$MOCK_STATUS"
     expect(deploy).toContain(
       'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     );
-    expect(deploy).not.toContain("Deploy — partner-booking-web");
+    expect(deploy).toContain("Deploy — partner-booking-web");
+    expect(step(deploy, "Deploy — partner-booking-web")).toContain(
+      "needs.prepare.outputs.partner_booking_exposure_flag",
+    );
+    expect(domain).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(domain).toContain("map-domain-service.sh ride.smarttransport.tw");
     expect(domain).not.toContain(
       "map-domain-service.sh book.smarttransport.tw",
@@ -523,6 +528,7 @@ printf '%s' "$MOCK_STATUS"
     ["rogue-agency-service", 1],
   ])("resolves agency portal target '%s' with exit %i", (target, status) => {
     const result = run(step(deploy, "Resolve dev config"), {
+      DEV_PARTNER_BOOKING_ENTRY_SLUG: "unit-persisted-entry",
       DEV_GCP_PROJECT_ID: "test-project",
       DEV_GCP_REGION: "us-central1",
       DEV_GCP_CLOUDSQL_INSTANCE: "test-project:us-central1:db",
@@ -668,4 +674,164 @@ exit 1
       "--service drts-dev-agency-portal-web --domain agency.smarttransport.tw --region us-central1 --project test-project",
     );
   });
+});
+
+describe("Partner shared-dev normal entry activation", () => {
+  const prepareEnv = {
+    DEV_GCP_PROJECT_ID: "test-project",
+    DEV_GCP_REGION: "us-central1",
+    DEV_GCP_CLOUDSQL_INSTANCE: "test-project:us-central1:db",
+    DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR:
+      "runtime@test-project.iam.gserviceaccount.com",
+    DEV_WIF_SERVICE_ACCOUNT: "deployer@test-project.iam.gserviceaccount.com",
+    DEV_WIF_PROVIDER: "test-provider",
+    DEV_WORKLOAD_IDENTITY_ISSUER: "issuer",
+    DEV_WORKLOAD_IDENTITY_AUDIENCE: "audience",
+    GITHUB_EVENT_NAME: "push",
+    GITHUB_SHA: sha,
+    DEV_PARTNER_BOOKING_ENTRY_SLUG: "unit-persisted-entry",
+    DEV_GCP_PARTNER_BOOKING_SERVICE: "",
+    DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED: "",
+  };
+  it.each([
+    ["", "--no-allow-unauthenticated"],
+    ["false", "--no-allow-unauthenticated"],
+    ["true", "--allow-unauthenticated"],
+  ])(
+    "resolves Partner exposure '%s' without changing other service policy",
+    (choice, flag) => {
+      const result = run(step(deploy, "Resolve dev config"), {
+        ...prepareEnv,
+        DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED: choice,
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.outputs.partner_booking_service).toBe(
+        "drts-dev-partner-booking-web",
+      );
+      expect(result.outputs.partner_booking_entry_slug).toBe(
+        "unit-persisted-entry",
+      );
+      expect(result.outputs.partner_booking_exposure_flag).toBe(flag);
+      expect(result.outputs.api_exposure_flag).toBe(
+        "--no-allow-unauthenticated",
+      );
+    },
+  );
+  it("requires a configured persisted-entry slug rather than silently choosing a demo", () => {
+    const result = run(step(deploy, "Resolve dev config"), {
+      ...prepareEnv,
+      DEV_PARTNER_BOOKING_ENTRY_SLUG: "",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("Set DEV_PARTNER_BOOKING_ENTRY_SLUG");
+  });
+  it.each([
+    ["drts-dev-partner-booking-web", 0],
+    ["rogue-partner-service", 1],
+  ])("keeps the exact Partner target '%s'", (target, status) => {
+    const result = run(step(deploy, "Resolve dev config"), {
+      ...prepareEnv,
+      DEV_GCP_PARTNER_BOOKING_SERVICE: target,
+    });
+    expect(result.status, result.stderr).toBe(status);
+  });
+  it.each([
+    ["200", sha, "authority", 0],
+    ["302", sha, "authority", 1],
+    ["200", "b".repeat(40), "authority", 1],
+    ["200", sha, "local_fallback", 1],
+  ])(
+    "binds the active entry probe to HTTP %s, same SHA and backend source %s",
+    (status, servedSha, source, exit) => {
+      const dir = directory();
+      executable(
+        dir,
+        "curl",
+        `
+while (($#)); do
+  case "$1" in
+    --dump-header) printf 'x-drts-candidate-sha: %s\\r\\n' "$MOCK_SERVED_SHA" > "$2"; shift 2 ;;
+    --output) printf '<div data-partner-entry-source="%s"><form></form></div>' "$MOCK_SOURCE" > "$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s' "$MOCK_HTTP_STATUS"
+`,
+      );
+      const result = run(
+        step(deploy, "Verify active Partner Booking entry"),
+        {
+          PARTNER_BOOKING_ID_TOKEN: "unit-fake-cloud-token",
+          PARTNER_BOOKING_URL: "https://partner.example.test",
+          PARTNER_BOOKING_ENTRY_SLUG: "unit-persisted-entry",
+          CANDIDATE_SHA: sha,
+          MOCK_HTTP_STATUS: status,
+          MOCK_SERVED_SHA: servedSha,
+          MOCK_SOURCE: source,
+        },
+        dir,
+      );
+      expect(result.status, result.stderr).toBe(exit);
+    },
+  );
+  it.each([false, true])(
+    "preserves other API origins and reconciles the actual Partner URL only once (present=%s)",
+    (alreadyPresent) => {
+      const dir = directory();
+      const log = path.join(dir, "commands");
+      executable(
+        dir,
+        "gcloud",
+        `
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+if [[ "$*" == *'services describe drts-dev-partner-booking-web'* ]]; then printf '%s' 'https://partner.example.test';
+elif [[ "$*" == *'services describe drts-dev-api'* ]]; then printf '%s' "$MOCK_API_JSON";
+elif [[ "$*" == *'run deploy drts-dev-api'* ]]; then exit 0;
+else exit 90; fi
+`,
+      );
+      const original =
+        "https://tenant.example.test,https://agency.example.test";
+      const origins = alreadyPresent
+        ? original + ",https://partner.example.test"
+        : original;
+      const script = step(deploy, "Reconcile Partner Booking runtime origin")
+        .replaceAll(
+          "${{ needs.prepare.outputs.partner_booking_service }}",
+          "drts-dev-partner-booking-web",
+        )
+        .replaceAll("${{ needs.prepare.outputs.api_service }}", "drts-dev-api")
+        .replaceAll("${{ needs.prepare.outputs.region }}", "us-central1")
+        .replaceAll("${{ needs.prepare.outputs.project_id }}", "test-project");
+      const result = run(
+        script,
+        {
+          COMMAND_LOG: log,
+          MOCK_API_JSON: JSON.stringify({
+            spec: {
+              template: {
+                spec: {
+                  containers: [
+                    { env: [{ name: "AUTH_ALLOWED_ORIGINS", value: origins }] },
+                  ],
+                },
+              },
+            },
+          }),
+        },
+        dir,
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const writes = readFileSync(log, "utf8")
+        .split("\n")
+        .filter((line) => line.includes("run deploy drts-dev-api"));
+      expect(writes).toHaveLength(alreadyPresent ? 0 : 1);
+      if (!alreadyPresent)
+        expect(writes[0]).toContain(
+          "--update-env-vars ^@^AUTH_ALLOWED_ORIGINS=" +
+            original +
+            ",https://partner.example.test",
+        );
+    },
+  );
 });

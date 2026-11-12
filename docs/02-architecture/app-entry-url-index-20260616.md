@@ -10,7 +10,7 @@ Authoritative source of truth for **which app serves which surface, at which dev
 
 > **Active Inventory & Deployment Status**:
 >
-> - **Configuration target:** `deploy-dev` adds the new `passenger-app-web` for **10 active services** (9 web + 1 API): `api, platform-admin-web, ops-console-web, fleet-partner-portal-web, tenant-console-web, bank-console-web, enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web, passenger-app-web`. The retired `passenger-web` remains excluded.
+> - **Configuration target:** `deploy-dev` adds the new `passenger-app-web` for **12 active services** (11 web + 1 API): `api, platform-admin-web, ops-console-web, fleet-partner-portal-web, tenant-console-web, bank-console-web, enterprise-dispatch-web, channel-partner-portal-web, referral-embed-web, passenger-app-web, agency-portal-web, partner-booking-web`. The retired `passenger-web` remains excluded.
 > - **Shared dev target:** Live `DEV_GCP_*` variables are authoritative. Read-only verification on 2026-10-10 returned `drts-dev-devcc-20260825 / us-central1`. Deployment uses the immutable publish workflow; no VM hosting.
 > - **Passenger delivery status:** New workflow/image/domain configuration is in preparation; no deployment run, live HTTP, DNS/TLS, provider login or payment acceptance is claimed. Service URL comes from the authorized deploy run's `status.url`, never an old project's suffix.
 > - **Historical baseline (2026-08-17):** The previous nine surfaces had CI Run 31997773400 / PR #1451 merge `4012b10c`, hermetic E2E (22/22), route suites (39/39) and browser journeys (7/7). The old project required billing enablement, and the nine URLs then returned `503`; paused Partner Booking and retired Concierge returned `404`. These results do not cover the new passenger surface.
@@ -31,6 +31,9 @@ Authoritative source of truth for **which app serves which surface, at which dev
 | **`channel-partner-portal-web`** | https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app<br>_(Custom: `https://channel.smarttransport.tw`)_                                     |              `503` (Deploy Blocked)              | `channel_partner` (scoped to formal `yuhe-residence`)   | Channel-partner self-service back office. Partner dashboard (`/dashboard`), referral ride volume & commission usage analytics (`/usage`), settlement statement downloads (`/statements` in CSV/PDF), channel entry configuration preview.                                                                                                     | External GCP project billing enablement; Live tax invoice filing / Taiwan GUI issuance; Bank wire clearing system.                                                                                                                     |
 | **`bank-console-web`**           | https://drts-dev-bank-console-web-4t7rg6fmeq-uc.a.run.app                                                                                              |              `503` (Deploy Blocked)              | `bank_program_admin`, `bank_auditor`                    | Line A — 信用卡卡友機場接送 Issuing-bank back office. Program dashboard, scoped booking transaction list and detail, program quota & usage metrics, contract terms view, authenticated monthly settlement statement downloads (`/statements`), masked audit log.                                                                              | External GCP project billing enablement; Core banking ledger API; Issuer-owned cardholder privilege validation / KYC engine.                                                                                                           |
 | **`passenger-app-web`**          | `https://ride.smarttransport.tw`<br>Cloud Run: `drts-dev-passenger-app-web` → live `status.url` from deployment                                        | Pending (new surface; no 2026-08-17 observation) | `passenger` / `first_party_passenger`                   | First-party passenger mobile web. Deploy smoke checks home `/` and login `/login`; public fare page `/fares` is supplied by PAX-WEB-BOOKING-UI and added to smoke by PAX-QA after merge. BFF `/api/passenger-app/*`, account `/account`; further flows are delivered by the PAX UI tasks.                                                     | Same-SHA review/CI; immutable publish deployment; DNS/TLS; provider account/secret bundles; SMS and PSP adapters. Private IAM by default, with explicit `DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED` opt-in for passenger browser access. |
+
+| **`agency-portal-web`** | `drts-dev-agency-portal-web` → actual deployment `status.url` | Pending immutable deployment evidence | `agency_user` | Existing separate agency login/invitation/read-only portal. | Existing OIDC/invitation configuration; no current live URL asserted. |
+| **`partner-booking-web`** | `drts-dev-partner-booking-web` → actual deployment `status.url` | Pending immutable deployment evidence | Normal partner ingress/session | Configured persisted entry eligibility form; create/completion separately accepted. | `DEV_PARTNER_BOOKING_ENTRY_SLUG`, normal credential/WIF/API transport; explicit browser exposure opt-in. |
 
 The new passenger domain requires **`ride CNAME ghs.googlehosted.com.`** in the
 `smarttransport.tw` DNS zone. User-managed provider callbacks are exactly
@@ -53,11 +56,28 @@ external acceptance. Configuration completeness does not prove login or payment 
 
 ---
 
-## 3. Paused Surfaces (HTTP 404 Enforced)
+## 3. Partner Booking — shared-dev activation
 
-| App                       | Paused Routes                                 |       Status       | Notes                                                                                                                                                                                                                                                                                                                     |
-| :------------------------ | :-------------------------------------------- | :----------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`partner-booking-web`** | `/ctbc/program/site`<br>`/ctbc/program/embed` | **PAUSED** (`404`) | Intentionally paused as of 2026-08-01. Covers both standalone website and bank-app embed. Has no active dev URL: deploy does not build or expose it; Cloud Run service returns 404; domain maintenance does not route `book.smarttransport.tw`. Source and route docs remain available for future reviewed re-enablement. |
+`partner-booking-web` uses `drts-dev-partner-booking-web`, container port `3007`.
+The active configuration now targets **12 Cloud Run services (11 web + API)**;
+the old endpoint observations above remain historical. No live Partner URL is
+asserted here. Main obtains the actual `status.url` from the authorized immutable
+`deploy-dev.yml` run, then delivers `<actual-origin>/<persisted-entrySlug>/eligibility`.
+`DEV_PARTNER_BOOKING_ENTRY_SLUG` is required before deployment and refers to an
+existing active durable entry/credential configured through the normal Admin/Partner
+lifecycle. It is not a demo seed or a new authentication mechanism.
+
+Exposure follows `DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED` (default `false`,
+operator explicit `true` for ordinary browser reviewers); API and other surfaces
+keep their current policy. Same-SHA HTTP plus authority-backed form proves entry
+availability only. Normal `partnerUserRef`, eligibility, true create/readback,
+Ops/Driver completion and receipt/invoice need their separate functional evidence.
+External issuer/roster/maps/GPS/physical vehicle demonstrations may be labeled SIM;
+internal order/session/eligibility/lifecycle records must stay real.
+
+The historical paused cleanup helper is disconnected from active deployment.
+Optional DNS/custom-domain maintenance is intentionally unchanged: no
+`book.smarttransport.tw` activation or production rail support is claimed.
 
 ---
 

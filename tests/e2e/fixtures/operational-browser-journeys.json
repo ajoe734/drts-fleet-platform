@@ -545,16 +545,6 @@
   ],
   "retiredSurfaces": [
     {
-      "id": "partner-booking-site",
-      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
-      "path": "/acme/program/site"
-    },
-    {
-      "id": "partner-booking-embed",
-      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
-      "path": "/acme/program/embed"
-    },
-    {
       "id": "concierge",
       "baseUrlEnv": "DRTS_DEV_CONCIERGE_BASE_URL",
       "path": "/"
