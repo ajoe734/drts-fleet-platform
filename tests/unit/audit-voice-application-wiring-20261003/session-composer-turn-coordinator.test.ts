@@ -283,7 +283,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
 
     expect(newBinary.length).toBeGreaterThan(0);
     expect(newBinary[0]!.toString("utf8")).toBe(
-      "audio:請說明上車地點的縣市、道路與門牌或入口。",
+      "audio:您好，請問您今天想從哪裡出發？",
     );
     // The replacement's channel never received the old attachment's
     // emergency prompt.
