@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Page,
+  type Request,
+  type Response,
+} from "@playwright/test";
 
 import { startAgencySmtpInbox } from "./smtp-inbox";
 import { seedAgencyPlatformPersonnel } from "./platform-personnel-fixture";
@@ -466,160 +472,291 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
   }
 
   await test.step("UI preview, create, refresh and signed download deliver a nonempty CSV for that exact trip", async () => {
-    await visit(page, "/trip-records/exports", "R11 Controlled Exports");
-    await page
-      .getByLabel("Record ID (Exact)", { exact: true })
-      .fill(String(selected.record_id));
-    const [previewResponse] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname ===
-            "/api/agency/trip-records/export-jobs/preview" &&
-          response.request().method() === "POST",
-      ),
-      page
-        .getByRole("button", { name: "Preview Record Count", exact: true })
-        .click(),
-    ]);
-    const preview = await data<{
-      record_count: number;
-      format: string;
-      purpose_required: boolean;
-    }>(previewResponse, "real export preview");
-    expect(preview).toMatchObject({
-      record_count: 1,
-      format: "csv",
-      purpose_required: true,
-    });
-    await expect(
-      page.getByText("Retained records matching scope: 1", { exact: true }),
-    ).toBeVisible();
-    await page
-      .getByLabel("Export Purpose (Required)", { exact: true })
-      .fill(
-        "Hosted Agency review of one actually completed Passenger trip; external mail and Google are simulated.",
+    // Diagnostic only: observe the existing UI flow, never replace or retry it.
+    const started = Date.now();
+    const elapsed = () => Date.now() - started;
+    const diagnostic = {
+      navigation: {
+        startedMs: null as number | null,
+        completedMs: null as number | null,
+      },
+      fill: {
+        startedMs: null as number | null,
+        completedMs: null as number | null,
+      },
+      click: {
+        startedMs: null as number | null,
+        completedMs: null as number | null,
+      },
+      documentReadyState: null as string | null,
+      previewRequests: 0,
+      previewResponses: 0,
+      previewFailedRequests: 0,
+      previewEvents: [] as {
+        kind: "request" | "response" | "failed";
+        atMs: number;
+        status?: number;
+      }[],
+      pageErrorCount: 0,
+      pageErrors: [] as {
+        name: string;
+        category: "hydration" | "chunk" | "runtime" | "other";
+        atMs: number;
+      }[],
+    };
+    const isPreview = (request: Request) => {
+      const url = new URL(request.url());
+      return (
+        url.origin === new URL(BASE).origin &&
+        url.pathname === "/api/agency/trip-records/export-jobs/preview" &&
+        request.method() === "POST"
       );
-    const [createResponse] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname ===
-            "/api/agency/trip-records/export-jobs" &&
-          response.request().method() === "POST",
-      ),
-      page
-        .getByRole("button", { name: "Create Export Job", exact: true })
-        .click(),
-    ]);
-    const job = await data<{ job_id: string }>(
-      createResponse,
-      "real durable export job creation",
-    );
-    expect(typeof job.job_id).toBe("string");
-    const statusPath = `/api/agency/trip-records/export-jobs/${encodeURIComponent(job.job_id)}`;
-    await expect
-      .poll(async () => {
-        const [response] = await Promise.all([
-          page.waitForResponse(
-            (response) => new URL(response.url()).pathname === statusPath,
-          ),
-          page
-            .getByRole("button", { name: "Refresh Status", exact: true })
-            .click(),
-        ]);
-        const status = await data<{
-          status: string;
-          agency_id: string;
-          record_count: number;
-        }>(response, "UI refresh of real export status");
-        expect(status).toMatchObject({ agency_id: agencyId, record_count: 1 });
-        return status.status;
-      })
-      .toBe("completed");
-    const [metadataResponse] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === `${statusPath}/download`,
-      ),
-      page
-        .getByRole("button", { name: "Get Download Link", exact: true })
-        .click(),
-    ]);
-    const metadata = await data<{
-      record_count: number;
-      manifest_hash: string;
-      download: { download_url: string };
-    }>(metadataResponse, "real signed download issuance");
-    expect(metadata.record_count).toBe(1);
-    expect(metadata.manifest_hash).toMatch(/^[a-f0-9]{64}$/);
-    const link = page.getByRole("link", {
-      name: "Download (while signed link is valid)",
-      exact: true,
-    });
-    await expect(link).toHaveAttribute("href", metadata.download.download_url);
-    const [download] = await Promise.all([
-      page.waitForEvent("download"),
-      link.click(),
-    ]);
-    expect(await download.failure()).toBeNull();
-    expect(download.suggestedFilename()).toMatch(/\.csv$/i);
-    const stream = await download.createReadStream();
-    expect(stream).not.toBeNull();
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
-    const bytes = Buffer.concat(chunks);
-    expect(bytes.length).toBeGreaterThan(0);
-    const rows = csvRows(bytes.toString("utf8").replace(/^\uFEFF/, ""));
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual(
-      expect.arrayContaining([
-        "recordId",
-        "orderId",
-        "tripId",
-        "plateNo",
-        "reservedAt",
-        "pickupAt",
-        "dropoffAt",
-        "routeSummary",
-        "distanceMeters",
-        "payableFareMinor",
-        "collectedFareMinor",
-        "tollMinor",
-      ]),
-    );
-    for (const [column, value] of [
-      ["recordId", selected.record_id],
-      ["orderId", selected.order_id],
-      ["tripId", selected.trip_id],
-    ]) {
-      expect(rows[1]![rows[0]!.indexOf(String(column))]).toBe(value);
+    };
+    const onRequest = (request: Request) => {
+      if (!isPreview(request)) return;
+      diagnostic.previewRequests++;
+      if (diagnostic.previewEvents.length < 12)
+        diagnostic.previewEvents.push({ kind: "request", atMs: elapsed() });
+    };
+    const onResponse = (response: Response) => {
+      if (!isPreview(response.request())) return;
+      diagnostic.previewResponses++;
+      if (diagnostic.previewEvents.length < 12)
+        diagnostic.previewEvents.push({
+          kind: "response",
+          atMs: elapsed(),
+          status: response.status(),
+        });
+    };
+    const onFailed = (request: Request) => {
+      if (!isPreview(request)) return;
+      diagnostic.previewFailedRequests++;
+      if (diagnostic.previewEvents.length < 12)
+        diagnostic.previewEvents.push({ kind: "failed", atMs: elapsed() });
+    };
+    const onPageError = (error: Error) => {
+      diagnostic.pageErrorCount++;
+      if (diagnostic.pageErrors.length >= 8) return;
+      const name = [
+        "Error",
+        "TypeError",
+        "ReferenceError",
+        "SyntaxError",
+        "RangeError",
+        "URIError",
+        "EvalError",
+        "ChunkLoadError",
+      ].includes(error.name)
+        ? error.name
+        : "OtherError";
+      const category = /hydrat/i.test(error.message)
+        ? "hydration"
+        : /ChunkLoadError|loading (?:CSS )?chunk|dynamically imported module|module script/i.test(
+              error.message,
+            )
+          ? "chunk"
+          : name === "OtherError"
+            ? "other"
+            : "runtime";
+      // No message/stack, URL query, headers, cookies, body, or token is retained.
+      diagnostic.pageErrors.push({ name, category, atMs: elapsed() });
+    };
+    page.on("request", onRequest);
+    page.on("response", onResponse);
+    page.on("requestfailed", onFailed);
+    page.on("pageerror", onPageError);
+    try {
+      await test.step("Navigate to the normal export page", async () => {
+        diagnostic.navigation.startedMs = elapsed();
+        await visit(page, "/trip-records/exports", "R11 Controlled Exports");
+        diagnostic.navigation.completedMs = elapsed();
+        // This is document load state only; it does not prove React hydration.
+        diagnostic.documentReadyState = await page.evaluate(
+          () => document.readyState,
+        );
+      });
+      await test.step("Fill the exact retained record ID", async () => {
+        diagnostic.fill.startedMs = elapsed();
+        await page
+          .getByLabel("Record ID (Exact)", { exact: true })
+          .fill(String(selected.record_id));
+        diagnostic.fill.completedMs = elapsed();
+      });
+      const [previewResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/agency/trip-records/export-jobs/preview" &&
+            response.request().method() === "POST",
+        ),
+        test.step("Click the normal preview button", async () => {
+          diagnostic.click.startedMs = elapsed();
+          await page
+            .getByRole("button", { name: "Preview Record Count", exact: true })
+            .click();
+          diagnostic.click.completedMs = elapsed();
+        }),
+      ]);
+      const preview = await data<{
+        record_count: number;
+        format: string;
+        purpose_required: boolean;
+      }>(previewResponse, "real export preview");
+      expect(preview).toMatchObject({
+        record_count: 1,
+        format: "csv",
+        purpose_required: true,
+      });
+      await expect(
+        page.getByText("Retained records matching scope: 1", { exact: true }),
+      ).toBeVisible();
+      await page
+        .getByLabel("Export Purpose (Required)", { exact: true })
+        .fill(
+          "Hosted Agency review of one actually completed Passenger trip; external mail and Google are simulated.",
+        );
+      const [createResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+              "/api/agency/trip-records/export-jobs" &&
+            response.request().method() === "POST",
+        ),
+        page
+          .getByRole("button", { name: "Create Export Job", exact: true })
+          .click(),
+      ]);
+      const job = await data<{ job_id: string }>(
+        createResponse,
+        "real durable export job creation",
+      );
+      expect(typeof job.job_id).toBe("string");
+      const statusPath = `/api/agency/trip-records/export-jobs/${encodeURIComponent(job.job_id)}`;
+      await expect
+        .poll(async () => {
+          const [response] = await Promise.all([
+            page.waitForResponse(
+              (response) => new URL(response.url()).pathname === statusPath,
+            ),
+            page
+              .getByRole("button", { name: "Refresh Status", exact: true })
+              .click(),
+          ]);
+          const status = await data<{
+            status: string;
+            agency_id: string;
+            record_count: number;
+          }>(response, "UI refresh of real export status");
+          expect(status).toMatchObject({
+            agency_id: agencyId,
+            record_count: 1,
+          });
+          return status.status;
+        })
+        .toBe("completed");
+      const [metadataResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === `${statusPath}/download`,
+        ),
+        page
+          .getByRole("button", { name: "Get Download Link", exact: true })
+          .click(),
+      ]);
+      const metadata = await data<{
+        record_count: number;
+        manifest_hash: string;
+        download: { download_url: string };
+      }>(metadataResponse, "real signed download issuance");
+      expect(metadata.record_count).toBe(1);
+      expect(metadata.manifest_hash).toMatch(/^[a-f0-9]{64}$/);
+      const link = page.getByRole("link", {
+        name: "Download (while signed link is valid)",
+        exact: true,
+      });
+      await expect(link).toHaveAttribute(
+        "href",
+        metadata.download.download_url,
+      );
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        link.click(),
+      ]);
+      expect(await download.failure()).toBeNull();
+      expect(download.suggestedFilename()).toMatch(/\.csv$/i);
+      const stream = await download.createReadStream();
+      expect(stream).not.toBeNull();
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+      const bytes = Buffer.concat(chunks);
+      expect(bytes.length).toBeGreaterThan(0);
+      const rows = csvRows(bytes.toString("utf8").replace(/^\uFEFF/, ""));
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toEqual(
+        expect.arrayContaining([
+          "recordId",
+          "orderId",
+          "tripId",
+          "plateNo",
+          "reservedAt",
+          "pickupAt",
+          "dropoffAt",
+          "routeSummary",
+          "distanceMeters",
+          "payableFareMinor",
+          "collectedFareMinor",
+          "tollMinor",
+        ]),
+      );
+      for (const [column, value] of [
+        ["recordId", selected.record_id],
+        ["orderId", selected.order_id],
+        ["tripId", selected.trip_id],
+      ]) {
+        expect(rows[1]![rows[0]!.indexOf(String(column))]).toBe(value);
+      }
+      await info.attach("agency-real-business-facts", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          agencyId,
+          recordId: selected.record_id,
+          orderId: selected.order_id,
+          tripId: selected.trip_id,
+          jobId: job.job_id,
+          previewCount: preview.record_count,
+          csvRows: rows.length - 1,
+          csvBytes: bytes.length,
+          csvSha256: createHash("sha256").update(bytes).digest("hex"),
+          reads,
+          externalSIM: [
+            "SMTP inbox delivery",
+            "Google authorization and OIDC provider claims",
+          ],
+          realPaths: [
+            "platform invitation API",
+            "Agency BFF callback and session",
+            "committed trip list/detail",
+            "qualifications and R09/R10/R12 projections",
+            "durable export job",
+            "signed CSV download",
+          ],
+          liveCloudOrRealGoogleClaimed: false,
+        }),
+      });
+    } finally {
+      page.off("request", onRequest);
+      page.off("response", onResponse);
+      page.off("requestfailed", onFailed);
+      page.off("pageerror", onPageError);
+      await info.attach("agency-export-preview-native-diagnostic", {
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...diagnostic,
+          elapsedMs: elapsed(),
+          documentReadyStateIsNotHydrationProof: true,
+          diagnosticOnlyNotAProductFix: true,
+        }),
+      });
     }
-    await info.attach("agency-real-business-facts", {
-      contentType: "application/json",
-      body: JSON.stringify({
-        agencyId,
-        recordId: selected.record_id,
-        orderId: selected.order_id,
-        tripId: selected.trip_id,
-        jobId: job.job_id,
-        previewCount: preview.record_count,
-        csvRows: rows.length - 1,
-        csvBytes: bytes.length,
-        csvSha256: createHash("sha256").update(bytes).digest("hex"),
-        reads,
-        externalSIM: [
-          "SMTP inbox delivery",
-          "Google authorization and OIDC provider claims",
-        ],
-        realPaths: [
-          "platform invitation API",
-          "Agency BFF callback and session",
-          "committed trip list/detail",
-          "qualifications and R09/R10/R12 projections",
-          "durable export job",
-          "signed CSV download",
-        ],
-        liveCloudOrRealGoogleClaimed: false,
-      }),
-    });
   });
 });
