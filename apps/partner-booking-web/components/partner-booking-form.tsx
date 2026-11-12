@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type CSSProperties } from "react";
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { createIdempotencyKey } from "@drts/api-client";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
@@ -18,6 +26,7 @@ import {
   type AddressProviderMode,
 } from "@drts/ui-web";
 import {
+  formatDateTimeLocalInputValue,
   getPartnerBookingFieldErrors,
   getPartnerMapSubmitGate,
   getPartnerProgramCoverage,
@@ -25,6 +34,8 @@ import {
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
   type PartnerBookingDraftValues,
+  type PartnerBookingActionResult,
+  type PartnerBookingSubmission,
 } from "@/lib/partner-booking-form";
 import { useTranslation } from "@/lib/i18n";
 
@@ -151,6 +162,7 @@ export function PartnerBookingForm({
   entry,
   eligibilityVerificationId,
   initialDraft,
+  submitBookingAction,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -159,11 +171,38 @@ export function PartnerBookingForm({
   >;
   eligibilityVerificationId: string | null;
   initialDraft: PartnerBookingDraftValues;
+  submitBookingAction?: (
+    submission: PartnerBookingSubmission,
+  ) => Promise<PartnerBookingActionResult>;
 }) {
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(initialDraft);
+  // The BFF sends offset-bearing defaults. Localize only those on hydration;
+  // an already edited datetime-local value must retain the browser's local time.
+  useEffect(() => {
+    if (!submitBookingAction) return;
+    const localInput = (value: string) =>
+      /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+        ? formatDateTimeLocalInputValue(new Date(value))
+        : value;
+    setDraft((current) => ({
+      ...current,
+      reservationWindowStart: localInput(current.reservationWindowStart),
+      reservationWindowEnd: localInput(current.reservationWindowEnd),
+      replacementStart: localInput(current.replacementStart),
+      replacementEnd: localInput(current.replacementEnd),
+    }));
+  }, [submitBookingAction]);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [bookingResult, setBookingResult] =
+    useState<PartnerBookingActionResult | null>(null);
+  const pendingSubmission = useRef<{
+    signature: string;
+    key: string;
+    eligibilityVerificationId?: string;
+  } | null>(null);
   const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
     pickup: null,
     dropoff: null,
@@ -221,6 +260,7 @@ export function PartnerBookingForm({
       : null;
 
   function updateField(name: string, value: string) {
+    setBookingResult(null);
     setDraft((current) => ({
       ...current,
       [name]: value,
@@ -286,7 +326,82 @@ export function PartnerBookingForm({
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitted(true);
+    if (!submitBookingAction) {
+      setSubmitted(true);
+      return;
+    }
+    if (!ready || mapGate.blocking || submitting) return;
+    const payload = {
+      draft: {
+        ...draft,
+        // datetime-local has no offset. Convert in the browser, not in a UTC BFF.
+        reservationWindowStart: new Date(
+          draft.reservationWindowStart,
+        ).toISOString(),
+        reservationWindowEnd: new Date(
+          draft.reservationWindowEnd,
+        ).toISOString(),
+        ...(entry.businessDispatchSubtype === "insurance_replacement_vehicle"
+          ? {
+              replacementStart: new Date(draft.replacementStart).toISOString(),
+              replacementEnd: new Date(draft.replacementEnd).toISOString(),
+            }
+          : {}),
+      },
+      pickup: mapSelection.pickup,
+      dropoff: mapSelection.dropoff,
+      serviceability: mapSelection.serviceability,
+      providerState: mapSelection.providerState,
+    };
+    // A service-area preview may finish after submission. Only command changes
+    // should replace the key used to retry a booking whose readback failed.
+    const signature = JSON.stringify({
+      draft: payload.draft,
+      pickup: payload.pickup,
+      dropoff: payload.dropoff,
+      mapFallbackReview:
+        mapGate.code === "dispatch_manual_review_required"
+          ? {
+              reasonCode: "dispatch_manual_review_required",
+              providerAvailable: payload.providerState.available,
+              providerDegraded: payload.providerState.degraded,
+              providerReasonCode: payload.providerState.reasonCode,
+            }
+          : null,
+    });
+    const previous = pendingSubmission.current;
+    const pending: NonNullable<typeof pendingSubmission.current> =
+      previous && previous.signature === signature
+        ? previous
+        : { signature, key: createIdempotencyKey("partner-booking") };
+    pendingSubmission.current = pending;
+    const idempotencyKey = pending.key;
+    setSubmitting(true);
+    setBookingResult(null);
+    startTransition(async () => {
+      try {
+        const result = await submitBookingAction({
+          ...payload,
+          idempotencyKey,
+          ...(pending.eligibilityVerificationId
+            ? { eligibilityVerificationId: pending.eligibilityVerificationId }
+            : {}),
+        });
+        const verificationId = result.ok
+          ? result.confirmation.eligibilityVerificationId
+          : result.eligibilityVerificationId;
+        if (verificationId) pending.eligibilityVerificationId = verificationId;
+        setBookingResult(result);
+      } catch {
+        setBookingResult({
+          ok: false,
+          errorCode: "PARTNER_BOOKING_SUBMIT_FAILED",
+          errorMessage: t("book.create.failed"),
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    });
   }
 
   const programLabel = getPartnerProgramLabel(
@@ -571,6 +686,7 @@ export function PartnerBookingForm({
               }}
               dropoffTitle={t("field.dropoffAddress")}
               onChange={(change) => {
+                setBookingResult(null);
                 setMapSelection(change);
                 setDraft((current) => ({
                   ...current,
@@ -605,9 +721,7 @@ export function PartnerBookingForm({
             name: "pickupAddress",
             label: t("field.pickupAddress"),
             fullSpan: true,
-            ...(pickupTextFallbackHint
-              ? { hint: pickupTextFallbackHint }
-              : {}),
+            ...(pickupTextFallbackHint ? { hint: pickupTextFallbackHint } : {}),
           })}
           {renderField({
             name: "dropoffAddress",
@@ -778,9 +892,9 @@ export function PartnerBookingForm({
                 ? t("book.map.coordinatesRequired")
                 : mapGate.code === "dispatch_manual_review_required"
                   ? t("book.map.manualReview")
-                : ready
-                  ? t("book.ready")
-                  : t("book.notReady")}
+                  : ready
+                    ? t("book.ready")
+                    : t("book.notReady")}
           </span>
           {mapGate.code === "dispatch_manual_review_required" ? (
             <CanvasBanner
@@ -801,10 +915,19 @@ export function PartnerBookingForm({
           <div style={actionRowStyle}>
             <button
               type="submit"
-              style={submitButtonStyle(theme, !ready || mapGate.blocking)}
-              disabled={!ready || mapGate.blocking}
+              style={submitButtonStyle(
+                theme,
+                !ready || mapGate.blocking || submitting,
+              )}
+              disabled={!ready || mapGate.blocking || submitting}
             >
-              {t("book.submit")}
+              {submitBookingAction
+                ? t(
+                    submitting
+                      ? "book.create.submitting"
+                      : "book.create.submit",
+                  )
+                : t("book.submit")}
             </button>
             {entry.programCode ? (
               <span style={{ color: theme.textMuted }}>
@@ -812,7 +935,52 @@ export function PartnerBookingForm({
               </span>
             ) : null}
           </div>
-          {submitted && ready && !mapGate.blocking ? (
+          {bookingResult?.ok === false ? (
+            <CanvasBanner
+              theme={theme}
+              tone="danger"
+              title={t("book.create.failed")}
+              body={
+                bookingResult.errorMessage + " · " + bookingResult.errorCode
+              }
+            />
+          ) : null}
+          {bookingResult?.ok ? (
+            <div
+              role="status"
+              data-testid="partner-booking-confirmation"
+              style={fieldStyle}
+            >
+              <strong>{t("book.create.success")}</strong>
+              <dl>
+                <dt>{t("book.create.bookingId")}</dt>
+                <dd data-testid="partner-booking-id">
+                  {bookingResult.confirmation.bookingId}
+                </dd>
+                <dt>{t("book.create.orderId")}</dt>
+                <dd data-testid="partner-order-id">
+                  {bookingResult.confirmation.orderId}
+                </dd>
+                <dt>{t("book.create.status")}</dt>
+                <dd>{bookingResult.confirmation.orderStatus}</dd>
+                {Object.entries(
+                  bookingResult.confirmation.partnerBookingDetails,
+                )
+                  .filter(([field]) => field !== "subtype")
+                  .map(([field, value]) => (
+                    <div key={field}>
+                      <dt>{t("field." + field)}</dt>
+                      <dd>
+                        {Array.isArray(value)
+                          ? value.join(" · ")
+                          : String(value)}
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </div>
+          ) : null}
+          {submitted && !submitBookingAction && ready && !mapGate.blocking ? (
             <CanvasBanner
               theme={theme}
               tone={

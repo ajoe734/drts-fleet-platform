@@ -3353,7 +3353,31 @@ export interface CreateCallCenterOrderCommand {
   mapFallbackReview?: CallCenterMapFallbackReview | null;
 }
 
+/** Partner intake facts retained with the original booking, not an external verification result. */
+export type PartnerBookingDetails =
+  | {
+      subtype: "travel_agency_transfer";
+      groupCode: string;
+      groupSize: number;
+      itineraryLink: string;
+      rosterPassengers: string[];
+      meetingPoint: string;
+    }
+  | {
+      subtype: "insurance_replacement_vehicle";
+      claimNumber: string;
+      policyNumber: string;
+      claimReference: string;
+      claimantName: string;
+      replacementStart: string;
+      replacementEnd: string;
+      replacementVehicleClass: string;
+      caseHandler: string;
+    };
+
 export interface CreateTenantBookingCommand {
+  partnerBookingDetails?: PartnerBookingDetails;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
   businessDispatchSubtype: BusinessDispatchSubtype;
   partnerEntrySlug?: string;
   eligibilityVerificationId?: string;
@@ -3569,6 +3593,7 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  partnerBookingDetails?: PartnerBookingDetails;
   serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
@@ -3691,6 +3716,7 @@ export interface OwnedOrderRecord {
 }
 
 export interface BookingRecord {
+  partnerBookingDetails?: PartnerBookingDetails;
   bookingId: string;
   orderId: string;
   tenantId: string;

@@ -81,6 +81,14 @@ const en = {
   "book.ready":
     "Program details and locations are confirmed. You can continue with submission.",
   "book.notReady": "Resolve the highlighted fields before submission.",
+  "book.create.submit": "Create booking",
+  "book.create.submitting": "Creating booking…",
+  "book.create.success": "Booking created and read back",
+  "book.create.failed":
+    "Booking could not be confirmed. Retry with the same details.",
+  "book.create.bookingId": "Booking ID",
+  "book.create.orderId": "Order ID",
+  "book.create.status": "Order status",
   "book.submit": "Validate booking form",
   "book.success": "Form validation passed",
   "book.success.detail":
@@ -570,6 +578,13 @@ const zh = {
   "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
   "book.ready": "方案資料與地址已確認，可繼續送出預約。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
+  "book.create.submit": "建立預約",
+  "book.create.submitting": "預約建立中…",
+  "book.create.success": "預約已建立並完成讀回",
+  "book.create.failed": "尚無法確認預約結果，請以相同資料重試。",
+  "book.create.bookingId": "預約編號",
+  "book.create.orderId": "訂單編號",
+  "book.create.status": "訂單狀態",
   "book.submit": "驗證下單表單",
   "book.success": "表單驗證通過",
   "book.success.detail": "此預約資料已準備完成，可交由合作通路後續建立訂單。",

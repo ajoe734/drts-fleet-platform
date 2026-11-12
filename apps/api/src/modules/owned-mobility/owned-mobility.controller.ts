@@ -364,12 +364,15 @@ export class OwnedMobilityController {
     return toApiSuccessEnvelope(
       {
         ...result,
-        booking: this.ownedMobilityService.getTenantBooking(
+        booking: await this.ownedMobilityService.resolvePersistedTenantBooking(
           resolvedTenantId,
           result.bookingId,
           identity,
         ),
-        order: this.ownedMobilityService.getOrder(result.orderId, identity),
+        order: await this.ownedMobilityService.resolvePersistedOrder(
+          result.orderId,
+          identity,
+        ),
       },
       requestId,
     );

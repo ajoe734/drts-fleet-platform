@@ -1,5 +1,7 @@
 import type {
   BusinessDispatchSubtype,
+  BookingRecord,
+  PartnerBookingDetails,
   PartnerChannelEntryRecord,
 } from "@drts/contracts";
 import {
@@ -55,7 +57,7 @@ function padDateTimeSegment(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function formatDateTimeLocalInputValue(value: Date) {
+export function formatDateTimeLocalInputValue(value: Date) {
   return [
     value.getFullYear(),
     padDateTimeSegment(value.getMonth() + 1),
@@ -481,3 +483,35 @@ export function getPartnerMapSubmitGate(params: {
 
   return baseGate;
 }
+
+/** Serializable form/action contract. Partner credentials never enter this payload. */
+export type PartnerBookingSubmission = {
+  draft: PartnerBookingDraftValues;
+  pickup: AddressPayload | null;
+  dropoff: AddressPayload | null;
+  serviceability: ServiceAreaEvaluationResult | null;
+  providerState: AddressProviderState;
+  idempotencyKey: string;
+  eligibilityVerificationId?: string;
+};
+
+export type PartnerBookingConfirmation = Pick<
+  BookingRecord,
+  | "bookingId"
+  | "orderId"
+  | "orderStatus"
+  | "reservationWindowStart"
+  | "reservationWindowEnd"
+> & {
+  partnerBookingDetails: PartnerBookingDetails;
+  eligibilityVerificationId: string | null;
+};
+
+export type PartnerBookingActionResult =
+  | { ok: true; confirmation: PartnerBookingConfirmation }
+  | {
+      ok: false;
+      errorCode: string;
+      errorMessage: string;
+      eligibilityVerificationId?: string;
+    };

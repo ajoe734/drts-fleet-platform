@@ -2008,6 +2008,16 @@ export class OwnedMobilityService
     );
     const reservationHoldId = randomUUID();
     const order: OwnedOrderRecord = {
+      ...(command.mapFallbackReview?.reasonCode
+        ? { mapFallbackReview: { ...command.mapFallbackReview } }
+        : {}),
+      ...(command.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(
+              command.partnerBookingDetails,
+            ),
+          }
+        : {}),
       orderId,
       orderNo: this.nextOrderNo(),
       orderSource: "portal",
@@ -13921,6 +13931,11 @@ export class OwnedMobilityService
 
     const complianceGates = this.listComplianceGatesForOrder(order);
     return {
+      ...(order.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(order.partnerBookingDetails),
+          }
+        : {}),
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
@@ -17988,6 +18003,11 @@ export class OwnedMobilityService
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
+      ...(order.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(order.partnerBookingDetails),
+          }
+        : {}),
       ...(order.serviceSelection
         ? { serviceSelection: { ...order.serviceSelection } }
         : {}),

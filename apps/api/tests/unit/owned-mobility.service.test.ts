@@ -24,6 +24,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import {
+  OwnedMobilityRepository,
   OwnedOrderDuplicateVoiceLinkError,
   OwnedOrderVersionConflictError,
 } from "../../src/modules/owned-mobility/owned-mobility.repository";
@@ -7686,4 +7687,139 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
       fareTotal: 1500,
     });
   });
+});
+
+// Only the SQL transport is modelled. Creation, JSONB serialization and fresh
+// repository/service readback use the production classes; this is not a PG claim.
+describe("C032 noncore booking detail persistence", () => {
+  it.each([
+    {
+      subtype: "travel_agency_transfer" as const,
+      details: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-TOUR-20261111",
+        groupSize: 2,
+        itineraryLink: "https://travel.example.test/itinerary/SIM-TOUR",
+        rosterPassengers: ["SIM Tour Leader", "SIM Passenger"],
+        meetingPoint: "SIM terminal meeting point",
+      },
+    },
+    {
+      subtype: "insurance_replacement_vehicle" as const,
+      details: {
+        subtype: "insurance_replacement_vehicle" as const,
+        claimNumber: "SIM-CLAIM-20261111",
+        policyNumber: "SIM-POLICY-20261111",
+        claimReference: "SIM-CASE-20261111",
+        claimantName: "SIM Insured Passenger",
+        replacementStart: "2099-06-05T10:00:00.000Z",
+        replacementEnd: "2099-06-06T10:00:00.000Z",
+        replacementVehicleClass: "business_vehicle",
+        caseHandler: "SIM Claim Handler",
+      },
+    },
+  ])(
+    "preserves $subtype intake through real JSONB write and a cold service read",
+    async ({ subtype, details }) => {
+      const rows = new Map<string, Record<string, unknown>>();
+      const query = vi.fn(
+        async (text: string, values: readonly unknown[] = []) => {
+          if (text.includes("INSERT INTO ops.phase1_owned_orders")) {
+            const record = JSON.parse(String(values[14])) as Record<
+              string,
+              unknown
+            >;
+            rows.set(String(record.orderId), record);
+            return { rows: [], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO ops.phase1_dispatch_trace_logs")) {
+            return { rows: [], rowCount: 1 };
+          }
+          if (
+            text.includes("SELECT record") &&
+            text.includes("FROM ops.phase1_owned_orders")
+          ) {
+            const record = text.includes("booking_id = $1")
+              ? [...rows.values()].find(
+                  (row) =>
+                    row.bookingId === values[0] && row.tenantId === values[1],
+                )
+              : rows.get(String(values[0]));
+            return {
+              rows: record ? [{ record: structuredClone(record) }] : [],
+              rowCount: record ? 1 : 0,
+            };
+          }
+          throw new Error("Unsupported C032 unit SQL: " + text);
+        },
+      );
+      const repository = new OwnedMobilityRepository({
+        isEnabled: () => true,
+        query,
+      } as never);
+      const producer = createOwnedMobilityService({
+        repository: repository as never,
+        serviceProductOverrides: {
+          serviceProductType: subtype,
+          displayName: "SIM noncore product",
+          timing: "reservation",
+          active: true,
+          defaultBillingMode: "partner_settlement",
+          defaultProofRequirements: ["photo"],
+        },
+      }).service;
+      // The object spread also compiles on the old command contract. Baseline
+      // failure must be the missing persisted facts, not a missing new import.
+      const created = await producer.createTenantBooking(
+        {
+          businessDispatchSubtype: subtype,
+          pickup: { address: "SIM Pickup" },
+          dropoff: { address: "SIM Dropoff" },
+          passenger: { name: "SIM Rider", phone: "0912000000" },
+          reservationWindowStart: "2099-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+          ...{
+            partnerBookingDetails: details,
+            mapFallbackReview: {
+              reasonCode: "dispatch_manual_review_required",
+              providerAvailable: false,
+              providerDegraded: false,
+              providerReasonCode: "unavailable",
+            },
+          },
+        },
+        "tenant-demo-001",
+      );
+      await vi.waitFor(() => expect(rows.has(created.orderId)).toBe(true));
+      const consumer = createOwnedMobilityService({
+        repository: repository as never,
+      }).service;
+      await expect(
+        consumer.resolvePersistedOrder(created.orderId),
+      ).resolves.toMatchObject({
+        orderId: created.orderId,
+        bookingId: created.bookingId,
+        partnerBookingDetails: details,
+        mapFallbackReview: {
+          reasonCode: "dispatch_manual_review_required",
+          providerAvailable: false,
+        },
+        queueFamily: "manual_review_queue",
+      });
+      await expect(
+        consumer.resolvePersistedTenantBooking(
+          "tenant-demo-001",
+          created.bookingId,
+        ),
+      ).resolves.toMatchObject({
+        orderId: created.orderId,
+        bookingId: created.bookingId,
+        partnerBookingDetails: details,
+      });
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining("booking_id = $1"),
+        [created.bookingId, "tenant-demo-001"],
+      );
+    },
+  );
 });
