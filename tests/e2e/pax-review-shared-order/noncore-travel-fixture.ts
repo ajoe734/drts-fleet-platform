@@ -5,6 +5,8 @@ import type {
   PartnerChannelEntryRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressHandoffSession,
+  ServiceAreaAdminMutationResponse,
+  ServiceAreaBoundaryRecord,
 } from "@drts/contracts";
 import { PartnerFixture } from "../system-remediation/sr-partner-notify-qa-20260917/partner-fixture";
 
@@ -38,12 +40,17 @@ export class NoncoreTravelFixture {
     entry: PartnerChannelEntryRecord;
     keyId: string | null;
   }[] = [];
+  private readonly airportAreas: ServiceAreaBoundaryRecord[] = [];
   readonly platform = required("DRTS_UAT_TOKEN_PLATFORM");
   readonly tenantId = required("DRTS_UAT_TENANT_A");
   readonly tenantToken = required("DRTS_UAT_TOKEN_A");
 
   async entry(
-    partnerType: "fleet_partner" | "travel_agency" | "insurance_company",
+    partnerType:
+      | "fleet_partner"
+      | "travel_agency"
+      | "insurance_company"
+      | "bank_partner",
     fleetPartnerId?: string,
   ) {
     const slug = `travel-completion-${randomUUID()}`;
@@ -62,14 +69,23 @@ export class NoncoreTravelFixture {
         businessDispatchSubtype:
           partnerType === "fleet_partner"
             ? "enterprise_dispatch"
-            : partnerType === "insurance_company"
-              ? "insurance_replacement_vehicle"
-              : "travel_agency_transfer",
+            : partnerType === "bank_partner"
+              ? "credit_card_airport_transfer"
+              : partnerType === "insurance_company"
+                ? "insurance_replacement_vehicle"
+                : "travel_agency_transfer",
         authMode: "partner_api_key",
         eligibilityMode:
-          partnerType === "fleet_partner" ? "none" : "reference_required",
+          partnerType === "fleet_partner"
+            ? "none"
+            : partnerType === "bank_partner"
+              ? "bank_card_inline"
+              : "reference_required",
         entryHost: new URL(PARTNER_ORIGIN).host,
-        entryPath: `/${slug}/book`,
+        entryPath:
+          partnerType === "bank_partner"
+            ? `/${slug}/eligibility`
+            : `/${slug}/book`,
         status: "active",
         activeFlag: true,
         ...(fleetPartnerId ? { fleetPartnerId } : {}),
@@ -104,7 +120,8 @@ export class NoncoreTravelFixture {
   async fleetSupply(
     subtype:
       | "travel_agency_transfer"
-      | "insurance_replacement_vehicle" = "travel_agency_transfer",
+      | "insurance_replacement_vehicle"
+      | "credit_card_airport_transfer" = "travel_agency_transfer",
   ) {
     const fleet = await this.fixture.call<FleetPartnerRecord>(
       "admin/fleet-partners",
@@ -367,8 +384,15 @@ export class NoncoreTravelFixture {
     return this.activateProduct("insurance_replacement_vehicle");
   }
 
+  async activateAirport() {
+    return this.activateProduct("credit_card_airport_transfer");
+  }
+
   private async activateProduct(
-    subtype: "travel_agency_transfer" | "insurance_replacement_vehicle",
+    subtype:
+      | "travel_agency_transfer"
+      | "insurance_replacement_vehicle"
+      | "credit_card_airport_transfer",
   ) {
     const before = await this.fixture.call<{ items: Data[] }>(
       "admin/service-products",
@@ -383,7 +407,9 @@ export class NoncoreTravelFixture {
         displayName:
           subtype === "travel_agency_transfer"
             ? "SIM hosted travel transfer"
-            : "SIM hosted insurance replacement vehicle",
+            : subtype === "credit_card_airport_transfer"
+              ? "SIM hosted airport transfer"
+              : "SIM hosted insurance replacement vehicle",
         timing: "reservation",
         active: true,
         defaultBillingMode: "partner_settlement",
@@ -406,6 +432,100 @@ export class NoncoreTravelFixture {
         (item) => item.serviceProductType === subtype && item.active,
       ),
     ).toHaveLength(1);
+  }
+
+  /** External geography is SIM; create/publish/readback uses the normal API3001 store. */
+  async configureAirportAreas(): Promise<ServiceAreaBoundaryRecord[]> {
+    const effectiveFrom = new Date(Date.now() - 60_000).toISOString();
+    const effectiveUntil = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+    const suffix = randomUUID().replaceAll("-", "").toUpperCase();
+    const definitions: {
+      areaCode: string;
+      displayName: string;
+      geometry: ServiceAreaBoundaryRecord["geometry"];
+      metadata: Record<string, unknown>;
+    }[] = [
+      {
+        areaCode: `SHARED_SIM_CITY_${suffix}`,
+        displayName: "SIM shared airport-transfer city catchment",
+        geometry: {
+          type: "polygon",
+          coordinates: [
+            { lat: 25.0005, lng: 121.4505 },
+            { lat: 25.0005, lng: 121.625 },
+            { lat: 25.125, lng: 121.625 },
+            { lat: 25.125, lng: 121.4505 },
+          ],
+        },
+        metadata: { source: "shared-external-geography-SIM", fixture: true },
+      },
+      {
+        areaCode: `SHARED_SIM_AIRPORT_${suffix}`,
+        displayName: "SIM shared declared TPE airport boundary",
+        geometry: {
+          type: "circle",
+          center: { lat: 25.0797, lng: 121.2342 },
+          radiusMeters: 6500,
+        },
+        metadata: {
+          source: "shared-external-geography-SIM",
+          fixture: true,
+          airportIataCode: "TPE",
+        },
+      },
+    ];
+    const publishedAreas: ServiceAreaBoundaryRecord[] = [];
+    for (const definition of definitions) {
+      const created = await this.fixture.call<ServiceAreaAdminMutationResponse>(
+        "service-area/admin/service-areas",
+        this.platform,
+        "POST",
+        {
+          ...definition,
+          serviceProductTypes: ["credit_card_airport_transfer"],
+          effectiveFrom,
+          effectiveUntil,
+        },
+      );
+      if (!created.serviceArea)
+        throw new Error("Normal airport area creation returned no record");
+      const area = created.serviceArea;
+      // Own the ID before any later assertion/publish/readback can fail.
+      this.airportAreas.push(area);
+      expect(area.serviceAreaId).toMatch(/^[a-f0-9-]{36}$/);
+      const published =
+        await this.fixture.call<ServiceAreaAdminMutationResponse>(
+          `service-area/admin/service-areas/${encodeURIComponent(area.serviceAreaId)}/publish`,
+          this.platform,
+          "POST",
+          {
+            reason:
+              "Disposable shared external geography SIM; real internal evaluation",
+          },
+        );
+      if (!published.serviceArea)
+        throw new Error("Normal airport area publication returned no record");
+      const actual = published.serviceArea;
+      expect(actual).toMatchObject({
+        serviceAreaId: area.serviceAreaId,
+        areaCode: definition.areaCode,
+        status: "active",
+        geometry: definition.geometry,
+        serviceProductTypes: ["credit_card_airport_transfer"],
+        effectiveFrom,
+        effectiveUntil,
+        metadata: definition.metadata,
+      });
+      expect(Number.isInteger(actual.version) && actual.version > 0).toBe(true);
+      const persisted = await this.fixture.db.query(
+        "SELECT record FROM ops.service_area_boundaries WHERE service_area_id=$1",
+        [area.serviceAreaId],
+      );
+      expect(persisted.rows).toHaveLength(1);
+      expect(persisted.rows[0]!.record).toMatchObject({ ...actual });
+      publishedAreas.push(actual);
+    }
+    return publishedAreas;
   }
 
   async fresh(
@@ -487,6 +607,23 @@ export class NoncoreTravelFixture {
           );
         } catch {
           errors.push(`entry ${scope.entry.entrySlug}`);
+        }
+      }
+      for (const area of [...this.airportAreas].reverse()) {
+        try {
+          const retired =
+            await this.fixture.call<ServiceAreaAdminMutationResponse>(
+              `service-area/admin/service-areas/${encodeURIComponent(area.serviceAreaId)}/retire`,
+              this.platform,
+              "POST",
+              { reason: "Disposable shared airport geography SIM complete" },
+            );
+          expect(retired.serviceArea).toMatchObject({
+            serviceAreaId: area.serviceAreaId,
+            status: "retired",
+          });
+        } catch {
+          errors.push(`service-area ${area.serviceAreaId}`);
         }
       }
     } finally {
