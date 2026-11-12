@@ -145,6 +145,56 @@ class CiFeatUnitPartitioningTests(unittest.TestCase):
             self.assertIn(f"needs.{upstream}.result", block)
 
 
+class RootUnitDelegationTests(unittest.TestCase):
+    """CI-DEDUPE-ROOT-UNIT-20261111: the root unit suite runs once per
+    non-draft PR to dev -- in ci-integ "Unit tests" -- instead of in both
+    workflows. ci.yml keeps it for PRs to main, drafts and pushes."""
+
+    DEV_PR_SKIP = (
+        "github.event_name != 'pull_request' || github.base_ref != 'dev' "
+        "|| github.event.pull_request.draft"
+    )
+    GATES = (
+        "tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json",
+        "tools/ci/verify_passenger_app_postgres_gate.py unit-test-results.json",
+        "tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json",
+        "Voice checkpoint PostgreSQL gate: four passed",
+    )
+
+    def setUp(self) -> None:
+        self.feat = CI_FEAT.read_text(encoding="utf-8")
+        self.integ = CI_INTEG.read_text(encoding="utf-8")
+
+    def test_ci_feat_root_unit_skips_only_non_draft_dev_prs(self) -> None:
+        block = job_block(self.feat, "product_root_unit")
+        self.assertIn(self.DEV_PR_SKIP, block)
+
+    def test_ci_feat_smoke_still_runs_and_checks_the_delegated_result(self) -> None:
+        block = job_block(self.feat, "product_smoke_acceptance")
+        self.assertIn("!cancelled()", block)
+        self.assertIn(
+            "ROOT_UNIT_DELEGATED: ${{ github.event_name == 'pull_request' && "
+            "github.base_ref == 'dev' && !github.event.pull_request.draft }}",
+            block,
+        )
+        # Delegated: the root job must not have run; otherwise it must pass.
+        self.assertIn("needs.product_root_unit.result }}' = 'skipped'", block)
+        self.assertIn("needs.product_root_unit.result }}' = 'success'", block)
+        # Every root-report step is skipped only when delegated.
+        self.assertEqual(block.count("if: env.ROOT_UNIT_DELEGATED != 'true'"), 6)
+
+    def test_ci_integ_unit_merges_the_report_and_runs_every_gate(self) -> None:
+        block = job_block(self.integ, "unit")
+        self.assertIn("--merged-output unit-test-results.json", block)
+        for gate in self.GATES:
+            self.assertIn(gate, block)
+
+    def test_ci_feat_keeps_the_same_gates_for_non_delegated_runs(self) -> None:
+        block = job_block(self.feat, "product_smoke_acceptance")
+        for gate in self.GATES:
+            self.assertIn(gate, block)
+
+
 class SharedToolingWiringTests(unittest.TestCase):
     """Both new test files must be reachable by the same gate that would
     otherwise silently stop protecting anything they cover, per
