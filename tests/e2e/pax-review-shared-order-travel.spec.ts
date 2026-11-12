@@ -979,10 +979,17 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         await expect(generation).toBeVisible();
         // These controls explicitly use Taipei wall-clock time. Preserve the
         // existing closed UTC window, including its millisecond end boundary.
-        const taipeiLocal = (instant: string) =>
-          new Date(Date.parse(instant) + 8 * 60 * 60 * 1000)
+        const taipeiLocal = (instant: string) => {
+          const local = new Date(Date.parse(instant) + 8 * 60 * 60 * 1000)
             .toISOString()
             .slice(0, -1);
+          // Match datetime-local's shortest normalized value. Keep every
+          // significant millisecond; Playwright rejects a value the input trims.
+          return local
+            .replace(/(\.\d*?)0+$/, "$1")
+            .replace(/\.$/, "")
+            .replace(/:00$/, "");
+        };
         await generation
           .getByLabel("Period start (Taipei time)", { exact: true })
           .fill(taipeiLocal(start.toISOString()));
