@@ -726,3 +726,173 @@ it("normal multi-taxi fixed-price Trip keeps its approved fare when completion f
   });
   expect(h.unexpected).toEqual([]);
 });
+
+// Normal API-owned program facts stay on this selected task/order. Eligibility,
+// issuer, travel roster and insurance facts here are explicit transport SIMs;
+// actual Trip rendering, app identity factory and shared SDK remain real.
+function programFulfillmentHarness(
+  subtype:
+    | "credit_card_airport_transfer"
+    | "travel_agency_transfer"
+    | "insurance_replacement_vehicle",
+) {
+  const h = createRequirementHarness(false);
+  h.record.serviceProductCode = subtype;
+  Object.assign(h.owned, {
+    serviceBucket: "business_dispatch",
+    serviceProductCode: subtype,
+    businessDispatchSubtype: subtype,
+    dispatchSemantics: "reservation",
+    fixedPrice: true,
+    quotedFare: { currency: PLATFORM_CURRENCY, amountMinor: 150000 },
+  });
+  Object.assign(h.view.orderSummary!, {
+    serviceBucket: "business_dispatch",
+    serviceProductCode: subtype,
+    businessDispatchSubtype: subtype,
+    dispatchSemantics: "reservation",
+    fixedPrice: true,
+    quotedFare: h.owned.quotedFare,
+  });
+  return h;
+}
+function fulfillmentPanel(mounted: Mounted) {
+  return one(
+    trip(mounted).findAll(
+      (node) =>
+        node.type === "View" &&
+        node.props.testID === "driver-partner-fulfillment",
+    ),
+    "selected task's fulfillment information",
+  );
+}
+
+it.each([
+  {
+    subtype: "credit_card_airport_transfer" as const,
+    patch: {
+      direction: "pickup" as const,
+      flightNo: "SIM-FLIGHT-892",
+      terminal: "SIM-T2",
+      luggageCount: 0,
+    },
+    expected: ["接機", "SIM-FLIGHT-892", "SIM-T2", "行李件數 0"],
+  },
+  {
+    subtype: "travel_agency_transfer" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-GROUP-17",
+        groupSize: 2,
+        itineraryLink: "https://itinerary.example.invalid/SIM-GROUP-17",
+        rosterPassengers: ["SIM團員甲", "SIM團員乙"],
+        meetingPoint: "SIM南側集合處",
+      },
+    },
+    expected: [
+      "SIM-GROUP-17",
+      "團體人數 2",
+      "SIM南側集合處",
+      "https://itinerary.example.invalid/SIM-GROUP-17",
+      "SIM團員甲、SIM團員乙",
+    ],
+  },
+  {
+    subtype: "insurance_replacement_vehicle" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "insurance_replacement_vehicle" as const,
+        claimNumber: "SIM-CLAIM-36",
+        policyNumber: "SIM-POLICY-36",
+        claimReference: "SIM-REFERENCE-36",
+        claimantName: "SIM代步使用人",
+        replacementStart: "2199-11-12T01:30:00.000Z",
+        replacementEnd: "2199-11-14T09:00:00.000Z",
+        replacementVehicleClass: "SIM中型代步車",
+        caseHandler: "SIM理賠聯絡員",
+      },
+    },
+    expected: [
+      "SIM-CLAIM-36",
+      "SIM代步使用人",
+      "SIM中型代步車",
+      "代步起始（UTC） 2199-11-12 01:30",
+      "代步結束（UTC） 2199-11-14 09:00",
+      "SIM理賠聯絡員",
+    ],
+  },
+])(
+  "normal Driver Trip renders $subtype fulfillment facts from its same-order API read",
+  async ({ subtype, patch, expected }) => {
+    const h = programFulfillmentHarness(subtype);
+    Object.assign(h.owned, patch);
+    const mounted = await h.mount();
+    await waitForState(() =>
+      expect(text(trip(mounted))).toContain(expected[0]!),
+    );
+    const panel = fulfillmentPanel(mounted);
+    for (const value of expected) expect(text(panel)).toContain(value);
+    expect(text(trip(mounted))).toContain(
+      `${h.record.taskId} · ${h.record.orderId}`,
+    );
+    expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
+    expect(h.record.orderId).toBe(h.owned.orderId);
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal Driver Trip marks missing insurance fulfillment facts as unavailable instead of inventing a policy or vehicle", async () => {
+  const h = programFulfillmentHarness("insurance_replacement_vehicle");
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("服務行程資訊"),
+  );
+  const information = text(fulfillmentPanel(mounted));
+  expect(information).toContain("代步車型 未提供");
+  expect(information).toContain("代步起始（UTC） 未提供");
+  expect(information).not.toContain("SIM中型代步車");
+  expect(information).not.toContain("undefined");
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Driver Trip clears the previous program details when selecting a different ordinary task", async () => {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  h.owned.partnerBookingDetails = {
+    subtype: "travel_agency_transfer",
+    groupCode: "SIM-OLD-GROUP",
+    groupSize: 2,
+    itineraryLink: "https://itinerary.example.invalid/SIM-OLD-GROUP",
+    rosterPassengers: ["SIM前單旅客"],
+    meetingPoint: "SIM前單集合處",
+  };
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("SIM前單集合處"),
+  );
+  const next = ownedTask("task-B", "pending_acceptance");
+  Object.assign(h.record, next);
+  Object.assign(h.view, taskView(next));
+  Object.assign(h.owned, order(next));
+  // The old optional snapshot remains on the transport object intentionally;
+  // this ordinary task must not advertise it as a program's current facts.
+  ports.selectedTaskId = next.taskId;
+  await renderer.act(async () => ports.navigate?.("trip"));
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain(`${next.taskId} · ${next.orderId}`),
+  );
+  await waitForState(() =>
+    expect(h.paths).toContain(`/api/driver/tasks/${next.taskId}/order`),
+  );
+  expect(text(trip(mounted))).not.toContain("SIM前單集合處");
+  expect(text(trip(mounted))).not.toContain("SIM-OLD-GROUP");
+  expect(
+    trip(mounted).findAll(
+      (node) => node.props.testID === "driver-partner-fulfillment",
+    ),
+  ).toHaveLength(0);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});

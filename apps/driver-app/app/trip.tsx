@@ -367,6 +367,77 @@ function formatTimestamp(value: string | null | undefined): string | null {
   return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
+// Fulfillment facts come from the selected task's existing owned-order read.
+// These are booking details, not a claim of external program verification.
+function getPartnerFulfillmentRows(
+  order: OwnedOrderRecord | null,
+): { label: string; value: string }[] | null {
+  if (!order || order.serviceBucket !== "business_dispatch") return null;
+  const copy = driverStrings.trip.fulfillment;
+  const text = (value: string | null | undefined) =>
+    typeof value === "string" && value.trim() ? value.trim() : copy.notProvided;
+  const count = (value: number | null | undefined) =>
+    value == null ? copy.notProvided : String(value);
+  const row = (label: string, value: string) => ({ label, value });
+  switch (order.businessDispatchSubtype) {
+    case "credit_card_airport_transfer":
+      return [
+        row(
+          copy.direction,
+          order.direction === "pickup"
+            ? copy.pickup
+            : order.direction === "dropoff"
+              ? copy.dropoff
+              : copy.notProvided,
+        ),
+        row(copy.flightNo, text(order.flightNo)),
+        row(copy.terminal, text(order.terminal)),
+        row(copy.luggageCount, count(order.luggageCount)),
+      ];
+    case "travel_agency_transfer": {
+      const details =
+        order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row(copy.groupCode, text(details?.groupCode)),
+        row(copy.groupSize, count(details?.groupSize)),
+        row(copy.meetingPoint, text(details?.meetingPoint)),
+        row(copy.itineraryLink, text(details?.itineraryLink)),
+        row(
+          copy.rosterPassengers,
+          text((details?.rosterPassengers ?? []).join("、")),
+        ),
+      ];
+    }
+    case "insurance_replacement_vehicle": {
+      const details =
+        order.partnerBookingDetails?.subtype === "insurance_replacement_vehicle"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row(copy.claimNumber, text(details?.claimNumber)),
+        row(copy.claimantName, text(details?.claimantName)),
+        row(
+          copy.replacementVehicleClass,
+          text(details?.replacementVehicleClass),
+        ),
+        row(
+          copy.replacementStart,
+          formatTimestamp(details?.replacementStart) ?? copy.notProvided,
+        ),
+        row(
+          copy.replacementEnd,
+          formatTimestamp(details?.replacementEnd) ?? copy.notProvided,
+        ),
+        row(copy.caseHandler, text(details?.caseHandler)),
+      ];
+    }
+    default:
+      return null;
+  }
+}
+
 function formatPickupStopTime(order: OwnedOrderRecord | null): string {
   const start = formatShortTime(order?.reservationWindowStart);
   return start ? `預計 ${start}` : "時間待同步";
@@ -906,6 +977,9 @@ export default function TripScreen() {
 
   const completionOrder =
     orderDetail?.orderId === taskDetail?.orderId ? orderDetail : null;
+  const fulfillmentRows = isForwardedTask(taskDetail)
+    ? null
+    : getPartnerFulfillmentRows(completionOrder);
   const actualFareDraft =
     actualFareState.taskId === taskDetail?.taskId
       ? actualFareState.draft
@@ -2145,6 +2219,27 @@ export default function TripScreen() {
               <RouteMetricChip label="車資" value={routeMetricFare} mono />
             </View>
           </Card>
+
+          {fulfillmentRows ? (
+            <Card theme={driverCanvasTheme} padding={14}>
+              <View
+                testID="driver-partner-fulfillment"
+                style={styles.bannerBodyStack}
+              >
+                <Text style={styles.bannerTitleText}>
+                  {driverStrings.trip.fulfillment.title}
+                </Text>
+                {fulfillmentRows.map((item) => (
+                  <View key={item.label} style={styles.routeStopCopy}>
+                    <Text style={styles.routeStopLabel}>{item.label}</Text>
+                    <Text selectable style={styles.bannerBodyText}>
+                      {item.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </Card>
+          ) : null}
 
           <Card
             theme={driverCanvasTheme}

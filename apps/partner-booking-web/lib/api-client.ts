@@ -103,6 +103,8 @@ async function getServerAuthorityHeaders(): Promise<Record<string, string>> {
   if (audience) {
     const identityToken = await mintMetadataIdentityToken(audience);
     if (identityToken) {
+      // Match the existing proxy transport while retaining the product bearer.
+      headers["x-serverless-authorization"] = `Bearer ${identityToken}`;
       headers["x-drts-google-id-token"] = identityToken;
     }
   }

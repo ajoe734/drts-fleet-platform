@@ -104,6 +104,9 @@ jobs:
       NOTIFICATION_OUTBOX_DIRECTORY: /tmp/tenant-uat-mail-outbox
       NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
       DRTS_UAT_API_URL: http://127.0.0.1:4102
+      # Carry the existing provider's renewed sessions between sequential stages.
+      # Never export bearers to GITHUB_ENV, logs or uploaded artifacts.
+      DRTS_UAT_RENEWED_SESSIONS_FILE: ${{ runner.temp }}/tenant-uat-renewed-sessions-${{ github.run_id }}-${{ github.run_attempt }}.json
       DRTS_REFERRAL_EMBED_BASE_URL: http://localhost:3002
       REFERRAL_EMBED_SESSION_SECRET: hosted-uat-session-not-a-real-secret
       REFERRAL_EMBED_ALLOWED_HOSTS: localhost:3002
@@ -506,6 +509,7 @@ jobs:
               kill "$(cat ".artifacts/tenant-uat-acceptance/$name.pid")" 2>/dev/null || true
             fi
           done
+          rm -f -- "$DRTS_UAT_RENEWED_SESSIONS_FILE"
 
       - name: Gate on zero skips and every test passed (Playwright + Vitest)
         id: gate

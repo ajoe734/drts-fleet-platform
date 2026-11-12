@@ -21,13 +21,38 @@ async function fillCardProgramFields(page: Page) {
   await page.getByLabel("接送方向").selectOption("pickup");
 }
 
+// The existing hosted route suite uses its explicit HTTP authority SIM.
+// These assertions prove the real form/action readback, not API/PG persistence.
+async function expectMapBookingReadback(page: Page) {
+  const confirmation = page.getByTestId("partner-booking-confirmation");
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation.getByText("預約已建立並完成讀回")).toBeVisible();
+  const booking = confirmation.getByTestId("partner-booking-id");
+  const order = confirmation.getByTestId("partner-order-id");
+  await expect(booking).toHaveText(/^booking-/);
+  await expect(order).toHaveText(/^order-/);
+  const href = await confirmation
+    .getByRole("link", { name: "預約確認", exact: true })
+    .getAttribute("href");
+  expect(href).not.toBeNull();
+  const readback = new URL(href!, page.url());
+  expect(readback.pathname).toBe("/acme/confirmed");
+  expect(readback.searchParams.get("bookingId")).toBe(
+    await booking.innerText(),
+  );
+  expect(readback.searchParams.get("orderId")).toBe(await order.innerText());
+  expect(readback.searchParams.get("partnerUserRef")).toBe(
+    new URL(page.url()).searchParams.get("partnerUserRef"),
+  );
+}
+
 test.describe("partner map booking UI", () => {
   test("keeps dispatchable coordinates explicit before validation success", async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name === "outage");
     const response = await page.goto(
-      "/acme/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001&partnerUserRef=SIM-map-dispatchable",
     );
     expect(response?.status()).toBe(200);
 
@@ -42,14 +67,11 @@ test.describe("partner map booking UI", () => {
 
     await expect(page.getByText("位於服務範圍內")).toBeVisible();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: "建立預約" });
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await expect(page.getByText("表單驗證通過")).toBeVisible();
-    await expect(
-      page.getByText("此預約資料已準備完成，可交由合作通路後續建立訂單。"),
-    ).toBeVisible();
+    await expectMapBookingReadback(page);
   });
 
   test("keeps manual-review routes explicit instead of looking dispatch-ready", async ({
@@ -57,7 +79,7 @@ test.describe("partner map booking UI", () => {
   }, testInfo) => {
     test.skip(testInfo.project.name === "outage");
     const response = await page.goto(
-      "/acme/book?eligibilityVerificationId=elig-verified-002",
+      "/acme/book?eligibilityVerificationId=elig-verified-002&partnerUserRef=SIM-map-manual-review",
     );
     expect(response?.status()).toBe(200);
 
@@ -85,9 +107,10 @@ test.describe("partner map booking UI", () => {
       "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
     );
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: "建立預約" });
     await expect(submit).toBeEnabled();
     await submit.click();
+    await expectMapBookingReadback(page);
 
     await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
     await expect(page.getByText("表單驗證通過")).toHaveCount(0);
@@ -96,7 +119,7 @@ test.describe("partner map booking UI", () => {
   test("blocks outside service area", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === "outage");
     const response = await page.goto(
-      "/acme/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001&partnerUserRef=SIM-map-outside",
     );
     expect(response?.status()).toBe(200);
 
@@ -115,8 +138,11 @@ test.describe("partner map booking UI", () => {
       .getByRole("button", { name: /Use this location|使用此位置/ })
       .click();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: "建立預約" });
     await expect(submit).toBeDisabled();
+    await expect(page.getByTestId("partner-booking-confirmation")).toHaveCount(
+      0,
+    );
   });
 
   test("submits manual review fallback when provider is down but coordinates exist", async ({
@@ -124,7 +150,7 @@ test.describe("partner map booking UI", () => {
   }, testInfo) => {
     test.skip(testInfo.project.name !== "outage");
     const response = await page.goto(
-      "/acme/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001&partnerUserRef=SIM-map-outage",
     );
     expect(response?.status()).toBe(200);
 
@@ -155,7 +181,7 @@ test.describe("partner map booking UI", () => {
       .getByRole("button", { name: /Use this location|使用此位置/ })
       .click();
 
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: "建立預約" });
     await expect(submit).toBeDisabled();
 
     // Fix reason for dropoff
@@ -169,8 +195,9 @@ test.describe("partner map booking UI", () => {
     // Now it works
     await expect(submit).toBeEnabled();
     await submit.click();
+    await expectMapBookingReadback(page);
 
-    // Actual PartnerBookingForm renders manual review required message in the submitted result
+    // The normal booking stays explicit about manual review after readback.
     const reviewSection = page
       .locator("section")
       .filter({ has: page.getByTestId("partner-booking-review-summary") });
@@ -189,12 +216,15 @@ test.describe("partner map booking UI", () => {
   }, testInfo) => {
     test.skip(testInfo.project.name !== "outage");
     const response = await page.goto(
-      "/acme/book?eligibilityVerificationId=elig-verified-001",
+      "/acme/book?eligibilityVerificationId=elig-verified-001&partnerUserRef=SIM-map-no-coordinates",
     );
     expect(response?.status()).toBe(200);
 
     await fillCardProgramFields(page);
-    const submit = page.getByRole("button", { name: "驗證下單表單" });
+    const submit = page.getByRole("button", { name: "建立預約" });
     await expect(submit).toBeDisabled();
+    await expect(page.getByTestId("partner-booking-confirmation")).toHaveCount(
+      0,
+    );
   });
 });

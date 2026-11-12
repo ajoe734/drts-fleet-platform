@@ -956,3 +956,116 @@ describe("partner-booking-web BFF wiring", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
+
+describe("normal Partner direct requests to a private Cloud Run API", () => {
+  it.each(["entry", "trip", "create"] as const)(
+    "carries the existing transport token for %s without replacing product identity",
+    async (operation) => {
+      const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+      process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+      clearPartnerEntryAuthorityCacheForTests();
+      const calls: { url: string; headers: Headers }[] = [];
+      const order = {
+        orderId: "SIM-cloud-order",
+        bookingId: "SIM-cloud-booking",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL, init?: RequestInit) => {
+          const url = new URL(String(input));
+          calls.push({ url: url.href, headers: new Headers(init?.headers) });
+          if (url.hostname === "metadata.google.internal")
+            return new Response("SIM-google-transport-token", { status: 200 });
+          return jsonResponse({
+            data:
+              operation === "entry"
+                ? activeEntry
+                : operation === "create"
+                  ? {
+                      booking: {
+                        bookingId: order.bookingId,
+                        orderId: order.orderId,
+                      },
+                      order,
+                    }
+                  : order,
+            meta: {
+              requestId: "SIM-cloud-transport",
+              timestamp: "2026-11-12T00:00:00Z",
+            },
+          });
+        }),
+      );
+      try {
+        if (operation === "entry") await getPublicPartnerEntry("acme");
+        else if (operation === "trip")
+          await getPartnerTrip(session, order.orderId);
+        else
+          await createPartnerBooking(session, {
+            businessDispatchSubtype: "credit_card_airport_transfer",
+            partnerEntrySlug: "acme",
+            eligibilityVerificationId: "SIM-eligibility",
+            pickup: { address: "SIM A", lat: 25, lng: 121 },
+            dropoff: { address: "SIM B", lat: 25.1, lng: 121.1 },
+            reservationWindowStart: "2099-11-12T10:00:00Z",
+            reservationWindowEnd: "2099-11-12T11:00:00Z",
+            passenger: { name: "SIM Passenger", phone: "0900000000" },
+          });
+        expect(calls).toHaveLength(2);
+        const metadata = new URL(calls[0]!.url);
+        expect(metadata.hostname).toBe("metadata.google.internal");
+        expect(metadata.searchParams.get("audience")).toBe(
+          process.env.DRTS_API_AUTH_AUDIENCE,
+        );
+        expect(calls[0]!.headers.get("Metadata-Flavor")).toBe("Google");
+        const outbound = calls[1]!.headers;
+        expect(outbound.get("x-serverless-authorization")).toBe(
+          "Bearer SIM-google-transport-token",
+        );
+        expect(outbound.get("x-drts-google-id-token")).toBe(
+          "SIM-google-transport-token",
+        );
+        expect(outbound.get("Authorization")).toBe(
+          operation === "entry" ? null : "Bearer partner-token",
+        );
+        expect(outbound.get("x-request-id")).toBeTruthy();
+      } finally {
+        if (oldAudience === undefined)
+          delete process.env.DRTS_API_AUTH_AUDIENCE;
+        else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+        clearPartnerEntryAuthorityCacheForTests();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("does not invent a transport token when the existing metadata source has none", async () => {
+    const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+    process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+    const calls: Headers[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.hostname === "metadata.google.internal")
+          return new Response(null, { status: 503 });
+        calls.push(new Headers(init?.headers));
+        return jsonResponse({
+          data: { orderId: "SIM-cloud-order" },
+          meta: { requestId: "SIM-cloud-no-token", timestamp: "t" },
+        });
+      }),
+    );
+    try {
+      await getPartnerTrip(session, "SIM-cloud-order");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.get("x-serverless-authorization")).toBeNull();
+      expect(calls[0]!.get("x-drts-google-id-token")).toBeNull();
+      expect(calls[0]!.get("Authorization")).toBe("Bearer partner-token");
+    } finally {
+      if (oldAudience === undefined) delete process.env.DRTS_API_AUTH_AUDIENCE;
+      else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+      vi.unstubAllGlobals();
+    }
+  });
+});

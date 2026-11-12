@@ -1,6 +1,27 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "dispatch.detail.fulfillment.title": "Service trip information",
+  "dispatch.detail.fulfillment.notProvided": "Not provided",
+  "dispatch.detail.fulfillment.direction": "Transfer direction",
+  "dispatch.detail.fulfillment.pickup": "Airport pickup",
+  "dispatch.detail.fulfillment.dropoff": "Airport drop-off",
+  "dispatch.detail.fulfillment.flightNo": "Flight",
+  "dispatch.detail.fulfillment.terminal": "Terminal",
+  "dispatch.detail.fulfillment.luggageCount": "Luggage count",
+  "dispatch.detail.fulfillment.groupCode": "Group code",
+  "dispatch.detail.fulfillment.groupSize": "Group size",
+  "dispatch.detail.fulfillment.meetingPoint": "Meeting point",
+  "dispatch.detail.fulfillment.itineraryLink": "Itinerary link",
+  "dispatch.detail.fulfillment.rosterPassengers": "Passenger roster",
+  "dispatch.detail.fulfillment.claimNumber": "Claim case number",
+  "dispatch.detail.fulfillment.claimantName": "Replacement vehicle user",
+  "dispatch.detail.fulfillment.replacementVehicleClass":
+    "Replacement vehicle class",
+  "dispatch.detail.fulfillment.replacementStart": "Replacement start (UTC)",
+  "dispatch.detail.fulfillment.replacementEnd": "Replacement end (UTC)",
+  "dispatch.detail.fulfillment.caseHandler": "Case contact",
+
   "platformNotice.section": "Platform notices",
   "platformNotice.read": "Read",
   "platformNotice.markRead": "Mark as read",
@@ -4657,6 +4678,26 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "dispatch.detail.fulfillment.title": "服務行程資訊",
+  "dispatch.detail.fulfillment.notProvided": "未提供",
+  "dispatch.detail.fulfillment.direction": "接送方向",
+  "dispatch.detail.fulfillment.pickup": "接機",
+  "dispatch.detail.fulfillment.dropoff": "送機",
+  "dispatch.detail.fulfillment.flightNo": "航班",
+  "dispatch.detail.fulfillment.terminal": "航廈",
+  "dispatch.detail.fulfillment.luggageCount": "行李件數",
+  "dispatch.detail.fulfillment.groupCode": "團體代碼",
+  "dispatch.detail.fulfillment.groupSize": "團體人數",
+  "dispatch.detail.fulfillment.meetingPoint": "集合地點",
+  "dispatch.detail.fulfillment.itineraryLink": "行程連結",
+  "dispatch.detail.fulfillment.rosterPassengers": "旅客名單",
+  "dispatch.detail.fulfillment.claimNumber": "理賠案件編號",
+  "dispatch.detail.fulfillment.claimantName": "代步使用人",
+  "dispatch.detail.fulfillment.replacementVehicleClass": "代步車型",
+  "dispatch.detail.fulfillment.replacementStart": "代步起始（UTC）",
+  "dispatch.detail.fulfillment.replacementEnd": "代步結束（UTC）",
+  "dispatch.detail.fulfillment.caseHandler": "案件聯絡人",
+
   "platformNotice.section": "平台公告",
   "platformNotice.read": "已讀",
   "platformNotice.markRead": "標示已讀",

@@ -193,6 +193,23 @@ const entries = {
 
 let lastTenantBookingCommand = null;
 
+// Normal airport ServerAction re-reads both original endpoints after POST.
+// Echo only the command this explicit HTTP SIM accepted; no production token,
+// service decision or durable database result is manufactured by this fixture.
+function normalBookingReadFacts() {
+  return {
+    bookingId: "booking-embed-001",
+    businessDispatchSubtype:
+      lastTenantBookingCommand?.businessDispatchSubtype ?? null,
+    direction: lastTenantBookingCommand?.direction ?? null,
+    flightNo: lastTenantBookingCommand?.flightNo ?? null,
+    terminal: lastTenantBookingCommand?.terminal ?? null,
+    reservationWindowEnd:
+      lastTenantBookingCommand?.reservationWindowEnd ?? null,
+    mapFallbackReview: lastTenantBookingCommand?.mapFallbackReview ?? null,
+  };
+}
+
 let mockAddresses = [
   {
     addressId: "addr-001",
@@ -380,6 +397,7 @@ const server = http.createServer((req, res) => {
   ) {
     json(res, 200, {
       data: {
+        ...normalBookingReadFacts(),
         bookingId: "booking-embed-001",
         orderId: "order-embed-001",
         orderStatus: "created",
@@ -401,6 +419,7 @@ const server = http.createServer((req, res) => {
   ) {
     json(res, 200, {
       data: {
+        ...normalBookingReadFacts(),
         orderId: "order-embed-001",
         orderNo: "ORD-EMBED-001",
         status: "created",

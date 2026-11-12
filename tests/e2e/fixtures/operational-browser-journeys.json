@@ -123,7 +123,7 @@
           "before": [
             {
               "kind": "fill",
-              "control": "input#enterprise-booking-cost-center",
+              "control": "#enterprise-booking-cost-center",
               "value": "CC-PRD-07"
             },
             {
@@ -153,7 +153,7 @@
             },
             {
               "kind": "fill",
-              "control": "input#enterprise-booking-cost-center",
+              "control": "#enterprise-booking-cost-center",
               "value": "CC-PRD-07"
             },
             {

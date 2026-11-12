@@ -1,0 +1,714 @@
+import { expect, test, type Page, type BrowserContext } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import {
+  normalisePlatformCurrency,
+  type OwnedOrderRecord,
+} from "@drts/contracts";
+import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
+import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { createDispatchInOrdinaryWorkspace } from "./pax-review-shared-order/ordinary-ops-dispatch";
+import { readAssignedTripAndAccept } from "./pax-review-shared-order/additional-journey";
+import {
+  NoncoreTravelFixture,
+  PARTNER_ORIGIN,
+  NONCORE_API,
+  camel,
+  required,
+} from "./pax-review-shared-order/noncore-travel-fixture";
+
+const OPS = "http://127.0.0.1:3202";
+const DRIVER = "http://127.0.0.1:3101";
+const run = promisify(execFile);
+
+async function renewActualFixtureSessions() {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "noncore-travel-session-"),
+  );
+  try {
+    const file = path.join(directory, "sessions.json");
+    await run("./apps/api/node_modules/.bin/tsx", [
+      "tests/e2e/system-remediation/sr-partner-notify-qa-20260917/fixture-sessions.ts",
+      file,
+    ]);
+    const sessions = JSON.parse(await readFile(file, "utf8")) as Record<
+      string,
+      string
+    >;
+    for (const name of [
+      "DRTS_UAT_TOKEN_PLATFORM",
+      "DRTS_UAT_TOKEN_A",
+      "DRTS_UAT_TOKEN_B",
+    ]) {
+      if (!sessions[name]) throw new Error("Normal fixture renewal failed");
+      process.env[name] = sessions[name];
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function establishNormalPlatformSession() {
+  // Existing Admin BFF performs the configured canonical development workforce
+  // exchange. The real API issues the JWT; this test never signs an identity.
+  const response = await fetch(
+    "http://127.0.0.1:3204/control-plane-proxy/auth/token",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+    },
+  );
+  expect(response.status).toBe(201);
+  const issued = camel(await response.json());
+  expect(typeof issued.token).toBe("string");
+  expect(issued.sessionId).toBeTruthy();
+  const verification = await fetch(`${NONCORE_API}/api/auth/session`, {
+    headers: { Authorization: `Bearer ${issued.token}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(20_000),
+  });
+  expect(verification.status).toBe(200);
+  const session = camel(await verification.json()).data;
+  expect(session).toMatchObject({
+    active: true,
+    identity: {
+      realm: "platform",
+      actorType: "platform_admin",
+      principalId: "principal_platform_admin_default",
+    },
+  });
+  process.env.DRTS_UAT_TOKEN_PLATFORM = issued.token;
+}
+
+async function address(
+  page: Page,
+  index: number,
+  query: string,
+  label: string,
+) {
+  const pickers = page.locator("[data-address-map-picker]");
+  await expect(pickers).toHaveCount(2);
+  const picker = pickers.nth(index);
+  await picker
+    .getByRole("textbox", { name: "Search address", exact: true })
+    .fill(query);
+  await picker.getByRole("button", { name: "Search", exact: true }).click();
+  await picker.getByRole("button", { name: new RegExp(label) }).click();
+}
+
+/** Hosted-only dedicated config includes both unchanged original cases plus this
+ * independent normal business case. No product/auth/PSP/Passenger mocks. */
+test("normal travel Partner booking is ordinarily assigned, genuinely Driver-completed and re-read with the same-order tenant invoice", async ({
+  browser,
+}, info) => {
+  expect(process.env.GITHUB_ACTIONS).toBe("true");
+  expect(required("DRTS_UAT_ENV")).toBe("sandbox");
+  expect(required("DRTS_UAT_API_URL")).toBe(NONCORE_API);
+  expect(required("CANDIDATE_SHA")).toMatch(/^[a-f0-9]{40}$/);
+  // The parent's system setup token has a normal fifteen-minute TTL. Exchange
+  // normal live workforce authority first; do not feed an expired parent setup
+  // token into renewal or weaken the existing durable verification step.
+  await establishNormalPlatformSession();
+  await renewActualFixtureSessions();
+  const fixture = new NoncoreTravelFixture();
+  const contexts: BrowserContext[] = [];
+  const progress = createJourneyProgress(
+    info.outputPath("noncore-safe-progress.json"),
+  );
+  const step = progress.step;
+  const newPage = async () => {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 1000 },
+      timezoneId: "Asia/Taipei",
+    });
+    contexts.push(context);
+    return context.newPage();
+  };
+  let orderId: string | null = null;
+  try {
+    const partner = await newPage(),
+      ops = await newPage(),
+      driver = await newPage();
+    await step("Activate normal travel product", () =>
+      fixture.activateTravel(),
+    );
+    const supply = await step(
+      "Approve durable normal SIM business supply through Fleet and Admin",
+      () => fixture.fleetSupply(),
+    );
+    const scope = await step(
+      "Create own normal travel entry and credential",
+      () => fixture.entry("travel_agency"),
+    );
+    const partnerUserRef = `SIM-travel-rider-${randomUUID()}`;
+    const referenceToken = `SIM-roster-reference-${randomUUID()}`;
+
+    await step(
+      "Issue real device invitation and register it in Driver UI",
+      async () => {
+        const invitation = await fixture.fixture.call<{
+          registrationCode: string;
+        }>("auth/driver/device/invite", fixture.platform, "POST", {
+          driverId: supply.driverId,
+        });
+        expect(invitation.registrationCode).toBeTruthy();
+        await driver.goto(`${DRIVER}/onboarding`);
+        await driver
+          .getByLabel("裝置註冊碼", { exact: true })
+          .fill(invitation.registrationCode);
+        const [registered] = await Promise.all([
+          driver.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname.endsWith(
+                "/auth/driver/device/register",
+              ) && response.request().method() === "POST",
+          ),
+          driver
+            .getByRole("button", { name: "註冊此裝置", exact: true })
+            .click(),
+        ]);
+        expect(registered.status()).toBe(201);
+        await expect(
+          driver.getByLabel("裝置註冊碼", { exact: true }),
+        ).toHaveCount(0);
+        await driver.getByText("任務", { exact: true }).first().click();
+        await expect(driver).toHaveURL(/\/jobs$/);
+        // Normal device-bound foreground producer sends actual ingestion requests.
+        // No registry location or task/tracking facts are written by this test.
+        await expect
+          .poll(
+            async () => {
+              const locations = await fixture.fixture.call<{ items: any[] }>(
+                "regulatory-registry/driver-locations",
+                fixture.platform,
+              );
+              return locations.items.some(
+                (item) =>
+                  item.driverId === supply.driverId &&
+                  Date.now() - Date.parse(item.recordedAt) < 60_000,
+              );
+            },
+            { timeout: 40_000, intervals: [1000] },
+          )
+          .toBe(true);
+      },
+    );
+
+    await partner
+      .context()
+      .addCookies([
+        { name: PARTNER_LOCALE_COOKIE, value: "en", url: PARTNER_ORIGIN },
+      ]);
+    const details = {
+      subtype: "travel_agency_transfer",
+      groupCode: `SIM-GROUP-${fixture.marker}`,
+      groupSize: 2,
+      itineraryLink: `https://travel.example.test/${fixture.marker}`,
+      rosterPassengers: ["SIM Traveller One", "SIM Traveller Two"],
+      meetingPoint: "SIM Taipei 101 meeting point",
+    };
+    const dates = await step(
+      "Submit normal travel form through the real ServerAction",
+      async () => {
+        const opened = await partner.goto(
+          `${PARTNER_ORIGIN}/${scope.entry.entrySlug}/book?${new URLSearchParams({ partnerUserRef, referenceToken })}`,
+        );
+        expect(opened?.status()).toBe(200);
+        await partner
+          .getByLabel("Passenger name", { exact: true })
+          .fill("SIM Hosted Travel Passenger");
+        await partner
+          .getByLabel("Passenger phone", { exact: true })
+          .fill("0900000036");
+        await partner
+          .getByLabel("Group / order reference", { exact: true })
+          .fill(details.groupCode);
+        await partner.getByLabel("Group seats", { exact: true }).fill("2");
+        await partner
+          .getByLabel("Itinerary link", { exact: true })
+          .fill(details.itineraryLink);
+        await partner
+          .getByLabel("Passenger roster", { exact: true })
+          .fill(details.rosterPassengers.join("\n"));
+        await partner
+          .getByLabel("Meeting point", { exact: true })
+          .fill(details.meetingPoint);
+        await partner.getByLabel("Luggage count", { exact: true }).fill("2");
+        await partner
+          .getByLabel("Notes", { exact: true })
+          .fill(
+            "SIM external roster, qualifications and GPS; normal internal lifecycle/invoice",
+          );
+        await address(partner, 0, "taipei 101", "Taipei 101");
+        await address(partner, 1, "taipei main", "Taipei Main Station");
+        await expect(
+          partner.getByText("Inside the service area", { exact: true }),
+        ).toBeVisible();
+        // Existing API setting is one minute; keep it unchanged. Prepare a valid
+        // short-lead new booking and then wait naturally before Driver start.
+        const dates = await partner.evaluate(() => {
+          const start = new Date(
+            Math.ceil((Date.now() + 90_000) / 60_000) * 60_000,
+          );
+          const end = new Date(start.getTime() + 30 * 60_000);
+          const local = (value: Date) => {
+            const pad = (x: number) => String(x).padStart(2, "0");
+            return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+          };
+          return {
+            start: local(start),
+            end: local(end),
+            startISO: start.toISOString(),
+            endISO: end.toISOString(),
+          };
+        });
+        await partner
+          .getByLabel("Reservation window start", { exact: true })
+          .fill(dates.start);
+        await partner
+          .getByLabel("Reservation window end", { exact: true })
+          .fill(dates.end);
+        const submit = partner.getByRole("button", {
+          name: "Create booking",
+          exact: true,
+        });
+        await expect(submit).toBeEnabled();
+        await submit.click();
+        await expect(
+          partner.getByTestId("partner-booking-confirmation"),
+        ).toContainText("Booking created and read back");
+        return dates;
+      },
+    );
+    const bookingId = (
+      await partner.getByTestId("partner-booking-id").innerText()
+    ).trim();
+    orderId = (
+      await partner.getByTestId("partner-order-id").innerText()
+    ).trim();
+    expect(bookingId).toMatch(/^booking-[a-f0-9-]{36}$/);
+    expect(orderId).toMatch(/^[a-f0-9-]{36}$/);
+    const exactOrderId = orderId;
+    const before = await fixture.fresh(
+      scope,
+      partnerUserRef,
+      bookingId,
+      exactOrderId,
+    );
+    expect(before.order).toMatchObject({
+      orderId: exactOrderId,
+      bookingId,
+      tenantId: fixture.tenantId,
+      businessDispatchSubtype: "travel_agency_transfer",
+      partnerId: scope.entry.partnerId,
+      partnerProgramId: scope.entry.programId,
+      partnerEntrySlug: scope.entry.entrySlug,
+      partnerBookingDetails: details,
+      reservationWindowStart: dates.startISO,
+    });
+    expect(before.order.eligibilityVerificationId).toBeTruthy();
+    expect(before.order.fixedPrice).toBe(true);
+    expect(before.order.quotedFare).toBeTruthy();
+    const verification = await fixture.fixture.call<any>(
+      `partner/eligibility/${encodeURIComponent(before.order.eligibilityVerificationId)}`,
+      fixture.platform,
+    );
+    expect(verification).toMatchObject({
+      verificationStatus: "eligible",
+      partnerEntrySlug: scope.entry.entrySlug,
+      partnerProgramId: scope.entry.programId,
+      businessDispatchSubtype: "travel_agency_transfer",
+    });
+
+    const created = await step(
+      "Create dispatch from the ordinary Ops page for this exact order",
+      () => createDispatchInOrdinaryWorkspace(ops, OPS, exactOrderId, info),
+    );
+    const opsFulfillment = ops.locator(
+      `[data-ops-fulfillment-order-id="${exactOrderId}"]`,
+    );
+    await expect(opsFulfillment).toHaveAttribute(
+      "data-ops-fulfillment-subtype",
+      "travel_agency_transfer",
+    );
+    for (const value of [
+      details.groupCode,
+      details.meetingPoint,
+      ...details.rosterPassengers,
+    ])
+      await expect(opsFulfillment).toContainText(value);
+    const assigned = await step(
+      "Ordinary Ops assigns an actually returned normal business candidate",
+      async () => {
+        const candidate = ops.locator("select[data-drt-dispatch-candidate]");
+        const value = `${supply.driverId}:${supply.vehicleId}`;
+        await expect(candidate.locator(`option[value="${value}"]`)).toHaveCount(
+          1,
+        );
+        await candidate.selectOption(value);
+        const [response] = await Promise.all([
+          ops.waitForResponse(
+            (item) =>
+              new URL(item.url()).pathname ===
+                "/control-plane-proxy/dispatch/assign" &&
+              item.request().method() === "POST",
+          ),
+          ops.locator('[data-drt-operation="ops-dispatch-assign"]').click(),
+        ]);
+        expect(response.status()).toBe(201);
+        expect(response.request().postDataJSON()).toMatchObject({
+          driverId: supply.driverId,
+          vehicleId: supply.vehicleId,
+          dispatchJobId: created.dispatchJobId,
+        });
+        const result = camel(await response.json()).data;
+        expect(result.assignmentId).toBeTruthy();
+        expect(result.taskId).toBeTruthy();
+        await expect(
+          ops.locator(`[data-ops-task-id="${result.taskId}"]`),
+        ).toBeVisible();
+        return result as { taskId: string; assignmentId: string };
+      },
+    );
+    await readAssignedTripAndAccept(
+      driver,
+      DRIVER,
+      exactOrderId,
+      step,
+      assigned.taskId,
+    );
+    const driverFulfillment = driver.getByTestId("driver-partner-fulfillment");
+    for (const value of [
+      details.groupCode,
+      details.meetingPoint,
+      ...details.rosterPassengers,
+    ])
+      await expect(driverFulfillment).toContainText(value);
+    for (const [label, action] of [
+      ["前往接送點", "depart"],
+      ["抵達上車點", "arrived_pickup"],
+      ["開始行程", "start"],
+    ] as const) {
+      if (action === "start")
+        await expect
+          .poll(() => Date.now(), { timeout: 180_000, intervals: [1000] })
+          .toBeGreaterThanOrEqual(Date.parse(dates.startISO));
+      await step(`Normal Driver ${action}`, async () => {
+        const [response] = await Promise.all([
+          driver.waitForResponse(
+            (item) =>
+              new URL(item.url()).pathname.endsWith(
+                `/driver/tasks/${assigned.taskId}/${action}`,
+              ) && item.request().method() === "POST",
+          ),
+          driver.getByRole("button", { name: label, exact: true }).click(),
+        ]);
+        expect(response.status()).toBe(201);
+      });
+    }
+    await step(
+      "Use actual tracked duration and normal required proof upload",
+      async () => {
+        await expect(driver.getByText(/0\.[2-9]\d km/).first()).toBeVisible({
+          timeout: 40_000,
+        });
+        const duration = driver
+          .getByText("時長", { exact: true })
+          .locator("..")
+          .getByText(/^\d{2}:\d{2}:\d{2}$/);
+        await expect
+          .poll(
+            async () => {
+              const [h, m, s] = (await duration.innerText())
+                .split(":")
+                .map(Number);
+              return h! * 3600 + m! * 60 + s!;
+            },
+            { timeout: 30_000, intervals: [1000] },
+          )
+          .toBeGreaterThan(20);
+        const proof = (before.order as OwnedOrderRecord).proofRequirements;
+        expect(proof.minPhotoCount).toBeGreaterThan(0);
+        expect(proof.minPhotoCount).toBeLessThanOrEqual(5);
+        expect(proof.expenseProofRequired).toBe(false);
+        const photo =
+          "apps/driver-app/android/app/src/main/res/drawable-mdpi/splashscreen_logo.png";
+        for (let index = 0; index < proof.minPhotoCount; index += 1) {
+          const [chooser] = await Promise.all([
+            driver.waitForEvent("filechooser"),
+            driver
+              .getByRole("button", { name: "從相簿選取", exact: true })
+              .click(),
+          ]);
+          await chooser.setFiles(photo);
+          await expect(
+            driver.getByRole("button", { name: "移除", exact: true }),
+          ).toHaveCount(index + 1);
+        }
+        if (proof.signoffRequired)
+          await driver
+            .getByPlaceholder("乘客簽收或簽收單號", { exact: true })
+            .fill(`SIM-SIGNOFF-${fixture.marker}`);
+      },
+    );
+    await step("Driver normally completes the exact task", async () => {
+      const complete = driver.getByRole("button", {
+        name: "完成行程",
+        exact: true,
+      });
+      await expect(complete).toBeEnabled();
+      const [response] = await Promise.all([
+        driver.waitForResponse(
+          (item) =>
+            new URL(item.url()).pathname.endsWith(
+              `/driver/tasks/${assigned.taskId}/complete`,
+            ) && item.request().method() === "POST",
+        ),
+        complete.click(),
+      ]);
+      expect(response.status()).toBe(201);
+    });
+    const pg = await fixture.fixture.db.query(
+      `
+      SELECT o.record AS order_record, j.record AS job_record,
+             a.record AS assignment_record, t.record AS task_record
+      FROM ops.phase1_owned_orders o
+      JOIN ops.phase1_dispatch_jobs j ON j.order_id=o.order_id
+      JOIN ops.phase1_dispatch_assignments a ON a.order_id=o.order_id AND a.dispatch_job_id=j.dispatch_job_id
+      JOIN ops.phase1_driver_tasks t ON t.order_id=o.order_id AND t.assignment_id=a.assignment_id
+      WHERE o.order_id=$1 AND j.dispatch_job_id=$2 AND a.assignment_id=$3 AND t.task_id=$4`,
+      [
+        exactOrderId,
+        created.dispatchJobId,
+        assigned.assignmentId,
+        assigned.taskId,
+      ],
+    );
+    expect(pg.rows).toHaveLength(1);
+    const row = pg.rows[0]!;
+    const task = row.task_record;
+    expect(row.order_record).toMatchObject({
+      orderId: exactOrderId,
+      bookingId,
+      status: "completed",
+      tenantId: fixture.tenantId,
+      partnerEntrySlug: scope.entry.entrySlug,
+      partnerBookingDetails: details,
+    });
+    expect(row.job_record).toMatchObject({
+      orderId: exactOrderId,
+      dispatchJobId: created.dispatchJobId,
+    });
+    expect(row.assignment_record).toMatchObject({
+      assignmentId: assigned.assignmentId,
+      orderId: exactOrderId,
+      driverId: supply.driverId,
+      vehicleId: supply.vehicleId,
+      status: "completed",
+    });
+    expect(task).toMatchObject({
+      taskId: assigned.taskId,
+      assignmentId: assigned.assignmentId,
+      orderId: exactOrderId,
+      driverId: supply.driverId,
+      vehicleId: supply.vehicleId,
+      status: "completed",
+    });
+    expect(task.fare).not.toBeNull();
+    expect(task.fare.amountMinor).toBeGreaterThanOrEqual(0);
+    expect(task.actualDistanceKm).toBeGreaterThan(0);
+    expect(task.actualDurationSec).toBeGreaterThan(20);
+    expect(Date.parse(task.completedAt)).toBeGreaterThan(
+      Date.parse(task.startedAt),
+    );
+    expect(task.proof.photos).toHaveLength(
+      before.order.proofRequirements.minPhotoCount,
+    );
+
+    const completed = await fixture.fresh(
+      scope,
+      partnerUserRef,
+      bookingId,
+      exactOrderId,
+    );
+    expect(completed.receipt.completion).toMatchObject({
+      taskId: assigned.taskId,
+      assignmentId: assigned.assignmentId,
+      dispatchJobId: created.dispatchJobId,
+      actualFare: task.fare,
+      completedAt: task.completedAt,
+    });
+    expect(completed.receipt.payment.availability).toBe("not_recorded");
+    const receiptUrl = `${PARTNER_ORIGIN}/${scope.entry.entrySlug}/receipt?${new URLSearchParams({ partnerUserRef, bookingId, orderId: exactOrderId })}`;
+    const assertReceiptUi = async () => {
+      const receipt = partner.getByTestId("partner-payment-receipt");
+      await expect(receipt).toHaveAttribute("data-order-id", exactOrderId);
+      await expect(receipt).toHaveAttribute("data-booking-id", bookingId);
+      await expect(receipt.getByTestId("partner-task-fare")).toHaveAttribute(
+        "data-task-id",
+        assigned.taskId,
+      );
+      await expect(receipt.getByTestId("partner-actual-fare")).toHaveText(
+        new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: normalisePlatformCurrency(task.fare.currency),
+        }).format(task.fare.amountMinor / 100),
+      );
+      await expect(
+        receipt.getByTestId("partner-passenger-payment"),
+      ).toHaveAttribute("data-payment-availability", "not_recorded");
+    };
+    await step(
+      "Normal Partner reopens and reloads the actual completed receipt",
+      async () => {
+        const opened = await partner.goto(receiptUrl);
+        expect(opened?.status()).toBe(200);
+        await assertReceiptUi();
+        const reloaded = await partner.reload();
+        expect(reloaded?.status()).toBe(200);
+        await assertReceiptUi();
+      },
+    );
+    const fresh = await fixture.fresh(
+      scope,
+      partnerUserRef,
+      bookingId,
+      exactOrderId,
+    );
+    expect(fresh.receipt.completion).toEqual(completed.receipt.completion);
+
+    const invoice = await step(
+      "Generate normal tenant invoice for the actual completed order",
+      async () => {
+        const start = new Date(task.completedAt);
+        start.setUTCHours(0, 0, 0, 0);
+        const periodEnd = new Date(Date.now() - 1).toISOString();
+        expect(Date.parse(periodEnd)).toBeGreaterThan(
+          Date.parse(task.completedAt),
+        );
+        const issued = await fixture.fixture.call<any>(
+          "tenant/invoices/generate",
+          fixture.tenantToken,
+          "POST",
+          {
+            tenantId: fixture.tenantId,
+            periodStart: start.toISOString(),
+            periodEnd,
+          },
+          fixture.tenantId,
+        );
+        const read = await fixture.fixture.call<any>(
+          `tenant/invoices/${encodeURIComponent(issued.invoiceId)}`,
+          fixture.tenantToken,
+          "GET",
+          undefined,
+          fixture.tenantId,
+        );
+        expect(read.invoiceId).toBe(issued.invoiceId);
+        const stored = await fixture.fixture.db.query(
+          "SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id=$1 AND invoice_id=$2",
+          [fixture.tenantId, issued.invoiceId],
+        );
+        expect(stored.rows).toHaveLength(1);
+        expect(stored.rows[0]!.record).toMatchObject({
+          invoiceId: issued.invoiceId,
+          tenantId: fixture.tenantId,
+        });
+        const expected = {
+          orderId: exactOrderId,
+          businessDispatchSubtype: "travel_agency_transfer",
+          partnerId: scope.entry.partnerId,
+          partnerProgramId: scope.entry.programId,
+          partnerEntrySlug: scope.entry.entrySlug,
+          eligibilityVerificationId: before.order.eligibilityVerificationId,
+          amount: task.fare,
+        };
+        for (const actual of [issued, read, stored.rows[0]!.record]) {
+          const lines = actual.lines.filter(
+            (line: any) => line.orderId === exactOrderId,
+          );
+          expect(lines).toHaveLength(1);
+          expect(lines[0]).toMatchObject(expected);
+        }
+        return {
+          invoiceId: read.invoiceId,
+          line: read.lines.find((line: any) => line.orderId === exactOrderId),
+        };
+      },
+    );
+    await info.attach("normal-travel-completion-same-order-facts", {
+      contentType: "application/json",
+      body: JSON.stringify(
+        {
+          candidate_sha: required("CANDIDATE_SHA"),
+          workflow_sha: required("WORKFLOW_SHA"),
+          orderId: exactOrderId,
+          bookingId,
+          tenantId: fixture.tenantId,
+          partnerId: scope.entry.partnerId,
+          programId: scope.entry.programId,
+          entrySlug: scope.entry.entrySlug,
+          eligibilityVerificationId: before.order.eligibilityVerificationId,
+          dispatchJobId: created.dispatchJobId,
+          assignmentId: assigned.assignmentId,
+          taskId: assigned.taskId,
+          supply,
+          status: task.status,
+          fare: task.fare,
+          completedAt: task.completedAt,
+          actualDistanceKm: task.actualDistanceKm,
+          actualDurationSec: task.actualDurationSec,
+          invoice,
+          simulated: [
+            "external-Google-metadata-transport-with-genuine-WIF-token",
+            "roster-reference-issuer",
+            "map-provider",
+            "existing-GPS-demo-track-not-route-geofence-or-physical-distance-verification",
+            "vehicle-driver-qualification-documents",
+            "project-PNG-proof-image",
+          ],
+          real: [
+            "normal-eligibility-ServerAction-create",
+            "Fleet-documents-approval-canonical-supply",
+            "Ops-UI-assignment",
+            "Driver-device-session-and-UI-lifecycle",
+            "proof-processing",
+            "PG-relational-completion",
+            "normal-Partner-fresh-receipt",
+            "tenant-admin-invoice-HTTP-PG",
+          ],
+          notClaimed: [
+            "physical-ride",
+            "PSP-collection",
+            "Passenger-ledger-payment",
+            "negotiated-travel-pricing",
+            "tax-invoice",
+            "mail-delivery",
+            "CloudRun-production",
+          ],
+        },
+        null,
+        2,
+      ),
+    });
+  } finally {
+    await info.attach("normal-travel-terminal-owned-ID", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        orderId,
+        source: "actual-response-only",
+        testStatus: info.status,
+        noForcedCompletedOrFakePassengerHistory: true,
+      }),
+    });
+    await Promise.allSettled(contexts.map((context) => context.close()));
+    await fixture.close();
+  }
+});
