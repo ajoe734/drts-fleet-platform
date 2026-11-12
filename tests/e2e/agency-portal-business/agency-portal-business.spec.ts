@@ -23,14 +23,22 @@ let agencyId: string;
 let invitationUrl: string;
 
 async function data<T>(response: JsonResponse, operation: string): Promise<T> {
-  expect(response.ok(), `${operation}: HTTP ${response.status()}`).toBe(true);
-  const envelope = (await response.json()) as {
+  const envelope = (await response.json().catch(() => null)) as {
     data?: T;
-    error?: unknown;
-  };
-  expect(envelope.error, operation).toBeUndefined();
-  expect(envelope.data, operation).toBeDefined();
-  return envelope.data as T;
+    error?: { code?: unknown };
+  } | null;
+  const errorCode = envelope?.error?.code;
+  const diagnosticCode =
+    typeof errorCode === "string" && /^[A-Z0-9_]{1,96}$/.test(errorCode)
+      ? errorCode
+      : "NO_ERROR_CODE";
+  expect(
+    response.ok(),
+    `${operation}: HTTP ${response.status()}, code ${diagnosticCode}`,
+  ).toBe(true);
+  expect(envelope?.error, operation).toBeUndefined();
+  expect(envelope?.data, operation).toBeDefined();
+  return envelope?.data as T;
 }
 
 async function read(page: Page, path: string): Promise<WirePage> {
@@ -143,12 +151,34 @@ test.beforeAll(async ({ playwright }) => {
     );
     agencyId = agency.agency_id;
     expect(typeof agencyId).toBe("string");
+    const invitationPath = `/api/platform-admin/agencies/${agencyId}/invitations`;
+    // Use the existing session/action-bound proof endpoint, as the ordinary
+    // platform invitation flow does. The suite's configured dev waiver and
+    // all product authentication/step-up rules stay unchanged.
+    const proof = await data<{
+      required: boolean;
+      action_id: string;
+      step_up_reference: string;
+    }>(
+      await admin.post("/api/identity/step-up-proofs", {
+        headers,
+        data: { method: "POST", path: invitationPath },
+      }),
+      "request the existing platform invitation proof",
+    );
+    expect(proof.required).toBe(true);
+    expect(proof.action_id).toBe("platform:users:create");
+    expect(typeof proof.step_up_reference).toBe("string");
+    expect(proof.step_up_reference.trim().length).toBeGreaterThan(0);
     const invitation = await data<{
       invitation: { delivery_status: string };
       delivery_outcome: string;
     }>(
-      await admin.post(`/api/platform-admin/agencies/${agencyId}/invitations`, {
-        headers,
+      await admin.post(invitationPath, {
+        headers: {
+          ...headers,
+          "x-drts-step-up-reference": proof.step_up_reference,
+        },
         data: {
           email: EMAIL,
           roleCode: "agency_exporter",
