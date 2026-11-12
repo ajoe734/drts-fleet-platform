@@ -1871,10 +1871,20 @@ export class RegulatoryRegistryRepository {
           app_state,
           transport_mode,
           network_type
-        FROM telemetry.driver_location_events
+        FROM telemetry.driver_location_events AS heartbeat_event
         WHERE driver_id = $1
           AND recorded_at = $2::timestamptz
-          AND ($3::timestamptz IS NULL OR received_at = $3::timestamptz)
+          AND (
+            $3::timestamptz IS NULL
+            OR EXISTS (
+              SELECT 1
+              FROM ops.phase1_driver_locations AS current_location
+              WHERE current_location.driver_id = heartbeat_event.driver_id
+                AND current_location.recorded_at = heartbeat_event.recorded_at
+                AND current_location.updated_at = heartbeat_event.received_at
+                AND date_trunc('milliseconds', current_location.updated_at) = $3::timestamptz
+            )
+          )
         ORDER BY
           CASE
             WHEN $3::timestamptz IS NOT NULL AND received_at = $3::timestamptz

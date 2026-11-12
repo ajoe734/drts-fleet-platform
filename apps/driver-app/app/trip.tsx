@@ -1550,6 +1550,7 @@ export default function TripScreen() {
             ? {
                 taskId: taskDetail.taskId,
                 driverId: taskDetail.driverId,
+                vehicleId: taskDetail.vehicleId,
                 status: taskDetail.status,
               }
             : null,
@@ -1594,6 +1595,7 @@ export default function TripScreen() {
     taskDetail?.driverId,
     taskDetail?.status,
     taskDetail?.taskId,
+    taskDetail?.vehicleId,
     trackingRetryKey,
   ]);
 

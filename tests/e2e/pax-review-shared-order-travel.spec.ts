@@ -1,4 +1,10 @@
-import { expect, test, type Page, type BrowserContext } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Page,
+  type BrowserContext,
+  type Response,
+} from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -7,6 +13,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   normalisePlatformCurrency,
+  type DriverLocationHeartbeatAck,
+  type DriverLocationHeartbeatEnvelope,
   type OwnedOrderRecord,
   type PartnerBootstrapSession,
 } from "@drts/contracts";
@@ -136,6 +144,8 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     return context.newPage();
   };
   let orderId: string | null = null;
+  let stopGpsObservation: (() => void) | null = null;
+  let pendingGpsObservation = Promise.resolve();
   try {
     const partner = await newPage(),
       ops = await newPage(),
@@ -524,6 +534,69 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         return result as { taskId: string; assignmentId: string };
       },
     );
+    // Observe the registered device's normal producer. This observer never sends
+    // heartbeats, changes its clock, pauses the SIM track or writes tracking rows.
+    const observedGps = new Map<
+      string,
+      {
+        event: DriverLocationHeartbeatEnvelope;
+        ack: DriverLocationHeartbeatAck;
+        httpStatus: number;
+      }
+    >();
+    const gpsObservationErrors: string[] = [];
+    const observeGps = (response: Response) => {
+      const url = new URL(response.url());
+      if (
+        url.origin !== NONCORE_API ||
+        url.pathname !== "/api/driver/location-heartbeats/batch" ||
+        response.request().method() !== "POST"
+      )
+        return;
+      // Consume the returned chain, including rejection; do not create an
+      // unobserved rejected finally() promise alongside the actual response.
+      pendingGpsObservation = pendingGpsObservation
+        .then(async () => {
+          const request = camel(response.request().postDataJSON()) as {
+            items: DriverLocationHeartbeatEnvelope[];
+          };
+          const reply = camel(await response.json()).data as {
+            items: DriverLocationHeartbeatAck[];
+          };
+          for (const event of request.items) {
+            if (
+              event.driverId !== supply.driverId ||
+              event.taskId !== assigned.taskId ||
+              event.vehicleId !== supply.vehicleId ||
+              event.workState !== "on_trip"
+            )
+              continue;
+            const ack = reply.items.find(
+              (item) => item.eventId === event.eventId,
+            );
+            const previous = observedGps.get(event.eventId);
+            if (
+              ack &&
+              (!previous ||
+                (!previous.ack.currentLocationUpdated &&
+                  ack.currentLocationUpdated))
+            )
+              observedGps.set(event.eventId, {
+                event,
+                ack,
+                httpStatus: response.status(),
+              });
+          }
+        })
+        .catch((error: unknown) => {
+          // No response bodies, credentials, messages or stacks in diagnostics.
+          gpsObservationErrors.push(
+            error instanceof Error ? error.name : "unknown",
+          );
+        });
+    };
+    driver.on("response", observeGps);
+    stopGpsObservation = () => driver.off("response", observeGps);
     const assertPartnerProgress = async (
       stage:
         | "accepted"
@@ -772,6 +845,266 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
             : "on_trip",
       );
     }
+    await step(
+      "Normal Driver batch persists precise same-task vehicle GPS and Partner reads a fresh sample",
+      async () => {
+        // API/SSR/current-row reads are independent and can advance normally.
+        // The SQL current/event JOIN is exact at database precision in ONE read;
+        // later API/SSR samples each match their own observed immutable event.
+        const facts: Record<string, unknown> = {
+          externalPosition: "existing explicit SIM track, not physical GPS",
+          context: {
+            orderId: exactOrderId,
+            bookingId,
+            taskId: assigned.taskId,
+            driverId: supply.driverId,
+            vehicleId: supply.vehicleId,
+          },
+          crossReadExactSampleEquality: false,
+          noEtaInferred: true,
+        };
+        const acceptedObservation = (eventId: string) => {
+          const observation = observedGps.get(eventId);
+          return observation?.httpStatus === 201 &&
+            observation.ack.accepted &&
+            observation.ack.currentLocationUpdated &&
+            !observation.ack.duplicate
+            ? observation
+            : null;
+        };
+        const readEvent = async (eventId: string) => {
+          const result = await fixture.fixture.db.query(
+            `SELECT event_id, device_id, driver_id, vehicle_id, task_id,
+                    sequence_no::text, lat, lng, accuracy_m, work_state,
+                    received_at <> date_trunc('milliseconds', received_at)
+                      AS has_submillisecond_precision,
+                    EXISTS (
+                      SELECT 1 FROM ops.phase1_driver_locations l
+                      WHERE l.driver_id = e.driver_id
+                        AND l.recorded_at = e.recorded_at
+                        AND l.updated_at = e.received_at
+                        AND l.lat = e.lat AND l.lng = e.lng
+                        AND l.accuracy_m IS NOT DISTINCT FROM e.accuracy_m
+                    ) AS still_current_when_event_read,
+                    to_char(recorded_at AT TIME ZONE 'UTC',
+                            'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS recorded_at,
+                    to_char(received_at AT TIME ZONE 'UTC',
+                            'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS received_at
+             FROM telemetry.driver_location_events e WHERE event_id = $1`,
+            [eventId],
+          );
+          return result.rows[0];
+        };
+        const assertPersistedObservation = async (
+          observation: NonNullable<ReturnType<typeof acceptedObservation>>,
+        ) => {
+          const row = await readEvent(observation.event.eventId);
+          if (!row)
+            throw new Error("Normal Driver GPS event is not persisted.");
+          expect(row).toMatchObject({
+            event_id: observation.event.eventId,
+            device_id: observation.event.deviceId,
+            driver_id: supply.driverId,
+            task_id: assigned.taskId,
+            vehicle_id: supply.vehicleId,
+            sequence_no: String(observation.event.sequenceNo),
+            work_state: "on_trip",
+            lat: observation.event.lat,
+            lng: observation.event.lng,
+            accuracy_m: observation.event.accuracyM,
+            recorded_at: observation.event.recordedAt,
+            received_at: observation.ack.serverReceivedAt,
+          });
+          return row;
+        };
+        try {
+          await expect
+            .poll(
+              async () => {
+                await pendingGpsObservation;
+                const result = await fixture.fixture.db.query(
+                  `SELECT e.event_id, e.device_id, e.sequence_no::text,
+                          e.received_at::text AS received_at_database,
+                          l.updated_at::text AS updated_at_database,
+                          e.received_at <> date_trunc('milliseconds', e.received_at)
+                            AS has_submillisecond_precision,
+                          e.received_at = l.updated_at AS exact_current_event_join
+                   FROM ops.phase1_driver_locations l
+                   JOIN telemetry.driver_location_events e
+                     ON e.driver_id = l.driver_id
+                    AND e.recorded_at = l.recorded_at
+                    AND e.received_at = l.updated_at
+                    AND e.lat = l.lat AND e.lng = l.lng
+                    AND e.accuracy_m IS NOT DISTINCT FROM l.accuracy_m
+                   WHERE e.driver_id = $1 AND e.task_id = $2 AND e.vehicle_id = $3
+                     AND e.work_state = 'on_trip'
+                     AND e.received_at <> date_trunc('milliseconds', e.received_at)
+                   ORDER BY e.sequence_no DESC LIMIT 1`,
+                  [supply.driverId, assigned.taskId, supply.vehicleId],
+                );
+                const current = result.rows[0];
+                facts.currentDatabaseSample = current ?? null;
+                const observation = current
+                  ? acceptedObservation(current.event_id)
+                  : null;
+                if (!observation) return false;
+                await assertPersistedObservation(observation);
+                expect(current).toMatchObject({
+                  device_id: observation.event.deviceId,
+                  sequence_no: String(observation.event.sequenceNo),
+                  has_submillisecond_precision: true,
+                  exact_current_event_join: true,
+                });
+                facts.normalBatch = observation;
+                return true;
+              },
+              { timeout: 40_000, intervals: [1000] },
+            )
+            .toBe(true);
+          await expect
+            .poll(
+              async () => {
+                const actual = await fixture.fresh(
+                  scope,
+                  partnerUserRef,
+                  bookingId,
+                  exactOrderId,
+                );
+                const projected = actual.order.progress;
+                facts.apiLocation = projected.location;
+                expect(projected).toMatchObject({
+                  orderId: exactOrderId,
+                  orderStatus: "on_trip",
+                  availability: "available",
+                  currentTask: {
+                    taskId: assigned.taskId,
+                    driverId: supply.driverId,
+                    vehicleId: supply.vehicleId,
+                    status: "on_trip",
+                  },
+                });
+                if (projected.location.status !== "fresh") return false;
+                await pendingGpsObservation;
+                const observation = [...observedGps.values()].find(
+                  (item) =>
+                    acceptedObservation(item.event.eventId) &&
+                    item.event.recordedAt === projected.location.recordedAt &&
+                    item.ack.serverReceivedAt === projected.location.updatedAt,
+                );
+                if (!observation) return false;
+                const apiEvent = await assertPersistedObservation(observation);
+                expect(apiEvent.has_submillisecond_precision).toBe(true);
+                facts.apiEvent = apiEvent;
+                expect(projected.location.position).toEqual({
+                  lat: observation.event.lat,
+                  lng: observation.event.lng,
+                });
+                expect(projected.location.accuracyM).toBe(
+                  observation.event.accuracyM,
+                );
+                expect(Number.isFinite(projected.location.position.lat)).toBe(
+                  true,
+                );
+                expect(Number.isFinite(projected.location.position.lng)).toBe(
+                  true,
+                );
+                expect(
+                  Date.parse(projected.readAt) -
+                    Date.parse(projected.location.updatedAt),
+                ).toBeLessThanOrEqual(90_000);
+                if (projected.location.accuracyM !== null)
+                  expect(projected.location.accuracyM).toBeLessThanOrEqual(100);
+                facts.apiEventId = observation.event.eventId;
+                return true;
+              },
+              { timeout: 40_000, intervals: [1000] },
+            )
+            .toBe(true);
+          await expect
+            .poll(
+              async () => {
+                const panel = partner.getByTestId("partner-trip-progress");
+                const [navigation] = await Promise.all([
+                  partner.waitForResponse(
+                    (response) =>
+                      response.request().isNavigationRequest() &&
+                      new URL(response.url()).pathname === confirmationPath,
+                  ),
+                  panel
+                    .getByRole("link", { name: "Update trip", exact: true })
+                    .click(),
+                ]);
+                expect(navigation.status()).toBe(200);
+                await partner.waitForLoadState("domcontentloaded");
+                await expect(panel).toHaveAttribute(
+                  "data-order-id",
+                  exactOrderId,
+                );
+                await expect(panel).toHaveAttribute(
+                  "data-task-id",
+                  assigned.taskId,
+                );
+                await expect(panel).toHaveAttribute(
+                  "data-driver-id",
+                  supply.driverId,
+                );
+                await expect(panel).toHaveAttribute(
+                  "data-vehicle-id",
+                  supply.vehicleId,
+                );
+                const field = (label: string) =>
+                  panel
+                    .locator("dl > div")
+                    .filter({
+                      has: partner
+                        .locator("dt")
+                        .filter({ hasText: new RegExp(`^${label}$`) }),
+                    })
+                    .locator("dd");
+                await expect(field("Current trip stage")).toHaveText(
+                  "Passenger on board",
+                );
+                const availability = (
+                  await field("GPS sample availability").innerText()
+                ).trim();
+                const recordedAt = (
+                  await field("GPS sample recorded at").innerText()
+                ).trim();
+                facts.ssrSample = { availability, recordedAt };
+                if (
+                  availability !==
+                  "A fresh sample matches this task and vehicle"
+                )
+                  return false;
+                await pendingGpsObservation;
+                const observation = [...observedGps.values()].find(
+                  (item) =>
+                    acceptedObservation(item.event.eventId) &&
+                    item.event.recordedAt === recordedAt,
+                );
+                if (!observation) return false;
+                const ssrEvent = await assertPersistedObservation(observation);
+                expect(ssrEvent.has_submillisecond_precision).toBe(true);
+                facts.ssrEvent = ssrEvent;
+                facts.ssrEventId = observation.event.eventId;
+                return true;
+              },
+              { timeout: 40_000, intervals: [1000] },
+            )
+            .toBe(true);
+        } finally {
+          facts.observedSameContextEvents = observedGps.size;
+          facts.safeObservationErrorNames = gpsObservationErrors;
+          await info.attach(
+            "normal-Driver-GPS-batch-PG-Partner-fresh-context",
+            {
+              contentType: "application/json",
+              body: JSON.stringify(facts, null, 2),
+            },
+          );
+        }
+      },
+    );
     await step(
       "Use actual tracked duration and normal required proof upload",
       async () => {
@@ -1225,6 +1558,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       ),
     });
   } finally {
+    stopGpsObservation?.();
     // Snapshot route locations before closing contexts. No query/fragment,
     // DOM, input values, request headers or credentials are captured.
     const pagesBeforeClose = contexts.flatMap((context, index) =>
@@ -1254,6 +1588,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       }),
     });
     await Promise.allSettled(contexts.map((context) => context.close()));
+    await pendingGpsObservation;
     await fixture.close();
   }
 });

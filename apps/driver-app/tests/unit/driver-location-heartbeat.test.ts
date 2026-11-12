@@ -173,6 +173,7 @@ describe("driver location heartbeat transport", () => {
     expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
     expect(enqueueDriverLocationEvent).toHaveBeenCalledWith({
       taskId: "task-001",
+      vehicleId: null,
       lat: 25.033,
       lng: 121.5654,
       recordedAt: new Date(16_000).toISOString(),
@@ -231,6 +232,7 @@ describe("driver location heartbeat transport", () => {
 
     expect(enqueueDriverLocationEvent).toHaveBeenCalledWith({
       taskId: "task-001",
+      vehicleId: null,
       lat: 25.033,
       lng: 121.5654,
       recordedAt: new Date(16_000).toISOString(),
@@ -275,6 +277,7 @@ describe("driver location heartbeat transport", () => {
     expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(2);
     expect(enqueueDriverLocationEvent).toHaveBeenNthCalledWith(1, {
       taskId: "task-001",
+      vehicleId: null,
       lat: 25.033,
       lng: 121.5654,
       recordedAt: new Date(1_000).toISOString(),
@@ -287,6 +290,7 @@ describe("driver location heartbeat transport", () => {
     });
     expect(enqueueDriverLocationEvent).toHaveBeenNthCalledWith(2, {
       taskId: "task-001",
+      vehicleId: null,
       lat: 25.033,
       lng: 121.5654,
       recordedAt: new Date(16_500).toISOString(),
@@ -365,5 +369,186 @@ describe("driver online_available continuous tracking", () => {
     expect(result.reason).toBe("BACKGROUND_LOCATION_REQUIRED");
     expect(heartbeatModule.getActiveDriverHeartbeatWorkState()).toBeNull();
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("driver heartbeat task and vehicle context", () => {
+  it.each([
+    ["foreground", false],
+    ["background", true],
+  ] as const)(
+    "carries the actual task vehicle through the %s producer",
+    async (source, backgroundGranted) => {
+      getBackgroundPermissionsAsync.mockResolvedValue({
+        granted: backgroundGranted,
+      });
+      requestBackgroundPermissionsAsync.mockResolvedValue({
+        granted: backgroundGranted,
+      });
+      const heartbeat = await import("../../lib/driver-location-heartbeat");
+
+      await heartbeat.syncDriverLocationHeartbeat({
+        taskId: "task-context-a",
+        driverId: "driver-context",
+        vehicleId: "vehicle-context-a",
+        status: "on_trip",
+      });
+      if (source === "foreground") {
+        expect(watchCallback).not.toBeNull();
+        watchCallback?.(createLocation(16_000));
+      } else {
+        expect(taskHandler).not.toBeNull();
+        await taskHandler?.({ data: { locations: [createLocation(16_000)] } });
+      }
+      await flushHeartbeatQueue();
+
+      expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
+      expect(enqueueDriverLocationEvent).toHaveBeenCalledWith({
+        taskId: "task-context-a",
+        vehicleId: "vehicle-context-a",
+        lat: 25.033,
+        lng: 121.5654,
+        recordedAt: new Date(16_000).toISOString(),
+        accuracyM: 8,
+        workState: "on_trip",
+        appState: source,
+        transportMode: source,
+        networkType: "unknown",
+        preserveKeyEvent: false,
+      });
+    },
+  );
+
+  it.each([
+    {
+      change: "another task",
+      nextTaskId: "task-context-b",
+      nextStatus: "enroute_pickup",
+      nextWorkState: "enroute",
+    },
+    {
+      change: "another vehicle on the same task",
+      nextTaskId: "task-context-a",
+      nextStatus: "on_trip",
+      nextWorkState: "on_trip",
+    },
+  ])(
+    "snapshots queued context before switching to $change",
+    async ({ nextTaskId, nextStatus, nextWorkState }) => {
+      const heartbeat = await import("../../lib/driver-location-heartbeat");
+      let releaseEnqueue: () => void = () => undefined;
+      const pendingEnqueue = new Promise<void>((resolve) => {
+        releaseEnqueue = resolve;
+      });
+      enqueueDriverLocationEvent.mockImplementationOnce(() => pendingEnqueue);
+
+      try {
+        await heartbeat.syncDriverLocationHeartbeat({
+          taskId: "task-context-a",
+          driverId: "driver-context",
+          vehicleId: "vehicle-context-a",
+          status: "on_trip",
+        });
+        await taskHandler?.({ data: { locations: [createLocation(1_000)] } });
+        await flushHeartbeatQueue();
+        expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
+
+        // This second A fix waits behind the unresolved first enqueue. Its
+        // context must not be read from mutable tracking state after the switch.
+        await taskHandler?.({ data: { locations: [createLocation(17_000)] } });
+        await heartbeat.syncDriverLocationHeartbeat({
+          taskId: nextTaskId,
+          driverId: "driver-context",
+          vehicleId: "vehicle-context-b",
+          status: nextStatus,
+        });
+        await taskHandler?.({ data: { locations: [createLocation(32_000)] } });
+      } finally {
+        releaseEnqueue();
+      }
+      for (let turn = 0; turn < 8; turn += 1) {
+        await flushHeartbeatQueue();
+      }
+
+      const drafts = enqueueDriverLocationEvent.mock.calls.map(
+        ([draft]) => draft,
+      );
+      expect(
+        drafts.find(
+          (draft) =>
+            draft.recordedAt === new Date(17_000).toISOString() &&
+            !draft.preserveKeyEvent,
+        ),
+      ).toMatchObject({
+        taskId: "task-context-a",
+        vehicleId: "vehicle-context-a",
+        workState: "on_trip",
+      });
+      expect(
+        drafts.some(
+          (draft) =>
+            draft.preserveKeyEvent &&
+            draft.taskId === nextTaskId &&
+            draft.vehicleId === "vehicle-context-b" &&
+            draft.workState === nextWorkState,
+        ),
+      ).toBe(true);
+      expect(
+        drafts.find(
+          (draft) => draft.recordedAt === new Date(32_000).toISOString(),
+        ),
+      ).toMatchObject({
+        taskId: nextTaskId,
+        vehicleId: "vehicle-context-b",
+        workState: nextWorkState,
+      });
+    },
+  );
+
+  it("clears task and vehicle for stop and subsequent online availability", async () => {
+    const heartbeat = await import("../../lib/driver-location-heartbeat");
+    await heartbeat.syncDriverLocationHeartbeat({
+      taskId: "task-context-a",
+      driverId: "driver-context",
+      vehicleId: "vehicle-context-a",
+      status: "on_trip",
+    });
+    await taskHandler?.({ data: { locations: [createLocation(1_000)] } });
+    await flushHeartbeatQueue();
+    enqueueDriverLocationEvent.mockClear();
+
+    await heartbeat.stopDriverLocationHeartbeat();
+    for (let turn = 0; turn < 4; turn += 1) {
+      await flushHeartbeatQueue();
+    }
+    expect(heartbeat.getActiveDriverHeartbeatTaskId()).toBeNull();
+    expect(heartbeat.getActiveDriverHeartbeatWorkState()).toBeNull();
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
+    expect(enqueueDriverLocationEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        taskId: null,
+        vehicleId: null,
+        workState: "available",
+        preserveKeyEvent: true,
+      }),
+    );
+    await taskHandler?.({ data: { locations: [createLocation(16_000)] } });
+    await flushHeartbeatQueue();
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
+
+    await heartbeat.syncDriverOnlineAvailableHeartbeat();
+    await taskHandler?.({ data: { locations: [createLocation(32_000)] } });
+    for (let turn = 0; turn < 4; turn += 1) {
+      await flushHeartbeatQueue();
+    }
+    expect(enqueueDriverLocationEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        taskId: null,
+        vehicleId: null,
+        workState: "available",
+        recordedAt: new Date(32_000).toISOString(),
+        preserveKeyEvent: false,
+      }),
+    );
   });
 });
