@@ -601,10 +601,35 @@ async function runNormalBooking(
     expect(beforeReload.booking.luggageCount).toBe(2);
     expect(beforeReload.stored.luggageCount).toBe(2);
   }
+  if (!scope.apiKey) throw new Error("Normal issued credential is missing");
+  const verificationSession = await fixture.call<PartnerBootstrapSession>(
+    "auth/partner/bootstrap-session",
+    null,
+    "POST",
+    { entrySlug: scope.entry.entrySlug, apiKey: scope.apiKey },
+  );
+  expect(verificationSession.tokenType).toBe("Bearer");
+  expect(verificationSession.partnerEntry.entrySlug).toBe(
+    scope.entry.entrySlug,
+  );
+  expect(verificationSession.identity).toMatchObject({
+    actorType: "partner_api_key",
+    realm: "partner",
+    tenantId: scope.entry.tenantId,
+    partnerId: scope.entry.partnerId,
+    partnerProgramId: scope.entry.programId,
+    partnerEntrySlug: scope.entry.entrySlug,
+  });
+  expect(verificationSession.identity.scopes).toContain(
+    "partner:eligibility:read",
+  );
   const verification = await fixture.call<PartnerEligibilityVerificationRecord>(
     "partner/eligibility/" +
       encodeURIComponent(beforeReload.booking.eligibilityVerificationId!),
-    required("DRTS_UAT_TOKEN_PLATFORM"),
+    verificationSession.accessToken,
+    "GET",
+    undefined,
+    scope.entry.tenantId,
   );
   expect(verification).toMatchObject({
     verificationStatus: "eligible",
