@@ -135,6 +135,36 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("git rev-parse HEAD", self.text)
         self.assertIn('"$resolved" != "$expected"', self.text)
 
+    def test_renewed_session_path_is_initialized_after_the_runner_starts(self) -> None:
+        job_env = self.text.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+        self.assertNotIn("runner.temp", job_env)
+        self.assertNotIn("DRTS_UAT_RENEWED_SESSIONS_FILE:", job_env)
+        prepare = self.text.split("      - name: Prepare evidence directory\n", 1)[1]
+        prepare = prepare.split("      - name:", 1)[0]
+        self.assertIn('echo "DRTS_UAT_RENEWED_SESSIONS_FILE=${RUNNER_TEMP}/', prepare)
+        self.assertLess(self.text.index("Prepare evidence directory"), self.text.index("Seed disposable tenant A/B sessions through the authoritative service"))
+
+    def test_renewed_session_path_expands_in_the_runner_shell(self) -> None:
+        command = next((line.strip() for line in self.text.splitlines()
+                        if line.strip().startswith('echo "DRTS_UAT_RENEWED_SESSIONS_FILE=')), None)
+        self.assertIsNotNone(command, "renewed sessions must be initialized by a runner shell step")
+        with tempfile.TemporaryDirectory(prefix="uat-path-with-spaces-") as directory:
+            root = Path(directory)
+            runner_temp = root / "runner temporary files"
+            runner_temp.mkdir()
+            env_file = root / "github-env"
+            result = subprocess.run(
+                ["bash", "-euc", command],
+                env={"RUNNER_TEMP": str(runner_temp), "GITHUB_RUN_ID": "501",
+                     "GITHUB_RUN_ATTEMPT": "3", "GITHUB_ENV": str(env_file)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(env_file.read_text(),
+                "DRTS_UAT_RENEWED_SESSIONS_FILE=" + str(runner_temp)
+                + "/tenant-uat-renewed-sessions-501-3.json\n")
+
     def test_declares_a_timeout(self) -> None:
         self.assertIn("timeout-minutes:", self.text)
 
