@@ -156,6 +156,21 @@ function fixture(mode = "bank_card_inline") {
           pagination: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 },
         });
       if (
+        url.pathname === "/api/partner/orders/" + orderId + "/receipt" &&
+        init?.method === "GET"
+      ) {
+        const order = record();
+        return envelope({
+          orderId: order.orderId,
+          bookingId: order.bookingId,
+          orderNo: order.orderNo,
+          orderStatus: order.status,
+          quotedFare: order.quotedFare,
+          completion: null,
+          payment: { availability: "not_recorded", status: null, amount: null },
+        });
+      }
+      if (
         url.pathname === "/api/partner/bookings/" + bookingId ||
         url.pathname === "/api/partner/orders/" + orderId
       ) {

@@ -8,6 +8,7 @@ import {
   PartnerBookingRecord,
   PartnerBookingReadError,
 } from "@/components/partner-booking-record";
+import { PartnerPaymentReceipt } from "@/components/partner-payment-receipt";
 import { getServerLocale } from "@/lib/server-locale";
 
 type PageProps = {
@@ -23,16 +24,21 @@ export default async function PartnerReceiptPage({
   const query = (await searchParams) ?? {};
   const locale = await getServerLocale();
   try {
-    const record = await loadPartnerBookingRecord(tenantSlug, query);
+    const record = await loadPartnerBookingRecord(tenantSlug, query, true);
     return (
-      <PartnerBookingRecord
-        booking={record.booking}
-        order={record.order}
-        entrySlug={record.entry.entrySlug}
-        partnerUserRef={record.partnerUserRef}
-        locale={locale}
-        screen="receipt"
-      />
+      <>
+        <PartnerBookingRecord
+          booking={record.booking}
+          order={record.order}
+          entrySlug={record.entry.entrySlug}
+          partnerUserRef={record.partnerUserRef}
+          locale={locale}
+          screen="receipt"
+        />
+        {record.receipt ? (
+          <PartnerPaymentReceipt receipt={record.receipt} locale={locale} />
+        ) : null}
+      </>
     );
   } catch (error) {
     if (error instanceof PartnerAuthorityError) {

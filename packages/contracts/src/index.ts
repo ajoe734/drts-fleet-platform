@@ -4134,6 +4134,37 @@ export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot>
   forwardedStatus?: string | null;
 }
 
+/**
+ * Read-only same-order completion and payment facts after normal partner ownership.
+ * A quote, completion fare or payment-method label never proves capture.
+ */
+export interface PartnerOrderReceiptRecord {
+  orderId: string;
+  bookingId: string | null;
+  orderNo: string;
+  orderStatus: OwnedOrderRecord["status"];
+  quotedFare: MoneyAmount | null;
+  completion: {
+    taskId: string;
+    assignmentId: string;
+    dispatchJobId: string;
+    driverId: string;
+    vehicleId: string;
+    completedAt: string | null;
+    actualFare: MoneyAmount | null;
+    actualFareBreakdown: ActualTripFareBreakdown | null;
+    actualDistanceKm: number | null;
+    actualDurationSec: number | null;
+  } | null;
+  payment: {
+    /** not_recorded means a successful ledger read returned no row. */
+    availability: "available" | "not_recorded" | "unavailable";
+    status: import("./phase1-p5-s3-multi-taxi").PassengerPaymentStatus | null;
+    /** Exact ledger amount only. Missing/invalid amounts never use the quote/task. */
+    amount: MoneyAmount | null;
+  };
+}
+
 export type DriverTaskStreamEventType =
   | "task_assigned"
   | "task_updated"

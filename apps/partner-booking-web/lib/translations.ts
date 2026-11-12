@@ -3,6 +3,41 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "receipt.actualTrip": "Actual trip fare",
+  "receipt.taskId": "Completed task ID",
+  "receipt.completedAt": "Trip completed at",
+  "receipt.actualFare": "Actual fare",
+  "receipt.start": "Starting fare",
+  "receipt.distanceFare": "Distance fare",
+  "receipt.delay": "Delay fare",
+  "receipt.night": "Night fare",
+  "receipt.breakdown": "Actual fare breakdown",
+  "receipt.distanceKm": "Actual distance (km)",
+  "receipt.durationSec": "Actual duration (seconds)",
+  "receipt.notProvided": "Not provided",
+  "receipt.noCompletion":
+    "No matching completed trip has been provided. The quotation is not used as actual fare.",
+  "receipt.passengerPayment": "Passenger electronic payment record",
+  "receipt.paymentScope":
+    "This section covers passenger electronic payments only. It does not show partner invoices or program settlement; a missing passenger payment record does not mean the partner booking is unpaid.",
+  "receipt.paymentStatus": "Passenger electronic payment status",
+  "receipt.transactionAmount": "Recorded transaction amount",
+  "receipt.noPassengerPayment":
+    "No passenger electronic payment record was found.",
+  "receipt.passengerPaymentUnavailable":
+    "The passenger electronic payment source is unavailable.",
+  "receipt.notTaxReceipt":
+    "These records are not a tax receipt. A trip fare or quotation does not prove passenger payment capture.",
+  "receipt.status.not_selected": "No passenger electronic payment selected",
+  "receipt.status.authorized":
+    "Passenger electronic payment authorized; not captured",
+  "receipt.status.captured": "Passenger electronic payment captured",
+  "receipt.status.failed":
+    "Passenger electronic payment failed; verify its outcome",
+  "receipt.status.refunded": "Passenger electronic payment refunded",
+  "receipt.status.manual_recovery":
+    "Passenger electronic payment requires manual confirmation",
+
   "eligibility.verify.title": "Program eligibility",
   "eligibility.verify.body":
     "Verify eligibility with this partner program before creating an airport booking.",
@@ -544,6 +579,35 @@ const en = {
 } as const;
 
 const zh = {
+  "receipt.actualTrip": "實際行程車資",
+  "receipt.taskId": "已完成任務編號",
+  "receipt.completedAt": "行程完成時間",
+  "receipt.actualFare": "實際車資",
+  "receipt.start": "起跳車資",
+  "receipt.distanceFare": "里程車資",
+  "receipt.delay": "延滯車資",
+  "receipt.night": "夜間加成",
+  "receipt.breakdown": "實際車資分項",
+  "receipt.distanceKm": "實際里程（公里）",
+  "receipt.durationSec": "實際時間（秒）",
+  "receipt.notProvided": "尚未提供",
+  "receipt.noCompletion": "尚未提供相符的已完成行程；不會以報價代填實際車資。",
+  "receipt.passengerPayment": "乘客電子付款紀錄",
+  "receipt.paymentScope":
+    "此區只呈現乘客電子付款，不包含合作帳單或方案結算；查無乘客付款紀錄不代表整筆合作通路預約未付款。",
+  "receipt.paymentStatus": "乘客電子付款狀態",
+  "receipt.transactionAmount": "原交易紀錄金額",
+  "receipt.noPassengerPayment": "查無乘客電子付款紀錄。",
+  "receipt.passengerPaymentUnavailable": "乘客電子付款資料來源目前未提供。",
+  "receipt.notTaxReceipt":
+    "這些紀錄不是稅務收據；行程車資或報價不代表乘客電子付款已擷取。",
+  "receipt.status.not_selected": "未選擇乘客電子付款",
+  "receipt.status.authorized": "乘客電子付款已授權，尚未擷取",
+  "receipt.status.captured": "乘客電子付款已擷取",
+  "receipt.status.failed": "乘客電子付款失敗，需確認交易結果",
+  "receipt.status.refunded": "乘客電子付款已退款",
+  "receipt.status.manual_recovery": "乘客電子付款待人工確認",
+
   "eligibility.verify.title": "合作方案資格確認",
   "eligibility.verify.body": "先向此合作方案確認資格，再建立機場接送預約。",
   "eligibility.verify.cardLast4": "卡號末四碼",

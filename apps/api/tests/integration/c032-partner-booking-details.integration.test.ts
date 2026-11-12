@@ -411,10 +411,23 @@ describe("C032 real JSONB booking persistence and cold replay", () => {
           legacy.orderId,
           current.orderId,
         ]);
+        // This direct-controller PG test supplies the normal authenticated
+        // tenant read boundary, not a platform/system scope bypass or a JWT.
+        const tenantIdentity: BootstrapRequestIdentity = {
+          authMode: "jwt_bearer",
+          actorType: "tenant_admin",
+          actorId: "SIM-PG-tenant-reader-" + tenantId,
+          realm: "tenant",
+          tenantId,
+          roleFamilies: ["tenant"],
+          roles: ["tenant_viewer"],
+          scopes: ["tenant:read"],
+          requestId: null,
+        };
         const ordinary = (
           await cold.listTenantBookings(
             { page: 1, pageSize: 20 },
-            null,
+            tenantIdentity,
             tenantId,
           )
         ).data;

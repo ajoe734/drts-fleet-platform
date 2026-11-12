@@ -1,6 +1,7 @@
 import { expect, type BrowserContext, type Page } from "@playwright/test";
 import type { ReferralEmbedHandoffArtifact } from "@drts/contracts";
 import type { PublicReferralEmbedSession } from "../../../../apps/referral-embed-web/lib/embed-partner-session";
+import { displayOrderNo } from "../../../../apps/referral-embed-web/lib/order-display";
 import type { PartnerFixture, PartnerFixtureEntry } from "./partner-fixture";
 
 // Next's production session cookie remains Secure. The browser and Playwright
@@ -173,8 +174,23 @@ export class NavigationFixture {
     expect(url.searchParams.get("screen")).toBe("trip");
     await this.activate(page.context(), nav);
     await page.reload();
-    expect((await this.active(page.context())).trip.orderId).toBe(nav.orderId);
-    await expect(page.getByText(nav.orderId, { exact: false })).toBeVisible();
+    const active = await this.active(page.context());
+    expect(active.trip.orderId).toBe(nav.orderId);
+    const persistedOrders = (
+      await this.partner.db.query(
+        "SELECT order_no FROM ops.phase1_owned_orders WHERE order_id=$1",
+        [nav.orderId],
+      )
+    ).rows;
+    expect(persistedOrders).toHaveLength(1);
+    const orderNo = persistedOrders[0]!.order_no;
+    expect(typeof orderNo).toBe("string");
+    expect(orderNo.trim().length).toBeGreaterThan(0);
+    expect(active.trip.orderNo).toBe(orderNo);
+    // Riders see the canonical short reference, while URL/API/PG bind its UUID.
+    await expect(
+      page.getByText(`訂單 ${displayOrderNo(orderNo)}`, { exact: true }),
+    ).toBeVisible();
     return this.cookie(page.context());
   }
 }

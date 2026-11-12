@@ -55,6 +55,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   ActualTripFareBreakdown,
+  PartnerOrderReceiptRecord,
   PassengerRideContactOption,
   PassengerServiceSelection,
   VehicleForm,
@@ -2845,6 +2846,137 @@ export class OwnedMobilityService
     }
     await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
+  }
+
+  /**
+   * A read of existing authorities only: never prepares supply, completes a task,
+   * initializes payment or substitutes a quote for an actual/captured amount.
+   */
+  async getPartnerOrderReceipt(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<PartnerOrderReceiptRecord> {
+    // Preserve the original async owner check before task/payment authority reads.
+    let order = await this.resolvePersistedOrder(orderId, identity);
+    let completion: PartnerOrderReceiptRecord["completion"] = null;
+    const money = (
+      value: MoneyAmount | null | undefined,
+    ): MoneyAmount | null => {
+      if (
+        !value ||
+        !Number.isSafeInteger(value.amountMinor) ||
+        value.amountMinor < 0 ||
+        typeof value.currency !== "string" ||
+        !value.currency.trim()
+      )
+        return null;
+      return {
+        amountMinor: value.amountMinor,
+        currency: normalisePlatformCurrency(value.currency),
+      };
+    };
+    const nonnegative = (value: number | null | undefined) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : null;
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const context = await this.ownedMobilityRepository.loadOrderActionContext(
+        { orderId },
+      );
+      const snapshot = context?.orders.find(
+        (candidate) => candidate.orderId === orderId,
+      );
+      if (!context || !snapshot)
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PARTNER_RECEIPT_CONTEXT_UNAVAILABLE",
+          "The persisted receipt context is unavailable.",
+        );
+      // The aggregate can be fresher than the first read. Use its actual owner.
+      await this.assertPartnerOrderIdentityAsync(identity, snapshot);
+      order = snapshot;
+      if (order.status === "completed") {
+        const matchingTasks = context.driverTasks.filter(
+          (task) =>
+            task.status === "completed" &&
+            task.orderId === order.orderId &&
+            context.dispatchAssignments.some(
+              (assignment) =>
+                assignment.status === "completed" &&
+                assignment.orderId === order.orderId &&
+                assignment.taskId === task.taskId &&
+                assignment.assignmentId === task.assignmentId &&
+                assignment.dispatchJobId === task.dispatchJobId &&
+                assignment.driverId === task.driverId &&
+                assignment.vehicleId === task.vehicleId &&
+                context.dispatchJobs.some(
+                  (job) =>
+                    job.dispatchJobId === task.dispatchJobId &&
+                    job.orderId === order.orderId,
+                ),
+            ),
+        );
+        // An ambiguous/legacy completion remains missing instead of picking an
+        // arbitrary old task or deriving its amount from the quote.
+        const task = matchingTasks.length === 1 ? matchingTasks[0] : undefined;
+        if (task) {
+          const captured = task.actualFareBreakdown;
+          const breakdown =
+            captured &&
+            [
+              captured.startMinor,
+              captured.distanceMinor,
+              captured.delayMinor,
+              captured.nightMinor,
+            ].every((value) => Number.isSafeInteger(value) && value >= 0)
+              ? { ...captured }
+              : null;
+          completion = {
+            taskId: task.taskId,
+            assignmentId: task.assignmentId,
+            dispatchJobId: task.dispatchJobId,
+            driverId: task.driverId,
+            vehicleId: task.vehicleId,
+            completedAt:
+              task.completedAt && Number.isFinite(Date.parse(task.completedAt))
+                ? task.completedAt
+                : null,
+            actualFare: money(task.fare),
+            actualFareBreakdown: breakdown,
+            actualDistanceKm: nonnegative(task.actualDistanceKm),
+            actualDurationSec: nonnegative(task.actualDurationSec),
+          };
+        }
+      }
+    }
+
+    let payment: PartnerOrderReceiptRecord["payment"] = {
+      availability: "unavailable",
+      status: null,
+      amount: null,
+    };
+    if (this.multiTaxiRepository?.isEnabled()) {
+      // Errors intentionally propagate. A failed read is not an empty ledger.
+      const ledger =
+        await this.multiTaxiRepository.findPassengerPayment(orderId);
+      payment = ledger
+        ? {
+            availability: "available",
+            status: ledger.status,
+            amount: money(ledger.amount),
+          }
+        : { availability: "not_recorded", status: null, amount: null };
+    }
+    return {
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      orderNo: order.orderNo,
+      orderStatus: order.status,
+      quotedFare: money(order.quotedFare),
+      completion,
+      payment,
+    };
   }
 
   getPassengerAssignmentDisclosure(orderId: string) {

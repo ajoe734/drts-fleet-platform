@@ -12,10 +12,82 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+type ReceiptWire = {
+  orderId: string;
+  bookingId: string | null;
+  orderNo: string;
+  orderStatus: string;
+  quotedFare: { currency: string; amountMinor: number } | null;
+  completion: {
+    taskId: string;
+    assignmentId: string;
+    dispatchJobId: string;
+    driverId: string;
+    vehicleId: string;
+    completedAt: string | null;
+    actualFare: { currency: string; amountMinor: number } | null;
+    actualFareBreakdown: {
+      startMinor: number;
+      distanceMinor: number;
+      delayMinor: number;
+      nightMinor: number;
+    } | null;
+    actualDistanceKm: number | null;
+    actualDurationSec: number | null;
+  } | null;
+  payment: {
+    availability: "available" | "not_recorded" | "unavailable";
+    status: string | null;
+    amount: { currency: string; amountMinor: number } | null;
+  };
+};
+
+function completedReceipt(): ReceiptWire {
+  return {
+    orderId: "SIM-persisted-order",
+    bookingId: "booking-SIM-persisted",
+    orderNo: "SIM-receipt-order-no",
+    orderStatus: "completed",
+    quotedFare: { currency: "TWD", amountMinor: 4000 },
+    completion: {
+      taskId: "SIM-actual-completed-task",
+      assignmentId: "SIM-actual-completed-assignment",
+      dispatchJobId: "SIM-actual-job",
+      driverId: "SIM-actual-driver",
+      vehicleId: "SIM-actual-vehicle",
+      completedAt: "2099-01-01T11:00:00Z",
+      actualFare: { currency: "TWD", amountMinor: 5500 },
+      actualFareBreakdown: {
+        startMinor: 2000,
+        distanceMinor: 3000,
+        delayMinor: 500,
+        nightMinor: 0,
+      },
+      actualDistanceKm: 12.5,
+      actualDurationSec: 1200,
+    },
+    payment: {
+      availability: "available",
+      status: "captured",
+      amount: { currency: "TWD", amountMinor: 6100 },
+    },
+  };
+}
+
 function transport(subtype = "travel_agency_transfer") {
   let status = "created";
   let mode: "rows" | "empty" | "empty-page" | "error" = "rows";
   const calls: string[] = [];
+  const requestHeaders: { path: string; authorization: string | null }[] = [];
+  let quotationMinor = 4500;
+  let receiptErrorCode: string | null = null;
+  let receipt: ReceiptWire = {
+    ...completedReceipt(),
+    orderStatus: "created",
+    quotedFare: { currency: "TWD", amountMinor: 4500 },
+    completion: null,
+    payment: { availability: "not_recorded", status: null, amount: null },
+  };
   const entry = {
     entrySlug: "sim-persisted",
     partnerId: "SIM-partner",
@@ -75,7 +147,7 @@ function transport(subtype = "travel_agency_transfer") {
     pickup: { address: "SIM actual pickup" },
     dropoff: { address: "SIM actual dropoff" },
     passenger: { name: "SIM Persisted Rider", phone: "0900000000" },
-    quotedFare: { currency: "TWD", amountMinor: 4500 },
+    quotedFare: { currency: "TWD", amountMinor: quotationMinor },
     quotedFareSource: "platform_pricing_rule",
     ...(details
       ? { partnerBookingDetails: details }
@@ -88,9 +160,13 @@ function transport(subtype = "travel_agency_transfer") {
     });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string | URL) => {
+    vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       calls.push(url.pathname);
+      requestHeaders.push({
+        path: url.pathname,
+        authorization: new Headers(init?.headers).get("Authorization"),
+      });
       if (url.pathname === "/api/partner/entries/" + entry.entrySlug)
         return envelope(entry);
       if (url.pathname === "/api/partner/ingress/handoff")
@@ -124,6 +200,19 @@ function transport(subtype = "travel_agency_transfer") {
           },
           { status: 503 },
         );
+      if (url.pathname === "/api/partner/orders/SIM-persisted-order/receipt") {
+        if (receiptErrorCode)
+          return Response.json(
+            {
+              error: {
+                code: receiptErrorCode,
+                message: "Synthetic receipt source failure",
+              },
+            },
+            { status: 503 },
+          );
+        return envelope(receipt);
+      }
       if (url.pathname === "/api/partner/bookings")
         return envelope({
           items: mode === "empty" || mode === "empty-page" ? [] : [record()],
@@ -144,6 +233,16 @@ function transport(subtype = "travel_agency_transfer") {
   );
   return {
     calls,
+    requestHeaders,
+    updateReceipt: (value: ReceiptWire) => {
+      receipt = value;
+    },
+    updateQuotation: (value: number) => {
+      quotationMinor = value;
+    },
+    failReceipt: (code: string) => {
+      receiptErrorCode = code;
+    },
     updateStatus: (value: string) => {
       status = value;
     },
@@ -249,5 +348,261 @@ describe("persisted partner booking pages", () => {
     const html = renderToStaticMarkup(await ConfirmedPage(query));
     expect(html).toContain('role="alert"');
     expect(html).not.toContain("SIM-persisted-order");
+  });
+
+  it.each([
+    "travel_agency_transfer",
+    "insurance_replacement_vehicle",
+    "credit_card_airport_transfer",
+  ])(
+    "shows distinct quotation, completed-task fare and passenger ledger for %s",
+    async (subtype) => {
+      const api = transport(subtype);
+      api.updateStatus("completed");
+      api.updateQuotation(4000);
+      api.updateReceipt(completedReceipt());
+      const html = renderToStaticMarkup(
+        await ReceiptPage(args({ bookingId: "booking-SIM-persisted" })),
+      );
+      expect(html).toContain("<h2>Quotation</h2><p>NT$40.00</p>");
+      expect(html).toContain('data-testid="partner-actual-fare">NT$55.00</dd>');
+      expect(html).toContain(
+        'data-testid="partner-payment-amount">NT$61.00</dd>',
+      );
+      expect(html).toContain("SIM-actual-completed-task");
+      expect(html).toContain('data-order-id="SIM-persisted-order"');
+      expect(html).toContain('data-booking-id="booking-SIM-persisted"');
+      expect(html).toContain("Starting fare");
+      expect(html).toContain("Distance fare");
+      expect(html).toContain("Delay fare");
+      expect(html).toContain("Night fare");
+      expect(html).toContain("12.5");
+      expect(html).toContain("1200");
+      expect(html).toContain("Passenger electronic payment record");
+      expect(html).toContain("Passenger electronic payment captured");
+      expect(html).toContain(
+        "does not show partner invoices or program settlement",
+      );
+      expect(html).toContain("not confirmation of payment");
+      expect(html).not.toContain("SIM-unit-only-server-session");
+      const normalReads = api.requestHeaders.filter(
+        ({ path }) =>
+          path.startsWith("/api/partner/bookings/") ||
+          path.startsWith("/api/partner/orders/"),
+      );
+      expect(normalReads.map(({ path }) => path)).toEqual([
+        "/api/partner/bookings/booking-SIM-persisted",
+        "/api/partner/orders/SIM-persisted-order",
+        "/api/partner/orders/SIM-persisted-order/receipt",
+      ]);
+      expect(normalReads.map(({ authorization }) => authorization)).toEqual([
+        "Bearer SIM-unit-only-server-session",
+        "Bearer SIM-unit-only-server-session",
+        "Bearer SIM-unit-only-server-session",
+      ]);
+    },
+  );
+
+  it("reloads the same receipt IDs and fresh task/payment values without reusing the quotation", async () => {
+    const api = transport();
+    api.updateStatus("completed");
+    api.updateQuotation(4000);
+    api.updateReceipt(completedReceipt());
+    const first = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    const newer = completedReceipt();
+    newer.completion!.actualFare = { currency: "TWD", amountMinor: 6600 };
+    newer.payment.amount = { currency: "TWD", amountMinor: 6200 };
+    api.updateReceipt(newer);
+    api.updateQuotation(4100);
+    const reloaded = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(first).toContain('data-testid="partner-actual-fare">NT$55.00</dd>');
+    expect(reloaded).toContain("<h2>Quotation</h2><p>NT$41.00</p>");
+    expect(reloaded).toContain(
+      'data-testid="partner-actual-fare">NT$66.00</dd>',
+    );
+    expect(reloaded).toContain(
+      'data-testid="partner-payment-amount">NT$62.00</dd>',
+    );
+    expect(reloaded).toContain("SIM-actual-completed-task");
+    expect(reloaded).toContain('data-order-id="SIM-persisted-order"');
+    expect(reloaded).toContain('data-booking-id="booking-SIM-persisted"');
+    expect(reloaded).not.toContain("NT$55.00");
+    expect(api.calls.filter((path) => path.endsWith("/receipt"))).toHaveLength(
+      2,
+    );
+  });
+
+  it.each([
+    ["not_selected", "No passenger electronic payment selected"],
+    ["authorized", "Passenger electronic payment authorized; not captured"],
+    ["captured", "Passenger electronic payment captured"],
+    ["failed", "Passenger electronic payment failed; verify its outcome"],
+    ["refunded", "Passenger electronic payment refunded"],
+    [
+      "manual_recovery",
+      "Passenger electronic payment requires manual confirmation",
+    ],
+  ])(
+    "preserves the passenger ledger meaning for %s",
+    async (status, expected) => {
+      const api = transport();
+      const receipt = completedReceipt();
+      receipt.payment.status = status!;
+      api.updateReceipt(receipt);
+      const html = renderToStaticMarkup(
+        await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+      );
+      expect(html).toContain("<dd>" + expected + "</dd>");
+      expect(html).toContain("Recorded transaction amount");
+      expect(html).toContain(
+        'data-testid="partner-payment-amount">NT$61.00</dd>',
+      );
+      if (status !== "captured")
+        expect(html).not.toContain(
+          "<dd>Passenger electronic payment captured</dd>",
+        );
+    },
+  );
+
+  it("keeps the quotation readable without inventing a completed task or actual fare", async () => {
+    const api = transport();
+    api.updateQuotation(4000);
+    const receipt = completedReceipt();
+    receipt.completion = null;
+    receipt.payment = {
+      availability: "not_recorded",
+      status: null,
+      amount: null,
+    };
+    api.updateReceipt(receipt);
+    const html = renderToStaticMarkup(
+      await ReceiptPage(args({ bookingId: "booking-SIM-persisted" })),
+    );
+    expect(html).toContain("<h2>Quotation</h2><p>NT$40.00</p>");
+    expect(html).toContain("No matching completed trip has been provided.");
+    expect(html).not.toContain('data-testid="partner-actual-fare"');
+    expect(html).not.toContain("NT$0.00");
+  });
+
+  it("does not borrow either the quote or task fare when captured ledger amount is absent", async () => {
+    const api = transport();
+    api.updateQuotation(4000);
+    const receipt = completedReceipt();
+    receipt.completion!.actualFare = null;
+    receipt.payment.amount = null;
+    api.updateReceipt(receipt);
+    const html = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(html).toContain(
+      'data-testid="partner-actual-fare">Not provided</dd>',
+    );
+    expect(html).toContain("<dd>Passenger electronic payment captured</dd>");
+    expect(html).toContain(
+      'data-testid="partner-payment-amount">Not provided</dd>',
+    );
+    expect(html).toContain("<h2>Quotation</h2><p>NT$40.00</p>");
+    expect(html).not.toContain("NT$55.00");
+    expect(html).not.toContain("NT$61.00");
+    expect(html).not.toContain("NT$0.00");
+  });
+
+  it("renders recorded zero task and passenger payment amounts as real zero values", async () => {
+    const api = transport();
+    const receipt = completedReceipt();
+    receipt.completion!.actualFare = { currency: "TWD", amountMinor: 0 };
+    receipt.completion!.actualFareBreakdown = {
+      startMinor: 0,
+      distanceMinor: 0,
+      delayMinor: 0,
+      nightMinor: 0,
+    };
+    receipt.completion!.actualDistanceKm = 0;
+    receipt.completion!.actualDurationSec = 0;
+    receipt.payment.amount = { currency: "TWD", amountMinor: 0 };
+    api.updateReceipt(receipt);
+    const html = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(html).toContain('data-testid="partner-actual-fare">NT$0.00</dd>');
+    expect(html).toContain('data-testid="partner-payment-amount">NT$0.00</dd>');
+    expect(html).not.toContain("Not provided");
+  });
+
+  it.each([
+    ["not_recorded", "No passenger electronic payment record was found."],
+    ["unavailable", "The passenger electronic payment source is unavailable."],
+  ] as const)(
+    "distinguishes %s passenger source without declaring partner settlement unpaid",
+    async (availability, expected) => {
+      const api = transport();
+      const receipt = completedReceipt();
+      receipt.payment = { availability, status: null, amount: null };
+      api.updateReceipt(receipt);
+      const html = renderToStaticMarkup(
+        await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+      );
+      expect(html).toContain(expected);
+      expect(html).toContain("does not mean the partner booking is unpaid");
+      expect(html).not.toContain('data-testid="partner-payment-amount"');
+      expect(html).not.toContain(
+        "<dd>Passenger electronic payment captured</dd>",
+      );
+    },
+  );
+
+  it("shows a true receipt read error instead of converting a failed source to no payment", async () => {
+    const api = transport();
+    api.failReceipt("PARTNER_RECEIPT_CONTEXT_UNAVAILABLE");
+    const html = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain(
+      'data-read-error="PARTNER_RECEIPT_CONTEXT_UNAVAILABLE"',
+    );
+    expect(html).not.toContain(
+      "No passenger electronic payment record was found.",
+    );
+    expect(html).not.toContain("SIM-persisted-order");
+  });
+
+  it.each(["orderId", "bookingId"] as const)(
+    "rejects a receipt with a different %s before rendering any monetary data",
+    async (field) => {
+      const api = transport();
+      const receipt = completedReceipt();
+      receipt[field] = "SIM-other-booking";
+      api.updateReceipt(receipt);
+      const html = renderToStaticMarkup(
+        await ReceiptPage(args({ bookingId: "booking-SIM-persisted" })),
+      );
+      expect(html).toContain(
+        'data-read-error="PARTNER_BOOKING_READBACK_MISMATCH"',
+      );
+      expect(html).not.toContain("SIM-other-booking");
+      expect(html).not.toContain('data-testid="partner-payment-receipt"');
+    },
+  );
+
+  it("does not add receipt reads to normal confirmation or program history", async () => {
+    const api = transport();
+    await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" }));
+    await TripsPage(args());
+    expect(api.calls.filter((path) => path.endsWith("/receipt"))).toEqual([]);
+    expect(
+      api.calls.filter(
+        (path) => path === "/api/partner/orders/SIM-persisted-order",
+      ),
+    ).toHaveLength(1);
+    expect(
+      api.calls.filter(
+        (path) => path === "/api/partner/bookings/booking-SIM-persisted",
+      ),
+    ).toHaveLength(1);
   });
 });

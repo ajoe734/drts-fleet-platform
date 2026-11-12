@@ -422,6 +422,19 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("partner/orders/:orderId/receipt")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getPartnerOrderReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getPartnerOrderReceipt(orderId, identity),
+      requestId,
+    );
+  }
+
   @Get("partner/referral/passenger/fees")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   @RequireRealms("partner")

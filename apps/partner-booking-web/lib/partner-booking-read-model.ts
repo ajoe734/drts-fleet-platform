@@ -2,6 +2,7 @@ import {
   createPartnerIngressHandoff,
   createPartnerSessionFromIngressHandoff,
   getPartnerConfirmation,
+  getPartnerReceipt,
   getPartnerTrip,
   getPartnerRouteContext,
   listPartnerBookings,
@@ -45,6 +46,7 @@ async function partnerReadSession(
 export async function loadPartnerBookingRecord(
   entrySlug: string,
   query: PartnerReadSearch,
+  includeReceipt = false,
 ) {
   const partnerUserRef = partnerReadValue(query.partnerUserRef);
   const bookingId = partnerReadValue(query.bookingId);
@@ -81,12 +83,27 @@ export async function loadPartnerBookingRecord(
       "PARTNER_BOOKING_READBACK_MISMATCH",
       "Booking and order references do not match.",
     );
+  const receipt = includeReceipt
+    ? await getPartnerReceipt(session, order.orderId)
+    : null;
+  if (
+    includeReceipt &&
+    (!receipt ||
+      receipt.orderId !== order.orderId ||
+      receipt.bookingId !== booking.bookingId)
+  )
+    throw new PartnerAuthorityError(
+      409,
+      "PARTNER_BOOKING_READBACK_MISMATCH",
+      "Receipt, booking and order references do not match.",
+    );
   // Session/key never leaves this server helper.
   return {
     entry: context.entry!,
     brand: context.brand,
     booking,
     order,
+    receipt,
     partnerUserRef: partnerUserRef!,
   };
 }

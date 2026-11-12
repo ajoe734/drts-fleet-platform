@@ -11,6 +11,7 @@ import type {
   CreateTenantBookingCommand,
   IdentityContext,
   OwnedOrderRecord,
+  PartnerOrderReceiptRecord,
   PartnerEntryBrandingMetadata,
   PartnerRecordAuditMetadata,
   PartnerBootstrapSession,
@@ -732,9 +733,16 @@ export async function getPartnerTrip(
   );
 }
 
+/** Passenger electronic-payment records do not represent partner settlement. */
 export async function getPartnerReceipt(
   session: PartnerSessionRecord,
   orderId: string,
-): Promise<OwnedOrderRecord> {
-  return getPartnerTrip(session, orderId);
+): Promise<PartnerOrderReceiptRecord> {
+  return requestAuthority<PartnerOrderReceiptRecord>(
+    "/api/partner/orders/" + encodeURIComponent(orderId) + "/receipt",
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
 }

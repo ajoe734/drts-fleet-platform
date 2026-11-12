@@ -193,16 +193,16 @@
       "reason": "Registers V0134__approved_supply_renewal.sql under the existing SA/SD supply eligibility and canonical registry submission family (docs/02-architecture/phase1_delta_sa_supply_eligibility_mobile_reporting_20260619.md, docs/02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md) at origin/dev 521dbbabd23799b7dd5e7b98cfe22ea921c6e68f after V0133__agency_access_logs.sql."
     },
     {
+      "amended_by_task_id": "SR-ACCEPT-001",
+      "amended_at": "2026-11-11",
+      "scope": "Append V0137__passenger_service_selection.sql to the existing passenger_app_allocations and this amendment only; preserve all prior allocation objects, amendments and task ownership entries.",
+      "reason": "Source-only provider support for PR #3213 pending Main adoption: registers the existing optional service_selection column on passenger.fare_quote_snapshots so the unchanged allocation collision, filename and maximum-version checks account for V0137. No task status, ownership, deployment or live acceptance is claimed. The unmerged Passenger version was moved from V0136 to V0137 because Main 42a8da2bee4ed14644f86b71d76b5f87cfbf3310 now owns V0136__callcenter_ai_assist.sql; the Passenger SQL body is unchanged."
+    },
+    {
       "amended_by_task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
       "amended_at": "2026-10-25",
       "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
       "reason": "Registers the R11 per-trip operational record truth, telemetry.driver_location_events route provenance, historical backfill/reconciliation, payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
-    },
-    {
-      "amended_by_task_id": "SR-ACCEPT-001",
-      "amended_at": "2026-11-11",
-      "scope": "Append V0136__passenger_service_selection.sql to the existing passenger_app_allocations and this amendment only; preserve all prior allocation objects, amendments and task ownership entries.",
-      "reason": "Source-only provider support for PR #3213 pending Main adoption: registers the existing optional service_selection column on passenger.fare_quote_snapshots so the unchanged allocation collision, filename and maximum-version checks account for V0136. No task status, ownership, deployment or live acceptance is claimed."
     }
   ],
   "voice_application_allocations": [
@@ -702,8 +702,8 @@
     },
     {
       "task_id": "SR-ACCEPT-001",
-      "version": "V0136",
-      "migration_filename": "V0136__passenger_service_selection.sql",
+      "version": "V0137",
+      "migration_filename": "V0137__passenger_service_selection.sql",
       "domain": "passenger_service_selection",
       "target_schema": "passenger",
       "primary_tables": ["passenger.fare_quote_snapshots"],

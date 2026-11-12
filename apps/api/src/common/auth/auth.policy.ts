@@ -396,7 +396,8 @@ export function resolveRouteAuthPolicy(
     upperMethod === "GET" &&
     (routePath === "partner/bookings" ||
       /^partner\/bookings\/[^/]+$/.test(routePath) ||
-      /^partner\/orders\/[^/]+$/.test(routePath))
+      /^partner\/orders\/[^/]+$/.test(routePath) ||
+      /^partner\/orders\/[^/]+\/receipt$/.test(routePath))
   ) {
     return {
       routeKey:
@@ -404,7 +405,9 @@ export function resolveRouteAuthPolicy(
           ? "partner:bookings:list"
           : routePath.startsWith("partner/bookings/")
             ? "partner:bookings:get"
-            : "partner:orders:get",
+            : routePath.endsWith("/receipt")
+              ? "partner:orders:receipt"
+              : "partner:orders:get",
       requiredScopes: ["partner:book"],
       allowedRealms: baseAllowedRealms("partner"),
       description: "Partner-scoped booking confirmation and receipt access",

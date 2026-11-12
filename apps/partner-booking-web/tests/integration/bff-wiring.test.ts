@@ -631,7 +631,9 @@ describe("partner-booking-web BFF wiring", () => {
     expect(
       (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
     ).toBeUndefined();
-    await expect(getPartnerRouteContext("adventureworks")).rejects.toMatchObject({
+    await expect(
+      getPartnerRouteContext("adventureworks"),
+    ).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_REQUEST_FAILED",
       status: 500,
     });
@@ -848,6 +850,16 @@ describe("partner-booking-web BFF wiring", () => {
       updatedAt: "2026-05-19T00:00:00.000Z",
     } as unknown as OwnedOrderRecord;
 
+    const receipt = {
+      orderId: order.orderId,
+      bookingId: booking.bookingId,
+      orderNo: order.orderNo,
+      orderStatus: order.status,
+      quotedFare: null,
+      completion: null,
+      payment: { availability: "not_recorded", status: null, amount: null },
+    };
+
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -870,7 +882,7 @@ describe("partner-booking-web BFF wiring", () => {
       )
       .mockResolvedValueOnce(
         jsonResponse({
-          data: order,
+          data: receipt,
           meta: { requestId: "r4", timestamp: "t4" },
         }),
       );
@@ -893,7 +905,7 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toEqual(booking);
     await expect(getPartnerTrip(session, "order-001")).resolves.toEqual(order);
     await expect(getPartnerReceipt(session, "order-001")).resolves.toEqual(
-      order,
+      receipt,
     );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -928,5 +940,19 @@ describe("partner-booking-web BFF wiring", () => {
         }),
       }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      API_URL + "/api/partner/orders/order-001/receipt",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+          "x-realm": "partner",
+          "x-tenant-id": "tenant-001",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
