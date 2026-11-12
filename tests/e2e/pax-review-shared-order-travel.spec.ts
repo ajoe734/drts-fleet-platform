@@ -4,6 +4,8 @@ import {
   type Page,
   type BrowserContext,
   type Response,
+  type Browser,
+  type TestInfo,
 } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -17,6 +19,7 @@ import {
   type DriverLocationHeartbeatEnvelope,
   type OwnedOrderRecord,
   type PartnerBootstrapSession,
+  type PartnerBookingDetails,
 } from "@drts/contracts";
 import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
 import { TENANT_SESSION_COOKIE_NAME } from "../../packages/tenant-auth/src/constants";
@@ -115,11 +118,14 @@ async function address(
   await picker.getByRole("button", { name: new RegExp(label) }).click();
 }
 
-/** Hosted-only dedicated config includes both unchanged original cases plus this
- * independent normal business case. No product/auth/PSP/Passenger mocks. */
-test("normal travel Partner booking is ordinarily assigned, genuinely Driver-completed and re-read with the same-order tenant invoice", async ({
-  browser,
-}, info) => {
+/** Both wrappers run this same normal booking/lifecycle/invoice journey.
+ * Only external program facts and the corresponding normal product vary. */
+async function runNormalPartnerJourney(
+  browser: Browser,
+  info: TestInfo,
+  subtype: "travel_agency_transfer" | "insurance_replacement_vehicle",
+) {
+  const insurance = subtype === "insurance_replacement_vehicle";
   expect(process.env.GITHUB_ACTIONS).toBe("true");
   expect(required("DRTS_UAT_ENV")).toBe("sandbox");
   expect(required("DRTS_UAT_API_URL")).toBe(NONCORE_API);
@@ -150,19 +156,32 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     const partner = await newPage(),
       ops = await newPage(),
       driver = await newPage();
-    await step("Activate normal travel product", () =>
-      fixture.activateTravel(),
+    await step(
+      insurance
+        ? "Activate normal insurance product"
+        : "Activate normal travel product",
+      () =>
+        insurance ? fixture.activateInsurance() : fixture.activateTravel(),
     );
     const supply = await step(
       "Approve durable normal SIM business supply through Fleet and Admin",
-      () => fixture.fleetSupply(),
+      () =>
+        insurance
+          ? fixture.fleetSupply("insurance_replacement_vehicle")
+          : fixture.fleetSupply(),
     );
     const scope = await step(
-      "Create own normal travel entry and credential",
-      () => fixture.entry("travel_agency"),
+      insurance
+        ? "Create own normal insurance entry and credential"
+        : "Create own normal travel entry and credential",
+      () => fixture.entry(insurance ? "insurance_company" : "travel_agency"),
     );
-    const partnerUserRef = `SIM-travel-rider-${randomUUID()}`;
-    const referenceToken = `SIM-roster-reference-${randomUUID()}`;
+    const partnerUserRef = insurance
+      ? `SIM-insurance-rider-${randomUUID()}`
+      : `SIM-travel-rider-${randomUUID()}`;
+    const referenceToken = insurance
+      ? `SIM-claim-reference-${randomUUID()}`
+      : `SIM-roster-reference-${randomUUID()}`;
 
     await step(
       "Issue real device invitation and register it in Driver UI",
@@ -228,7 +247,11 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         await test.step("Driver Settings: fill the original profile name", async () => {
           await driver
             .getByPlaceholder("司機姓名", { exact: true })
-            .fill("SIM hosted travel driver");
+            .fill(
+              insurance
+                ? "SIM hosted insurance driver"
+                : "SIM hosted travel driver",
+            );
         });
         await test.step("Driver Settings: fill the declared surname", async () => {
           await surname.fill("演練");
@@ -255,10 +278,15 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
           )
           .catch(() => null);
         await info
-          .attach("normal-travel-settings-save-availability", {
-            contentType: "application/json",
-            body: JSON.stringify({ saveAvailability }),
-          })
+          .attach(
+            insurance
+              ? "normal-insurance-settings-save-availability"
+              : "normal-travel-settings-save-availability",
+            {
+              contentType: "application/json",
+              body: JSON.stringify({ saveAvailability }),
+            },
+          )
           .catch(() => undefined);
         const [saved] =
           await test.step("Driver Settings: save through the original profile PATCH", async () =>
@@ -317,16 +345,31 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       .addCookies([
         { name: PARTNER_LOCALE_COOKIE, value: "en", url: PARTNER_ORIGIN },
       ]);
-    const details = {
-      subtype: "travel_agency_transfer",
-      groupCode: `SIM-GROUP-${fixture.marker}`,
-      groupSize: 2,
-      itineraryLink: `https://travel.example.test/${fixture.marker}`,
-      rosterPassengers: ["SIM Traveller One", "SIM Traveller Two"],
-      meetingPoint: "SIM Taipei 101 meeting point",
-    };
+    const details: PartnerBookingDetails = insurance
+      ? {
+          subtype: "insurance_replacement_vehicle",
+          claimNumber: `SIM-CLAIM-${fixture.marker}`,
+          policyNumber: `SIM-POLICY-${fixture.marker}`,
+          claimReference: `SIM-CASE-${fixture.marker}`,
+          claimantName: "SIM Insured Person",
+          // Set from the actual browser's reservation window below, before submit.
+          replacementStart: "",
+          replacementEnd: "",
+          replacementVehicleClass: "SIM business replacement vehicle",
+          caseHandler: "SIM Case Handler",
+        }
+      : {
+          subtype: "travel_agency_transfer",
+          groupCode: `SIM-GROUP-${fixture.marker}`,
+          groupSize: 2,
+          itineraryLink: `https://travel.example.test/${fixture.marker}`,
+          rosterPassengers: ["SIM Traveller One", "SIM Traveller Two"],
+          meetingPoint: "SIM Taipei 101 meeting point",
+        };
     const dates = await step(
-      "Submit normal travel form through the real ServerAction",
+      insurance
+        ? "Submit normal insurance form through the real ServerAction"
+        : "Submit normal travel form through the real ServerAction",
       async () => {
         const opened = await partner.goto(
           `${PARTNER_ORIGIN}/${scope.entry.entrySlug}/book?${new URLSearchParams({ partnerUserRef, referenceToken })}`,
@@ -334,28 +377,55 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         expect(opened?.status()).toBe(200);
         await partner
           .getByLabel("Passenger name", { exact: true })
-          .fill("SIM Hosted Travel Passenger");
+          .fill(
+            insurance
+              ? "SIM Hosted Insurance Passenger"
+              : "SIM Hosted Travel Passenger",
+          );
         await partner
           .getByLabel("Passenger phone", { exact: true })
           .fill("0900000036");
-        await partner
-          .getByLabel("Group / order reference", { exact: true })
-          .fill(details.groupCode);
-        await partner.getByLabel("Group seats", { exact: true }).fill("2");
-        await partner
-          .getByLabel("Itinerary link", { exact: true })
-          .fill(details.itineraryLink);
-        await partner
-          .getByLabel("Passenger roster", { exact: true })
-          .fill(details.rosterPassengers.join("\n"));
-        await partner
-          .getByLabel("Meeting point", { exact: true })
-          .fill(details.meetingPoint);
-        await partner.getByLabel("Luggage count", { exact: true }).fill("2");
+        if (details.subtype === "travel_agency_transfer") {
+          await partner
+            .getByLabel("Group / order reference", { exact: true })
+            .fill(details.groupCode);
+          await partner.getByLabel("Group seats", { exact: true }).fill("2");
+          await partner
+            .getByLabel("Itinerary link", { exact: true })
+            .fill(details.itineraryLink);
+          await partner
+            .getByLabel("Passenger roster", { exact: true })
+            .fill(details.rosterPassengers.join("\n"));
+          await partner
+            .getByLabel("Meeting point", { exact: true })
+            .fill(details.meetingPoint);
+          await partner.getByLabel("Luggage count", { exact: true }).fill("2");
+        } else {
+          await partner
+            .getByLabel("Claim number", { exact: true })
+            .fill(details.claimNumber);
+          await partner
+            .getByLabel("Policy number", { exact: true })
+            .fill(details.policyNumber);
+          await partner
+            .getByLabel("Claim reference", { exact: true })
+            .fill(details.claimReference);
+          await partner
+            .getByLabel("Claimant", { exact: true })
+            .fill(details.claimantName);
+          await partner
+            .getByLabel("Replacement-vehicle class", { exact: true })
+            .fill(details.replacementVehicleClass);
+          await partner
+            .getByLabel("Case handler", { exact: true })
+            .fill(details.caseHandler);
+        }
         await partner
           .getByLabel("Notes", { exact: true })
           .fill(
-            "SIM external roster, qualifications and GPS; normal internal lifecycle/invoice",
+            insurance
+              ? "SIM external policy, claim facts, qualifications and GPS; normal internal lifecycle/invoice"
+              : "SIM external roster, qualifications and GPS; normal internal lifecycle/invoice",
           );
         await address(partner, 0, "taipei 101", "Taipei 101");
         await address(partner, 1, "taipei main", "Taipei Main Station");
@@ -380,6 +450,16 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
             endISO: end.toISOString(),
           };
         });
+        if (details.subtype === "insurance_replacement_vehicle") {
+          details.replacementStart = dates.startISO;
+          details.replacementEnd = dates.endISO;
+          await partner
+            .getByLabel("Replacement period start", { exact: true })
+            .fill(dates.start);
+          await partner
+            .getByLabel("Replacement period end", { exact: true })
+            .fill(dates.end);
+        }
         await partner
           .getByLabel("Reservation window start", { exact: true })
           .fill(dates.start);
@@ -395,6 +475,12 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         await expect(
           partner.getByTestId("partner-booking-confirmation"),
         ).toContainText("Booking created and read back");
+        if (details.subtype === "insurance_replacement_vehicle")
+          for (const [key, value] of Object.entries(details))
+            if (key !== "subtype")
+              await expect(
+                partner.getByTestId("partner-booking-confirmation"),
+              ).toContainText(value);
         return dates;
       },
     );
@@ -417,7 +503,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       orderId: exactOrderId,
       bookingId,
       tenantId: fixture.tenantId,
-      businessDispatchSubtype: "travel_agency_transfer",
+      businessDispatchSubtype: subtype,
       partnerId: scope.entry.partnerId,
       partnerProgramId: scope.entry.programId,
       partnerEntrySlug: scope.entry.entrySlug,
@@ -463,7 +549,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       verificationStatus: "eligible",
       partnerEntrySlug: scope.entry.entrySlug,
       partnerProgramId: scope.entry.programId,
-      businessDispatchSubtype: "travel_agency_transfer",
+      businessDispatchSubtype: subtype,
     });
 
     const confirmationPath = `/${encodeURIComponent(scope.entry.entrySlug)}/confirmed`;
@@ -493,14 +579,45 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     );
     await expect(opsFulfillment).toHaveAttribute(
       "data-ops-fulfillment-subtype",
-      "travel_agency_transfer",
+      subtype,
     );
-    for (const value of [
-      details.groupCode,
-      details.meetingPoint,
-      ...details.rosterPassengers,
-    ])
-      await expect(opsFulfillment).toContainText(value);
+    if (details.subtype === "travel_agency_transfer") {
+      for (const value of [
+        details.groupCode,
+        details.meetingPoint,
+        ...details.rosterPassengers,
+      ])
+        await expect(opsFulfillment).toContainText(value);
+    } else {
+      for (const value of [
+        details.claimNumber,
+        details.claimantName,
+        details.replacementVehicleClass,
+        details.caseHandler,
+      ])
+        await expect(opsFulfillment).toContainText(value);
+      // Ops deliberately renders this existing fulfillment window in UTC.
+      const opsLocale = await ops.locator("html").getAttribute("lang");
+      for (const value of [details.replacementStart, details.replacementEnd]) {
+        const displayed = new Intl.DateTimeFormat(
+          opsLocale === "zh" ? "zh-TW" : "en-US",
+          {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+            timeZone: "UTC",
+          },
+        )
+          .format(new Date(value))
+          .replace(",", "");
+        await expect(
+          opsFulfillment.getByText(displayed, { exact: true }),
+        ).toBeVisible();
+      }
+    }
     const assigned = await step(
       "Ordinary Ops assigns an actually returned normal business candidate",
       async () => {
@@ -810,12 +927,29 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     );
     await assertPartnerProgress("accepted");
     const driverFulfillment = driver.getByTestId("driver-partner-fulfillment");
-    for (const value of [
-      details.groupCode,
-      details.meetingPoint,
-      ...details.rosterPassengers,
-    ])
-      await expect(driverFulfillment).toContainText(value);
+    if (details.subtype === "travel_agency_transfer") {
+      for (const value of [
+        details.groupCode,
+        details.meetingPoint,
+        ...details.rosterPassengers,
+      ])
+        await expect(driverFulfillment).toContainText(value);
+    } else {
+      for (const value of [
+        details.claimNumber,
+        details.claimantName,
+        details.replacementVehicleClass,
+        details.caseHandler,
+      ])
+        await expect(driverFulfillment).toContainText(value);
+      for (const value of [details.replacementStart, details.replacementEnd])
+        await expect(
+          driverFulfillment.getByText(
+            new Date(value).toISOString().replace("T", " ").slice(0, 16),
+            { exact: true },
+          ),
+        ).toBeVisible();
+    }
     for (const [label, action] of [
       ["前往接送點", "depart"],
       ["抵達上車點", "arrived_pickup"],
@@ -1264,6 +1398,8 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
     expect(task.proof.photos).toHaveLength(
       before.order.proofRequirements.minPhotoCount,
     );
+    if (before.order.proofRequirements.signoffRequired)
+      expect(task.proof.signatureId).toBe(`SIM-SIGNOFF-${fixture.marker}`);
 
     const completed = await fixture.fresh(
       scope,
@@ -1463,7 +1599,7 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         });
         const expected = {
           orderId: exactOrderId,
-          businessDispatchSubtype: "travel_agency_transfer",
+          businessDispatchSubtype: subtype,
           partnerId: scope.entry.partnerId,
           partnerProgramId: scope.entry.programId,
           partnerEntrySlug: scope.entry.entrySlug,
@@ -1476,6 +1612,19 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
           );
           expect(lines).toHaveLength(1);
           expect(lines[0]).toMatchObject(expected);
+          // A later invoice may also contain earlier completed travel orders.
+          // Check the full invoice independently from this order's unique line.
+          expect(actual.lines.length).toBeGreaterThan(0);
+          for (const line of actual.lines)
+            expect(normalisePlatformCurrency(line.amount.currency)).toBe(
+              normalisePlatformCurrency(actual.amount.currency),
+            );
+          expect(actual.amount.amountMinor).toBe(
+            actual.lines.reduce(
+              (sum: number, line: any) => sum + line.amount.amountMinor,
+              0,
+            ),
+          );
         }
         return {
           invoiceId: read.invoiceId,
@@ -1539,64 +1688,83 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         ).toBeVisible();
       },
     );
-    await info.attach("normal-travel-completion-same-order-facts", {
-      contentType: "application/json",
-      body: JSON.stringify(
-        {
-          candidate_sha: required("CANDIDATE_SHA"),
-          workflow_sha: required("WORKFLOW_SHA"),
-          orderId: exactOrderId,
-          bookingId,
-          tenantId: fixture.tenantId,
-          partnerId: scope.entry.partnerId,
-          programId: scope.entry.programId,
-          entrySlug: scope.entry.entrySlug,
-          eligibilityVerificationId: before.order.eligibilityVerificationId,
-          dispatchJobId: created.dispatchJobId,
-          assignmentId: assigned.assignmentId,
-          taskId: assigned.taskId,
-          supply,
-          status: task.status,
-          fare: task.fare,
-          completedAt: task.completedAt,
-          actualDistanceKm: task.actualDistanceKm,
-          actualDurationSec: task.actualDurationSec,
-          invoice,
-          simulated: [
-            "external-Google-metadata-transport-with-genuine-WIF-token",
-            "roster-reference-issuer",
-            "map-provider",
-            "existing-GPS-demo-track-not-route-geofence-or-physical-distance-verification",
-            "vehicle-driver-qualification-documents",
-            "external-document-scanner-HTTP-verdict",
-            "project-PNG-proof-image",
-          ],
-          real: [
-            "normal-eligibility-ServerAction-create",
-            "Fleet-documents-approval-canonical-supply",
-            "Ops-UI-assignment",
-            "Driver-device-session-and-UI-lifecycle",
-            "proof-processing",
-            "PG-relational-completion",
-            "normal-Partner-fresh-receipt",
-            "tenant-admin-invoice-HTTP-PG",
-            "normal-Tenant-billing-Generate-UI-and-exact-invoice-detail",
-          ],
-          notClaimed: [
-            "physical-ride",
-            "genuine-malware-engine",
-            "PSP-collection",
-            "Passenger-ledger-payment",
-            "negotiated-travel-pricing",
-            "tax-invoice",
-            "mail-delivery",
-            "CloudRun-production",
-          ],
-        },
-        null,
-        2,
-      ),
-    });
+    await info.attach(
+      insurance
+        ? "normal-insurance-completion-same-order-facts"
+        : "normal-travel-completion-same-order-facts",
+      {
+        contentType: "application/json",
+        body: JSON.stringify(
+          {
+            candidate_sha: required("CANDIDATE_SHA"),
+            businessDispatchSubtype: subtype,
+            partnerBookingDetails: details,
+            proof: {
+              requirements: before.order.proofRequirements,
+              photoCount: task.proof.photos.length,
+              signatureProvided: Boolean(task.proof.signatureId),
+              signoffClaim: before.order.proofRequirements.signoffRequired
+                ? "normal required signoff entered in Driver UI and persisted"
+                : "signoff not required by this actual order; no signoff validation claim",
+            },
+            workflow_sha: required("WORKFLOW_SHA"),
+            orderId: exactOrderId,
+            bookingId,
+            tenantId: fixture.tenantId,
+            partnerId: scope.entry.partnerId,
+            programId: scope.entry.programId,
+            entrySlug: scope.entry.entrySlug,
+            eligibilityVerificationId: before.order.eligibilityVerificationId,
+            dispatchJobId: created.dispatchJobId,
+            assignmentId: assigned.assignmentId,
+            taskId: assigned.taskId,
+            supply,
+            status: task.status,
+            fare: task.fare,
+            completedAt: task.completedAt,
+            actualDistanceKm: task.actualDistanceKm,
+            actualDurationSec: task.actualDurationSec,
+            invoice,
+            simulated: [
+              "external-Google-metadata-transport-with-genuine-WIF-token",
+              insurance
+                ? "policy-and-claim-reference-issuer"
+                : "roster-reference-issuer",
+              "map-provider",
+              "existing-GPS-demo-track-not-route-geofence-or-physical-distance-verification",
+              "vehicle-driver-qualification-documents",
+              "external-document-scanner-HTTP-verdict",
+              "project-PNG-proof-image",
+            ],
+            real: [
+              "normal-eligibility-ServerAction-create",
+              "Fleet-documents-approval-canonical-supply",
+              "Ops-UI-assignment",
+              "Driver-device-session-and-UI-lifecycle",
+              "proof-processing",
+              "PG-relational-completion",
+              "normal-Partner-fresh-receipt",
+              "tenant-admin-invoice-HTTP-PG",
+              "normal-Tenant-billing-Generate-UI-and-exact-invoice-detail",
+            ],
+            notClaimed: [
+              "physical-ride",
+              "genuine-malware-engine",
+              "PSP-collection",
+              "Passenger-ledger-payment",
+              insurance
+                ? "negotiated-insurance-pricing"
+                : "negotiated-travel-pricing",
+              "tax-invoice",
+              "mail-delivery",
+              "CloudRun-production",
+            ],
+          },
+          null,
+          2,
+        ),
+      },
+    );
   } finally {
     stopGpsObservation?.();
     // Snapshot route locations before closing contexts. No query/fragment,
@@ -1613,22 +1781,45 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
       }),
     );
     await info
-      .attach("normal-travel-terminal-page-routes", {
-        contentType: "application/json",
-        body: JSON.stringify({ pages: pagesBeforeClose }),
-      })
+      .attach(
+        insurance
+          ? "normal-insurance-terminal-page-routes"
+          : "normal-travel-terminal-page-routes",
+        {
+          contentType: "application/json",
+          body: JSON.stringify({ pages: pagesBeforeClose }),
+        },
+      )
       .catch(() => undefined);
-    await info.attach("normal-travel-terminal-owned-ID", {
-      contentType: "application/json",
-      body: JSON.stringify({
-        orderId,
-        source: "actual-response-only",
-        testStatus: info.status,
-        noForcedCompletedOrFakePassengerHistory: true,
-      }),
-    });
+    await info.attach(
+      insurance
+        ? "normal-insurance-terminal-owned-ID"
+        : "normal-travel-terminal-owned-ID",
+      {
+        contentType: "application/json",
+        body: JSON.stringify({
+          orderId,
+          source: "actual-response-only",
+          testStatus: info.status,
+          noForcedCompletedOrFakePassengerHistory: true,
+        }),
+      },
+    );
     await Promise.allSettled(contexts.map((context) => context.close()));
     await pendingGpsObservation;
     await fixture.close();
   }
+}
+
+/** Original travel case and every shared step remain in the same job. */
+test("normal travel Partner booking is ordinarily assigned, genuinely Driver-completed and re-read with the same-order tenant invoice", async ({
+  browser,
+}, info) => {
+  await runNormalPartnerJourney(browser, info, "travel_agency_transfer");
+});
+
+test("normal insurance Partner booking is ordinarily assigned, genuinely Driver-completed and re-read with the same-order tenant invoice", async ({
+  browser,
+}, info) => {
+  await runNormalPartnerJourney(browser, info, "insurance_replacement_vehicle");
 });

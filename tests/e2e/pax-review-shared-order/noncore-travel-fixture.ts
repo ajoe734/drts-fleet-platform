@@ -43,7 +43,7 @@ export class NoncoreTravelFixture {
   readonly tenantToken = required("DRTS_UAT_TOKEN_A");
 
   async entry(
-    partnerType: "fleet_partner" | "travel_agency",
+    partnerType: "fleet_partner" | "travel_agency" | "insurance_company",
     fleetPartnerId?: string,
   ) {
     const slug = `travel-completion-${randomUUID()}`;
@@ -62,7 +62,9 @@ export class NoncoreTravelFixture {
         businessDispatchSubtype:
           partnerType === "fleet_partner"
             ? "enterprise_dispatch"
-            : "travel_agency_transfer",
+            : partnerType === "insurance_company"
+              ? "insurance_replacement_vehicle"
+              : "travel_agency_transfer",
         authMode: "partner_api_key",
         eligibilityMode:
           partnerType === "fleet_partner" ? "none" : "reference_required",
@@ -99,7 +101,11 @@ export class NoncoreTravelFixture {
     return { entry, apiKey: issued.plaintextKey };
   }
 
-  async fleetSupply() {
+  async fleetSupply(
+    subtype:
+      | "travel_agency_transfer"
+      | "insurance_replacement_vehicle" = "travel_agency_transfer",
+  ) {
     const fleet = await this.fixture.call<FleetPartnerRecord>(
       "admin/fleet-partners",
       this.platform,
@@ -248,10 +254,7 @@ export class NoncoreTravelFixture {
     };
     // Registry's existing bucket mapping recognizes 'dispatch'; declaring both
     // real supported products prevents travel being misclassified standard_taxi.
-    const supportedServiceProductCodes = [
-      "enterprise_dispatch",
-      "travel_agency_transfer",
-    ];
+    const supportedServiceProductCodes = ["enterprise_dispatch", subtype];
     const driverDraft = await fleetCall(
       "fleet-partner/supply-submissions/drivers",
       "POST",
@@ -357,17 +360,30 @@ export class NoncoreTravelFixture {
   }
 
   async activateTravel() {
+    return this.activateProduct("travel_agency_transfer");
+  }
+
+  async activateInsurance() {
+    return this.activateProduct("insurance_replacement_vehicle");
+  }
+
+  private async activateProduct(
+    subtype: "travel_agency_transfer" | "insurance_replacement_vehicle",
+  ) {
     const before = await this.fixture.call<{ items: Data[] }>(
       "admin/service-products",
       this.platform,
     );
     const product = before.items.find(
-      (item) => item.serviceProductType === "travel_agency_transfer",
+      (item) => item.serviceProductType === subtype,
     );
     if (!product || product.serviceProductId.startsWith("seed-")) {
       await this.fixture.call("admin/service-products", this.platform, "POST", {
-        serviceProductType: "travel_agency_transfer",
-        displayName: "SIM hosted travel transfer",
+        serviceProductType: subtype,
+        displayName:
+          subtype === "travel_agency_transfer"
+            ? "SIM hosted travel transfer"
+            : "SIM hosted insurance replacement vehicle",
         timing: "reservation",
         active: true,
         defaultBillingMode: "partner_settlement",
@@ -387,8 +403,7 @@ export class NoncoreTravelFixture {
     );
     expect(
       actual.items.filter(
-        (item) =>
-          item.serviceProductType === "travel_agency_transfer" && item.active,
+        (item) => item.serviceProductType === subtype && item.active,
       ),
     ).toHaveLength(1);
   }
