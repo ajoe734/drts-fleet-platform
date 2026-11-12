@@ -223,31 +223,52 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     .context()
     .addCookies([{ name: "drts-locale-v2", value: "en", url: BASE }]);
   await page.route(
-    /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth(?:\?|$)/,
+    (url) =>
+      url.origin === new URL(BASE).origin &&
+      url.pathname === "/api/auth/agency/login",
     async (route) => {
-      const authorization = new URL(route.request().url());
+      // Chromium does not route a redirect's second URL. Fetch the real BFF
+      // login without following its Google redirect, retaining its actual
+      // status, body and all headers (including every state Set-Cookie).
+      const login = await route.fetch({ maxRedirects: 0 });
+      const headers = login.headers();
+      const location = headers.location;
+      if (login.status() !== 307 || !location) {
+        await route.fulfill({ response: login });
+        return;
+      }
+      const authorization = new URL(location, BASE);
+      expect(authorization.origin).toBe("https://accounts.google.com");
+      expect(authorization.pathname).toBe("/o/oauth2/v2/auth");
       const state = authorization.searchParams.get("state");
       const callback = new URL(authorization.searchParams.get("redirect_uri")!);
       expect(Boolean(state)).toBe(true);
       expect(callback.origin).toBe(new URL(BASE).origin);
       expect(callback.pathname).toBe("/api/auth/agency/callback");
+      // Only the external Google leg is simulated. The real API-issued state,
+      // nonce/PKCE and invitation still reach the unmodified normal callback.
       callback.searchParams.set("state", state!);
-      // Existing offline branch provides a fresh subject, preserving the actual
-      // signed Agency state, nonce/PKCE exchange, invitation and API session.
       callback.searchParams.set(
         "code",
         `agency_business_partner_${randomUUID()}`,
       );
       await route.fulfill({
-        status: 302,
-        headers: { location: callback.href },
-        body: "",
+        response: login,
+        headers: { ...headers, location: callback.href },
       });
     },
   );
 
   await test.step("Delivered invitation and simulated external Google return create a real Agency session", async () => {
     await page.goto(invitationUrl);
+    const loginResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(BASE).origin &&
+        url.pathname === "/api/auth/agency/login" &&
+        response.request().method() === "GET"
+      );
+    });
     const callbackResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return (
@@ -259,6 +280,25 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     await page
       .getByRole("link", { name: "Accept invitation with Google", exact: true })
       .click();
+    const login = await loginResponse;
+    const loginError =
+      login.status() >= 400
+        ? ((await login.json().catch(() => null)) as { error?: unknown } | null)
+            ?.error
+        : null;
+    expect(
+      {
+        status: login.status(),
+        errorCode:
+          loginError === null
+            ? null
+            : typeof loginError === "string" &&
+                /^[A-Z0-9_]{1,96}$/.test(loginError)
+              ? loginError
+              : "NO_ALLOWLISTED_ERROR_CODE",
+      },
+      "real Agency BFF login start result",
+    ).toEqual({ status: 307, errorCode: null });
     const callback = await callbackResponse;
     const location = await callback.headerValue("location");
     const redirect = location ? new URL(location, BASE) : null;
