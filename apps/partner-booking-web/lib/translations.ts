@@ -3,6 +3,24 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "eligibility.verify.title": "Program eligibility",
+  "eligibility.verify.body":
+    "Verify eligibility with this partner program before creating an airport booking.",
+  "eligibility.verify.cardLast4": "Last four card digits",
+  "eligibility.verify.cardholderName": "Cardholder name",
+  "eligibility.verify.reference": "Issuer reference",
+  "eligibility.verify.benefit": "Benefit reference (if provided)",
+  "eligibility.verify.submit": "Verify eligibility",
+  "eligibility.verify.submitting": "Verifying eligibility…",
+  "eligibility.verify.eligible": "Eligible",
+  "eligibility.verify.ineligible": "Not eligible",
+  "eligibility.verify.manual_review": "Eligibility needs review",
+  "eligibility.verify.result":
+    "This result comes from the partner eligibility service. Only an eligible result can continue to booking.",
+  "eligibility.verify.continue": "Continue to booking",
+  "eligibility.verify.failed":
+    "Eligibility could not be confirmed. Check the original partner entry and retry.",
+
   "read.confirmation": "Booking confirmation",
   "read.record": "Booking record",
   "read.history": "Partner / program bookings",
@@ -526,6 +544,22 @@ const en = {
 } as const;
 
 const zh = {
+  "eligibility.verify.title": "合作方案資格確認",
+  "eligibility.verify.body": "先向此合作方案確認資格，再建立機場接送預約。",
+  "eligibility.verify.cardLast4": "卡號末四碼",
+  "eligibility.verify.cardholderName": "持卡人姓名",
+  "eligibility.verify.reference": "合作方提供的資格參考碼",
+  "eligibility.verify.benefit": "禮遇參考編號（如有）",
+  "eligibility.verify.submit": "確認資格",
+  "eligibility.verify.submitting": "資格確認中…",
+  "eligibility.verify.eligible": "資格符合",
+  "eligibility.verify.ineligible": "資格不符",
+  "eligibility.verify.manual_review": "資格待人工確認",
+  "eligibility.verify.result":
+    "此結果由合作方案資格服務回傳；只有資格符合才可繼續預約。",
+  "eligibility.verify.continue": "繼續建立預約",
+  "eligibility.verify.failed": "尚無法確認資格，請核對原合作入口後重試。",
+
   "read.confirmation": "預約確認",
   "read.record": "預約紀錄",
   "read.history": "合作通路／方案預約",

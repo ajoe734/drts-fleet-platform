@@ -3,6 +3,8 @@ import type {
   BookingRecord,
   PartnerBookingDetails,
   PartnerChannelEntryRecord,
+  VerifyPartnerEligibilityCommand,
+  PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 import {
   evaluateAddressSubmitGate,
@@ -503,7 +505,11 @@ export type PartnerBookingConfirmation = Pick<
   | "reservationWindowStart"
   | "reservationWindowEnd"
 > & {
-  partnerBookingDetails: PartnerBookingDetails;
+  partnerBookingDetails?: PartnerBookingDetails;
+  businessDispatchSubtype?: BookingRecord["businessDispatchSubtype"];
+  direction?: BookingRecord["direction"];
+  flightNo?: BookingRecord["flightNo"];
+  terminal?: BookingRecord["terminal"];
   eligibilityVerificationId: string | null;
 };
 
@@ -531,3 +537,21 @@ export function partnerBookingReadHref(
     "/" + encodeURIComponent(entrySlug) + "/" + screen + "?" + query.toString()
   );
 }
+
+/** Existing partner eligibility fields only; no session/key enters this payload. */
+export type PartnerEligibilitySubmission = Omit<
+  VerifyPartnerEligibilityCommand,
+  "entrySlug"
+>;
+
+export type PartnerEligibilityActionResult =
+  | {
+      ok: true;
+      verification: Pick<
+        PartnerEligibilityVerificationRecord,
+        | "eligibilityVerificationId"
+        | "verificationStatus"
+        | "verificationReasonCode"
+      >;
+    }
+  | { ok: false; errorCode: string; errorMessage: string };

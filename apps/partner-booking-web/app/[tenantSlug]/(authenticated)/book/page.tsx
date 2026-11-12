@@ -71,11 +71,12 @@ export default async function PartnerBookPage({
       redirect(`/${tenantSlug}/inactive${persistentQuery}`);
     }
 
-    const isNoncore =
+    const hasBookingAction =
+      entry.businessDispatchSubtype === "credit_card_airport_transfer" ||
       entry.businessDispatchSubtype === "travel_agency_transfer" ||
       entry.businessDispatchSubtype === "insurance_replacement_vehicle";
     const initialDraft = createDefaultPartnerBookingDraft();
-    if (isNoncore) {
+    if (hasBookingAction) {
       // These defaults were produced in the BFF's timezone. Carry the instant,
       // then let the browser format its datetime-local fields after hydration.
       initialDraft.reservationWindowStart = new Date(
@@ -98,7 +99,7 @@ export default async function PartnerBookPage({
         eligibilityVerificationId={eligibilityVerificationId}
         initialDraft={initialDraft}
         partnerUserRef={partnerUserRef}
-        {...(isNoncore ? { submitBookingAction: submitBooking } : {})}
+        {...(hasBookingAction ? { submitBookingAction: submitBooking } : {})}
       />
     );
   } catch (error) {

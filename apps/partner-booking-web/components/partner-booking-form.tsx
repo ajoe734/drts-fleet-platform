@@ -528,7 +528,13 @@ export function PartnerBookingForm({
         actions={
           gate.actionHref ? (
             <Link
-              href={gate.actionHref}
+              href={
+                partnerUserRef
+                  ? gate.actionHref +
+                    "?" +
+                    new URLSearchParams({ partnerUserRef }).toString()
+                  : gate.actionHref
+              }
               style={{
                 color: theme.accent,
                 fontWeight: 700,
@@ -1005,7 +1011,7 @@ export function PartnerBookingForm({
                 <dt>{t("book.create.status")}</dt>
                 <dd>{bookingResult.confirmation.orderStatus}</dd>
                 {Object.entries(
-                  bookingResult.confirmation.partnerBookingDetails,
+                  bookingResult.confirmation.partnerBookingDetails ?? {},
                 )
                   .filter(([field]) => field !== "subtype")
                   .map(([field, value]) => (
@@ -1018,6 +1024,22 @@ export function PartnerBookingForm({
                       </dd>
                     </div>
                   ))}
+                {bookingResult.confirmation.businessDispatchSubtype ===
+                "credit_card_airport_transfer" ? (
+                  <>
+                    <dt>{t("field.flightNo")}</dt>
+                    <dd>{bookingResult.confirmation.flightNo}</dd>
+                    <dt>{t("field.terminal")}</dt>
+                    <dd>{bookingResult.confirmation.terminal}</dd>
+                    <dt>{t("field.direction")}</dt>
+                    <dd>
+                      {t(
+                        "field.direction." +
+                          bookingResult.confirmation.direction,
+                      )}
+                    </dd>
+                  </>
+                ) : null}
               </dl>
             </div>
           ) : null}

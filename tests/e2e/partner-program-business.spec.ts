@@ -111,7 +111,9 @@ test.afterAll(async () => {
   expect(errors, "normal credential/entry cleanup").toEqual([]);
 });
 
-async function ensureProduct(subtype: Subtype) {
+async function ensureProduct(
+  subtype: Subtype | "credit_card_airport_transfer",
+) {
   const token = required("DRTS_UAT_TOKEN_PLATFORM");
   const before = await fixture.call<{ items: ServiceProductRecord[] }>(
     "admin/service-products",
@@ -401,8 +403,12 @@ async function readPersistedPages(
   const row = history.locator('li[data-booking-id="' + bookingId + '"]');
   await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-booking-id", bookingId);
-  await expect(row).toContainText("Taipei 101");
-  await expect(row).toContainText("Taipei Main Station");
+  await expect(row).toContainText(
+    "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+  );
+  await expect(row).toContainText(
+    "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+  );
   await expect(history).toContainText("Page 1 of 1");
   await expect(
     history.getByRole("link", { name: "Previous page", exact: true }),
@@ -706,4 +712,501 @@ test("C032 normal insurance /book creates and reloads the same persisted booking
   page,
 }, testInfo) => {
   await runNormalBooking(page, testInfo, "insurance_replacement_vehicle");
+});
+
+// Only the existing issuer decision adapter and map fixtures are SIM. All
+// personnel, entry/credential issuance, eligibility IDs, sessions, bookings and
+// readbacks below use the unmodified hosted HTTP API and migrated PG.
+type AirportDirection = "pickup" | "dropoff";
+const airportMapAnchors = {
+  home: {
+    query: "taipei 101",
+    label: "Taipei 101",
+    address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+    lat: 25.033964,
+    lng: 121.564468,
+  },
+  airportSIM: {
+    query: "taipei main",
+    label: "Taipei Main Station",
+    address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
+    lat: 25.047762,
+    lng: 121.517017,
+  },
+};
+
+async function onboardAirport(): Promise<Scope> {
+  await ensureProduct("credit_card_airport_transfer");
+  const suffix = randomUUID().replaceAll("-", "");
+  const entry = await fixture.call<PartnerChannelEntryRecord>(
+    "platform-admin/partner-entries",
+    required("DRTS_UAT_TOKEN_PLATFORM"),
+    "POST",
+    {
+      tenantId: required("DRTS_UAT_TENANT_A"),
+      partnerCode: "sim_airport_" + suffix,
+      partnerType: "bank_partner",
+      programId: "sim-airport-program-" + suffix,
+      programCode: "SIM-AIRPORT-" + suffix,
+      entrySlug: "sim-airport-" + suffix,
+      displayName: "SIM Airport Benefit Program " + suffix,
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      authMode: "partner_api_key",
+      eligibilityMode: "bank_card_inline",
+      entryHost: new URL(origin).host,
+      entryPath: "/sim-airport-" + suffix + "/eligibility",
+      status: "active",
+      activeFlag: true,
+    },
+  );
+  const scope: Scope = { entry, keyId: null, apiKey: null };
+  scopes.push(scope);
+  expect(entry).toMatchObject({
+    tenantId: required("DRTS_UAT_TENANT_A"),
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    eligibilityMode: "bank_card_inline",
+    partnerType: "bank_partner",
+    status: "active",
+    activeFlag: true,
+  });
+  const issued = await fixture.call<PartnerIngressCredentialIssued>(
+    "platform-admin/partner-entries/" +
+      encodeURIComponent(entry.entrySlug) +
+      "/credentials/issue",
+    required("DRTS_UAT_TOKEN_PLATFORM"),
+    "POST",
+    {
+      purpose:
+        "Disposable SIM issuer; real normal airport browser/API/PG acceptance",
+    },
+  );
+  expect(issued.plaintextKey).toBeTruthy();
+  scope.keyId = issued.credential.keyId;
+  scope.apiKey = issued.plaintextKey;
+  const actual = await fixture.call<PartnerChannelEntryRecord>(
+    "partner/entries/" + encodeURIComponent(entry.entrySlug),
+    null,
+  );
+  expect(actual).toMatchObject({
+    entrySlug: entry.entrySlug,
+    tenantId: entry.tenantId,
+    partnerId: entry.partnerId,
+    programId: entry.programId,
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    eligibilityMode: "bank_card_inline",
+    status: "active",
+    activeFlag: true,
+  });
+  return scope;
+}
+
+function assertAirportSnapshot(
+  data: Awaited<ReturnType<typeof freshRead>>,
+  scope: Scope,
+  ids: { bookingId: string; orderId: string; verificationId: string },
+  direction: AirportDirection,
+  flightNo: string,
+  terminal: string,
+  start: string,
+  end: string,
+  notes: string,
+  benefitReference: string,
+) {
+  const pickup =
+    direction === "pickup"
+      ? airportMapAnchors.airportSIM
+      : airportMapAnchors.home;
+  const dropoff =
+    direction === "pickup"
+      ? airportMapAnchors.home
+      : airportMapAnchors.airportSIM;
+  for (const record of [data.booking, data.order, data.stored]) {
+    expect(record).toMatchObject({
+      bookingId: ids.bookingId,
+      orderId: ids.orderId,
+      tenantId: scope.entry.tenantId,
+      partnerId: scope.entry.partnerId,
+      partnerProgramId: scope.entry.programId,
+      partnerEntrySlug: scope.entry.entrySlug,
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      eligibilityVerificationId: ids.verificationId,
+      direction,
+      flightNo,
+      terminal,
+      reservationWindowStart: start,
+      reservationWindowEnd: end,
+      passenger: { name: "SIM Airport Benefit Passenger", phone: "0900000034" },
+      pickup: { address: pickup.address, lat: pickup.lat, lng: pickup.lng },
+      dropoff: { address: dropoff.address, lat: dropoff.lat, lng: dropoff.lng },
+      notes,
+      benefitReference,
+    });
+    expect(record.issuerAuthorizationRef).toBeTruthy();
+    expect(record.partnerBookingDetails).toBeUndefined();
+  }
+  expect(data.order.pickup).toEqual(data.stored.pickup);
+  expect(data.order.dropoff).toEqual(data.stored.dropoff);
+  expect(data.booking.issuerAuthorizationRef).toBe(
+    data.order.issuerAuthorizationRef,
+  );
+  expect(data.stored.issuerAuthorizationRef).toBe(
+    data.order.issuerAuthorizationRef,
+  );
+}
+
+async function readAirportPages(
+  page: Page,
+  scope: Scope,
+  partnerUserRef: string,
+  bookingId: string,
+  orderId: string,
+  direction: AirportDirection,
+  flightNo: string,
+  terminal: string,
+) {
+  const route = (screen: "confirmed" | "receipt" | "trips") => {
+    const url = new URL(page.url());
+    expect(url.pathname).toBe("/" + scope.entry.entrySlug + "/" + screen);
+    expect(url.searchParams.get("partnerUserRef")).toBe(partnerUserRef);
+    expect(url.searchParams.has("apiKey")).toBe(false);
+    expect(url.searchParams.has("accessToken")).toBe(false);
+    if (screen !== "trips") {
+      expect(url.searchParams.get("bookingId")).toBe(bookingId);
+      expect(url.searchParams.get("orderId")).toBe(orderId);
+    }
+  };
+  const record = page.getByTestId("partner-persisted-booking");
+  const assertRecord = async (heading: string) => {
+    await expect(record).toBeVisible();
+    await expect(record).toHaveAttribute("data-booking-id", bookingId);
+    await expect(record).toHaveAttribute("data-order-id", orderId);
+    await expect(
+      record.getByRole("heading", { name: heading, exact: true }),
+    ).toBeVisible();
+    await expect(record).toContainText(flightNo);
+    await expect(record).toContainText(terminal);
+    await expect(record.getByText(direction, { exact: true })).toBeVisible();
+    await expect(record).toContainText(
+      "This is a booking record and quotation, not confirmation of payment.",
+    );
+  };
+  await page
+    .getByTestId("partner-booking-confirmation")
+    .getByRole("link", { name: "Booking confirmation", exact: true })
+    .click();
+  await assertRecord("Booking confirmation");
+  route("confirmed");
+  await page.reload();
+  await assertRecord("Booking confirmation");
+  route("confirmed");
+  await record
+    .getByRole("link", { name: "Booking record", exact: true })
+    .click();
+  await assertRecord("Booking record");
+  route("receipt");
+  await page.reload();
+  await assertRecord("Booking record");
+  route("receipt");
+  await record
+    .getByRole("link", { name: "Partner / program bookings", exact: true })
+    .click();
+  const history = page.getByTestId("partner-persisted-history");
+  await expect(history).toBeVisible();
+  route("trips");
+  await expect(history).toContainText(
+    "Bookings available to this partner entry and program. This is not a personal-only trip history.",
+  );
+  const row = history.locator('li[data-booking-id="' + bookingId + '"]');
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText(airportMapAnchors.home.address);
+  await expect(row).toContainText(airportMapAnchors.airportSIM.address);
+  await expect(history).toContainText("Page 1 of 1");
+  await page.reload();
+  await expect(history).toBeVisible();
+  route("trips");
+  await expect(row).toHaveCount(1);
+  await row.getByRole("link", { name: bookingId, exact: true }).click();
+  await assertRecord("Booking confirmation");
+  route("confirmed");
+}
+
+async function runAirportBooking(
+  page: Page,
+  testInfo: TestInfo,
+  direction: AirportDirection,
+) {
+  const scope = await onboardAirport();
+  const marker = randomUUID();
+  const partnerUserRef = "SIM-airport-resident-" + marker;
+  const flightNo = "SIM-" + direction.toUpperCase() + "-101";
+  const terminal = "SIM Terminal One";
+  const benefitReference = "SIM-airport-benefit-" + marker;
+  const notes = "SIM issuer/map anchors; real normal airport booking " + marker;
+  await page
+    .context()
+    .addCookies([{ name: PARTNER_LOCALE_COOKIE, value: "en", url: origin }]);
+  expect(
+    (
+      await page.goto(
+        "/" +
+          scope.entry.entrySlug +
+          "/eligibility?" +
+          new URLSearchParams({ partnerUserRef }),
+      )
+    )?.status(),
+  ).toBe(200);
+  await expect(
+    page.getByRole("heading", { name: scope.entry.displayName, exact: true }),
+  ).toBeVisible();
+  // Existing sandbox-backed BankCardInlineEligibilityAdapter accepts even last
+  // digits. This is SIM issuer evidence, never a live bank/card authorization.
+  await page.getByLabel("Last four card digits", { exact: true }).fill("1234");
+  await page
+    .getByLabel("Cardholder name", { exact: true })
+    .fill("SIM Airport Benefit Passenger");
+  await page
+    .getByLabel("Benefit reference (if provided)", { exact: true })
+    .fill(benefitReference);
+  await page.getByLabel("Flight number", { exact: true }).fill(flightNo);
+  await page
+    .getByRole("button", { name: "Verify eligibility", exact: true })
+    .click();
+  const continuation = page.getByRole("link", {
+    name: "Continue to booking",
+    exact: true,
+  });
+  await expect(continuation).toBeVisible();
+  const verificationId = (
+    await page.getByTestId("partner-eligibility-verification-id").innerText()
+  ).trim();
+  expect(verificationId).toMatch(/^elig_[a-f0-9-]{36}$/);
+  const continueHref = new URL(
+    (await continuation.getAttribute("href"))!,
+    origin,
+  );
+  expect(continueHref.searchParams.get("eligibilityVerificationId")).toBe(
+    verificationId,
+  );
+  expect(continueHref.searchParams.get("partnerUserRef")).toBe(partnerUserRef);
+  expect(continueHref.searchParams.has("apiKey")).toBe(false);
+  expect(continueHref.searchParams.has("accessToken")).toBe(false);
+  const verification = await fixture.call<PartnerEligibilityVerificationRecord>(
+    "partner/eligibility/" + encodeURIComponent(verificationId),
+    required("DRTS_UAT_TOKEN_PLATFORM"),
+  );
+  expect(verification).toMatchObject({
+    eligibilityVerificationId: verificationId,
+    tenantId: scope.entry.tenantId,
+    partnerId: scope.entry.partnerId,
+    partnerProgramId: scope.entry.programId,
+    partnerEntrySlug: scope.entry.entrySlug,
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    verificationStatus: "eligible",
+    decisionSource: "issuer_realtime",
+    adapterCode: "issuer_bank_card_inline_v1",
+    benefitReference,
+    requestMetadata: { cardLast4: "1234", flightNo },
+  });
+  expect(verification.issuerAuthorizationRef).toBeTruthy();
+  const persistedVerification = await fixture.db.query(
+    "SELECT record FROM admin.phase1_partner_eligibility_verifications WHERE eligibility_verification_id=$1",
+    [verificationId],
+  );
+  expect(persistedVerification.rows).toHaveLength(1);
+  expect(persistedVerification.rows[0]!.record).toMatchObject({
+    eligibilityVerificationId: verificationId,
+    verificationStatus: "eligible",
+    partnerEntrySlug: scope.entry.entrySlug,
+    benefitReference,
+    adapterCode: "issuer_bank_card_inline_v1",
+  });
+  await continuation.click();
+  await expect(
+    page.getByLabel("Passenger name", { exact: true }),
+  ).toBeVisible();
+  expect(
+    new URL(page.url()).searchParams.get("eligibilityVerificationId"),
+  ).toBe(verificationId);
+  await page
+    .getByLabel("Passenger name", { exact: true })
+    .fill("SIM Airport Benefit Passenger");
+  await page.getByLabel("Passenger phone", { exact: true }).fill("0900000034");
+  await page.getByLabel("Notes", { exact: true }).fill(notes);
+  await page
+    .getByLabel("Card tier", { exact: true })
+    .fill("SIM benefit program");
+  await page.getByLabel("Flight number", { exact: true }).fill(flightNo);
+  await page.getByLabel("Terminal", { exact: true }).fill(terminal);
+  await page
+    .getByLabel("Pickup / drop-off", { exact: true })
+    .selectOption(direction);
+  const dates = await page.evaluate(() => {
+    const start = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    start.setSeconds(0, 0);
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const local = (date: Date) => {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return (
+        date.getFullYear() +
+        "-" +
+        pad(date.getMonth() + 1) +
+        "-" +
+        pad(date.getDate()) +
+        "T" +
+        pad(date.getHours()) +
+        ":" +
+        pad(date.getMinutes())
+      );
+    };
+    return {
+      start: local(start),
+      end: local(end),
+      startISO: start.toISOString(),
+      endISO: end.toISOString(),
+    };
+  });
+  await page
+    .getByLabel("Reservation window start", { exact: true })
+    .fill(dates.start);
+  await page
+    .getByLabel("Reservation window end", { exact: true })
+    .fill(dates.end);
+  const pickup =
+    direction === "pickup"
+      ? airportMapAnchors.airportSIM
+      : airportMapAnchors.home;
+  const dropoff =
+    direction === "pickup"
+      ? airportMapAnchors.home
+      : airportMapAnchors.airportSIM;
+  await selectAddress(page, 0, pickup.query, pickup.label);
+  await selectAddress(page, 1, dropoff.query, dropoff.label);
+  await expect(
+    page.getByText("Inside the service area", { exact: true }),
+  ).toBeVisible();
+  const submit = page.getByRole("button", {
+    name: "Create booking",
+    exact: true,
+  });
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  const confirmation = page.getByTestId("partner-booking-confirmation");
+  await expect(confirmation).toBeVisible();
+  const bookingId = (
+    await confirmation.getByTestId("partner-booking-id").innerText()
+  ).trim();
+  const orderId = (
+    await confirmation.getByTestId("partner-order-id").innerText()
+  ).trim();
+  expect(bookingId).toMatch(/^booking-[a-f0-9-]{36}$/);
+  expect(orderId).toMatch(/^[a-f0-9-]{36}$/);
+  expect(createdIds.has(bookingId) || createdIds.has(orderId)).toBe(false);
+  createdIds.add(bookingId);
+  createdIds.add(orderId);
+  await expect(confirmation).toContainText(flightNo);
+  await expect(confirmation).toContainText(terminal);
+  const ids = { bookingId, orderId, verificationId };
+  const before = await freshRead(scope, partnerUserRef, bookingId, orderId);
+  assertAirportSnapshot(
+    before,
+    scope,
+    ids,
+    direction,
+    flightNo,
+    terminal,
+    dates.startISO,
+    dates.endISO,
+    notes,
+    benefitReference,
+  );
+  await readAirportPages(
+    page,
+    scope,
+    partnerUserRef,
+    bookingId,
+    orderId,
+    direction,
+    flightNo,
+    terminal,
+  );
+  const after = await freshRead(scope, partnerUserRef, bookingId, orderId);
+  assertAirportSnapshot(
+    after,
+    scope,
+    ids,
+    direction,
+    flightNo,
+    terminal,
+    dates.startISO,
+    dates.endISO,
+    notes,
+    benefitReference,
+  );
+  expect(after.drtsPassengerId).toBe(before.drtsPassengerId);
+  const evidence = {
+    candidate_sha: required("CANDIDATE_SHA"),
+    workflow_sha: required("WORKFLOW_SHA"),
+    case: testInfo.title,
+    ...ids,
+    direction,
+    flightNo,
+    terminal,
+    entrySlug: scope.entry.entrySlug,
+    tenantId: scope.entry.tenantId,
+    eligibilityMode: "bank_card_inline",
+    adapterCode: verification.adapterCode,
+    real: [
+      "normal-browser-eligibility-form",
+      "API-issued-verification-ID",
+      "normal-API-issued-session",
+      "actual-PG-verification-and-order-record",
+      "normal-book-create-double-GET",
+      "clicked-confirmed-record-history",
+      "reload-same-IDs",
+      "fresh-session-after-page-reloads",
+    ],
+    simulated: [
+      "existing-sandbox-backed-BankCardInlineEligibilityAdapter-issuer-decision",
+      "Google-metadata-transport-only-genuine-WIF-token",
+      "existing-GreaterTaipei-map-anchors",
+    ],
+    beforeReload: { sameIds: true, snapshotMatches: true },
+    afterReload: {
+      sameIds: true,
+      snapshotMatches: true,
+      canonicalPartnerIdentityStable: true,
+    },
+    limits: [
+      "No live bank/card authorization",
+      "Map anchors do not prove real Taoyuan airport coverage or geofence",
+      "No driver completion/payment/paid receipt",
+      "No CloudRun/prod or Main adoption claim",
+    ],
+  };
+  const directory = path.resolve(
+    ".artifacts/tenant-uat-acceptance/c032-booking",
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, "airport-" + direction + ".json"),
+    JSON.stringify(evidence, null, 2) + "\n",
+  );
+  await testInfo.attach(
+    "C032 normal airport real eligibility and persisted IDs",
+    {
+      body: Buffer.from(JSON.stringify(evidence, null, 2)),
+      contentType: "application/json",
+    },
+  );
+}
+
+test("C032 normal airport pickup verifies eligibility and reloads the same booking, record and history", async ({
+  page,
+}, testInfo) => {
+  await runAirportBooking(page, testInfo, "pickup");
+});
+test("C032 normal airport dropoff verifies eligibility and reloads the same booking, record and history", async ({
+  page,
+}, testInfo) => {
+  await runAirportBooking(page, testInfo, "dropoff");
 });
