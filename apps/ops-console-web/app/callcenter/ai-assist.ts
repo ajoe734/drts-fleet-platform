@@ -14,6 +14,8 @@
 
 import type { AddressPayload } from "@drts/contracts";
 
+import { assistCapabilityLabels } from "./translations";
+
 export const ASSIST_FIELDS = [
   "pickup",
   "dropoff",
@@ -248,17 +250,12 @@ export function assistFieldStatus(
     : "ai_filled";
 }
 
-const CAPABILITY_LABELS: Record<string, { zh: string; en: string }> = {
-  wheelchair: { zh: "輪椅", en: "wheelchair" },
-  child_seat: { zh: "兒童座椅", en: "child seat" },
-};
-
 export function formatCapabilities(value: string, locale: "zh" | "en") {
   return value
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
-    .map((item) => CAPABILITY_LABELS[item]?.[locale] ?? item)
+    .map((item) => assistCapabilityLabels[item]?.[locale] ?? item)
     .join(locale === "zh" ? "、" : ", ");
 }
 

@@ -22,6 +22,7 @@ import {
   type FrequentPlaceView,
   type HandoffQueueItemView,
 } from "./ai-assist";
+import { aiAssistCopy } from "./translations";
 
 type Theme = ReturnType<typeof buildCanvasTheme>;
 type Locale = "zh" | "en";
@@ -34,142 +35,8 @@ export type AssistAddressStatus =
   | "not_found"
   | "error";
 
-const COPY = {
-  zh: {
-    title: "AI 協助填單",
-    subtitleHandoff: "AI 語音客服已先填好，請核對後送出；錯的欄位直接修改。",
-    subtitleAssist:
-      "AI 正在聽這通電話並即時填單，請核對後送出；錯的欄位直接修改。",
-    sourceHandoff: "AI 語音轉接",
-    sourceAssist: "AI 旁聽中",
-    extractorLlm: "AI 模型",
-    extractorRules: "規則擷取",
-    extractorVoice: "語音對話",
-    empty: "這通電話目前沒有 AI 填單資料。",
-    loadError: "AI 填單資料暫時讀不到，請直接手動填寫。",
-    rawText: "乘客原話",
-    candidates: "也聽到",
-    confirm: "確認無誤",
-    offer: "AI 聽到新的值",
-    useOffer: "改用",
-    blockingTitle: "還有 AI 不確定的欄位",
-    blockingBody: "請先確認或修改：",
-    transcript: "通話逐字稿（最近幾句）",
-    speakerCaller: "乘客",
-    speakerAgent: "客服",
-    speakerUnknown: "—",
-    addressResolving: "正在地圖上查詢 AI 填的地址…",
-    addressApplied: "已依 AI 填的地址帶入地圖，請核對位置",
-    addressHistory: "和這支電話之前的上車地點相符，已帶入原本的位置",
-    frequentTitle: "這支電話常用的上車地點",
-    frequentNote: "僅供客服參考；乘客身分未核對前，請勿唸出完整地址。",
-    frequentTrips: (count: number) => `${count} 次`,
-    addressNotFound: "地圖找不到這個地址，請在下方地圖搜尋或釘選",
-    addressError: "地圖查詢失敗，請在下方地圖搜尋或釘選",
-    status: {
-      empty: "未填",
-      ai_filled: "AI 填入",
-      ai_uncertain: "請確認",
-      confirmed: "已確認",
-      agent_edited: "已人工修改",
-    } satisfies Record<AssistFieldStatusView, string>,
-    fields: {
-      pickup: "上車地點",
-      dropoff: "下車地點",
-      passengerName: "乘客稱呼",
-      passengerPhone: "聯絡電話",
-      pickupTime: "乘車時間",
-      passengerCount: "乘客人數",
-      luggage: "行李",
-      requiredCapabilities: "特殊需求",
-      notes: "其他備註",
-    } satisfies Record<AssistField, string>,
-    queueTitle: "等待接手的 AI 轉接",
-    queueSubtitle: "AI 處理不了、轉給真人的來電，最急的在最上面。",
-    queueEmpty: "目前沒有等待中的轉接。",
-    queueWaiting: (minutes: number) => `已等 ${minutes} 分鐘`,
-    queueOpen: "開啟",
-    priority: { normal: "一般", urgent: "優先", emergency: "緊急" },
-    reasons: {
-      customer_requested: "乘客要求真人",
-      location_unresolved: "地址無法確認",
-      service_unsupported: "AI 不支援的需求",
-      urgent_safety: "安全緊急",
-      provider_unavailable: "語音服務異常",
-      speech_not_understood: "AI 連續聽不懂",
-    } as Record<string, string>,
-  },
-  en: {
-    title: "AI booking assist",
-    subtitleHandoff:
-      "The AI voice agent filled this in. Check it, fix what is wrong, then submit.",
-    subtitleAssist:
-      "The AI is listening to this call and filling the booking. Check it, fix what is wrong, then submit.",
-    sourceHandoff: "AI voice handoff",
-    sourceAssist: "AI listening",
-    extractorLlm: "AI model",
-    extractorRules: "Rule extraction",
-    extractorVoice: "Voice dialogue",
-    empty: "No AI booking data for this call yet.",
-    loadError: "AI booking data is unavailable; fill the form manually.",
-    rawText: "Caller said",
-    candidates: "Also heard",
-    confirm: "Looks right",
-    offer: "AI heard a new value",
-    useOffer: "Use it",
-    blockingTitle: "Some AI values are uncertain",
-    blockingBody: "Confirm or correct before submitting: ",
-    transcript: "Call transcript (latest lines)",
-    speakerCaller: "Caller",
-    speakerAgent: "Agent",
-    speakerUnknown: "—",
-    addressResolving: "Looking up the AI's address on the map…",
-    addressApplied: "Placed from the AI's address; check the pin",
-    addressHistory:
-      "Matches an earlier pickup of this phone number; its pin was used",
-    frequentTitle: "Frequent pickups of this phone number",
-    frequentNote:
-      "For agents only: do not read a full address to a caller whose identity is not checked.",
-    frequentTrips: (count: number) => `${count} trips`,
-    addressNotFound: "Address not found on the map; search or pin it below",
-    addressError: "Map lookup failed; search or pin it below",
-    status: {
-      empty: "Empty",
-      ai_filled: "AI filled",
-      ai_uncertain: "Please check",
-      confirmed: "Confirmed",
-      agent_edited: "Edited",
-    } satisfies Record<AssistFieldStatusView, string>,
-    fields: {
-      pickup: "Pickup",
-      dropoff: "Drop-off",
-      passengerName: "Passenger",
-      passengerPhone: "Phone",
-      pickupTime: "Pickup time",
-      passengerCount: "Passengers",
-      luggage: "Luggage",
-      requiredCapabilities: "Needs",
-      notes: "Other notes",
-    } satisfies Record<AssistField, string>,
-    queueTitle: "AI handoffs waiting",
-    queueSubtitle: "Calls the AI passed to a human, most urgent first.",
-    queueEmpty: "No handoffs waiting.",
-    queueWaiting: (minutes: number) => `Waiting ${minutes} min`,
-    queueOpen: "Open",
-    priority: { normal: "Normal", urgent: "Urgent", emergency: "Emergency" },
-    reasons: {
-      customer_requested: "Caller asked for a human",
-      location_unresolved: "Address unresolved",
-      service_unsupported: "Request not supported by AI",
-      urgent_safety: "Safety emergency",
-      provider_unavailable: "Voice service problem",
-      speech_not_understood: "AI could not understand twice",
-    } as Record<string, string>,
-  },
-};
-
 export function assistCopy(locale: Locale) {
-  return COPY[locale];
+  return aiAssistCopy[locale];
 }
 
 const STATUS_TONE: Record<AssistFieldStatusView, CanvasTone> = {
@@ -214,7 +81,7 @@ export function AiAssistPanel({
   onConfirm,
   onAcceptOffer,
 }: AiAssistPanelProps) {
-  const copy = COPY[locale];
+  const copy = aiAssistCopy[locale];
   const rowStyle: CSSProperties = {
     display: "grid",
     gridTemplateColumns: "minmax(84px, 110px) 1fr",
@@ -489,7 +356,7 @@ export function HandoffQueueList({
   selectedCallId,
   onOpen,
 }: HandoffQueueListProps) {
-  const copy = COPY[locale];
+  const copy = aiAssistCopy[locale];
   return (
     <CanvasCard
       theme={theme}
@@ -557,7 +424,7 @@ export function FrequentPickupChips({
   onPick,
 }: FrequentPickupChipsProps) {
   if (!places.length) return null;
-  const copy = COPY[locale];
+  const copy = aiAssistCopy[locale];
   return (
     <div
       data-callcenter-frequent-pickups
