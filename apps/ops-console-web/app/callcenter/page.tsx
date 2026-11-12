@@ -71,6 +71,14 @@ import {
   type CallcenterServiceabilityPreviewStatus,
 } from "./map-booking";
 import { CallcenterInteractiveMap } from "./callcenter-interactive-map";
+import { formatAccuracy } from "./ai-assist";
+import {
+  AiAssistPanel,
+  FrequentPickupChips,
+  HandoffQueueList,
+  assistCopy,
+} from "./ai-assist-panel";
+import { useCallcenterAiAssist } from "./use-ai-assist";
 import { resolveOpsMapTileUrlTemplate } from "../dispatch/ops-map-board";
 import {
   deriveDispatchPresentation,
@@ -1246,6 +1254,23 @@ export default function CallcenterPage() {
     null;
   const callcenterActorId =
     selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001";
+  // CALLCENTER-AI-ASSIST-20261111: the AI fills the booking, the agent fixes
+  // what is wrong. AI values arrive asynchronously (draft fetch, geocode), so
+  // they always land after the per-call order-form reset effect below.
+  const assist = useCallcenterAiAssist({
+    callId: selectedSession?.callId ?? null,
+    callOpen: Boolean(selectedSession && selectedSession.status !== "closed"),
+    actorId: callcenterActorId,
+    locale: currentLocale,
+    provider: mapBookingProvider,
+    onApplyPassenger: (field, value) =>
+      setOrderForm((current) => ({ ...current, [field]: value })),
+    onApplyAddress: (field, address) =>
+      field === "pickup"
+        ? setPickupAddress(address)
+        : setDropoffAddress(address),
+  });
+  const assistText = assistCopy(currentLocale);
   useEffect(() => {
     if (
       !hasCallcenterAddressCoordinates(pickupAddress) ||
@@ -1817,10 +1842,16 @@ export default function CallcenterPage() {
       )
     : undefined;
   const createBookingDisabled =
-    !createBookingAction?.enabled || !mapBookingGate.canSubmit;
+    !createBookingAction?.enabled ||
+    !mapBookingGate.canSubmit ||
+    assist.blocking.length > 0;
   const createBookingHelper = !createBookingAction?.enabled
     ? getActionHelper(t, createBookingAction)
-    : mapBookingBanner.submitHelper;
+    : assist.blocking.length > 0
+      ? `${assistText.blockingBody}${assist.blocking
+          .map((field) => assistText.fields[field])
+          .join(currentLocale === "zh" ? "、" : ", ")}`
+      : mapBookingBanner.submitHelper;
   const linkOrderAction = selectedSession
     ? getActionDescriptor(
         selectedSession.availableActions,
@@ -2143,6 +2174,22 @@ export default function CallcenterPage() {
               theme={theme}
               label="每筆有效受理成本"
               value={cohortMetrics.costPerEffectiveIntakeFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label={
+                currentLocale === "zh"
+                  ? "AI 填單正確率（30 天）"
+                  : "AI fill accuracy (30 days)"
+              }
+              value={formatAccuracy(assist.accuracy?.totals.accuracy ?? null)}
+              sub={
+                assist.accuracy
+                  ? currentLocale === "zh"
+                    ? `客服保留 ${assist.accuracy.totals.accepted}・修改 ${assist.accuracy.totals.corrected}・AI 漏填 ${assist.accuracy.totals.aiMissing}`
+                    : `kept ${assist.accuracy.totals.accepted} · corrected ${assist.accuracy.totals.corrected} · missed ${assist.accuracy.totals.aiMissing}`
+                  : undefined
+              }
             />
           </div>
           <div style={formGridStyle}>
@@ -3095,11 +3142,33 @@ export default function CallcenterPage() {
               </CanvasCard>
             </div>
 
+            <HandoffQueueList
+              theme={theme}
+              locale={currentLocale}
+              items={assist.handoffs}
+              selectedCallId={selectedCallId}
+              onOpen={(callId) => setSelectedCallId(callId)}
+            />
+
             <CanvasCard
               theme={theme}
               title={t("callcenter.resolutionDesk.title")}
               subtitle={t("callcenter.resolutionDesk.subtitle")}
             >
+              {selectedSession && (
+                <AiAssistPanel
+                  theme={theme}
+                  locale={currentLocale}
+                  draft={assist.draft}
+                  loadState={assist.loadState}
+                  form={assist.form}
+                  addressStatus={assist.addressStatus}
+                  blocking={assist.blocking}
+                  onEdit={assist.edit}
+                  onConfirm={assist.confirm}
+                  onAcceptOffer={assist.acceptOffer}
+                />
+              )}
               <div style={dualFormGridStyle}>
                 <form
                   onSubmit={(event) => {
@@ -3121,8 +3190,14 @@ export default function CallcenterPage() {
                       passengerName: orderForm.passengerName,
                       passengerPhone: orderForm.passengerPhone,
                       fallbackPassengerPhone: selectedSession.callerPhone,
-                      notes: orderForm.notes,
+                      notes: assist.orderNotes(orderForm.notes),
                     });
+                    const finalPresence = {
+                      pickup: true,
+                      dropoff: true,
+                      passengerName: Boolean(orderForm.passengerName.trim()),
+                      passengerPhone: Boolean(orderForm.passengerPhone.trim()),
+                    };
                     void runGuardedAction(
                       "create-booking",
                       createBookingAction,
@@ -3131,6 +3206,10 @@ export default function CallcenterPage() {
                           await getOpsClient().createCallCenterOrder(command, {
                             idempotencyKey: orderIntentKey,
                           });
+                        void assist.reportOutcome(
+                          created.orderId,
+                          finalPresence,
+                        );
                         setOrderIntentKey(
                           createIdempotencyKey("callcenter-order"),
                         );
@@ -3164,12 +3243,14 @@ export default function CallcenterPage() {
                         type="text"
                         required
                         value={orderForm.passengerName}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.target.value;
                           setOrderForm((current) => ({
                             ...current,
-                            passengerName: event.target.value,
-                          }))
-                        }
+                            passengerName: value,
+                          }));
+                          assist.edit("passengerName", value);
+                        }}
                         style={nativeInputStyle}
                       />
                     </CanvasField>
@@ -3180,12 +3261,14 @@ export default function CallcenterPage() {
                       <input
                         type="text"
                         value={orderForm.passengerPhone}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.target.value;
                           setOrderForm((current) => ({
                             ...current,
-                            passengerPhone: event.target.value,
-                          }))
-                        }
+                            passengerPhone: value,
+                          }));
+                          assist.edit("passengerPhone", value);
+                        }}
                         style={nativeInputStyle}
                       />
                     </CanvasField>
@@ -3211,6 +3294,12 @@ export default function CallcenterPage() {
                         data-address-map-picker="callcenter-pickup-map"
                         data-provider-status={pickupProviderState.reasonCode}
                       >
+                        <FrequentPickupChips
+                          theme={theme}
+                          locale={currentLocale}
+                          places={assist.frequentPlaces}
+                          onPick={assist.pickFrequentPlace}
+                        />
                         <AddressMapPicker
                           id="callcenter-pickup-map"
                           provider={mapBookingProvider}
@@ -3222,6 +3311,7 @@ export default function CallcenterPage() {
                           onChange={(change: AddressMapPickerChange) => {
                             setPickupAddress(change.address);
                             setPickupProviderState(change.providerState);
+                            assist.observeAddress("pickup", change.address);
                           }}
                           actorId={callcenterActorId}
                           title={mapBookingSectionCopy.pickupTitle}
@@ -3257,6 +3347,7 @@ export default function CallcenterPage() {
                           onChange={(change: AddressMapPickerChange) => {
                             setDropoffAddress(change.address);
                             setDropoffProviderState(change.providerState);
+                            assist.observeAddress("dropoff", change.address);
                           }}
                           actorId={callcenterActorId}
                           title={mapBookingSectionCopy.dropoffTitle}

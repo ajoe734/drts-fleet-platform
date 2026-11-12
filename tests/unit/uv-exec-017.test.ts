@@ -438,16 +438,16 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
       expect(queueItem.status).toBe("queued");
 
       // Agent is assigned
-      h.handoffQueueService.assignAgent(queueItem.handoffId, "agent-007");
-      expect(h.handoffQueueService.getHandoffItem(queueItem.handoffId)?.status).toBe("assigned");
+      await h.handoffQueueService.assignAgent(queueItem.handoffId, "agent-007");
+      expect((await h.handoffQueueService.getHandoffItem(queueItem.handoffId))?.status).toBe("assigned");
 
       // Request CTI bridge: even when accepted, status must remain "bridging" (pending)
       await h.handoffQueueService.requestBridge(queueItem.handoffId, ctiAdapter, "sandbox");
-      expect(h.handoffQueueService.getHandoffItem(queueItem.handoffId)?.status).toBe("bridging");
+      expect((await h.handoffQueueService.getHandoffItem(queueItem.handoffId))?.status).toBe("bridging");
 
       // Only upon explicit confirmation does it become connected
-      h.handoffQueueService.confirmBridge(queueItem.handoffId);
-      expect(h.handoffQueueService.getHandoffItem(queueItem.handoffId)?.status).toBe("connected");
+      await h.handoffQueueService.confirmBridge(queueItem.handoffId);
+      expect((await h.handoffQueueService.getHandoffItem(queueItem.handoffId))?.status).toBe("connected");
     });
 
     it("handles unanswered queue timeout (未接) properly", async () => {
@@ -460,7 +460,7 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
       });
 
       // Queue timeout occurs
-      const unanswered = h.handoffQueueService.handleUnanswered(
+      const unanswered = await h.handoffQueueService.handleUnanswered(
         init.handoffId,
         "queue_wait_timeout_exceeded",
       );
@@ -508,7 +508,7 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
       expect(agentDropResult.session?.leaseEpoch).toBe(4);
       expect(agentDropResult.session?.dialogState).toBe("handoff_pending");
 
-      const requeuedItem = h.handoffQueueService.getHandoffItem(init.handoffId);
+      const requeuedItem = await h.handoffQueueService.getHandoffItem(init.handoffId);
       expect(requeuedItem?.status).toBe("queued");
       expect(requeuedItem?.redispatchCount).toBe(1);
       expect(requeuedItem?.assignedAgentId).toBeNull();
@@ -528,7 +528,7 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
       expect(callerDropResult.sessionClosed).toBe(true);
       expect(h.getSession().dialogState).toBe("closed");
       expect(h.getSession().mediaState).toBe("ended");
-      expect(h.handoffQueueService.getHandoffItem(init.handoffId)?.status).toBe("caller_dropped");
+      expect((await h.handoffQueueService.getHandoffItem(init.handoffId))?.status).toBe("caller_dropped");
     });
   });
 

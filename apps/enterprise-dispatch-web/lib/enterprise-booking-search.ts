@@ -37,9 +37,9 @@ export function hasActiveEnterpriseBookingFilters(
 ): boolean {
   return Boolean(
     filters.passenger.trim() !== "" ||
-      filters.status !== "" ||
-      filters.dateFrom !== "" ||
-      filters.dateTo !== "",
+    filters.status !== "" ||
+    filters.dateFrom !== "" ||
+    filters.dateTo !== "",
   );
 }
 
@@ -104,10 +104,17 @@ export function formatEnterpriseBookingTime(
   if (!isoString) return "-";
   const parsed = new Date(isoString);
   if (Number.isNaN(parsed.getTime())) return isoString;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(parsed.getMonth() + 1)}/${pad(parsed.getDate())} ${pad(
-    parsed.getHours(),
-  )}:${pad(parsed.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DEFAULT_PRODUCT_TIMEZONE,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+  const component = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${component("month")}/${component("day")} ${component("hour")}:${component("minute")}`;
 }
 
 export function computeEnterpriseBookingPageRangeLabel(

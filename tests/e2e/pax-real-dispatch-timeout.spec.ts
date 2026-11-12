@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
+import { signInOnReviewPage } from "./pax-review-shared-order/rehearsal-passenger";
 import {
   OPS,
   PAX,
@@ -96,21 +97,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
     });
     await registerDriver(ops, driver, driverBase, step);
     await step("Timeout Passenger actual OTP login", async () => {
-      await pax.goto(`${PAX}/review`);
-      const suffix = (Number(process.env.GITHUB_RUN_ID ?? 1) + 88) % 100;
-      await pax
-        .getByLabel("演練手機", { exact: true })
-        .fill(`09000000${String(suffix).padStart(2, "0")}`);
-      await pax.getByRole("checkbox").check();
-      const requested = pax.waitForResponse(
-        (r) =>
-          new URL(r.url()).pathname === "/api/passenger-app/review-demo/otp" &&
-          r.request().method() === "POST",
-      );
-      await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
-      expect((await requested).ok()).toBe(true);
-      await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-      await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
+      await signInOnReviewPage(pax, 88);
       expect(
         await pax.evaluate(() =>
           localStorage.getItem("drts.passenger.functional-demo.v1"),
@@ -167,7 +154,11 @@ test("the real reservation acceptance deadline expires automatically, then recov
                 has: driver.getByText(assigned.taskId, { exact: true }),
               })
               .click();
-            await expect(driver).toHaveURL(/\/trip$/);
+            await expect(driver).toHaveURL(
+              (url) =>
+                url.pathname === new URL(`${driverBase}/trip`).pathname &&
+                url.searchParams.get("taskId") === assigned.taskId,
+            );
             await expect(
               driver.getByText(orderId, { exact: false }).first(),
             ).toBeVisible();

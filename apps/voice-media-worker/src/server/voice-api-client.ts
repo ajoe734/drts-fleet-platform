@@ -297,6 +297,13 @@ interface ApiErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
+export interface AssistTranscriptSegmentInput {
+  segmentId: string;
+  speaker: "caller" | "agent" | "unknown";
+  text: string;
+  startedAt?: string | null;
+}
+
 export class VoiceApiClient {
   constructor(
     private readonly config: VoiceApiClientConfig,
@@ -359,6 +366,25 @@ export class VoiceApiClient {
       signal,
     );
   }
+  /**
+   * CALLCENTER-AI-ASSIST-20261111: final speech-recognition segments of a
+   * call a human agent is handling, so apps/api can keep the agent's
+   * AI-prefilled booking draft current. Service identity, like recording
+   * events: the segments belong to the call, not to an AI voice session.
+   */
+  async postAssistTranscript(
+    callId: string,
+    segments: readonly AssistTranscriptSegmentInput[],
+    signal?: AbortSignal,
+  ): Promise<{ callId: string; draftVersion: number; extractor: string }> {
+    return this.requestWithWorkloadIdentity(
+      "POST",
+      `/callcenter/sessions/${encodeURIComponent(callId)}/assist/transcript`,
+      { segments },
+      signal,
+    );
+  }
+
   async getRecordingEvents(
     voiceSessionId: string,
     signal?: AbortSignal,

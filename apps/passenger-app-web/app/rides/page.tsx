@@ -17,9 +17,9 @@ import {
 
 function formatFare(ride: PassengerRideAuthorityView): string {
   const fareMinor =
+    ride.receipt?.amountMinor ??
     ride.assignment?.routeFare?.payableFareMinor ??
     ride.assignment?.routeFare?.estimatedFareMinor ??
-    ride.receipt?.amountMinor ??
     (ride.order as any)?.estimatedFareMinor;
   if (fareMinor !== undefined && fareMinor !== null) {
     return `車資 NT$ ${Math.round(fareMinor / 100)}`;

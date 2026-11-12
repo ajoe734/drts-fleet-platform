@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  replyLanguagesFromEnv,
+  resolveReplyLanguage,
+} from "../language/language-router";
+import {
   voiceDialogueSnapshotContentSchema,
   voiceToolResultSchemas,
   type VoiceCapabilityScope,
@@ -438,6 +442,8 @@ const DEFAULT_TURN_TIMEOUT_MS = 8_000;
  */
 export class VoiceCallTurnCoordinator {
   private readonly sessions = new Map<VoiceCallAttachment, TurnSession>();
+  /** CALLCENTER-AI-ASSIST-20261111: languages the AI may reply in. */
+  private readonly replyLanguages = replyLanguagesFromEnv();
 
   constructor(
     private readonly createProvider: () => VoiceDialogueProvider,
@@ -1446,7 +1452,7 @@ export class VoiceCallTurnCoordinator {
       mediaEpoch: event.mediaEpoch,
       segmentIds: [event.payload.segmentId],
       transcript: event.payload.text,
-      verifiedContext: {},
+      verifiedContext: turnSession.state.promptContext(),
       deadline: Date.now() + this.turnTimeoutMs,
       signal: abortController.signal,
     };
@@ -1456,7 +1462,7 @@ export class VoiceCallTurnCoordinator {
         turnSession,
         request,
         abortController,
-        event.payload.language,
+        resolveReplyLanguage(event.payload.language, this.replyLanguages),
         speaker,
         event.mediaEpoch,
       ),

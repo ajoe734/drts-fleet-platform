@@ -457,11 +457,47 @@ export class VehicleEligibilityService implements OnModuleInit {
     });
   }
 
+  async updateMatrixFromPersistence(
+    command: UpdateVehicleEligibilityMatrixCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ): Promise<VehicleEligibilityMatrixRecord[]> {
+    if (!this.repository?.isEnabled()) {
+      return this.updateMatrix(command, actor, requestId);
+    }
+    const previous = this.listMatrix();
+    const updated = this.stageMatrixUpdate(command, previous);
+    try {
+      // This API replaces the complete matrix. Keep replaceAll's existing
+      // transaction/deletion semantics; amendMatrix intentionally retains rows.
+      await this.repository.replaceAll(updated);
+    } catch (error) {
+      this.repository.reportPersistenceFailure(error, "update_matrix");
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "VEHICLE_ELIGIBILITY_STORAGE_UNAVAILABLE",
+        "Vehicle eligibility storage is unavailable.",
+      );
+    }
+    return this.publishMatrixUpdate(updated, previous, actor, requestId);
+  }
+
   updateMatrix(
     command: UpdateVehicleEligibilityMatrixCommand,
     actor: AuditActor,
     requestId?: string,
   ) {
+    const existing = this.listMatrix();
+    const updated = this.stageMatrixUpdate(command, existing);
+    return this.publishMatrixUpdate(updated, existing, actor, requestId, () =>
+      this.persist(this.matrix),
+    );
+  }
+
+  private stageMatrixUpdate(
+    command: UpdateVehicleEligibilityMatrixCommand,
+    existing: readonly VehicleEligibilityMatrixRecord[],
+  ): VehicleEligibilityMatrixRecord[] {
     if (!command || !Array.isArray(command.items)) {
       throw new ApiRequestError(
         400,
@@ -470,7 +506,6 @@ export class VehicleEligibilityService implements OnModuleInit {
       );
     }
 
-    const existing = this.listMatrix();
     const now = new Date().toISOString();
     const seenCapabilityIds = new Set<string>();
 
@@ -497,10 +532,20 @@ export class VehicleEligibilityService implements OnModuleInit {
       });
     });
 
+    return updated;
+  }
+
+  private publishMatrixUpdate(
+    updated: VehicleEligibilityMatrixRecord[],
+    existing: readonly VehicleEligibilityMatrixRecord[],
+    actor: AuditActor,
+    requestId?: string,
+    beforeAudit?: () => void,
+  ): VehicleEligibilityMatrixRecord[] {
     this.matrix = updated;
     this.matrixConfigured = updated.length > 0;
     this.sortMatrix(this.matrix);
-    this.persist(this.matrix);
+    beforeAudit?.();
     this.recordAudit(
       {
         actorId: actor.actorId ?? null,

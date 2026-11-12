@@ -84,6 +84,19 @@ class CiIntegUnitPartitioningTests(unittest.TestCase):
         self.assertFalse(env_is_set(job_block(self.text, "unit-image"), "DRTS_REQUIRE_API_TEST_IMAGE"))
         self.assertFalse(env_is_set(job_block(self.text, "unit"), "DRTS_REQUIRE_API_TEST_IMAGE"))
 
+    def test_postgres_opt_in_suites_receive_the_shard_database(self) -> None:
+        block = job_block(self.text, "unit-shard")
+        # Match job-level env only: a comment or another step/job cannot enable
+        # these opt-in suites in the actual Vitest shard process.
+        env = re.search(r"^    env:\n((?:      [^\n]*\n)+)", block, re.MULTILINE)
+        self.assertIsNotNone(env)
+        values = dict(re.findall(r"^      ([A-Z_]+):\s*(\S+)\s*$", env.group(1), re.MULTILINE))
+        database_url = values.get("DATABASE_URL")
+        self.assertEqual(database_url, "postgresql://postgres:postgres@localhost:5432/drts_fleet_platform")
+        for name in ("PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL", "UV_RECORDER_TEST_DATABASE_URL"):
+            with self.subTest(variable=name):
+                self.assertEqual(values.get(name), database_url)
+
     def test_unit_shard_fails_closed_on_a_non_success_shard_result(self) -> None:
         block = job_block(self.text, "unit")
         self.assertIn("needs.unit-shard.result", block)
@@ -130,6 +143,56 @@ class CiFeatUnitPartitioningTests(unittest.TestCase):
         block = job_block(self.text, "product_smoke_acceptance")
         for upstream in ("product_fast_checks", "product_root_unit", "product_api_unit"):
             self.assertIn(f"needs.{upstream}.result", block)
+
+
+class RootUnitDelegationTests(unittest.TestCase):
+    """CI-DEDUPE-ROOT-UNIT-20261111: the root unit suite runs once per
+    non-draft PR to dev -- in ci-integ "Unit tests" -- instead of in both
+    workflows. ci.yml keeps it for PRs to main, drafts and pushes."""
+
+    DEV_PR_SKIP = (
+        "github.event_name != 'pull_request' || github.base_ref != 'dev' "
+        "|| github.event.pull_request.draft"
+    )
+    GATES = (
+        "tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json",
+        "tools/ci/verify_passenger_app_postgres_gate.py unit-test-results.json",
+        "tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json",
+        "Voice checkpoint PostgreSQL gate: four passed",
+    )
+
+    def setUp(self) -> None:
+        self.feat = CI_FEAT.read_text(encoding="utf-8")
+        self.integ = CI_INTEG.read_text(encoding="utf-8")
+
+    def test_ci_feat_root_unit_skips_only_non_draft_dev_prs(self) -> None:
+        block = job_block(self.feat, "product_root_unit")
+        self.assertIn(self.DEV_PR_SKIP, block)
+
+    def test_ci_feat_smoke_still_runs_and_checks_the_delegated_result(self) -> None:
+        block = job_block(self.feat, "product_smoke_acceptance")
+        self.assertIn("!cancelled()", block)
+        self.assertIn(
+            "ROOT_UNIT_DELEGATED: ${{ github.event_name == 'pull_request' && "
+            "github.base_ref == 'dev' && !github.event.pull_request.draft }}",
+            block,
+        )
+        # Delegated: the root job must not have run; otherwise it must pass.
+        self.assertIn("needs.product_root_unit.result }}' = 'skipped'", block)
+        self.assertIn("needs.product_root_unit.result }}' = 'success'", block)
+        # Every root-report step is skipped only when delegated.
+        self.assertEqual(block.count("if: env.ROOT_UNIT_DELEGATED != 'true'"), 6)
+
+    def test_ci_integ_unit_merges_the_report_and_runs_every_gate(self) -> None:
+        block = job_block(self.integ, "unit")
+        self.assertIn("--merged-output unit-test-results.json", block)
+        for gate in self.GATES:
+            self.assertIn(gate, block)
+
+    def test_ci_feat_keeps_the_same_gates_for_non_delegated_runs(self) -> None:
+        block = job_block(self.feat, "product_smoke_acceptance")
+        for gate in self.GATES:
+            self.assertIn(gate, block)
 
 
 class SharedToolingWiringTests(unittest.TestCase):

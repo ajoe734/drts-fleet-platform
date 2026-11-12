@@ -116,11 +116,11 @@ export class ReportingFilingController {
 
   @Get("reports/jobs")
   @RequireRealms("platform", "ops")
-  listReportJobs(
+  async listReportJobs(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.reportingFilingService.listReportJobs(
+    const items = await this.reportingFilingService.listReportJobsForRead(
       requestId,
       identity,
     );
@@ -129,12 +129,12 @@ export class ReportingFilingController {
 
   @Get("tenant/reports/jobs")
   @RequireRealms("tenant", "platform", "ops")
-  listTenantReportJobs(
+  async listTenantReportJobs(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.reportingFilingService.listReportJobs(
+    const items = await this.reportingFilingService.listReportJobsForRead(
       requestId,
       identity,
       this.requireTenantId(tenantId),
@@ -144,13 +144,17 @@ export class ReportingFilingController {
 
   @Get("reports/:jobId")
   @RequireRealms("platform", "ops")
-  getReportJob(
+  async getReportJob(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.getReportJob(jobId, requestId, identity),
+      await this.reportingFilingService.getReportJobForRead(
+        jobId,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -165,11 +169,12 @@ export class ReportingFilingController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const artifact = await this.reportingFilingService.renderReportArtifact(
-      jobId,
-      requestId,
-      identity,
-    );
+    const artifact =
+      await this.reportingFilingService.renderReportArtifactForRead(
+        jobId,
+        requestId,
+        identity,
+      );
     return new StreamableFile(artifact.buffer, {
       type: artifact.contentType,
       disposition: `attachment; filename="${artifact.fileName}"`,
@@ -185,12 +190,13 @@ export class ReportingFilingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const normalizedTenantId = this.requireTenantId(tenantId);
-    const artifact = await this.reportingFilingService.renderReportArtifact(
-      jobId,
-      requestId,
-      identity,
-      normalizedTenantId,
-    );
+    const artifact =
+      await this.reportingFilingService.renderReportArtifactForRead(
+        jobId,
+        requestId,
+        identity,
+        normalizedTenantId,
+      );
     return new StreamableFile(artifact.buffer, {
       type: artifact.contentType,
       disposition: `attachment; filename="${artifact.fileName}"`,
@@ -199,14 +205,14 @@ export class ReportingFilingController {
 
   @Get("tenant/reports/:jobId")
   @RequireRealms("tenant", "platform", "ops")
-  getTenantReportJob(
+  async getTenantReportJob(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.getReportJob(
+      await this.reportingFilingService.getReportJobForRead(
         jobId,
         requestId,
         identity,

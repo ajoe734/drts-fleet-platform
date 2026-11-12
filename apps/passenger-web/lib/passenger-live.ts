@@ -1,5 +1,6 @@
 import type {
   ApiSuccessEnvelope,
+  FaresResponse,
   MultiTaxiElectronicReceipt,
   PassengerRideAuthorityView,
   PassengerRideSseEventEnvelope,
@@ -22,6 +23,99 @@ export class PassengerAuthorityError extends Error {
     super(code);
     this.name = "PassengerAuthorityError";
   }
+}
+
+export type PassengerPublicFareVersion = FaresResponse["currentVersion"] & {
+  nightSurchargeUnit: "TWD_per_trip";
+  nightApplication: "pickup" | "any_overlap";
+};
+
+function isPublicFareVersion(
+  value: unknown,
+): value is PassengerPublicFareVersion {
+  if (!value || typeof value !== "object") return false;
+  const fare = value as Record<string, unknown>;
+  const amounts = ["baseFare", "distanceRate", "delayRate", "nightSurcharge"];
+  const increments = [
+    "baseDistanceMeters",
+    "distanceIncrementMeters",
+    "delayIncrementSeconds",
+  ];
+  const whole = (keys: string[], minimum: number) =>
+    keys.every((key) => {
+      const amount = fare[key];
+      return (
+        typeof amount === "number" &&
+        Number.isSafeInteger(amount) &&
+        amount >= minimum
+      );
+    });
+  const clockTime = (value: unknown) =>
+    typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const fees = fare.additionalFees;
+  const effective = fare.effectiveAt;
+  if (
+    typeof effective !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}(?:T.+)?$/.test(effective)
+  )
+    return false;
+  const instant = new Date(effective);
+  const calendar = new Date(effective.slice(0, 10) + "T00:00:00Z");
+  return (
+    typeof fare.version === "string" &&
+    fare.version.trim().length > 0 &&
+    Number.isFinite(instant.getTime()) &&
+    Number.isFinite(calendar.getTime()) &&
+    calendar.toISOString().slice(0, 10) === effective.slice(0, 10) &&
+    whole(amounts, 0) &&
+    whole(increments, 1) &&
+    clockTime(fare.nightSurchargeWindowStart) &&
+    clockTime(fare.nightSurchargeWindowEnd) &&
+    fare.nightSurchargeUnit === "TWD_per_trip" &&
+    (fare.nightApplication === "pickup" ||
+      fare.nightApplication === "any_overlap") &&
+    !!fees &&
+    typeof fees === "object" &&
+    !Array.isArray(fees) &&
+    Object.values(fees).every(
+      (amount) =>
+        typeof amount === "number" &&
+        Number.isSafeInteger(amount) &&
+        amount >= 0,
+    )
+  );
+}
+
+export async function fetchPassengerPublicFare(): Promise<PassengerPublicFareVersion> {
+  const response = await fetch(PASSENGER_PROXY_BASE + "/passenger-app/fares", {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as {
+    data?: Record<string, unknown>;
+    error?: { code?: string };
+  };
+  if (!response.ok || !payload?.data) {
+    throw new PassengerAuthorityError(
+      response.status,
+      payload?.error?.code || "PASSENGER_PUBLIC_FARE_REQUEST_FAILED",
+    );
+  }
+  const raw = payload.data.currentVersion ?? payload.data.current_version;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new PassengerAuthorityError(502, "PASSENGER_PUBLIC_FARE_UNAVAILABLE");
+  }
+  // Decode DTO field names once. additionalFees contains operator labels,
+  // whose spelling must remain exactly as returned by the public service.
+  const fare = Object.fromEntries(
+    Object.entries(raw).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+  if (!isPublicFareVersion(fare)) {
+    throw new PassengerAuthorityError(502, "PASSENGER_PUBLIC_FARE_UNAVAILABLE");
+  }
+  return fare;
 }
 
 export async function fetchPassengerRideAuthority(token: string) {

@@ -24,8 +24,8 @@ import type {
 import {
   type PassengerBookingClient,
   type PassengerPaymentClient,
+  BOOKING_PROPOSAL_REFRESH_MS,
   PassengerApiError,
-  earliestBookingTime,
   fromLocalDateTime,
   isBookingTimeAllowed,
   paymentMethodExpired,
@@ -34,6 +34,8 @@ import {
   PASSENGER_CONFIRMATION_ROWS,
   PASSENGER_FREE_CANCELLATION_NOTICE,
   PASSENGER_SUPPORT_PHONE,
+  proposedBookingTime,
+  withBookableTime,
 } from "@drts/passenger-client";
 import { PASSENGER_P5_COLORS as p5 } from "@drts/ui-tokens";
 
@@ -44,6 +46,8 @@ interface Draft {
   origin: ResolvedAddressPayload | null;
   destination: ResolvedAddressPayload | null;
   localTime: string;
+  /** The app proposed localTime and keeps it current until the passenger types one. */
+  localTimeAuto?: boolean;
 }
 interface Recovery {
   command: CreatePassengerRideCommand;
@@ -108,6 +112,11 @@ function validAddress(value: ResolvedAddressPayload) {
     !!value.address && Number.isFinite(value.lat) && Number.isFinite(value.lng)
   );
 }
+const TIME_REFUSALS = [
+  "invalid_booking_time",
+  "booking_lead_invalid",
+  "too_soon_to_book",
+];
 function message(reason: unknown): string {
   const code =
     reason instanceof PassengerApiError
@@ -115,7 +124,7 @@ function message(reason: unknown): string {
       : reason instanceof Error
         ? reason.message
         : "unavailable";
-  if (["invalid_booking_time", "booking_lead_invalid"].includes(code))
+  if (TIME_REFUSALS.includes(code))
     return "請選擇符合最短提前時間的有效預約時間。";
   if (
     ["quote_expired", "fare_quote_expired", "fare_quote_not_found"].includes(
@@ -235,11 +244,7 @@ export function NativeBookingScreen({
           (m) => m.isDefault && !paymentMethodExpired(m, new Date(now())),
         )?.paymentMethodId ?? "",
       );
-      setDraft((current) => ({
-        ...current,
-        localTime:
-          current.localTime || earliestBookingTime(configuration, now()),
-      }));
+      setDraft((current) => withBookableTime(current, configuration, now()));
       setQuote(undefined);
       setChecked(false);
     } catch (reason) {
@@ -261,6 +266,29 @@ export function NativeBookingScreen({
       generation.current += 1;
     };
   }, [client, paymentClient]);
+  useEffect(() => {
+    // Only while editing: the quote E-19b shows is bound to its time.
+    if (
+      quote ||
+      busy ||
+      recovering ||
+      created ||
+      !settings ||
+      !draft.localTimeAuto
+    )
+      return;
+    const refresh = () => {
+      const localTime = proposedBookingTime(settings, now());
+      setDraft((current) =>
+        current.localTimeAuto && current.localTime !== localTime
+          ? { ...current, localTime }
+          : current,
+      );
+    };
+    refresh();
+    const timer = setInterval(refresh, BOOKING_PROPOSAL_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [quote, busy, recovering, created, settings, draft.localTimeAuto, now]);
   useEffect(() => {
     if (!quote || pending.current || committed.current) return;
     let timer: ReturnType<typeof setTimeout>;
@@ -383,9 +411,9 @@ export function NativeBookingScreen({
       finish(ticket);
     }
   }
-  function scheduledAt() {
+  function scheduledAt(localTime = draft.localTime) {
     if (!settings) throw new Error("booking_settings_unavailable");
-    const iso = fromLocalDateTime(draft.localTime);
+    const iso = fromLocalDateTime(localTime);
     if (!isBookingTimeAllowed(iso, settings, now()))
       throw new Error("booking_lead_invalid");
     return iso;
@@ -405,12 +433,18 @@ export function NativeBookingScreen({
     setQuote(undefined);
     try {
       if (!(await currentAccount(ticket))) return;
+      // Fresh at the press: JS timers do not run while the app is in the background.
+      const localTime = draft.localTimeAuto
+        ? proposedBookingTime(settings, now())
+        : draft.localTime;
+      const time = scheduledAt(localTime);
+      setDraft((current) => ({ ...current, localTime }));
       const result = await client.getFareQuote({
         originLat: draft.origin.lat,
         originLng: draft.origin.lng,
         destinationLat: draft.destination.lat,
         destinationLng: draft.destination.lng,
-        scheduledAt: scheduledAt(),
+        scheduledAt: time,
       });
       if (!live(ticket)) return;
       if (result.serviceAreaResult === "not_serviceable") {
@@ -524,13 +558,14 @@ export function NativeBookingScreen({
           : reason instanceof Error
             ? reason.message
             : "unavailable";
-      const expired = [
-        "quote_expired",
-        "fare_quote_expired",
-        "fare_quote_not_found",
-        "booking_lead_invalid",
-        "invalid_booking_time",
-      ].includes(code);
+      const timeRefused = TIME_REFUSALS.includes(code);
+      const expired =
+        timeRefused ||
+        [
+          "quote_expired",
+          "fare_quote_expired",
+          "fare_quote_not_found",
+        ].includes(code);
       if (
         expired ||
         (reason instanceof PassengerApiError &&
@@ -543,7 +578,9 @@ export function NativeBookingScreen({
           setQuote(undefined);
           setChecked(false);
         }
-        await report(ticket, reason);
+        if (timeRefused && draft.localTimeAuto)
+          setError("原預約時間已過，已為您更新時間，請重新試算。");
+        else await report(ticket, reason);
       } else if (pending.current) {
         pending.current.unknown = true;
         setRecovering(true);
@@ -726,7 +763,9 @@ export function NativeBookingScreen({
             accessibilityLabel="預約時間 YYYY-MM-DDTHH:mm"
             value={draft.localTime}
             editable={!disabled}
-            onChangeText={(localTime) => changeDraft({ ...draft, localTime })}
+            onChangeText={(localTime) =>
+              changeDraft({ ...draft, localTime, localTimeAuto: false })
+            }
             style={styles.input}
           />
           <Text testID="booking-lead-policy" style={styles.note}>
