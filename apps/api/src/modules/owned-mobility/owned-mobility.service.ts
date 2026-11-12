@@ -14986,12 +14986,21 @@ export class OwnedMobilityService
       };
     }
 
-    const evaluation = this.serviceAreaService.evaluate({
-      serviceProductType,
-      pickup,
-      ...(dropoff ? { dropoff } : {}),
-      requestedAt: order.createdAt,
-    });
+    const evaluation =
+      serviceProductType === "credit_card_airport_transfer" && dropoff
+        ? this.serviceAreaService.evaluateAirportTransferRoute({
+            pickup,
+            dropoff,
+            // The shared evaluator validates direction at runtime as well.
+            direction: order.direction as "pickup" | "dropoff",
+            requestedAt: order.createdAt,
+          })
+        : this.serviceAreaService.evaluate({
+            serviceProductType,
+            pickup,
+            ...(dropoff ? { dropoff } : {}),
+            requestedAt: order.createdAt,
+          });
 
     return {
       serviceProductType,

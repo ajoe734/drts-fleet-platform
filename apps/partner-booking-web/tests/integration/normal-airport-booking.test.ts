@@ -65,6 +65,28 @@ function fixture(mode = "bank_card_inline") {
   let verificationFailure = false;
   let readFailures = 0;
   let wrongFlight = false;
+  let geoFailure = false;
+  let omitEvaluation = false;
+  let routeDecision: "serviceable" | "not_serviceable" = "serviceable";
+  let routeHold: Promise<void> | null = null;
+  const places = [
+    {
+      candidateId: "mock-taoyuan-airport-t1",
+      provider: "mock",
+      displayName: "Taoyuan Airport Terminal 1",
+      address: "桃園市大園區航站南路9號",
+      location: { lat: 25.0797, lng: 121.2342 },
+      confidence: "exact",
+    },
+    {
+      candidateId: "mock-taipei-city-hall",
+      provider: "mock",
+      displayName: "Taipei City Hall",
+      address: "台北市信義區市府路1號",
+      location: { lat: 25.0375, lng: 121.5637 },
+      confidence: "exact",
+    },
+  ];
   const verificationId = "elig-SIM-authority-airport-result";
   const orderId = "6ddfa143-f827-4c97-8d42-92533d31e334";
   const bookingId = "booking-SIM-airport-result";
@@ -106,6 +128,112 @@ function fixture(mode = "bank_card_inline") {
         body,
         headers: new Headers(init?.headers),
       });
+      if (url.pathname.startsWith("/api/geo/")) {
+        if (geoFailure)
+          return Response.json(
+            {
+              error: {
+                code: "GEO_PROVIDER_NOT_CONFIGURED",
+                message: "SIM external provider missing configuration",
+              },
+            },
+            { status: 503 },
+          );
+        if (url.pathname === "/api/geo/health")
+          return envelope({
+            provider: "mock",
+            mode: "mock",
+            status: "healthy",
+            failClosed: false,
+            mockAllowed: true,
+          });
+        if (url.pathname === "/api/geo/search")
+          return envelope({
+            provider: "mock",
+            generatedAt: "2026-11-12T00:00:00Z",
+            candidates: places.filter((p) =>
+              /airport/i.test(url.searchParams.get("q") ?? "")
+                ? p.candidateId.includes("airport")
+                : p.candidateId.includes("hall"),
+            ),
+          });
+        if (
+          url.pathname === "/api/geo/resolve" ||
+          url.pathname === "/api/geo/reverse"
+        ) {
+          const selected =
+            places.find(
+              (p) =>
+                p.candidateId === body?.candidateId ||
+                p.location.lat ===
+                  (body?.location as { lat?: number } | undefined)?.lat,
+            ) ?? places[0]!;
+          return envelope({
+            provider: "mock",
+            resolvedAt: "2026-11-12T00:00:00Z",
+            address: {
+              addressName: selected.displayName,
+              address: selected.address,
+              ...selected.location,
+              coordinateSource: "provider_candidate",
+              geocodeProvider: "mock",
+              surface: "partner_booking",
+            },
+            candidate: selected,
+          });
+        }
+        if (url.pathname === "/api/geo/route") {
+          if (routeHold) await routeHold;
+          return envelope({
+            provider: "mock",
+            generatedAt: "2026-11-12T00:00:00Z",
+            distanceMeters: 30000,
+            durationSeconds: 1800,
+            encodedPolyline: null,
+            ...(!omitEvaluation
+              ? {
+                  serviceAreaEvaluation: {
+                    decision: routeDecision,
+                    serviceProductType: "credit_card_airport_transfer",
+                    evaluatedAt: "2026-11-12T00:00:00Z",
+                    serviceAreaCodes: ["SIM-CITY", "SIM-AIRPORT"],
+                    geometryVersionRefs: [
+                      "service_area:SIM-CITY@1",
+                      "service_area:SIM-AIRPORT@1",
+                    ],
+                    reasonCodes:
+                      routeDecision === "serviceable"
+                        ? []
+                        : ["AIRPORT_DROPOFF_REQUIRED"],
+                    reasonMessages: [],
+                    stops: [
+                      {
+                        kind: "pickup",
+                        location: body!.origin,
+                        serviceAreaCodes: [],
+                        policyCodes: [],
+                        geometryVersionRefs: [],
+                        decision: routeDecision,
+                        reasonCodes: [],
+                        reasonMessages: [],
+                      },
+                      {
+                        kind: "dropoff",
+                        location: body!.destination,
+                        serviceAreaCodes: [],
+                        policyCodes: [],
+                        geometryVersionRefs: [],
+                        decision: routeDecision,
+                        reasonCodes: [],
+                        reasonMessages: [],
+                      },
+                    ],
+                  },
+                }
+              : {}),
+          });
+        }
+      }
       if (url.pathname === "/api/partner/entries/" + entry.entrySlug)
         return envelope(entry);
       if (url.pathname === "/api/partner/ingress/handoff")
@@ -261,6 +389,22 @@ function fixture(mode = "bank_card_inline") {
     wrongFlight: () => {
       wrongFlight = true;
     },
+    failGeo: () => {
+      geoFailure = true;
+    },
+    omitEvaluation: () => {
+      omitEvaluation = true;
+    },
+    setRouteDecision: (value: "serviceable" | "not_serviceable") => {
+      routeDecision = value;
+    },
+    holdRoute: () => {
+      let release!: () => void;
+      routeHold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return release;
+    },
   };
 }
 
@@ -292,7 +436,10 @@ async function verifyThroughExistingPage(
 
 async function chooseMapLocations(container: HTMLElement) {
   const pickers = container.querySelectorAll("[data-address-map-picker]");
-  for (const [index, query] of ["taipei 101", "taipei main"].entries()) {
+  for (const [index, query] of [
+    "taoyuan airport",
+    "taipei city hall",
+  ].entries()) {
     const picker = within(pickers[index] as HTMLElement);
     fireEvent.change(picker.getByRole("textbox", { name: "搜尋地址" }), {
       target: { value: query },
@@ -300,7 +447,7 @@ async function chooseMapLocations(container: HTMLElement) {
     fireEvent.click(picker.getByRole("button", { name: "搜尋" }));
     fireEvent.click(
       await picker.findByRole("button", {
-        name: index === 0 ? /Taipei 101/ : /Taipei Main Station/,
+        name: index === 0 ? /Taoyuan Airport Terminal 1/ : /Taipei City Hall/,
       }),
     );
   }
@@ -524,6 +671,248 @@ describe("normal airport eligibility, booking and actual record routes", () => {
       screen.queryByTestId("partner-eligibility-verification-id"),
     ).toBeNull();
     expect(screen.queryByRole("link", { name: "繼續建立預約" })).toBeNull();
+    expect(f.commands).toHaveLength(0);
+  });
+});
+
+/** Reads an existing real page first, so V-only against the old page fails a behavior assertion. */
+async function normalMapAction() {
+  const page = await BookPage(
+    args({ eligibilityVerificationId: "elig-SIM-authority-airport-result" }),
+  );
+  const action = page.props.readMapAction as
+    | undefined
+    | ((
+        request: Record<string, unknown>,
+      ) => Promise<{ ok: boolean; data?: unknown; errorCode?: string }>);
+  expect(typeof action).toBe("function");
+  return action!;
+}
+
+describe("normal airport map ServerAction and canonical preview", () => {
+  it.each(["pickup", "dropoff"] as const)(
+    "uses the actual normal Partner bearer and canonical %s route evaluation",
+    async (direction) => {
+      const f = fixture();
+      const action = await normalMapAction();
+      const airport = { lat: 25.0797, lng: 121.2342 };
+      const city = { lat: 25.0375, lng: 121.5637 };
+      const origin = direction === "pickup" ? airport : city;
+      const destination = direction === "pickup" ? city : airport;
+      const result = await action({
+        operation: "route",
+        origin,
+        destination,
+        direction,
+        requestedAt: "1900-01-01T00:00:00Z",
+        requestedByActorId: "foreign-client-actor",
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          serviceAreaEvaluation: {
+            decision: "serviceable",
+            serviceProductType: "credit_card_airport_transfer",
+          },
+        },
+      });
+      const call = f.calls.find((c) => c.path === "/api/geo/route");
+      expect(call?.body).toEqual({
+        origin,
+        destination,
+        travelMode: "drive",
+        locale: "zh",
+        requestedByActorId: "SIM-airport-passenger",
+        airportTransfer: { direction },
+      });
+      expect(call?.headers.get("authorization")).toBe(
+        "Bearer SIM-server-only-airport-session",
+      );
+      expect(call?.headers.get("x-tenant-id")).toBe(f.entry.tenantId);
+      expect(
+        f.calls.find((c) => c.path === "/api/partner/ingress/handoff")?.body,
+      ).toEqual({
+        entrySlug: f.entry.entrySlug,
+        partnerUserRef: "SIM-existing-airport-owner",
+      });
+      expect(JSON.stringify(result)).not.toContain(
+        "SIM-server-only-airport-session",
+      );
+      expect(f.commands).toHaveLength(0);
+    },
+  );
+
+  it("uses server-side normal geo search/resolve/reverse and returns only consumed provider health", async () => {
+    const f = fixture();
+    const action = await normalMapAction();
+    expect(await action({ operation: "health" })).toEqual({
+      ok: true,
+      data: {
+        provider: "mock",
+        mode: "mock",
+        status: "healthy",
+        failClosed: false,
+        mockAllowed: true,
+      },
+    });
+    expect(
+      await action({
+        operation: "search",
+        query: {
+          q: "taoyuan airport",
+          surface: "platform_admin",
+          requestedByActorId: "foreign-client",
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: { candidates: [{ candidateId: "mock-taoyuan-airport-t1" }] },
+    });
+    expect(
+      await action({
+        operation: "resolve",
+        command: {
+          candidateId: "mock-taoyuan-airport-t1",
+          addressText: "SIM airport",
+          surface: "platform_admin",
+          selectedByActorId: "foreign-client",
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: { address: { lat: 25.0797, lng: 121.2342 } },
+    });
+    expect(
+      await action({
+        operation: "reverse",
+        command: {
+          location: { lat: 25.0375, lng: 121.5637 },
+          surface: "platform_admin",
+          requestedByActorId: "foreign-client",
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: { address: { lat: 25.0375, lng: 121.5637 } },
+    });
+    const resolve = f.calls.find((c) => c.path === "/api/geo/resolve");
+    expect(resolve?.body).toMatchObject({
+      surface: "partner_booking",
+      selectedByActorId: "SIM-airport-passenger",
+    });
+    expect(
+      f.calls
+        .filter((c) => c.path.startsWith("/api/geo/"))
+        .every(
+          (c) =>
+            c.headers.get("authorization") ===
+            "Bearer SIM-server-only-airport-session",
+        ),
+    ).toBe(true);
+    expect(f.commands).toHaveLength(0);
+  });
+
+  it.each(["provider_unavailable", "missing_evaluation"])(
+    "keeps %s explicit instead of fabricating serviceability",
+    async (mode) => {
+      const f = fixture();
+      if (mode === "provider_unavailable") f.failGeo();
+      else f.omitEvaluation();
+      const action = await normalMapAction();
+      expect(
+        await action({
+          operation: "route",
+          origin: { lat: 25.0797, lng: 121.2342 },
+          destination: { lat: 25.0375, lng: 121.5637 },
+          direction: "pickup",
+        }),
+      ).toMatchObject({
+        ok: false,
+        errorCode:
+          mode === "provider_unavailable"
+            ? "GEO_PROVIDER_NOT_CONFIGURED"
+            : "PARTNER_MAP_PREVIEW_UNAVAILABLE",
+      });
+      expect(f.commands).toHaveLength(0);
+    },
+  );
+
+  it("requires the two actual points before route preview and marks external map SIM in the normal form", async () => {
+    const f = fixture();
+    const page = await BookPage(
+      args({ eligibilityVerificationId: f.verificationId }),
+    );
+    expect(typeof page.props.readMapAction).toBe("function");
+    const { container } = render(page);
+    await screen.findByText(
+      "地圖與地址資料為模擬；服務區域規則仍由預約系統實際判定。",
+    );
+    fireEvent.change(screen.getByLabelText("接送方向"), {
+      target: { value: "pickup" },
+    });
+    const first = within(
+      container.querySelectorAll("[data-address-map-picker]")[0] as HTMLElement,
+    );
+    fireEvent.change(first.getByRole("textbox", { name: "搜尋地址" }), {
+      target: { value: "taoyuan airport" },
+    });
+    fireEvent.click(first.getByRole("button", { name: "搜尋" }));
+    fireEvent.click(
+      await first.findByRole("button", { name: /Taoyuan Airport Terminal 1/ }),
+    );
+    expect(f.calls.filter((c) => c.path === "/api/geo/route")).toHaveLength(0);
+    expect(screen.queryByText("位於服務範圍內")).toBeNull();
+    const second = within(
+      container.querySelectorAll("[data-address-map-picker]")[1] as HTMLElement,
+    );
+    fireEvent.change(second.getByRole("textbox", { name: "搜尋地址" }), {
+      target: { value: "taipei city hall" },
+    });
+    fireEvent.click(second.getByRole("button", { name: "搜尋" }));
+    fireEvent.click(
+      await second.findByRole("button", { name: /Taipei City Hall/ }),
+    );
+    await screen.findByText("位於服務範圍內");
+    expect(
+      f.calls.find((c) => c.path === "/api/geo/route")?.body,
+    ).toMatchObject({
+      origin: { lat: 25.0797, lng: 121.2342 },
+      destination: { lat: 25.0375, lng: 121.5637 },
+      airportTransfer: { direction: "pickup" },
+    });
+    expect(container.innerHTML).not.toContain(
+      "SIM-server-only-airport-session",
+    );
+  });
+
+  it("clears an old direction preview while the new read is pending and preserves a canonical refusal", async () => {
+    const f = fixture();
+    const page = await BookPage(
+      args({ eligibilityVerificationId: f.verificationId }),
+    );
+    expect(typeof page.props.readMapAction).toBe("function");
+    const { container } = render(
+      React.cloneElement(page, { initialDraft: f.draft }),
+    );
+    await chooseMapLocations(container);
+    await screen.findByText("位於服務範圍內");
+    const button = screen.getByRole("button", {
+      name: "建立預約",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    const release = f.holdRoute();
+    f.setRouteDecision("not_serviceable");
+    fireEvent.change(screen.getByLabelText("接送方向"), {
+      target: { value: "dropoff" },
+    });
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(screen.queryByText("位於服務範圍內")).toBeNull();
+    release();
+    await screen.findByText("不在服務範圍內");
+    expect(button.disabled).toBe(true);
+    expect(
+      f.calls.filter((c) => c.path === "/api/geo/route").at(-1)?.body,
+    ).toMatchObject({ airportTransfer: { direction: "dropoff" } });
     expect(f.commands).toHaveLength(0);
   });
 });

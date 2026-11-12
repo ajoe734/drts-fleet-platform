@@ -171,6 +171,10 @@ const en = {
   "book.section.program": "Program-specific intake",
   "book.section.review": "Submission readiness",
   "book.map.label": "Pickup and drop-off map check",
+  "book.map.simulated":
+    "Map and address results are simulated. Service-area rules are evaluated by the booking API.",
+  "book.map.previewPending":
+    "Checking the selected route and airport direction…",
   "book.map.hint":
     "Confirm both stops on the map so the booking carries dispatchable coordinates.",
   "book.map.textFallbackHint":
@@ -771,6 +775,9 @@ const zh = {
   "book.section.program": "方案專屬欄位",
   "book.section.review": "送單檢查",
   "book.map.label": "上下車地圖確認",
+  "book.map.simulated":
+    "地圖與地址資料為模擬；服務區域規則仍由預約系統實際判定。",
+  "book.map.previewPending": "正在確認所選路線與機場接送方向…",
   "book.map.hint": "請先在地圖上確認上下車位置，讓訂單帶有可派送座標。",
   "book.map.textFallbackHint":
     "若地址查詢暫時無法使用，請先補上下車文字地址，讓客服保留這筆待確認預約。",

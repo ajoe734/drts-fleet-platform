@@ -25,8 +25,11 @@ import {
   type CanvasTheme,
   type AddressMapPairChange,
   type AddressProviderMode,
+  type AddressProviderHealth,
 } from "@drts/ui-web";
 import {
+  createPartnerAirportMapProvider,
+  type PartnerAirportMapAction,
   formatDateTimeLocalInputValue,
   partnerBookingReadHref,
   getPartnerBookingFieldErrors,
@@ -166,6 +169,7 @@ export function PartnerBookingForm({
   initialDraft,
   submitBookingAction,
   partnerUserRef,
+  readMapAction,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -175,6 +179,7 @@ export function PartnerBookingForm({
   eligibilityVerificationId: string | null;
   initialDraft: PartnerBookingDraftValues;
   partnerUserRef?: string | null;
+  readMapAction?: PartnerAirportMapAction;
   submitBookingAction?: (
     submission: PartnerBookingSubmission,
   ) => Promise<PartnerBookingActionResult>;
@@ -223,10 +228,38 @@ export function PartnerBookingForm({
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
       | undefined) ?? "healthy";
+  const canonicalAirportMap =
+    entry.businessDispatchSubtype === "credit_card_airport_transfer" &&
+    Boolean(submitBookingAction);
+  const [airportMapHealth, setAirportMapHealth] =
+    useState<AddressProviderHealth | null>(null);
   const mapProvider = useMemo(
-    () => createConfiguredMockAddressProvider(mapProviderMode),
-    [mapProviderMode],
+    () =>
+      canonicalAirportMap
+        ? createPartnerAirportMapProvider(readMapAction, draft.direction)
+        : createConfiguredMockAddressProvider(mapProviderMode),
+    [canonicalAirportMap, readMapAction, draft.direction, mapProviderMode],
   );
+  useEffect(() => {
+    if (!canonicalAirportMap) return;
+    let cancelled = false;
+    mapProvider
+      .getHealth?.()
+      .then((health) => {
+        if (!cancelled) setAirportMapHealth(health);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAirportMapHealth({
+            mode: "disabled",
+            status: "unhealthy",
+            failClosed: true,
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canonicalAirportMap, mapProvider]);
   const mapLabels = useMemo(() => buildAddressPickerLabels(locale), [locale]);
 
   const errors = getPartnerBookingFieldErrors({
@@ -253,6 +286,11 @@ export function PartnerBookingForm({
     serviceability: mapSelection.serviceability,
     providerState: mapSelection.providerState,
   });
+  const airportPreviewPending =
+    canonicalAirportMap &&
+    mapSelection.bothDispatchReady &&
+    mapSelection.providerState.available &&
+    !mapSelection.serviceability;
   const pickupTextFallbackHint =
     !mapSelection.providerState.available &&
     mapGate.code === "dispatch_manual_review_required"
@@ -266,6 +304,8 @@ export function PartnerBookingForm({
 
   function updateField(name: string, value: string) {
     setBookingResult(null);
+    if (canonicalAirportMap && name === "direction")
+      setMapSelection((current) => ({ ...current, serviceability: null }));
     setDraft((current) => ({
       ...current,
       [name]: value,
@@ -358,7 +398,8 @@ export function PartnerBookingForm({
       setSubmitted(true);
       return;
     }
-    if (!ready || mapGate.blocking || submitting) return;
+    if (!ready || mapGate.blocking || airportPreviewPending || submitting)
+      return;
     const payload = {
       draft: {
         ...draft,
@@ -710,12 +751,23 @@ export function PartnerBookingForm({
             <span style={{ ...labelStyle, color: theme.text }}>
               {t("book.map.label")}
             </span>
+            {canonicalAirportMap && airportMapHealth?.mode === "mock" ? (
+              <CanvasBanner
+                theme={theme}
+                tone="info"
+                title={t("book.map.simulated")}
+              />
+            ) : null}
             <AddressMapPairPicker
               actorId={entry.entrySlug}
+              requireCompleteRoute={canonicalAirportMap}
+              {...(canonicalAirportMap
+                ? { providerHealth: airportMapHealth }
+                : {})}
               bounds={{
                 minLat: 24.9,
                 maxLat: 25.2,
-                minLng: 121.4,
+                minLng: canonicalAirportMap ? 121.1 : 121.4,
                 maxLng: 121.7,
               }}
               dropoffTitle={t("field.dropoffAddress")}
@@ -730,7 +782,9 @@ export function PartnerBookingForm({
               }}
               pickupTitle={t("field.pickupAddress")}
               provider={mapProvider}
-              serviceProductType={entry.businessDispatchSubtype}
+              {...(canonicalAirportMap && !draft.direction
+                ? {}
+                : { serviceProductType: entry.businessDispatchSubtype })}
               surface="partner_booking"
               theme={theme}
               {...(mapLabels ? { labels: mapLabels } : {})}
@@ -920,15 +974,17 @@ export function PartnerBookingForm({
             data-testid="partner-booking-review-summary"
             style={{ color: theme.textMuted }}
           >
-            {mapGate.code === "outside_service_area"
-              ? t("book.map.outsideServiceArea")
-              : mapGate.code === "coordinates_required"
-                ? t("book.map.coordinatesRequired")
-                : mapGate.code === "dispatch_manual_review_required"
-                  ? t("book.map.manualReview")
-                  : ready
-                    ? t("book.ready")
-                    : t("book.notReady")}
+            {airportPreviewPending
+              ? t("book.map.previewPending")
+              : mapGate.code === "outside_service_area"
+                ? t("book.map.outsideServiceArea")
+                : mapGate.code === "coordinates_required"
+                  ? t("book.map.coordinatesRequired")
+                  : mapGate.code === "dispatch_manual_review_required"
+                    ? t("book.map.manualReview")
+                    : ready
+                      ? t("book.ready")
+                      : t("book.notReady")}
           </span>
           {mapGate.code === "dispatch_manual_review_required" ? (
             <CanvasBanner
@@ -951,9 +1007,17 @@ export function PartnerBookingForm({
               type="submit"
               style={submitButtonStyle(
                 theme,
-                !ready || mapGate.blocking || submitting,
+                !ready ||
+                  mapGate.blocking ||
+                  airportPreviewPending ||
+                  submitting,
               )}
-              disabled={!ready || mapGate.blocking || submitting}
+              disabled={
+                !ready ||
+                mapGate.blocking ||
+                airportPreviewPending ||
+                submitting
+              }
             >
               {submitBookingAction
                 ? t(

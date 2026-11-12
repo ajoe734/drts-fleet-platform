@@ -1,3 +1,8 @@
+import type { ComputeGeoRouteCommand } from "@drts/contracts";
+import { GeoController } from "../../src/modules/geo/geo.controller";
+import { GeoService } from "../../src/modules/geo/geo.service";
+import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
+import { MockGeoProvider } from "../../src/modules/geo/mock-geo.provider";
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import type {
   DispatchAssignmentRecord,
@@ -8579,4 +8584,285 @@ describe("normal partner progress accounts for every live tuple", () => {
       });
     },
   );
+});
+
+const AIRPORT_ROUTE_SIM_HOME = { lat: 25.033964, lng: 121.564468 };
+const AIRPORT_ROUTE_SIM_AIRPORT = { lat: 25.0797, lng: 121.2342 };
+const AIRPORT_ROUTE_SIM_OTHER_CITY = { lat: 25.06, lng: 121.58 };
+const AIRPORT_ROUTE_SIM_CONTEXT = {
+  actorId: "unit-airport-coverage-operator",
+  actorType: "platform_admin" as const,
+};
+
+// External airport identity/operating-area facts are explicit SIM. These are
+// normal service mutations; neither geometry nor route business logic is stubbed.
+async function createAirportRouteAreas(
+  areas = new ServiceAreaService(),
+  airportOptions: {
+    metadata?: Record<string, unknown>;
+    products?: ("credit_card_airport_transfer" | "taxi_realtime")[];
+    effectiveFrom?: string;
+    effectiveUntil?: string | null;
+    publish?: boolean;
+  } = {},
+) {
+  const cityGeometry = areas
+    .listServiceAreas()
+    .find((area) => area.areaCode === "TAIPEI_CORE")!.geometry;
+  const city = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_CITY",
+      displayName: "Explicit SIM airport-product city coverage",
+      geometry: cityGeometry,
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      effectiveFrom: "2020-01-01T00:00:00.000Z",
+      metadata: { externalFacts: "SIM" },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  await areas.publishServiceArea(
+    city.record.serviceAreaId,
+    {},
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  const airport = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_IDENTITY",
+      displayName: "Explicit SIM airport identity boundary",
+      geometry: {
+        type: "circle",
+        center: AIRPORT_ROUTE_SIM_AIRPORT,
+        radiusMeters: 6500,
+      },
+      serviceProductTypes: airportOptions.products ?? [
+        "credit_card_airport_transfer",
+      ],
+      effectiveFrom: airportOptions.effectiveFrom ?? "2020-01-01T00:00:00.000Z",
+      effectiveUntil: airportOptions.effectiveUntil ?? null,
+      metadata: airportOptions.metadata ?? {
+        airportIataCode: "TPE",
+        externalFacts: "SIM",
+      },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  if (airportOptions.publish !== false) {
+    await areas.publishServiceArea(
+      airport.record.serviceAreaId,
+      {},
+      AIRPORT_ROUTE_SIM_CONTEXT,
+    );
+  }
+  return { areas, city: city.record, airport: airport.record };
+}
+
+async function readActualAirportPreview(
+  areas: ServiceAreaService,
+  pickup: { lat: number; lng: number },
+  dropoff: { lat: number; lng: number },
+  direction: "pickup" | "dropoff",
+) {
+  // Reflect.construct also runs on the old real GeoService constructor: an old
+  // caller missing the new response field fails an assertion, not an import.
+  const geo = Reflect.construct(GeoService, [
+    new MockGeoProvider(),
+    new GeoProviderConfigService({
+      NODE_ENV: "test",
+      DRTS_ENV: "test",
+      MAP_PROVIDER_MODE: "mock",
+    }),
+    undefined,
+    undefined,
+    areas,
+  ]) as GeoService;
+  const response = await new GeoController(geo).route({
+    origin: pickup,
+    destination: dropoff,
+    airportTransfer: { direction },
+  } as ComputeGeoRouteCommand & {
+    airportTransfer: { direction: "pickup" | "dropoff" };
+  });
+  expect(response.data).toHaveProperty("serviceAreaEvaluation");
+  const result = response.data as typeof response.data & {
+    serviceAreaEvaluation: ServiceAreaEvaluationResult;
+  };
+  expect(result.provider).toBe("mock");
+  return result.serviceAreaEvaluation;
+}
+
+function airportRouteBookingCommand(
+  direction: "pickup" | "dropoff",
+  pickup: { lat: number; lng: number },
+  dropoff: { lat: number; lng: number },
+) {
+  return {
+    businessDispatchSubtype: "credit_card_airport_transfer" as const,
+    direction,
+    flightNo: "SIM-AIRPORT-123",
+    terminal: "SIM terminal",
+    reservationWindowStart: defaultReservationWindowStart(),
+    reservationWindowEnd: defaultReservationWindowEnd(),
+    pickup: { address: "SIM route pickup", ...pickup },
+    dropoff: { address: "SIM route dropoff", ...dropoff },
+    passenger: { name: "SIM route rider", phone: "0900000041" },
+  };
+}
+
+describe("normal airport booking uses the preview route authority", () => {
+  for (const scenario of [
+    {
+      name: "pickup airport-to-city",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_AIRPORT,
+      dropoff: AIRPORT_ROUTE_SIM_HOME,
+    },
+    {
+      name: "dropoff city-to-airport",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_AIRPORT,
+    },
+  ] as const) {
+    it(`creates and reads the same order for ${scenario.name}`, async () => {
+      const { areas } = await createAirportRouteAreas();
+      const preview = await readActualAirportPreview(
+        areas,
+        scenario.pickup,
+        scenario.dropoff,
+        scenario.direction,
+      );
+      expect(preview.decision).toBe("serviceable");
+      const { service } = createOwnedMobilityService({
+        serviceAreaService: areas,
+      });
+      const booking = await service.createTenantBooking(
+        airportRouteBookingCommand(
+          scenario.direction,
+          scenario.pickup,
+          scenario.dropoff,
+        ),
+        "tenant-demo-001",
+      );
+      const order = service.getOrder(booking.orderId);
+      const record = service.getTenantBooking(
+        "tenant-demo-001",
+        booking.bookingId,
+      );
+      expect(order).toMatchObject({
+        orderId: booking.orderId,
+        bookingId: booking.bookingId,
+        direction: scenario.direction,
+        pickup: scenario.pickup,
+        dropoff: scenario.dropoff,
+      });
+      expect(record).toMatchObject({
+        orderId: booking.orderId,
+        bookingId: booking.bookingId,
+        direction: scenario.direction,
+      });
+      expect(order.spatialAudit?.serviceAreaEvaluation).toMatchObject({
+        decision: "serviceable",
+        serviceProductType: "credit_card_airport_transfer",
+      });
+      expect(
+        order.spatialAudit?.serviceAreaEvaluation?.geometryVersionRefs,
+      ).toEqual(
+        expect.arrayContaining([
+          "service_area:UNIT_SIM_AIRPORT_CITY@1",
+          "service_area:UNIT_SIM_AIRPORT_IDENTITY@1",
+        ]),
+      );
+      expect(
+        order.complianceGates?.find((gate) => gate.gateType === "service_area")
+          ?.state,
+      ).toBe("clear");
+    });
+  }
+
+  for (const scenario of [
+    {
+      name: "pickup with airport only at destination",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_AIRPORT,
+      code: "AIRPORT_PICKUP_REQUIRED",
+    },
+    {
+      name: "dropoff with airport only at origin",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_AIRPORT,
+      dropoff: AIRPORT_ROUTE_SIM_HOME,
+      code: "AIRPORT_DROPOFF_REQUIRED",
+    },
+    {
+      name: "pickup between two city stops",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_OTHER_CITY,
+      code: "AIRPORT_PICKUP_REQUIRED",
+    },
+    {
+      name: "dropoff between two city stops",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_OTHER_CITY,
+      code: "AIRPORT_DROPOFF_REQUIRED",
+    },
+  ] as const) {
+    it(`rejects ${scenario.name} before publishing a booking`, async () => {
+      const { areas } = await createAirportRouteAreas();
+      const { service } = createOwnedMobilityService({
+        serviceAreaService: areas,
+      });
+      let failure: unknown;
+      try {
+        await service.createTenantBooking(
+          airportRouteBookingCommand(
+            scenario.direction,
+            scenario.pickup,
+            scenario.dropoff,
+          ),
+          "tenant-demo-001",
+        );
+      } catch (error) {
+        failure = error;
+      }
+      // On the old callable this is a real Assertion failure: creation wrongly succeeds.
+      expect(failure).toBeInstanceOf(ApiRequestError);
+      expect((failure as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: scenario.code },
+      });
+      expect(service.listOrders()).toEqual([]);
+    });
+  }
+
+  it("keeps a missing-coordinate airport request in the existing manual review path", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: areas,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        direction: "pickup",
+        flightNo: "SIM-AIRPORT-MANUAL",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
+        pickup: { address: "SIM unresolved airport stop" },
+        dropoff: { address: "SIM unresolved home stop" },
+        passenger: { name: "SIM manual rider", phone: "0900000041" },
+      },
+      "tenant-demo-001",
+    );
+    const order = service.getOrder(booking.orderId);
+    expect(
+      order.complianceGates?.find((gate) => gate.gateType === "service_area"),
+    ).toMatchObject({ state: "review_required", evidenceState: "missing" });
+    expect(order.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(() =>
+      service.dispatchOrder(booking.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
 });

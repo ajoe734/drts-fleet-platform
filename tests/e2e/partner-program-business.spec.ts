@@ -6,6 +6,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import type {
+  GeoProviderHealthResponse,
+  GeoRouteResponse,
+  ServiceAreaAdminMutationResponse,
+  ServiceAreaBoundaryRecord,
   BookingRecord,
   OwnedOrderRecord,
   PartnerBookingDetails,
@@ -27,6 +31,7 @@ type Scope = {
 };
 const execute = promisify(execFile);
 const scopes: Scope[] = [];
+const createdAirportAreas: ServiceAreaBoundaryRecord[] = [];
 const createdIds = new Set<string>();
 const origin = "http://127.0.0.1:3007";
 let fixture: PartnerFixture;
@@ -70,6 +75,7 @@ test.beforeAll(async () => {
     await rm(directory, { recursive: true, force: true });
   }
   fixture = new PartnerFixture(); // Do not start unrelated notification fixtures.
+  await configureAirportAreas();
 });
 
 test.afterAll(async () => {
@@ -105,12 +111,114 @@ test.afterAll(async () => {
       }
       scope.apiKey = null;
     }
+    for (const area of [...createdAirportAreas].reverse()) {
+      try {
+        const retired = await fixture.call<ServiceAreaAdminMutationResponse>(
+          "service-area/admin/service-areas/" +
+            encodeURIComponent(area.serviceAreaId) +
+            "/retire",
+          required("DRTS_UAT_TOKEN_PLATFORM"),
+          "POST",
+          { reason: "Disposable C032 airport map acceptance complete" },
+        );
+        expect(retired.serviceArea).toMatchObject({
+          serviceAreaId: area.serviceAreaId,
+          status: "retired",
+        });
+      } catch {
+        errors.push("service-area cleanup: " + area.serviceAreaId);
+      }
+    }
   } finally {
     await fixture.db.end();
   }
   // Keep booking evidence in disposable PG. Never delete/reset shared data.
   expect(errors, "normal credential/entry cleanup").toEqual([]);
 });
+
+/** External airport/address facts are SIM; these are normal persisted governance writes. */
+async function configureAirportAreas() {
+  const suffix = randomUUID().replaceAll("-", "").toUpperCase();
+  const effectiveFrom = new Date(Date.now() - 60_000).toISOString();
+  const effectiveUntil = new Date(
+    Date.now() + 2 * 60 * 60 * 1000,
+  ).toISOString();
+  const definitions = [
+    {
+      areaCode: "C032_SIM_CITY_" + suffix,
+      displayName: "SIM C032 city airport-transfer catchment",
+      geometry: {
+        type: "polygon",
+        coordinates: [
+          { lat: 25.0005, lng: 121.4505 },
+          { lat: 25.0005, lng: 121.625 },
+          { lat: 25.125, lng: 121.625 },
+          { lat: 25.125, lng: 121.4505 },
+        ],
+      },
+      metadata: { source: "hosted-external-map-SIM", fixture: true },
+    },
+    {
+      areaCode: "C032_SIM_AIRPORT_" + suffix,
+      displayName: "SIM C032 declared airport boundary",
+      geometry: {
+        type: "circle",
+        center: { lat: 25.0797, lng: 121.2342 },
+        radiusMeters: 6500,
+      },
+      metadata: {
+        source: "hosted-external-map-SIM",
+        fixture: true,
+        airportIataCode: "TPE",
+      },
+    },
+  ];
+  for (const definition of definitions) {
+    const created = await fixture.call<ServiceAreaAdminMutationResponse>(
+      "service-area/admin/service-areas",
+      required("DRTS_UAT_TOKEN_PLATFORM"),
+      "POST",
+      {
+        ...definition,
+        serviceProductTypes: ["credit_card_airport_transfer"],
+        effectiveFrom,
+        effectiveUntil,
+      },
+    );
+    expect(created.serviceArea?.serviceAreaId).toMatch(/^[a-f0-9-]{36}$/);
+    const area = created.serviceArea!;
+    createdAirportAreas.push(area); // Even a later publish failure retains normal cleanup.
+    const published = await fixture.call<ServiceAreaAdminMutationResponse>(
+      "service-area/admin/service-areas/" +
+        encodeURIComponent(area.serviceAreaId) +
+        "/publish",
+      required("DRTS_UAT_TOKEN_PLATFORM"),
+      "POST",
+      {
+        reason:
+          "Disposable C032 explicit SIM map facts; internal evaluation remains real",
+      },
+    );
+    expect(published.serviceArea).toMatchObject({
+      serviceAreaId: area.serviceAreaId,
+      areaCode: definition.areaCode,
+      status: "active",
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      metadata: definition.metadata,
+    });
+    const persisted = await fixture.db.query(
+      "SELECT record FROM ops.service_area_boundaries WHERE service_area_id=$1",
+      [area.serviceAreaId],
+    );
+    expect(persisted.rows).toHaveLength(1);
+    expect(persisted.rows[0]!.record).toMatchObject({
+      serviceAreaId: area.serviceAreaId,
+      status: "active",
+      areaCode: definition.areaCode,
+      metadata: definition.metadata,
+    });
+  }
+}
 
 async function ensureProduct(
   subtype: Subtype | "credit_card_airport_transfer",
@@ -746,18 +854,18 @@ test("C032 normal insurance /book creates and reloads the same persisted booking
 type AirportDirection = "pickup" | "dropoff";
 const airportMapAnchors = {
   home: {
-    query: "taipei 101",
-    label: "Taipei 101",
-    address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
-    lat: 25.033964,
-    lng: 121.564468,
+    query: "taipei city hall",
+    label: "Taipei City Hall",
+    address: "台北市信義區市府路1號",
+    lat: 25.0375,
+    lng: 121.5637,
   },
   airportSIM: {
-    query: "taipei main",
-    label: "Taipei Main Station",
-    address: "No. 3, Beiping West Road, Zhongzheng District, Taipei",
-    lat: 25.047762,
-    lng: 121.517017,
+    query: "taoyuan airport",
+    label: "Taoyuan Airport Terminal 1",
+    address: "桃園市大園區航站南路9號",
+    lat: 25.0797,
+    lng: 121.2342,
   },
 };
 
@@ -872,6 +980,17 @@ function assertAirportSnapshot(
   }
   expect(data.order.pickup).toEqual(data.stored.pickup);
   expect(data.order.dropoff).toEqual(data.stored.dropoff);
+  expect(data.stored.spatialAudit?.serviceAreaEvaluation).toMatchObject({
+    decision: "serviceable",
+    serviceProductType: "credit_card_airport_transfer",
+  });
+  expect(
+    data.stored.spatialAudit?.serviceAreaEvaluation?.geometryVersionRefs,
+  ).toEqual(
+    expect.arrayContaining(
+      createdAirportAreas.map((area) => "service_area:" + area.areaCode + "@1"),
+    ),
+  );
   expect(data.booking.issuerAuthorizationRef).toBe(
     data.order.issuerAuthorizationRef,
   );
@@ -1130,6 +1249,66 @@ async function runAirportBooking(
     direction === "pickup"
       ? airportMapAnchors.home
       : airportMapAnchors.airportSIM;
+  const mapSession = await fixture.call<PartnerIngressHandoffSession>(
+    "partner/ingress/handoff",
+    null,
+    "POST",
+    { entrySlug: scope.entry.entrySlug, apiKey: scope.apiKey, partnerUserRef },
+  );
+  expect(mapSession.identity).toMatchObject({
+    actorType: "referral_passenger",
+    realm: "partner",
+    tenantId: scope.entry.tenantId,
+    partnerEntrySlug: scope.entry.entrySlug,
+  });
+  const health = await fixture.call<GeoProviderHealthResponse>(
+    "geo/health",
+    mapSession.accessToken,
+    "GET",
+    undefined,
+    scope.entry.tenantId,
+  );
+  expect(health).toMatchObject({
+    mode: "mock",
+    provider: "mock",
+    failClosed: false,
+  });
+  for (const control of [
+    {
+      origin: { lat: dropoff.lat, lng: dropoff.lng },
+      destination: { lat: pickup.lat, lng: pickup.lng },
+    },
+    {
+      origin: {
+        lat: airportMapAnchors.home.lat,
+        lng: airportMapAnchors.home.lng,
+      },
+      destination: {
+        lat: airportMapAnchors.home.lat,
+        lng: airportMapAnchors.home.lng,
+      },
+    },
+  ]) {
+    const refused = await fixture.call<GeoRouteResponse>(
+      "geo/route",
+      mapSession.accessToken,
+      "POST",
+      { ...control, airportTransfer: { direction } },
+      scope.entry.tenantId,
+    );
+    expect(refused.serviceAreaEvaluation?.decision).toBe("not_serviceable");
+    expect(refused.serviceAreaEvaluation?.reasonCodes).toContain(
+      direction === "pickup"
+        ? "AIRPORT_PICKUP_REQUIRED"
+        : "AIRPORT_DROPOFF_REQUIRED",
+    );
+  }
+  await expect(
+    page.getByText(
+      "Map and address results are simulated. Service-area rules are evaluated by the booking API.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await selectAddress(page, 0, pickup.query, pickup.label);
   await selectAddress(page, 1, dropoff.query, dropoff.label);
   await expect(
@@ -1212,6 +1391,8 @@ async function runAirportBooking(
       "normal-API-issued-session",
       "actual-PG-verification-and-order-record",
       "normal-book-create-double-GET",
+      "canonical-direction-and-city-city-refusal",
+      "normal-governance-HTTP-and-PG-spatial-evaluation-snapshot",
       "clicked-confirmed-record-history",
       "reload-same-IDs",
       "fresh-session-after-page-reloads",
@@ -1219,7 +1400,8 @@ async function runAirportBooking(
     simulated: [
       "existing-sandbox-backed-BankCardInlineEligibilityAdapter-issuer-decision",
       "Google-metadata-transport-only-genuine-WIF-token",
-      "existing-GreaterTaipei-map-anchors",
+      "existing-API-MockGeoProvider-Taipei-home-and-TaoyuanT1-candidates",
+      "operator-published-disposable-SIM-city-and-airport-identity-facts",
     ],
     beforeReload: { sameIds: true, snapshotMatches: true },
     afterReload: {
@@ -1229,7 +1411,7 @@ async function runAirportBooking(
     },
     limits: [
       "No live bank/card authorization",
-      "Map anchors do not prove real Taoyuan airport coverage or geofence",
+      "Mock external map/address/IATA facts do not prove live Google or production city-airport coverage",
       "No driver completion/payment/paid receipt",
       "No CloudRun/prod or Main adoption claim",
     ],

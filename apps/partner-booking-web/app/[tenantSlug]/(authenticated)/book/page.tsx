@@ -6,10 +6,14 @@ import {
 } from "@/lib/api-client";
 import {
   createDefaultPartnerBookingDraft,
+  type PartnerAirportMapRequest,
   type PartnerBookingSubmission,
   type PartnerBookingActionResult,
 } from "@/lib/partner-booking-form";
-import { submitPartnerProgramBooking } from "@/lib/submit-partner-booking";
+import {
+  readPartnerAirportMap,
+  submitPartnerProgramBooking,
+} from "@/lib/submit-partner-booking";
 import { getServerLocale } from "@/lib/server-locale";
 
 type PageProps = {
@@ -47,6 +51,16 @@ export default async function PartnerBookPage({
       referenceToken,
       eligibilityVerificationId,
       submission,
+      locale,
+    });
+  }
+
+  async function readMap(request: PartnerAirportMapRequest) {
+    "use server";
+    return readPartnerAirportMap({
+      tenantSlug,
+      partnerUserRef,
+      request,
       locale,
     });
   }
@@ -98,6 +112,9 @@ export default async function PartnerBookPage({
         entry={entry}
         eligibilityVerificationId={eligibilityVerificationId}
         initialDraft={initialDraft}
+        {...(entry.businessDispatchSubtype === "credit_card_airport_transfer"
+          ? { readMapAction: readMap }
+          : {})}
         partnerUserRef={partnerUserRef}
         {...(hasBookingAction ? { submitBookingAction: submitBooking } : {})}
       />

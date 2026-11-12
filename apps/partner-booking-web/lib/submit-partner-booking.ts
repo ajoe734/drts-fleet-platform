@@ -3,6 +3,11 @@ import type {
   PartnerBookingDetails,
 } from "@drts/contracts";
 import {
+  getPartnerGeoHealth,
+  searchPartnerGeo,
+  resolvePartnerGeo,
+  reversePartnerGeo,
+  routePartnerGeo,
   createPartnerBooking,
   createPartnerIngressHandoff,
   createPartnerSessionFromIngressHandoff,
@@ -15,6 +20,8 @@ import {
 import {
   getPartnerBookingFieldErrors,
   getPartnerMapSubmitGate,
+  type PartnerAirportMapRequest,
+  type PartnerAirportMapResult,
   type PartnerBookingActionResult,
   type PartnerBookingSubmission,
   type PartnerEligibilitySubmission,
@@ -369,6 +376,179 @@ export async function submitPartnerProgramBooking(
       errorCode,
       errorMessage: t("book.create.failed", undefined, input.locale),
       ...(eligibilityVerificationId ? { eligibilityVerificationId } : {}),
+    };
+  }
+}
+
+type MapDependencies = Pick<
+  typeof import("./api-client"),
+  | "getPartnerRouteContext"
+  | "createPartnerIngressHandoff"
+  | "getPartnerGeoHealth"
+  | "searchPartnerGeo"
+  | "resolvePartnerGeo"
+  | "reversePartnerGeo"
+  | "routePartnerGeo"
+>;
+const mapDependencies: MapDependencies = {
+  getPartnerRouteContext,
+  createPartnerIngressHandoff,
+  getPartnerGeoHealth,
+  searchPartnerGeo,
+  resolvePartnerGeo,
+  reversePartnerGeo,
+  routePartnerGeo,
+};
+
+/** Normal per-request ingress, just like the existing booking/eligibility actions. */
+export async function readPartnerAirportMap(
+  input: {
+    tenantSlug: string;
+    partnerUserRef: string | null;
+    request: PartnerAirportMapRequest;
+    locale: Locale;
+  },
+  dependencies: MapDependencies = mapDependencies,
+): Promise<PartnerAirportMapResult> {
+  try {
+    const { entry } = await dependencies.getPartnerRouteContext(
+      input.tenantSlug,
+    );
+    if (!entry || entry.status !== "active" || !entry.activeFlag)
+      throw new PartnerAuthorityError(
+        409,
+        "PARTNER_ENTRY_INACTIVE",
+        "Partner entry is unavailable.",
+      );
+    if (entry.businessDispatchSubtype !== "credit_card_airport_transfer")
+      throw new PartnerAuthorityError(
+        400,
+        "PARTNER_ENTRY_SUBTYPE_MISMATCH",
+        "This map belongs to an airport program.",
+      );
+    if (!input.partnerUserRef?.trim())
+      throw new PartnerAuthorityError(
+        400,
+        "PARTNER_USER_REF_REQUIRED",
+        "Partner ingress identity is missing.",
+      );
+    const handoff = await dependencies.createPartnerIngressHandoff({
+      entrySlug: entry.entrySlug,
+      partnerUserRef: input.partnerUserRef,
+    });
+    const session = createPartnerSessionFromIngressHandoff(handoff, entry);
+    const request = input.request;
+    switch (request.operation) {
+      case "health": {
+        const health = await dependencies.getPartnerGeoHealth(session);
+        return {
+          ok: true,
+          data: {
+            provider: health.provider,
+            mode: health.mode,
+            status: health.status,
+            failClosed: health.failClosed,
+            mockAllowed: health.mockAllowed,
+          },
+        };
+      }
+      case "search":
+        return {
+          ok: true,
+          data: await dependencies.searchPartnerGeo(session, {
+            q: request.query.q,
+            ...(request.query.limit !== undefined
+              ? { limit: request.query.limit }
+              : {}),
+            ...(request.query.near
+              ? {
+                  near: {
+                    lat: request.query.near.lat,
+                    lng: request.query.near.lng,
+                  },
+                }
+              : {}),
+            locale: input.locale,
+            surface: "partner_booking",
+            requestedByActorId: session.identity.actorId,
+          }),
+        };
+      case "resolve":
+        return {
+          ok: true,
+          data: await dependencies.resolvePartnerGeo(session, {
+            addressText: request.command.addressText,
+            ...(request.command.candidateId
+              ? { candidateId: request.command.candidateId }
+              : {}),
+            ...(request.command.providerCandidateId
+              ? { providerCandidateId: request.command.providerCandidateId }
+              : {}),
+            ...(request.command.placeId
+              ? { placeId: request.command.placeId }
+              : {}),
+            ...(request.command.selectedPoint
+              ? {
+                  selectedPoint: {
+                    lat: request.command.selectedPoint.lat,
+                    lng: request.command.selectedPoint.lng,
+                  },
+                }
+              : {}),
+            ...(request.command.manualOverrideReason
+              ? { manualOverrideReason: request.command.manualOverrideReason }
+              : {}),
+            surface: "partner_booking",
+            selectedByActorId: session.identity.actorId,
+          }),
+        };
+      case "reverse":
+        return {
+          ok: true,
+          data: await dependencies.reversePartnerGeo(session, {
+            location: {
+              lat: request.command.location.lat,
+              lng: request.command.location.lng,
+            },
+            locale: input.locale,
+            surface: "partner_booking",
+            requestedByActorId: session.identity.actorId,
+          }),
+        };
+      case "route": {
+        if (request.direction !== "pickup" && request.direction !== "dropoff")
+          throw new PartnerAuthorityError(
+            400,
+            "PARTNER_BOOKING_INVALID",
+            "Choose an airport direction.",
+          );
+        const route = await dependencies.routePartnerGeo(session, {
+          origin: { lat: request.origin.lat, lng: request.origin.lng },
+          destination: {
+            lat: request.destination.lat,
+            lng: request.destination.lng,
+          },
+          travelMode: "drive",
+          locale: input.locale,
+          requestedByActorId: session.identity.actorId,
+          airportTransfer: { direction: request.direction },
+        });
+        if (!route.serviceAreaEvaluation)
+          throw new PartnerAuthorityError(
+            503,
+            "PARTNER_MAP_PREVIEW_UNAVAILABLE",
+            "The route result is unavailable.",
+          );
+        return { ok: true, data: route };
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode:
+        error instanceof PartnerAuthorityError
+          ? error.code
+          : "PARTNER_MAP_UNAVAILABLE",
     };
   }
 }

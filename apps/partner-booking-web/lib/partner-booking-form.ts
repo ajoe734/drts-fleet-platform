@@ -1,4 +1,12 @@
 import type {
+  ComputeGeoRouteCommand,
+  GeoRouteResponse,
+  GeoSearchResponse,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  SearchGeoQuery,
+  ResolveAddressCommand,
+  ReverseGeocodeCommand,
   BusinessDispatchSubtype,
   BookingRecord,
   PartnerBookingDetails,
@@ -7,6 +15,9 @@ import type {
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 import {
+  AddressProviderUnavailableError,
+  type AddressMapPickerProvider,
+  type AddressProviderHealth,
   evaluateAddressSubmitGate,
   type AddressPayload,
   type AddressProviderState,
@@ -555,3 +566,78 @@ export type PartnerEligibilityActionResult =
       >;
     }
   | { ok: false; errorCode: string; errorMessage: string };
+
+/** Serializable map inputs; the BFF supplies the actual Partner bearer/actor. */
+export type PartnerAirportMapRequest =
+  | { operation: "health" }
+  | { operation: "search"; query: SearchGeoQuery }
+  | { operation: "resolve"; command: ResolveAddressCommand }
+  | { operation: "reverse"; command: ReverseGeocodeCommand }
+  | {
+      operation: "route";
+      origin: ComputeGeoRouteCommand["origin"];
+      destination: ComputeGeoRouteCommand["destination"];
+      direction: "pickup" | "dropoff";
+    };
+export type PartnerAirportMapResult =
+  | {
+      ok: true;
+      data:
+        | AddressProviderHealth
+        | GeoSearchResponse
+        | GeoResolveResponse
+        | GeoReverseResponse
+        | GeoRouteResponse;
+    }
+  | { ok: false; errorCode: string };
+export type PartnerAirportMapAction = (
+  request: PartnerAirportMapRequest,
+) => Promise<PartnerAirportMapResult>;
+
+/** Geo and coverage remain normal API reads, including when external maps are SIM. */
+export function createPartnerAirportMapProvider(
+  action: PartnerAirportMapAction | undefined,
+  direction: "" | "pickup" | "dropoff",
+): AddressMapPickerProvider {
+  async function read<T>(request: PartnerAirportMapRequest): Promise<T> {
+    if (!action)
+      throw new AddressProviderUnavailableError(
+        "The address service is unavailable.",
+        "partner_map_unavailable",
+      );
+    const result = await action(request);
+    if (!result.ok)
+      throw new AddressProviderUnavailableError(
+        "The address service is unavailable.",
+        result.errorCode,
+      );
+    return result.data as T;
+  }
+  return {
+    search: (query) => read<GeoSearchResponse>({ operation: "search", query }),
+    resolve: (command) =>
+      read<GeoResolveResponse>({ operation: "resolve", command }),
+    reverse: (command) =>
+      read<GeoReverseResponse>({ operation: "reverse", command }),
+    getHealth: () => read<AddressProviderHealth>({ operation: "health" }),
+    async evaluateServiceArea(command) {
+      if (!command.dropoff || !direction)
+        throw new AddressProviderUnavailableError(
+          "Confirm both stops and the airport direction.",
+          "airport_route_incomplete",
+        );
+      const route = await read<GeoRouteResponse>({
+        operation: "route",
+        origin: command.pickup,
+        destination: command.dropoff,
+        direction,
+      });
+      if (!route.serviceAreaEvaluation)
+        throw new AddressProviderUnavailableError(
+          "The route service-area result is unavailable.",
+          "airport_preview_unavailable",
+        );
+      return route.serviceAreaEvaluation;
+    },
+  };
+}

@@ -2,6 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
+  ComputeGeoRouteCommand,
+  GeoProviderHealthResponse,
+  GeoSearchResponse,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  GeoRouteResponse,
+  SearchGeoQuery,
+  ResolveAddressCommand,
+  ReverseGeocodeCommand,
   ApiSuccessEnvelope,
   BookingRecord,
   TenantBookingListQuery,
@@ -748,4 +757,63 @@ export async function getPartnerReceipt(
       headers: buildPartnerHeaders(session),
     },
   );
+}
+
+/** Normal Partner utility reads use the same server-only bearer and Cloud Run transport. */
+export async function getPartnerGeoHealth(session: PartnerSessionRecord) {
+  return requestAuthority<GeoProviderHealthResponse>("/api/geo/health", {
+    method: "GET",
+    headers: buildPartnerHeaders(session),
+  });
+}
+export async function searchPartnerGeo(
+  session: PartnerSessionRecord,
+  query: SearchGeoQuery,
+) {
+  const params = new URLSearchParams({
+    q: query.q,
+    surface: "partner_booking",
+  });
+  if (query.locale) params.set("locale", query.locale);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.near) {
+    params.set("nearLat", String(query.near.lat));
+    params.set("nearLng", String(query.near.lng));
+  }
+  if (session.identity.actorId !== null)
+    params.set("requestedByActorId", session.identity.actorId);
+  return requestAuthority<GeoSearchResponse>("/api/geo/search?" + params, {
+    method: "GET",
+    headers: buildPartnerHeaders(session),
+  });
+}
+export async function resolvePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ResolveAddressCommand,
+) {
+  return requestAuthority<GeoResolveResponse>("/api/geo/resolve", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
+}
+export async function reversePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ReverseGeocodeCommand,
+) {
+  return requestAuthority<GeoReverseResponse>("/api/geo/reverse", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
+}
+export async function routePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ComputeGeoRouteCommand,
+) {
+  return requestAuthority<GeoRouteResponse>("/api/geo/route", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
 }

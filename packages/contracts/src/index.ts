@@ -225,15 +225,27 @@ export interface GeoReverseResponse {
 export const GEO_ROUTE_TRAVEL_MODES = ["drive", "two_wheeler", "walk"] as const;
 export type GeoRouteTravelMode = (typeof GEO_ROUTE_TRAVEL_MODES)[number];
 
+export interface AirportTransferRouteIntent {
+  direction: "pickup" | "dropoff";
+}
+
+export interface EvaluateAirportTransferRouteCommand extends AirportTransferRouteIntent {
+  pickup: GeoPoint;
+  dropoff: GeoPoint;
+  requestedAt?: string;
+}
+
 export interface ComputeGeoRouteCommand {
   origin: GeoPoint;
   destination: GeoPoint;
+  airportTransfer?: AirportTransferRouteIntent;
   travelMode?: GeoRouteTravelMode;
   locale?: string;
   requestedByActorId?: string | null;
 }
 
 export interface GeoRouteResponse {
+  serviceAreaEvaluation?: ServiceAreaEvaluationResult;
   provider: string;
   distanceMeters: number;
   durationSeconds: number;
@@ -386,6 +398,7 @@ export interface ServiceAreaBoundaryRecord {
   effectiveFrom: string;
   effectiveUntil: string | null;
   version: number;
+  /** Operator-published airport identity, when present: airportIataCode (3 uppercase letters). */
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
