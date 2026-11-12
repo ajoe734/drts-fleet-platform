@@ -19,6 +19,9 @@ import TripsPage from "@/app/[tenantSlug]/(authenticated)/trips/page";
 import { clearPartnerEntryAuthorityCacheForTests } from "@/lib/api-client";
 import {
   createDefaultPartnerBookingDraft,
+  createPartnerAirportMapProvider,
+  type PartnerAirportMapAction,
+  type PartnerAirportMapResult,
   type PartnerBookingSubmission,
 } from "@/lib/partner-booking-form";
 import { submitPartnerProgramBooking } from "@/lib/submit-partner-booking";
@@ -928,5 +931,130 @@ describe("normal airport map ServerAction and canonical preview", () => {
       f.calls.filter((c) => c.path === "/api/geo/route").at(-1)?.body,
     ).toMatchObject({ airportTransfer: { direction: "dropoff" } });
     expect(f.commands).toHaveLength(0);
+  });
+});
+
+describe("normal airport map provider concurrent health reads", () => {
+  const healthy = {
+    provider: "mock",
+    mode: "mock",
+    status: "healthy",
+    failClosed: false,
+    mockAllowed: true,
+  } as const;
+  const healthyResult: PartnerAirportMapResult = { ok: true, data: healthy };
+
+  function healthReader(action: PartnerAirportMapAction) {
+    const provider = createPartnerAirportMapProvider(action, "pickup");
+    const getHealth = provider.getHealth;
+    if (!getHealth)
+      throw new Error("Existing provider health reader is missing");
+    return getHealth;
+  }
+
+  it("coalesces simultaneous health callers on the same provider into one action", async () => {
+    let finish: (result: PartnerAirportMapResult) => void = () => {
+      throw new Error("Unit response gate is not initialized");
+    };
+    const response = new Promise<PartnerAirportMapResult>((resolve) => {
+      finish = resolve;
+    });
+    const action = vi.fn<PartnerAirportMapAction>(() => response);
+    const getHealth = healthReader(action);
+    const first = getHealth();
+    const second = getHealth();
+    const third = getHealth();
+    const admittedCalls = action.mock.calls.length;
+    finish(healthyResult);
+    expect(await Promise.all([first, second, third])).toEqual([
+      healthy,
+      healthy,
+      healthy,
+    ]);
+    expect(admittedCalls).toBe(1);
+    expect(first).toBe(second);
+    expect(second).toBe(third);
+    expect(action).toHaveBeenCalledExactlyOnceWith({ operation: "health" });
+  });
+
+  it("reads fresh health after success instead of retaining a completed snapshot", async () => {
+    const changed = {
+      ...healthy,
+      status: "unhealthy",
+      failClosed: true,
+    } as const;
+    const action = vi
+      .fn<PartnerAirportMapAction>()
+      .mockResolvedValueOnce(healthyResult)
+      .mockResolvedValueOnce({ ok: true, data: changed });
+    const getHealth = healthReader(action);
+    const first = getHealth();
+    expect(await first).toEqual(healthy);
+    const next = getHealth();
+    expect(next).not.toBe(first);
+    expect(await next).toEqual(changed);
+    expect(action).toHaveBeenCalledTimes(2);
+    expect(action.mock.calls).toEqual([
+      [{ operation: "health" }],
+      [{ operation: "health" }],
+    ]);
+  });
+
+  it.each(["action rejection", "reported unavailable"] as const)(
+    "clears a shared %s so the next health call can recover",
+    async (failure) => {
+      const upstream = new Error("SIM external health failure");
+      const action = vi.fn<PartnerAirportMapAction>();
+      if (failure === "action rejection")
+        action.mockRejectedValueOnce(upstream);
+      else
+        action.mockResolvedValueOnce({
+          ok: false,
+          errorCode: "SIM_HEALTH_UNAVAILABLE",
+        });
+      action.mockResolvedValue(healthyResult);
+      const getHealth = healthReader(action);
+      const first = getHealth();
+      const second = getHealth();
+      const admittedCalls = action.mock.calls.length;
+      const outcomes = await Promise.allSettled([first, second]);
+      expect(admittedCalls).toBe(1);
+      expect(outcomes.map((outcome) => outcome.status)).toEqual([
+        "rejected",
+        "rejected",
+      ]);
+      for (const outcome of outcomes) {
+        if (outcome.status !== "rejected")
+          throw new Error("A failed health request must not appear healthy");
+        if (failure === "action rejection")
+          expect(outcome.reason).toBe(upstream);
+        else
+          expect(outcome.reason).toMatchObject({
+            name: "AddressProviderUnavailableError",
+            reasonCode: "SIM_HEALTH_UNAVAILABLE",
+          });
+      }
+      const recovered = getHealth();
+      expect(recovered).not.toBe(first);
+      expect(await recovered).toEqual(healthy);
+      expect(action).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps separate provider instances independent even with the same action", async () => {
+    const action = vi
+      .fn<PartnerAirportMapAction>()
+      .mockResolvedValue(healthyResult);
+    const firstProvider = healthReader(action);
+    const secondProvider = healthReader(action);
+    const first = firstProvider();
+    const second = secondProvider();
+    expect(first).not.toBe(second);
+    expect(await Promise.all([first, second])).toEqual([healthy, healthy]);
+    expect(action).toHaveBeenCalledTimes(2);
+    expect(action.mock.calls).toEqual([
+      [{ operation: "health" }],
+      [{ operation: "health" }],
+    ]);
   });
 });

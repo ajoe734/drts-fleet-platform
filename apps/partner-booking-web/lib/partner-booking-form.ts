@@ -613,13 +613,30 @@ export function createPartnerAirportMapProvider(
       );
     return result.data as T;
   }
+  let pendingHealth: Promise<AddressProviderHealth> | null = null;
   return {
     search: (query) => read<GeoSearchResponse>({ operation: "search", query }),
     resolve: (command) =>
       read<GeoResolveResponse>({ operation: "resolve", command }),
     reverse: (command) =>
       read<GeoReverseResponse>({ operation: "reverse", command }),
-    getHealth: () => read<AddressProviderHealth>({ operation: "health" }),
+    getHealth: () => {
+      if (!pendingHealth) {
+        pendingHealth = read<AddressProviderHealth>({
+          operation: "health",
+        }).then(
+          (health) => {
+            pendingHealth = null;
+            return health;
+          },
+          (error: unknown) => {
+            pendingHealth = null;
+            throw error;
+          },
+        );
+      }
+      return pendingHealth;
+    },
     async evaluateServiceArea(command) {
       if (!command.dropoff || !direction)
         throw new AddressProviderUnavailableError(

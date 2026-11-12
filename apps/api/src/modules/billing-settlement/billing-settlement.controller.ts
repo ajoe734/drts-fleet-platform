@@ -278,16 +278,17 @@ export class BillingSettlementController {
   @Get("settlement/invoices")
   @RequireRealms("system", "platform", "tenant", "ops", "partner")
   @RequireScopes("billing:read")
-  listPlatformInvoices(
+  async listPlatformInvoices(
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     // `partner` is an allowed realm here and was never narrowed, so a partner
     // could list every tenant's invoices. Visibility is resolved once and
     // applies to whoever is asking.
+    const visibility = resolveTenantVisibility(identity);
     const items = filterToTenantVisibility(
-      this.billingSettlementService.listPlatformInvoices(),
-      resolveTenantVisibility(identity),
+      await this.billingSettlementService.listPlatformInvoicesFresh(visibility),
+      visibility,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }

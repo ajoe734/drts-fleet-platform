@@ -996,8 +996,64 @@ test("normal travel Partner booking is ordinarily assigned, genuinely Driver-com
         }
         return {
           invoiceId: read.invoiceId,
+          amount: read.amount,
           line: read.lines.find((line: any) => line.orderId === exactOrderId),
         };
+      },
+    );
+    await step(
+      "Ordinary Ops reads the completed order's recorded invoice and returns to the same dispatch detail",
+      async () => {
+        const opened = await ops.goto(
+          `${OPS}/billing?orderId=${encodeURIComponent(exactOrderId)}`,
+        );
+        expect(opened?.status()).toBe(200);
+        await expect(ops).toHaveURL(
+          (url) =>
+            url.pathname === "/billing" &&
+            url.searchParams.get("orderId") === exactOrderId,
+        );
+        const card = ops.locator(
+          `details[data-invoice-id="${invoice.invoiceId}"]`,
+        );
+        await expect(card).toHaveCount(1);
+        await expect(card).toBeVisible();
+        await expect(card).toHaveAttribute("open", "");
+        await expect(card.locator("summary")).toContainText(invoice.invoiceId);
+        await expect(
+          card.getByText(fixture.tenantId, { exact: true }),
+        ).toBeVisible();
+        const line = card.locator(`tbody tr[data-order-id="${exactOrderId}"]`);
+        await expect(line).toHaveCount(1);
+        await expect(line.locator("td").nth(0)).toHaveText(exactOrderId);
+        const money = (amount: { currency: string; amountMinor: number }) =>
+          `${amount.currency} ${new Intl.NumberFormat("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(amount.amountMinor / 100)}`;
+        await expect(line.locator("td").nth(2)).toHaveText(
+          money(invoice.line.amount),
+        );
+        await expect(card.locator("dl dd").last()).toHaveText(
+          money(invoice.amount),
+        );
+        const originalOrder = line.getByRole("link");
+        const dispatchPath = `/dispatch/${encodeURIComponent(exactOrderId)}`;
+        await expect(originalOrder).toHaveAttribute("href", dispatchPath);
+        const [returned] = await Promise.all([
+          ops.waitForResponse(
+            (response) =>
+              response.request().isNavigationRequest() &&
+              new URL(response.url()).origin === OPS &&
+              new URL(response.url()).pathname === dispatchPath,
+          ),
+          originalOrder.click(),
+        ]);
+        expect(returned.status()).toBe(200);
+        await expect(ops).toHaveURL((url) => url.pathname === dispatchPath);
+        await expect(
+          ops.locator(`[data-ops-order-id="${exactOrderId}"]`),
+        ).toBeVisible();
       },
     );
     await info.attach("normal-travel-completion-same-order-facts", {

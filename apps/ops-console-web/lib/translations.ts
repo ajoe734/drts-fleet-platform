@@ -1,6 +1,33 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "nav.billing": "Invoice review",
+  "billing.title": "Invoice review",
+  "billing.description":
+    "Find the recorded invoice lines for an order and return to its dispatch record.",
+  "billing.orderId": "Order ID",
+  "billing.search": "Find order invoices",
+  "billing.clear": "Show all invoices",
+  "billing.refresh": "Refresh invoices",
+  "billing.error":
+    "Invoices could not be read. Refresh this page or contact the responsible finance team.",
+  "billing.empty": "No invoices are recorded in your current view.",
+  "billing.noMatch": "No recorded invoice line matches this order ID.",
+  "billing.invoiceId": "Invoice ID",
+  "billing.tenantId": "Tenant ID",
+  "billing.period": "Billing period (UTC)",
+  "billing.status": "Recorded invoice status",
+  "billing.invoiceTotal": "Full invoice total",
+  "billing.lines": "Order lines",
+  "billing.lineAmount": "Recorded line amount",
+  "billing.descriptionColumn": "Description",
+  "billing.partnerEntry": "Partner entry",
+  "billing.originalOrder": "Open original order",
+  "billing.noLines": "This invoice has no recorded order lines.",
+  "billing.download": "Download recorded invoice",
+  "billing.boundary":
+    "Invoices are created by the tenant finance process. Invoice amounts do not establish passenger card capture, bank settlement, or a tax receipt.",
+
   "dispatch.detail.fulfillment.title": "Service trip information",
   "dispatch.detail.fulfillment.notProvided": "Not provided",
   "dispatch.detail.fulfillment.direction": "Transfer direction",
@@ -4678,6 +4705,32 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "nav.billing": "帳單核對",
+  "billing.title": "帳單核對",
+  "billing.description":
+    "依訂單查找已保存的合作帳單明細，並返回同一筆派遣紀錄。",
+  "billing.orderId": "訂單編號",
+  "billing.search": "查詢訂單帳單",
+  "billing.clear": "顯示全部帳單",
+  "billing.refresh": "更新帳單",
+  "billing.error": "帳單目前無法讀取，請更新頁面或洽負責的財務人員。",
+  "billing.empty": "目前可讀範圍尚無已保存帳單。",
+  "billing.noMatch": "沒有符合此訂單編號的已保存帳單明細。",
+  "billing.invoiceId": "帳單編號",
+  "billing.tenantId": "租戶編號",
+  "billing.period": "帳務期間（UTC）",
+  "billing.status": "已記錄帳單狀態",
+  "billing.invoiceTotal": "整張帳單總額",
+  "billing.lines": "訂單明細",
+  "billing.lineAmount": "已記錄明細金額",
+  "billing.descriptionColumn": "項目說明",
+  "billing.partnerEntry": "合作入口",
+  "billing.originalOrder": "查看原訂單",
+  "billing.noLines": "此帳單沒有已記錄訂單明細。",
+  "billing.download": "下載已記錄帳單",
+  "billing.boundary":
+    "帳單由原租戶財務流程產生；帳單金額不代表乘客信用卡扣款、銀行入帳或稅務憑證。",
+
   "dispatch.detail.fulfillment.title": "服務行程資訊",
   "dispatch.detail.fulfillment.notProvided": "未提供",
   "dispatch.detail.fulfillment.direction": "接送方向",
