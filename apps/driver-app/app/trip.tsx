@@ -443,6 +443,55 @@ function getPartnerFulfillmentRows(
   }
 }
 
+// Ordinary phone fulfillment uses the selected task's canonical requirements.
+// Never substitute the passenger profile for a missing selected contact.
+function getPhoneFulfillmentRows(
+  order: OwnedOrderRecord | null,
+  task: DriverTaskRecord | null,
+): { label: string; value: string }[] | null {
+  if (!order || order.orderSource !== "phone") return null;
+  const requirements =
+    task?.orderId === order.orderId
+      ? (task.bookingRequirements ?? order.bookingRequirements)
+      : order.bookingRequirements;
+  const copy = driverStrings.trip.fulfillment;
+  const text = (value: string | null | undefined) =>
+    typeof value === "string" && value.trim() ? value.trim() : copy.notProvided;
+  const count = (value: number | null | undefined) =>
+    value == null ? copy.notProvided : String(value);
+  const role = requirements?.driverContactRole;
+  const contact =
+    role === "booker"
+      ? requirements?.bookerContact
+      : role === "passenger"
+        ? requirements?.passengerContact
+        : undefined;
+  return [
+    {
+      label: copy.contactRole,
+      value:
+        role === "booker"
+          ? copy.bookerContact
+          : role === "passenger"
+            ? copy.passengerContact
+            : copy.notProvided,
+    },
+    { label: copy.contactName, value: text(contact?.name) },
+    { label: copy.contactPhone, value: text(contact?.phone) },
+    { label: copy.passengerCount, value: count(requirements?.passengerCount) },
+    { label: copy.luggageCount, value: count(requirements?.luggageCount) },
+    {
+      label: copy.luggageSize,
+      value:
+        requirements?.luggageSize === "standard"
+          ? copy.standardLuggage
+          : requirements?.luggageSize === "oversized"
+            ? copy.oversizedLuggage
+            : copy.notProvided,
+    },
+  ];
+}
+
 function formatPickupStopTime(order: OwnedOrderRecord | null): string {
   const start = formatShortTime(order?.reservationWindowStart);
   return start ? `預計 ${start}` : "時間待同步";
@@ -989,7 +1038,8 @@ export default function TripScreen() {
   }).waypointProgress;
   const fulfillmentRows = isForwardedTask(taskDetail)
     ? null
-    : getPartnerFulfillmentRows(completionOrder);
+    : (getPhoneFulfillmentRows(completionOrder, taskDetail) ??
+      getPartnerFulfillmentRows(completionOrder));
   const actualFareDraft =
     actualFareState.taskId === taskDetail?.taskId
       ? actualFareState.draft

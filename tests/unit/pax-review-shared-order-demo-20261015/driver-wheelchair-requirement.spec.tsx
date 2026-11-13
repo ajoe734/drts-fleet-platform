@@ -5,6 +5,7 @@ import type { ReactElement, ReactNode } from "react";
 import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import type {
+  BookingRequirements,
   DriverTaskRecord,
   OwnedOrderRecord,
   UnifiedDriverTaskView,
@@ -1145,6 +1146,194 @@ it("normal Trip ignores an old waypoint response after changing to another selec
   expect(text(trip(mounted))).not.toContain("停靠點 1");
   expect(ports.alerts).not.toHaveBeenCalled();
   expect(h.visits).toHaveLength(1);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+// Phone fixtures use the existing real SDK and mounted Trip. Only HTTP/native
+// ports are simulated; no PSTN, real phone call, server or PG proof is claimed.
+function phoneRequirements(
+  role: BookingRequirements["driverContactRole"],
+  selfBooking = false,
+): BookingRequirements {
+  const passengerContact = { name: "SIM 乘車人乙", phone: "0900000102" };
+  return {
+    passengerCount: selfBooking ? 1 : 3,
+    luggageCount: selfBooking ? 0 : 2,
+    luggageSize: "standard",
+    requiredCapabilities: [],
+    bookerContact: selfBooking
+      ? passengerContact
+      : { name: "SIM 代叫人甲", phone: "0900000101" },
+    passengerContact,
+    driverContactRole: role,
+    policyVersion: "SIM-phone-policy",
+    validationReference: "SIM-phone-validation",
+  };
+}
+
+function phoneHarness(requirements?: BookingRequirements) {
+  const h = createRequirementHarness(false);
+  h.owned.orderSource = "phone";
+  h.owned.callId = "SIM-phone-call";
+  if (requirements) {
+    h.record.bookingRequirements = requirements;
+    h.owned.bookingRequirements = requirements;
+    // The production interceptor sends snake_case; real SDK conversion must
+    // preserve nested canonical contacts and explicit zero luggage.
+    const wireRequirements = {
+      passenger_count: requirements.passengerCount,
+      luggage_count: requirements.luggageCount,
+      luggage_size: requirements.luggageSize,
+      required_capabilities: requirements.requiredCapabilities,
+      booker_contact: requirements.bookerContact,
+      passenger_contact: requirements.passengerContact,
+      driver_contact_role: requirements.driverContactRole,
+      policy_version: requirements.policyVersion,
+      validation_reference: requirements.validationReference,
+    };
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const reply = await originalFetch(input, init);
+        const url = new URL(
+          typeof input === "string" || input instanceof URL
+            ? String(input)
+            : input.url,
+        );
+        if (
+          url.pathname !== "/api/driver/tasks" &&
+          url.pathname !== `/api/driver/tasks/${h.record.taskId}/order`
+        )
+          return reply;
+        const envelope = await reply.json();
+        const records =
+          url.pathname === "/api/driver/tasks"
+            ? envelope.data.items
+            : [envelope.data];
+        for (const record of records) {
+          delete record.bookingRequirements;
+          record.booking_requirements = wireRequirements;
+        }
+        return response(envelope.data, reply.status);
+      },
+    );
+  }
+  return h;
+}
+
+async function phoneCard(mounted: Mounted) {
+  await waitForState(() =>
+    expect(
+      trip(mounted).findAll(
+        (node) =>
+          node.type === "View" &&
+          node.props.testID === "driver-partner-fulfillment",
+      ),
+    ).toHaveLength(1),
+  );
+  return one(
+    trip(mounted).findAll(
+      (node) =>
+        node.type === "View" &&
+        node.props.testID === "driver-partner-fulfillment",
+    ),
+    "same-task canonical fulfillment card",
+  );
+}
+
+it.each([
+  {
+    title: "self booking",
+    role: "booker" as const,
+    self: true,
+    name: "SIM 乘車人乙",
+    phone: "0900000102",
+    roleLabel: "叫車聯絡人",
+  },
+  {
+    title: "proxy booking contacting passenger",
+    role: "passenger" as const,
+    self: false,
+    name: "SIM 乘車人乙",
+    phone: "0900000102",
+    roleLabel: "乘車聯絡人",
+  },
+  {
+    title: "proxy booking contacting booker",
+    role: "booker" as const,
+    self: false,
+    name: "SIM 代叫人甲",
+    phone: "0900000101",
+    roleLabel: "叫車聯絡人",
+  },
+])(
+  "normal phone Trip displays canonical $title contact and load through SDK wire",
+  async ({ role, self, name, phone, roleLabel }) => {
+    const requirements = phoneRequirements(role, self);
+    const h = phoneHarness(requirements);
+    const mounted = await h.mount();
+    const content = text(await phoneCard(mounted));
+    expect(content).toContain(`接車聯絡角色 ${roleLabel}`);
+    expect(content).toContain(`接車聯絡人姓名 ${name}`);
+    expect(content).toContain(`接車聯絡電話 ${phone}`);
+    expect(content).toContain(`乘車人數 ${requirements.passengerCount}`);
+    expect(content).toContain(`行李件數 ${requirements.luggageCount}`);
+    expect(content).toContain("行李尺寸 標準");
+    if (!self) {
+      expect(content).not.toContain(
+        role === "booker" ? "0900000102" : "0900000101",
+      );
+      expect(content).not.toContain(
+        role === "booker" ? "SIM 乘車人乙" : "SIM 代叫人甲",
+      );
+    }
+    expect(content).not.toContain(h.owned.passenger.name);
+    expect(content).not.toContain(h.owned.passenger.phone);
+    expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("legacy phone Trip without canonical requirements does not invent a contact or load", async () => {
+  const h = phoneHarness();
+  h.owned.luggageCount = 4;
+  const mounted = await h.mount();
+  const content = text(await phoneCard(mounted));
+  for (const label of [
+    "接車聯絡角色",
+    "接車聯絡人姓名",
+    "接車聯絡電話",
+    "乘車人數",
+    "行李件數",
+    "行李尺寸",
+  ]) {
+    expect(content).toContain(`${label} 未提供`);
+  }
+  expect(content).not.toContain(h.owned.passenger.name);
+  expect(content).not.toContain(h.owned.passenger.phone);
+  expect(content).not.toContain("行李件數 4");
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("phone Trip does not replace a missing selected contact with another role or the passenger profile", async () => {
+  const requirements = phoneRequirements("passenger");
+  requirements.passengerContact = { name: "", phone: "" };
+  const h = phoneHarness(requirements);
+  const mounted = await h.mount();
+  const content = text(await phoneCard(mounted));
+  expect(content).toContain("接車聯絡角色 乘車聯絡人");
+  expect(content).toContain("接車聯絡人姓名 未提供");
+  expect(content).toContain("接車聯絡電話 未提供");
+  expect(content).toContain("乘車人數 3");
+  expect(content).toContain("行李件數 2");
+  expect(content).not.toContain(requirements.bookerContact.name);
+  expect(content).not.toContain(requirements.bookerContact.phone);
+  expect(content).not.toContain(h.owned.passenger.name);
+  expect(content).not.toContain(h.owned.passenger.phone);
   expect(h.completionRequests).toEqual([]);
   expect(h.unexpected).toEqual([]);
 });
