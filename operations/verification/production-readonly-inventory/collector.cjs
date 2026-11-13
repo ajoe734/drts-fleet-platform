@@ -112,7 +112,7 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "3134f8a446fae4354222496ffc80d938897f7667d6c459e806608ae0563deed8",
+      "df25090525fb6a8dc3994f2faa4da29aa9bad2f13be8e1a4eb7abb21a1590bda",
     ],
     [
       "run.cjs",
@@ -1372,14 +1372,14 @@ function serialize(report) {
     for (const [kind, count] of Object.entries({
       project: 1,
       sql: 1,
-      service: 11,
-      revision: 11,
+      service: TOPOLOGY.length,
+      revision: TOPOLOGY.length,
       job: 1,
       repository: 1,
       images: 1,
       versions: 19,
       account: 2,
-      policy: 11,
+      policy: TOPOLOGY.length,
       iap: 10,
     }))
       if (report.records.filter((r) => r.kind === kind).length < count)

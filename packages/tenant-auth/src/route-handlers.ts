@@ -7,6 +7,7 @@ import {
 } from "./constants";
 import {
   isSecureEnvironment,
+  resolveBrowserOrigin,
   sanitizeReturnPath,
   encodeStateEnvelope,
   decodeStateEnvelope,
@@ -66,9 +67,12 @@ async function getAuth(
       request.nextUrl.searchParams.get("return_url") ||
       "/";
     const tenantId = request.nextUrl.searchParams.get("tenant_id") || "";
-    const returnUrl = sanitizeReturnPath(rawReturnUrl, request.nextUrl.origin);
+    const returnUrl = sanitizeReturnPath(
+      rawReturnUrl,
+      resolveBrowserOrigin(request),
+    );
 
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/tenant/callback`;
+    const callbackUrl = `${resolveBrowserOrigin(request)}/api/auth/tenant/callback`;
     const backendUrl = new URL(`${resolveApiUrl()}/api/auth/tenant/login`);
     backendUrl.searchParams.set("redirect_uri", callbackUrl);
     if (tenantId) {
@@ -203,7 +207,7 @@ async function getAuth(
     const expectedState = statePayload.state || stateToken;
 
     if (state !== expectedState && state !== stateToken) {
-      const loginUrl = new URL(loginFailurePath, request.nextUrl.origin);
+      const loginUrl = new URL(loginFailurePath, resolveBrowserOrigin(request));
       loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
       loginUrl.searchParams.set(
         "message",
@@ -212,7 +216,7 @@ async function getAuth(
       return NextResponse.redirect(loginUrl);
     }
 
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/tenant/callback`;
+    const callbackUrl = `${resolveBrowserOrigin(request)}/api/auth/tenant/callback`;
 
     try {
       const exchangeRes = await tenantAuthFetch(
@@ -254,12 +258,12 @@ async function getAuth(
       const csrfToken = generateCsrfToken();
       const targetRedirect = sanitizeReturnPath(
         returnUrl,
-        request.nextUrl.origin,
+        resolveBrowserOrigin(request),
       );
       const isSecure = isSecureEnvironment(request);
 
       const response = NextResponse.redirect(
-        new URL(targetRedirect, request.nextUrl.origin),
+        new URL(targetRedirect, resolveBrowserOrigin(request)),
       );
 
       response.cookies.set(

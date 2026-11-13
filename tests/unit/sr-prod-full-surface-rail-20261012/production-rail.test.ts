@@ -688,11 +688,12 @@ describe("production complete topology and strict startup rail", () => {
     );
   });
   it("executes the real preflight, deploy and migration builders with all eleven ports and immutable source", () => {
-    const { plan } = candidate();
+    const { plan, vars } = candidate();
     expect(plan.services.map((s: any) => s.id)).toEqual(ids);
     expect(plan.services.map((s: any) => s.port)).toEqual([
       3001, 3002, 3003, 3007, 3004, 3008, 3014, 3010, 3013, 3009, 3012,
     ]);
+    expect(plan.services).toHaveLength(11);
     expect(plan.builds).toHaveLength(12);
     const commands: string[][] = [];
     const cloud = (args: string[]) => {
@@ -702,13 +703,13 @@ describe("production complete topology and strict startup rail", () => {
     deploy(plan, imagesFor(plan), cloud);
     const deployments = commands.filter((args) => args[1] === "deploy");
     expect(deployments).toHaveLength(11);
-    for (const args of deployments.filter(
-      (args) => args[2] !== "drts-prod-agency-portal-web",
-    )) {
-      expect(args).toContain("--no-allow-unauthenticated");
-      expect(args[args.indexOf("--ingress") + 1]).toBe(
-        "internal-and-cloud-load-balancing",
-      );
+    for (const args of deployments) {
+      if (args[2] !== "drts-prod-agency-portal-web") {
+        expect(args).toContain("--no-allow-unauthenticated");
+        expect(args[args.indexOf("--ingress") + 1]).toBe(
+          "internal-and-cloud-load-balancing",
+        );
+      }
       expect(args[args.indexOf("--image") + 1]).toMatch(
         /@sha256:[a-f0-9]{64}$/,
       );
@@ -732,6 +733,37 @@ describe("production complete topology and strict startup rail", () => {
     expect(
       plan.services.find((s: any) => s.id === "bank-console-web").secrets,
     ).toHaveProperty("BANK_SESSION_SECRET");
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    expect(agency.port).toBe(3012);
+    expect(agency.dockerfile).toBe("apps/agency-portal-web/Dockerfile");
+    expect(agency.env.DRTS_API_URL).toBe(plan.services[0].origin);
+    expect(agency.env.DRTS_API_AUTH_AUDIENCE).toBe(
+      plan.services[0].transportAudience,
+    );
+    expect(agency.secrets.BFF_STATE_SECRET).toBe(
+      "drts-prod-bff-state-secret:7",
+    );
+    expect(agency.probe).toEqual({
+      path: "/api/auth/session",
+      expect: {
+        "data.active": true,
+        "data.identity.realm": "agency",
+        "data.identity.actor_type": "agency_user",
+        "data.identity.agency_id": "agency-fixture",
+      },
+    });
+    expect(plan.services[0].env.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(
+      `${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    );
+    const agencyArgs = deployArgs(plan, agency, imagesFor(plan)[agency.id]);
+    expect(agencyArgs[agencyArgs.indexOf("--set-secrets") + 1]).toContain(
+      "BFF_STATE_SECRET=drts-prod-bff-state-secret:7",
+    );
+    expect(
+      deployArgs(plan, plan.services[0], imagesFor(plan).api).join(" "),
+    ).toContain(
+      `AGENCY_INVITATION_ACCEPT_URL_BASE=${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    );
     commands.length = 0;
     migrate(plan, imagesFor(plan), cloud);
     expect(commands.filter((args) => args[2] === "execute")).toHaveLength(1);
@@ -1370,7 +1402,7 @@ describe("Agency portal existing production release wiring", () => {
       id: "agency-portal-web",
       dockerfile: "apps/agency-portal-web/Dockerfile",
     });
-    expect(plan.services[0].env.AUTH_ALLOWED_ORIGINS.split(";")).toContain(
+    expect(plan.services[0].env.AUTH_ALLOWED_ORIGINS.split(",")).toContain(
       vars.PROD_AGENCY_PORTAL_ORIGIN,
     );
     expect(plan.services[0].env.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(

@@ -25,10 +25,15 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
 ]);
 
 const [, , childEntry, internalPortArg] = process.argv;
-// Only this existing consumer understands the private provenance. Other
-// control-plane applications must not receive an unknown header to relay.
-const fleetOriginConsumer =
-  childEntry === "apps/fleet-partner-portal-web/server.js";
+// Only these consumers understand the private provenance and keep it from
+// their API relays. Other control-plane applications must not receive an
+// unknown header to relay. The loopback child's request.url is 127.0.0.1, so
+// these portals build Google OIDC callbacks and same-origin checks from it.
+const ORIGIN_CONSUMER_ENTRIES = new Set([
+  "apps/fleet-partner-portal-web/server.js",
+  "apps/tenant-console-web/server.js",
+]);
+const originConsumer = ORIGIN_CONSUMER_ENTRIES.has(childEntry);
 
 if (!childEntry || !internalPortArg) {
   console.error(
@@ -224,8 +229,7 @@ async function forwardNextRequest(req, res, requestUrl) {
   const headers = copyRequestHeaders(req, targetUrl, {
     forwardAuthorization: true,
   });
-  if (fleetOriginConsumer)
-    headers.set(RUNTIME_ORIGIN_HEADER, requestUrl.origin);
+  if (originConsumer) headers.set(RUNTIME_ORIGIN_HEADER, requestUrl.origin);
   const body =
     method === "GET" || method === "HEAD"
       ? undefined
@@ -268,6 +272,9 @@ const child = spawn(process.execPath, [childEntry], {
     ...process.env,
     HOSTNAME: "127.0.0.1",
     PORT: String(internalPort),
+    // Tells shared auth code (@drts/tenant-auth, also run without this
+    // wrapper) that RUNTIME_ORIGIN_HEADER comes from here, never a caller.
+    DRTS_RUNTIME_ORIGIN_HEADER: originConsumer ? "1" : "0",
   },
   stdio: "inherit",
 });

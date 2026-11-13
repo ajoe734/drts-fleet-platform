@@ -1,3 +1,4 @@
+import type React from "react";
 import {
   NativePassengerSession,
   NativePassengerSessionChangedError,
@@ -86,6 +87,11 @@ export interface NativePassengerRuntimeOptions {
     | { status: "ready"; port: PassengerOAuthBrowserPort }
     | { status: "unavailable" };
   paymentFields: PassengerPaymentFieldsAvailability;
+  paymentFieldsView?: React.ReactNode;
+  renderPaymentFields?(props: {
+    client: PassengerPaymentClient;
+    onReady(fields: PassengerPaymentFieldsAvailability): void;
+  }): React.ReactNode;
   paymentBrowser: NativePaymentBrowserAvailability;
   bookingMap: NativeBookingMapAvailability;
   newRequestId(): string;

@@ -1,6 +1,7 @@
-import type {
-  AgencyDailyDispatchRecordView,
-  AgencyPage,
+import {
+  DEFAULT_PRODUCT_TIMEZONE,
+  type AgencyDailyDispatchRecordView,
+  type AgencyPage,
 } from "@drts/contracts";
 import { Card, DataTable, PageHeader, Td, Tr } from "@drts/ui-web";
 
@@ -25,7 +26,15 @@ export default async function DailyDispatchPage({
   searchParams: SearchParams;
 }) {
   const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
-  const today = new Date().toISOString().slice(0, 10);
+  const calendarParts = new Intl.DateTimeFormat("en", {
+    timeZone: DEFAULT_PRODUCT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const today = ["year", "month", "day"]
+    .map((type) => calendarParts.find((part) => part.type === type)?.value)
+    .join("-");
   const query = {
     serviceDateFrom: firstParam(params.serviceDateFrom) ?? today,
     serviceDateTo: firstParam(params.serviceDateTo) ?? today,
@@ -106,11 +115,7 @@ export default async function DailyDispatchPage({
                 ),
               },
               {
-                label: t(
-                  "reports.dailyDispatch.col.source",
-                  undefined,
-                  locale,
-                ),
+                label: t("reports.dailyDispatch.col.source", undefined, locale),
               },
               {
                 label: t(
@@ -148,11 +153,7 @@ export default async function DailyDispatchPage({
                 ),
               },
               {
-                label: t(
-                  "reports.dailyDispatch.col.driver",
-                  undefined,
-                  locale,
-                ),
+                label: t("reports.dailyDispatch.col.driver", undefined, locale),
               },
               {
                 label: t(

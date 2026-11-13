@@ -106,6 +106,30 @@ export function harness(port?: MaskedCallPort, enabled = true) {
               ? [{ record: structuredClone(order) }]
               : [],
         };
+      // The existing Trip caller now reads canonical tenant bookings. Keep
+      // actual Controller/Service/Repository query and pagination behavior;
+      // only this single-row external SQL result remains controlled.
+      if (
+        sql.includes("tenant_id = $1") &&
+        sql.includes("booking_id IS NOT NULL")
+      ) {
+        const visible =
+          order && order.bookingId && values[0] === order.tenantId
+            ? [order]
+            : [];
+        if (sql.includes("COUNT(*)::int AS total") && values.length === 1) {
+          return { rows: [{ total: visible.length }] };
+        }
+        if (sql.includes("LIMIT $2 OFFSET $3") && values.length === 3) {
+          const limit = Number(values[1]);
+          const offset = Number(values[2]);
+          return {
+            rows: visible.slice(offset, offset + limit).map((record) => ({
+              record: structuredClone(record),
+            })),
+          };
+        }
+      }
       throw new Error("Unexpected SQL in contact-only fixture");
     },
   } as never);

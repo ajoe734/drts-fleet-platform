@@ -372,6 +372,112 @@ describe("Agency auth BFF route handlers", () => {
     expect(cookies).toMatch(new RegExp(`${AGENCY_PROFILE_COOKIE_NAME}=;`));
   });
 
+  // Deploy — Dev 2026-11-13: on Cloud Run, Next standalone's request URL is its
+  // bind address, so the API refused "Redirect URI host https://0.0.0.0:3012".
+  it("uses the public Cloud Run host, not the bind address, for login, callback and logout", async () => {
+    const bind = "https://0.0.0.0:3012";
+    const host = "drts-dev-agency-portal-web-xyz.a.run.app";
+    const publicOrigin = `https://${host}`;
+    process.env.K_SERVICE = "drts-dev-agency-portal-web";
+    try {
+      const loginFetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            authorization_url: "https://accounts.google.com/o/oauth2/v2/auth",
+            state: "s9",
+            state_token: "state-token-9",
+          },
+        }),
+      );
+      global.fetch = loginFetch;
+      const login = await authGet(
+        new NextRequest(`${bind}/api/auth/agency/login`, { headers: { host } }),
+        authContext("agency", "login"),
+      );
+      expect(login.status).toBe(307);
+      expect(
+        new URL(String(loginFetch.mock.calls[0]?.[0])).searchParams.get(
+          "redirect_uri",
+        ),
+      ).toBe(`${publicOrigin}/api/auth/agency/callback`);
+
+      const callbackFetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            access_token: "agency-jwt",
+            agency: { agency_id: "agency_1", display_name: "測試機關" },
+            role_code: "agency_viewer",
+          },
+        }),
+      );
+      global.fetch = callbackFetch;
+      const envelope = encodeStateEnvelope({
+        stateToken: "state-token-9",
+        state: "s9",
+        returnUrl: "/trip-records",
+      });
+      const callback = await authGet(
+        new NextRequest(`${bind}/api/auth/agency/callback?code=c9&state=s9`, {
+          headers: {
+            host,
+            cookie: `${AGENCY_OIDC_STATE_COOKIE_NAME}=${envelope}`,
+          },
+        }),
+        authContext("agency", "callback"),
+      );
+      expect(callback.headers.get("location")).toBe(
+        `${publicOrigin}/trip-records`,
+      );
+      const exchange = JSON.parse(
+        String((callbackFetch.mock.calls[0]?.[1] as RequestInit).body),
+      );
+      expect(exchange.callbackUrl).toBe(
+        `${publicOrigin}/api/auth/agency/callback`,
+      );
+
+      global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ data: {} }));
+      const logout = (origin: string) =>
+        authPost(
+          new NextRequest(`${bind}/api/auth/logout`, {
+            method: "POST",
+            headers: {
+              host,
+              origin,
+              "x-csrf-token": "csrf-1",
+              cookie: `${AGENCY_SESSION_COOKIE_NAME}=agency-jwt; ${AGENCY_CSRF_COOKIE_NAME}=csrf-1`,
+            },
+          }),
+          authContext("logout"),
+        );
+      expect((await logout(publicOrigin)).status).toBe(200);
+      expect((await logout("https://foreign.example.test")).status).toBe(403);
+      // A direct Next server never trusts a caller's wrapper provenance.
+      const forgedFetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            authorization_url: "https://accounts.google.com/o/oauth2/v2/auth",
+            state: "s10",
+            state_token: "state-token-10",
+          },
+        }),
+      );
+      global.fetch = forgedFetch;
+      await authGet(
+        new NextRequest(`${bind}/api/auth/agency/login`, {
+          headers: { host, "x-drts-runtime-origin": "https://forged.test" },
+        }),
+        authContext("agency", "login"),
+      );
+      expect(
+        new URL(String(forgedFetch.mock.calls[0]?.[0])).searchParams.get(
+          "redirect_uri",
+        ),
+      ).toBe(`${publicOrigin}/api/auth/agency/callback`);
+    } finally {
+      delete process.env.K_SERVICE;
+    }
+  });
+
   it("the agency API proxy only forwards agency paths with the session bearer", async () => {
     const fetchMock = vi
       .fn()

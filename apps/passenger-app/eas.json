@@ -1,0 +1,48 @@
+{
+  "cli": {
+    "version": "21.4.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "node": "22.23.2",
+      "pnpm": "10.33.0",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_PASSENGER_MODE": "demo"
+      }
+    },
+    "preview-simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "configured-preview": {
+      "extends": "preview",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_PASSENGER_MODE": "configured",
+        "PASSENGER_IOS_APS_ENVIRONMENT": "production"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "environment": "production",
+      "node": "22.23.2",
+      "pnpm": "10.33.0",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_PASSENGER_MODE": "configured",
+        "PASSENGER_IOS_APS_ENVIRONMENT": "production"
+      }
+    }
+  }
+}
