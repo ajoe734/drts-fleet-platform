@@ -15012,15 +15012,50 @@ export class OwnedMobilityService
   }
 
   private bookingRequirementCandidateAllowed(
-    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
     preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): boolean {
-    if (!order.bookingRequirements && !order.serviceSelection) return true;
+    const travelDetails =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? order.partnerBookingDetails
+        : null;
+    const travelPassengers = travelDetails?.groupSize;
+    const travelLuggage =
+      order.businessDispatchSubtype === "travel_agency_transfer"
+        ? order.luggageCount
+        : null;
+    // Compare only this booking's declared load. Legacy absent demands stay
+    // absent; planned tour/vehicle metadata is not actual vehicle capacity.
+    const needsTravelLuggageCapacity =
+      travelLuggage != null && travelLuggage > 0;
+    const hasTravelLoad =
+      travelPassengers != null || needsTravelLuggageCapacity;
+    if (!order.bookingRequirements && !order.serviceSelection && !hasTravelLoad)
+      return true;
     const capability =
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       ) ?? null;
+    if (
+      hasTravelLoad &&
+      (!capability?.active ||
+        (travelPassengers != null &&
+          (!Number.isInteger(capability.seatCount) ||
+            capability.seatCount < travelPassengers)) ||
+        (needsTravelLuggageCapacity &&
+          (!Number.isInteger(capability.luggageCapacity) ||
+            capability.luggageCapacity < travelLuggage)))
+    )
+      return false;
     const vehicleForm = preparedVehicleForms
       ? (preparedVehicleForms.get(vehicleId) ?? null)
       : capability?.vehicleForm;
@@ -15037,7 +15072,14 @@ export class OwnedMobilityService
   }
 
   private assertBookingRequirementCandidate(
-    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
     preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ) {

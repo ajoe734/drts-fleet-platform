@@ -2269,12 +2269,36 @@ export async function runNormalPartnerJourney(
         "data-task-id",
         assigned.taskId,
       );
-      await expect(receipt.getByTestId("partner-actual-fare")).toHaveText(
-        new Intl.NumberFormat("en-US", {
-          style: "currency",
-          currency: normalisePlatformCurrency(task.fare.currency),
-        }).format(task.fare.amountMinor / 100),
-      );
+      if (
+        completed.booking.businessDispatchSubtype === "travel_agency_transfer"
+      ) {
+        await expect(
+          partner.getByTestId("partner-record-tour-fee"),
+        ).toContainText("Included in the tour fee");
+        await expect(
+          partner.getByRole("heading", { name: "Quotation", exact: true }),
+        ).toHaveCount(0);
+        await expect(receipt.getByTestId("partner-actual-fare")).toHaveCount(0);
+        await expect(
+          receipt.getByRole("heading", { name: "Completed trip", exact: true }),
+        ).toBeVisible();
+        await expect(receipt.getByTestId("partner-task-fare")).toContainText(
+          task.completedAt,
+        );
+        await expect(receipt.getByTestId("partner-task-fare")).toContainText(
+          String(task.actualDistanceKm),
+        );
+        await expect(receipt.getByTestId("partner-task-fare")).toContainText(
+          String(task.actualDurationSec),
+        );
+      } else {
+        await expect(receipt.getByTestId("partner-actual-fare")).toHaveText(
+          new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: normalisePlatformCurrency(task.fare.currency),
+          }).format(task.fare.amountMinor / 100),
+        );
+      }
       await expect(
         receipt.getByTestId("partner-passenger-payment"),
       ).toHaveAttribute("data-payment-availability", "not_recorded");
@@ -2297,6 +2321,52 @@ export async function runNormalPartnerJourney(
       exactOrderId,
     );
     expect(fresh.receipt.completion).toEqual(completed.receipt.completion);
+
+    if (
+      completed.booking.businessDispatchSubtype === "travel_agency_transfer" ||
+      completed.booking.businessDispatchSubtype ===
+        "insurance_replacement_vehicle"
+    ) {
+      await step(
+        "Keep the completed non-card order outside issuer settlement",
+        async () => {
+          // These reference-program facts were returned by ordinary booking, not
+          // added to the statement request. References alone are not card proof.
+          expect(completed.order.benefitReference).toBeTruthy();
+          expect(completed.order.issuerAuthorizationRef).toBeTruthy();
+          const period = new Date(task.completedAt).toISOString().slice(0, 7);
+          const statement = await fixture.fixture.call<any>(
+            `tenant/settlement-statements/${encodeURIComponent(period)}`,
+            fixture.tenantToken,
+            "GET",
+            undefined,
+            fixture.tenantId,
+          );
+          expect(statement.period).toBe(period);
+          expect(statement.direction).toBe("issuer_pays_drts");
+          expect(Array.isArray(statement.lines)).toBe(true);
+          expect(
+            statement.lines.map((line: { tripId: string }) => line.tripId),
+          ).not.toContain(exactOrderId);
+          // The normal list also reads repository periods. Other genuine card
+          // trips/months may exist; do not declare the whole tenant statement empty.
+          const periods = await fixture.fixture.call<any>(
+            "tenant/settlement-statements",
+            fixture.tenantToken,
+            "GET",
+            undefined,
+            fixture.tenantId,
+          );
+          expect(Array.isArray(periods.items)).toBe(true);
+          for (const listed of periods.items) {
+            expect(Array.isArray(listed.lines)).toBe(true);
+            expect(
+              listed.lines.map((line: { tripId: string }) => line.tripId),
+            ).not.toContain(exactOrderId);
+          }
+        },
+      );
+    }
 
     const invoice = await step(
       "Generate normal tenant invoice for the actual completed order",

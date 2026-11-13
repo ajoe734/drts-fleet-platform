@@ -94,6 +94,8 @@ export function PartnerBookingRecord({
   principal?: PartnerPrincipalReadback;
 }) {
   const label = (key: string) => t(key, undefined, locale);
+  const tourIncluded =
+    booking.businessDispatchSubtype === "travel_agency_transfer";
   const rows = [
     [label("book.create.bookingId"), booking.bookingId],
     [label("book.create.orderId"), order.orderId],
@@ -208,12 +210,13 @@ export function PartnerBookingRecord({
     };
   }
   const quotation = order.quotedFare;
-  const money = quotation
-    ? new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
-        style: "currency",
-        currency: normalisePlatformCurrency(quotation.currency),
-      }).format(quotation.amountMinor / 100)
-    : label("read.noQuotation");
+  const money =
+    !tourIncluded && quotation
+      ? new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+          style: "currency",
+          currency: normalisePlatformCurrency(quotation.currency),
+        }).format(quotation.amountMinor / 100)
+      : label("read.noQuotation");
   return (
     <section
       data-testid="partner-persisted-booking"
@@ -347,7 +350,7 @@ export function PartnerBookingRecord({
           </dl>
         </section>
       ) : null}
-      {booking.businessDispatchSubtype === "travel_agency_transfer" ? (
+      {tourIncluded ? (
         <aside
           data-testid="partner-record-tour-fee"
           aria-label={label("book.travel.fee.title")}
@@ -356,14 +359,18 @@ export function PartnerBookingRecord({
           <p>{label("book.travel.fee.scope")}</p>
         </aside>
       ) : null}
-      <h2>{label("read.quotation")}</h2>
-      <p>{money}</p>
-      {order.quotedFareSource ? (
-        <p>
-          {label("read.quotationSource")}: {order.quotedFareSource}
-        </p>
+      {!tourIncluded ? (
+        <>
+          <h2>{label("read.quotation")}</h2>
+          <p>{money}</p>
+          {order.quotedFareSource ? (
+            <p>
+              {label("read.quotationSource")}: {order.quotedFareSource}
+            </p>
+          ) : null}
+          <p>{label("read.notPaidReceipt")}</p>
+        </>
       ) : null}
-      <p>{label("read.notPaidReceipt")}</p>
       <nav aria-label={label("read.navigation")}>
         <Link
           href={partnerBookingReadHref(entrySlug, "confirmed", partnerUserRef, {

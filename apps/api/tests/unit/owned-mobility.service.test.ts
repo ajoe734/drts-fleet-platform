@@ -297,6 +297,7 @@ function createOwnedMobilityService(options?: {
     service,
     regulatoryRegistryService,
     auditNotificationService,
+    vehicleEligibilityService,
   };
 }
 
@@ -8873,6 +8874,7 @@ describe("normal airport booking uses the preview route authority", () => {
 describe("travel selected places reach the existing dispatch task", () => {
   it("rejects invalid places and projects the actual canonical pickup, repeated stops and dropoff in order", async () => {
     const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
       candidates: [
         {
           driverId: "drv-demo-004",
@@ -8980,9 +8982,369 @@ describe("travel selected places reach the existing dispatch task", () => {
   });
 });
 
+// Normal booking and public dispatch entry points use the real license-class
+// capability authority. Registry/runtime evaluation remain the existing unit ports;
+// these assertions do not claim physical vehicle, HTTP or PG verification.
+describe("travel booking load follows current dispatch vehicle capacity", () => {
+  function capacityFixture(
+    subtype:
+      | "travel_agency_transfer"
+      | "insurance_replacement_vehicle" = "travel_agency_transfer",
+    enableVehicleEligibility = true,
+  ) {
+    const fixture = createOwnedMobilityService({
+      enableVehicleEligibility,
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: subtype,
+        displayName: "SIM booking load",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+      runtimeEligibilityEvaluator: {
+        evaluate: vi.fn().mockResolvedValue({
+          serviceProductId: "SIM-travel-capacity",
+          serviceProductCode: subtype,
+          policyVersion: "SIM-existing-runtime-evaluation",
+          decision: "eligible",
+          hardReasonCodes: [],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "fresh",
+          evaluatedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    const controller = new OwnedMobilityController(
+      fixture.service,
+      {} as never,
+    );
+    const command = {
+      businessDispatchSubtype: subtype,
+      pickup: { address: "SIM load pickup", lat: 25.03, lng: 121.51 },
+      dropoff: { address: "SIM load dropoff", lat: 25.06, lng: 121.55 },
+      passenger: { name: "SIM load rider", phone: "0900000000" },
+      reservationWindowStart: defaultReservationWindowStart(),
+      reservationWindowEnd: defaultReservationWindowEnd(),
+      luggageCount: 4,
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-CAPACITY",
+        groupSize: 5,
+        itineraryLink: "https://travel.example.test/capacity",
+        rosterPassengers: ["SIM A", "SIM B", "SIM C", "SIM D", "SIM E"],
+        meetingPoint: "SIM load pickup",
+        // Tour declarations neither supply nor enlarge the actual candidate.
+        planGroupSize: 40,
+        planVehicleSeats: 50,
+      },
+    };
+    const setCapacity = (
+      patch: {
+        seatCount?: number;
+        luggageCapacity?: number;
+        conditionallyAllowed?: boolean;
+      } | null,
+    ) => {
+      const authority = fixture.vehicleEligibilityService;
+      if (!authority) throw new Error("Capacity authority is not enabled");
+      authority.updateMatrix(
+        {
+          items: authority
+            .listMatrix()
+            .flatMap((item) =>
+              item.licenseType !== "business_vehicle"
+                ? [item]
+                : patch === null
+                  ? []
+                  : [{ ...item, ...patch }],
+            ),
+        },
+        {
+          actorId: "SIM-capacity-operator",
+          actorType: "ops_user",
+          tenantId: null,
+        },
+      );
+    };
+    return { ...fixture, controller, command, setCapacity };
+  }
+
+  it.each([
+    {
+      name: "five riders and four bags",
+      riders: 5,
+      bags: 4,
+      capacity: 4,
+      allowed: true,
+    },
+    {
+      name: "too many riders",
+      riders: 6,
+      bags: 4,
+      capacity: 4,
+      allowed: false,
+    },
+    { name: "too many bags", riders: 5, bags: 5, capacity: 4, allowed: false },
+    {
+      name: "zero bags with zero luggage capacity",
+      riders: 5,
+      bags: 0,
+      capacity: 0,
+      allowed: true,
+    },
+  ])(
+    "$name is evaluated at initial dispatch and both candidate views",
+    async ({ riders, bags, capacity, allowed }) => {
+      const { service, controller, command, setCapacity } = capacityFixture();
+      setCapacity({ luggageCapacity: capacity, conditionallyAllowed: true });
+      const booking = await service.createTenantBooking(
+        {
+          ...command,
+          luggageCount: bags,
+          partnerBookingDetails: {
+            ...command.partnerBookingDetails,
+            groupSize: riders,
+            rosterPassengers: Array.from(
+              { length: riders },
+              (_, index) => `SIM capacity rider ${index + 1}`,
+            ),
+          },
+        },
+        "tenant-demo-001",
+      );
+      expect(service.getOrder(booking.orderId)).toMatchObject({
+        luggageCount: bags,
+        partnerBookingDetails: {
+          groupSize: riders,
+          planGroupSize: 40,
+          planVehicleSeats: 50,
+        },
+      });
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe(allowed ? "reserved" : "queued");
+      for (const includeIneligible of ["false", "true"]) {
+        const response = await controller.listDispatchCandidates(
+          dispatch.dispatchJobId,
+          includeIneligible,
+        );
+        expect(
+          response.data.items.map((candidate) => candidate.vehicleId),
+        ).toEqual(allowed ? ["veh-demo-004"] : []);
+      }
+      if (allowed) {
+        const assignment = await service.assignDispatch({
+          dispatchJobId: dispatch.dispatchJobId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        });
+        expect(await service.getDriverTask(assignment.taskId)).toMatchObject({
+          orderId: booking.orderId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        });
+      }
+    },
+  );
+
+  it.each([
+    { name: "seats", patch: { seatCount: 4 } },
+    { name: "luggage", patch: { luggageCapacity: 3 } },
+    { name: "removed canonical capability", patch: null },
+  ])(
+    "rechecks reduced $name capacity after candidate read before final assignment",
+    async ({ patch }) => {
+      const {
+        service,
+        controller,
+        command,
+        setCapacity,
+        vehicleEligibilityService,
+      } = capacityFixture();
+      const booking = await service.createTenantBooking(
+        command,
+        "tenant-demo-001",
+      );
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe("reserved");
+      expect(
+        (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+          .items,
+      ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+      setCapacity(patch);
+      if (patch === null) {
+        expect(
+          vehicleEligibilityService?.resolveRuntimeVehicleCapability(
+            "veh-demo-004",
+          ),
+        ).toBeNull();
+      }
+      // A caller can retain the earlier candidate, so assignment must re-read
+      // authority even before the next GET refresh has hidden that candidate.
+      await expect(async () =>
+        service.assignDispatch({
+          dispatchJobId: dispatch.dispatchJobId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        }),
+      ).rejects.toMatchObject({
+        code: "BOOKING_REQUIREMENTS_NOT_MET",
+        status: 409,
+      });
+      expect(service.getReportingSnapshot().dispatchAssignments).toEqual([]);
+      for (const includeIneligible of ["false", "true"]) {
+        expect(
+          (
+            await controller.listDispatchCandidates(
+              dispatch.dispatchJobId,
+              includeIneligible,
+            )
+          ).data.items,
+        ).toEqual([]);
+      }
+    },
+  );
+
+  it("does not treat a missing capacity authority as satisfying declared travel load", async () => {
+    const { service, controller, command } = capacityFixture(
+      "travel_agency_transfer",
+      false,
+    );
+    const booking = await service.createTenantBooking(
+      command,
+      "tenant-demo-001",
+    );
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("queued");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([]);
+    await expect(async () =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-004",
+        driverId: "drv-demo-004",
+      }),
+    ).rejects.toMatchObject({ code: "BOOKING_REQUIREMENTS_NOT_MET" });
+    expect(service.getReportingSnapshot().dispatchAssignments).toEqual([]);
+  });
+
+  it.each(["absent", "passengers only", "luggage only"] as const)(
+    "preserves legacy %s demand without inventing a missing count",
+    async (kind) => {
+      const { service, controller, command, setCapacity } = capacityFixture();
+      // Missing seats/demand are not inferred from any planned vehicle declaration.
+      setCapacity({
+        seatCount: kind === "luggage only" ? 1 : 5,
+        luggageCapacity: kind === "luggage only" ? 2 : 0,
+      });
+      const booking = await service.createTenantBooking(
+        {
+          ...command,
+          luggageCount: kind === "luggage only" ? 2 : undefined,
+          partnerBookingDetails:
+            kind === "passengers only"
+              ? command.partnerBookingDetails
+              : undefined,
+        },
+        "tenant-demo-001",
+      );
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe("reserved");
+      expect(
+        (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+          .items,
+      ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+      const assignment = await service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-004",
+        driverId: "drv-demo-004",
+      });
+      expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+        booking.orderId,
+      );
+    },
+  );
+
+  it("preserves a legacy zero-bag booking without requiring a new capacity authority", async () => {
+    const { service, controller, command } = capacityFixture(
+      "travel_agency_transfer",
+      false,
+    );
+    const booking = await service.createTenantBooking(
+      { ...command, partnerBookingDetails: undefined, luggageCount: 0 },
+      "tenant-demo-001",
+    );
+    expect(service.getOrder(booking.orderId).luggageCount).toBe(0);
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("reserved");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+      booking.orderId,
+    );
+  });
+
+  it("keeps non-travel luggage outside the new travel capacity comparison", async () => {
+    const { service, controller, command } = capacityFixture(
+      "insurance_replacement_vehicle",
+    );
+    const booking = await service.createTenantBooking(
+      { ...command, partnerBookingDetails: undefined, luggageCount: 99 },
+      "tenant-demo-001",
+    );
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("reserved");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+      booking.orderId,
+    );
+  });
+});
+
 describe("owned travel canonical waypoint visits", () => {
   async function journey() {
     const setup = createOwnedMobilityService({
+      enableVehicleEligibility: true,
       candidates: [
         {
           driverId: "drv-demo-004",
