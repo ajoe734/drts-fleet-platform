@@ -932,3 +932,219 @@ it("normal Driver Trip leaves legacy guide contact unavailable instead of using 
   expect(h.completionRequests).toEqual([]);
   expect(h.unexpected).toEqual([]);
 });
+
+function waypointTripHarness() {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  ports.heartbeatActive = true;
+  h.record.status = "on_trip";
+  h.record.startedAt = "2026-11-13T00:01:00.000Z";
+  h.owned.status = "on_trip";
+  const routeStops = [
+    { address: "SIM museum", lat: 25.03, lng: 121.53 },
+    { ...h.owned.pickup },
+  ];
+  h.owned.partnerBookingDetails = {
+    subtype: "travel_agency_transfer",
+    groupCode: "SIM-WAYPOINT-GROUP",
+    groupSize: 1,
+    itineraryLink: "https://travel.example.invalid/SIM-waypoints",
+    rosterPassengers: ["SIM traveller"],
+    meetingPoint: "SIM meeting",
+    routeStops,
+  };
+  h.record.waypoints = [h.owned.pickup, ...routeStops, h.owned.dropoff].map(
+    (place, sequence, places) => ({
+      sequence,
+      label:
+        sequence === 0
+          ? "上車點"
+          : sequence === places.length - 1
+            ? "下車點"
+            : "停靠點 " + sequence,
+      address: place.address,
+      lat: place.lat ?? null,
+      lng: place.lng ?? null,
+      arrivedAt: sequence === 0 ? "2026-11-13T00:00:00.000Z" : null,
+      departedAt: sequence === 0 ? h.record.startedAt : null,
+    }),
+  );
+  Object.assign(h.view, taskView(h.record), { allowedActions: ["complete"] });
+  const visits: Array<{
+    taskId: string;
+    endpoint: string;
+    body: Record<string, unknown>;
+  }> = [];
+  const controls = { failNext: false, wait: null as Promise<void> | null };
+  const delegate = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" || input instanceof URL
+          ? String(input)
+          : input.url,
+      );
+      const endpoint = url.pathname.split("/").at(-1)!;
+      if (
+        init?.method !== "POST" ||
+        !["arrived_pickup", "depart"].includes(endpoint)
+      )
+        return delegate(input, init);
+      const snapshot = structuredClone(h.record);
+      expect(url.pathname).toBe(
+        "/api/driver/tasks/" + snapshot.taskId + "/" + endpoint,
+      );
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      visits.push({ taskId: snapshot.taskId, endpoint, body });
+      if (controls.wait) await controls.wait;
+      if (controls.failNext) {
+        controls.failNext = false;
+        return response(
+          { message: "SIM canonical conflict; reload required" },
+          409,
+        );
+      }
+      const waypoint = snapshot.waypoints.find(
+        (item) => item.sequence === body.waypointSequence,
+      );
+      if (!waypoint) throw new Error("Unexpected waypoint HTTP SIM sequence");
+      if (endpoint === "arrived_pickup")
+        waypoint.arrivedAt = String(body.arrivedAt);
+      else waypoint.departedAt = String(body.departedAt);
+      if (h.record.taskId === snapshot.taskId)
+        Object.assign(h.record, snapshot);
+      return response(snapshot);
+    }),
+  );
+  return { ...h, visits, controls };
+}
+
+function waypointControl(mounted: Mounted, label: string) {
+  return one(
+    trip(mounted).findAll(
+      (node) => node.type === "NativeButton" && text(node) === label,
+    ),
+    label,
+  );
+}
+
+it("normal Trip sends ordered arrival/departure commands for every repeated-place waypoint before enabling completion", async () => {
+  const h = waypointTripHarness();
+  const mounted = await h.mount();
+  const expected = [
+    [1, "arrived_pickup", "抵達停靠點 1"],
+    [1, "depart", "離開停靠點 1"],
+    [2, "arrived_pickup", "抵達停靠點 2"],
+    [2, "depart", "離開停靠點 2"],
+    [3, "arrived_pickup", "抵達下車點"],
+  ] as const;
+  for (const [index, [sequence, endpoint, label]] of expected.entries()) {
+    await waitForState(() =>
+      expect(waypointControl(mounted, label).props.disabled).toBe(false),
+    );
+    expect(
+      trip(mounted).findAll(
+        (node) => node.type === "NativeButton" && text(node) === "完成行程",
+      ),
+    ).toHaveLength(0);
+    await press(waypointControl(mounted, label));
+    await waitForState(() => expect(h.visits).toHaveLength(index + 1));
+    expect(h.visits[index]).toMatchObject({
+      taskId: h.record.taskId,
+      endpoint,
+      body: { waypointSequence: sequence },
+    });
+    expect(
+      Number.isFinite(
+        Date.parse(
+          String(
+            h.visits[index]!.body[
+              endpoint === "depart" ? "departedAt" : "arrivedAt"
+            ],
+          ),
+        ),
+      ),
+    ).toBe(true);
+    expect(h.record.status).toBe("on_trip");
+    expect(h.completionRequests).toEqual([]);
+  }
+  await waitForState(() =>
+    expect(completeControl(mounted).props.disabled).toBe(false),
+  );
+  expect(h.record.waypoints[2]!.lat).toBe(h.record.waypoints[0]!.lat);
+  expect(h.record.waypoints[2]!.arrivedAt).not.toBeNull();
+  expect(h.record.waypoints[3]!.departedAt).toBeNull();
+  await press(completeControl(mounted));
+  await waitForState(() => expect(h.completionRequests).toHaveLength(1));
+  expect(h.record.status).toBe("completed");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip reloads canonical waypoint state after a rejected visit without optimistic advancement", async () => {
+  const h = waypointTripHarness();
+  h.controls.failNext = true;
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false),
+  );
+  const readsBefore = h.paths.filter(
+    (path) => path === "/api/driver/tasks",
+  ).length;
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() =>
+    expect(
+      h.paths.filter((path) => path === "/api/driver/tasks").length,
+    ).toBeGreaterThan(readsBefore),
+  );
+  await waitForState(() =>
+    expect(ports.alerts).toHaveBeenCalledWith("錯誤", expect.any(String)),
+  );
+  expect(h.record.waypoints[1]!.arrivedAt).toBeNull();
+  expect(h.record.waypoints[2]!.arrivedAt).toBeNull();
+  expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false);
+  expect(h.completionRequests).toEqual([]);
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() =>
+    expect(waypointControl(mounted, "離開停靠點 1").props.disabled).toBe(false),
+  );
+  expect(h.visits.map((visit) => visit.body.waypointSequence)).toEqual([1, 1]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip ignores an old waypoint response after changing to another selected task", async () => {
+  const h = waypointTripHarness();
+  let release!: () => void;
+  h.controls.wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false),
+  );
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() => expect(h.visits).toHaveLength(1));
+  const next = ownedTask("task-B", "pending_acceptance");
+  Object.assign(h.record, next);
+  Object.assign(h.view, taskView(next));
+  Object.assign(h.owned, order(next), { partnerBookingDetails: undefined });
+  ports.selectedTaskId = next.taskId;
+  await renderer.act(async () => ports.navigate?.("trip"));
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("task-B · order-task-B"),
+  );
+  ports.alerts.mockClear();
+  await renderer.act(async () => {
+    release();
+    await Promise.resolve();
+  });
+  await waitForState(() =>
+    expect(waypointControl(mounted, "接受任務").props.disabled).toBe(false),
+  );
+  expect(h.record.taskId).toBe("task-B");
+  expect(h.record.waypoints).toEqual([]);
+  expect(text(trip(mounted))).not.toContain("停靠點 1");
+  expect(ports.alerts).not.toHaveBeenCalled();
+  expect(h.visits).toHaveLength(1);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});

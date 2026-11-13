@@ -17,6 +17,7 @@ import {
   normalisePlatformCurrency,
   type DriverLocationHeartbeatAck,
   type DriverLocationHeartbeatEnvelope,
+  type DriverTaskRecord,
   type OwnedOrderRecord,
   type PartnerBootstrapSession,
   type PartnerBookingDetails,
@@ -1210,6 +1211,10 @@ export async function runNormalPartnerJourney(
         return result as { taskId: string; assignmentId: string };
       },
     );
+    const observedWaypointVisits = new Map<
+      number,
+      { arrivedAt: string | null; departedAt: string | null }
+    >();
     // Observe the registered device's normal producer. This observer never sends
     // heartbeats, changes its clock, pauses the SIM track or writes tracking rows.
     const observedGps = new Map<
@@ -1556,6 +1561,36 @@ export async function runNormalPartnerJourney(
           driver.getByRole("button", { name: label, exact: true }).click(),
         ]);
         expect(response.status()).toBe(201);
+        if (
+          details?.subtype === "travel_agency_transfer" &&
+          details.routeStops?.length
+        ) {
+          const request = response.request().postDataJSON();
+          expect(request.waypointSequence).toBeUndefined();
+          const changed = camel(await response.json()).data as DriverTaskRecord;
+          const pickup = changed.waypoints.find(
+            (waypoint) => waypoint.sequence === 0,
+          );
+          if (!pickup) throw new Error("Expected canonical pickup waypoint");
+          if (action === "depart") {
+            expect(pickup.arrivedAt).toBeNull();
+            expect(pickup.departedAt).toBeNull();
+          } else {
+            if (action === "arrived_pickup") {
+              expect(pickup.arrivedAt).toBe(request.arrivedAt);
+              expect(pickup.departedAt).toBeNull();
+            } else {
+              expect(pickup.arrivedAt).toBe(
+                observedWaypointVisits.get(0)?.arrivedAt,
+              );
+              expect(pickup.departedAt).toBe(request.startedAt);
+            }
+            observedWaypointVisits.set(0, {
+              arrivedAt: pickup.arrivedAt,
+              departedAt: pickup.departedAt,
+            });
+          }
+        }
       });
       await assertPartnerProgress(
         action === "depart"
@@ -1865,6 +1900,150 @@ export async function runNormalPartnerJourney(
         }
       },
     );
+    if (
+      details?.subtype === "travel_agency_transfer" &&
+      details.routeStops?.length
+    ) {
+      const visitFacts: Array<Record<string, unknown>> = [];
+      const places = [
+        before.order.pickup,
+        ...details.routeStops,
+        before.order.dropoff,
+      ];
+      const readWaypointTask = async () => {
+        const result = await fixture.fixture.db.query(
+          `SELECT record FROM ops.phase1_driver_tasks WHERE task_id=$1 AND order_id=$2 AND assignment_id=$3`,
+          [assigned.taskId, exactOrderId, assigned.assignmentId],
+        );
+        expect(result.rows).toHaveLength(1);
+        const record = result.rows[0]!.record as DriverTaskRecord;
+        expect(record).toMatchObject({
+          taskId: assigned.taskId,
+          orderId: exactOrderId,
+          assignmentId: assigned.assignmentId,
+          driverId: supply.driverId,
+          vehicleId: supply.vehicleId,
+          status: "on_trip",
+        });
+        return record;
+      };
+      const initial = await readWaypointTask();
+      expect(initial.waypoints.map(({ sequence }) => sequence)).toEqual(
+        places.map((_, sequence) => sequence),
+      );
+      expect(initial.waypoints[0]).toMatchObject(
+        observedWaypointVisits.get(0)!,
+      );
+      for (const waypoint of initial.waypoints.slice(1)) {
+        expect(waypoint.arrivedAt).toBeNull();
+        expect(waypoint.departedAt).toBeNull();
+      }
+      // The second selected stop intentionally revisits pickup coordinates.
+      // Sequence, not address/coordinate deduplication, identifies each visit.
+      expect(places[2]).toMatchObject({
+        lat: places[0]!.lat,
+        lng: places[0]!.lng,
+      });
+      for (let sequence = 1; sequence < places.length; sequence += 1) {
+        const last = sequence === places.length - 1;
+        const stopLabel = last ? "下車點" : `停靠點 ${sequence}`;
+        for (const phase of (last
+          ? ["arrived"]
+          : ["arrived", "depart"]) as Array<"arrived" | "depart">) {
+          await step(
+            `Normal Driver ${phase} canonical waypoint ${sequence}`,
+            async () => {
+              const pgBefore = await readWaypointTask();
+              await expect(
+                driver.getByRole("button", { name: "完成行程", exact: true }),
+              ).toHaveCount(0);
+              const endpoint =
+                phase === "arrived" ? "arrived_pickup" : "depart";
+              const [response] = await Promise.all([
+                driver.waitForResponse(
+                  (item) =>
+                    new URL(item.url()).pathname.endsWith(
+                      `/driver/tasks/${assigned.taskId}/${endpoint}`,
+                    ) && item.request().method() === "POST",
+                ),
+                driver
+                  .getByRole("button", {
+                    name: (phase === "arrived" ? "抵達" : "離開") + stopLabel,
+                    exact: true,
+                  })
+                  .click(),
+              ]);
+              expect(response.status()).toBe(201);
+              const request = response.request().postDataJSON();
+              expect(request.waypointSequence).toBe(sequence);
+              const timestamp =
+                phase === "arrived" ? request.arrivedAt : request.departedAt;
+              expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+              expect(Number.isFinite(Date.parse(timestamp))).toBe(true);
+              const reply = camel(await response.json())
+                .data as DriverTaskRecord;
+              expect(reply).toMatchObject({
+                taskId: assigned.taskId,
+                orderId: exactOrderId,
+                assignmentId: assigned.assignmentId,
+                driverId: supply.driverId,
+                vehicleId: supply.vehicleId,
+                status: "on_trip",
+              });
+              const expected = pgBefore.waypoints.map((waypoint) =>
+                waypoint.sequence === sequence
+                  ? {
+                      ...waypoint,
+                      [phase === "arrived" ? "arrivedAt" : "departedAt"]:
+                        timestamp,
+                    }
+                  : waypoint,
+              );
+              expect(reply.waypoints).toEqual(expected);
+              const pgAfter = await readWaypointTask();
+              expect(pgAfter.waypoints).toEqual(reply.waypoints);
+              const visited = pgAfter.waypoints[sequence]!;
+              observedWaypointVisits.set(sequence, {
+                arrivedAt: visited.arrivedAt,
+                departedAt: visited.departedAt,
+              });
+              visitFacts.push({
+                sequence,
+                phase,
+                requestTimestamp: timestamp,
+                httpStatus: response.status(),
+                pgBefore: pgBefore.waypoints,
+                pgAfter: pgAfter.waypoints,
+              });
+            },
+          );
+        }
+      }
+      expect(observedWaypointVisits.size).toBe(places.length);
+      expect(
+        observedWaypointVisits.get(places.length - 1)?.departedAt,
+      ).toBeNull();
+      await info.attach(
+        "normal-Driver-canonical-waypoint-visit-commands-and-PG-readback",
+        {
+          contentType: "application/json",
+          body: JSON.stringify(
+            {
+              orderId: exactOrderId,
+              taskId: assigned.taskId,
+              assignmentId: assigned.assignmentId,
+              driverId: supply.driverId,
+              vehicleId: supply.vehicleId,
+              external:
+                "normal hosted Driver with explicit SIM places/track; not a physical arrival claim",
+              visits: visitFacts,
+            },
+            null,
+            2,
+          ),
+        },
+      );
+    }
     await step(
       "Use actual tracked duration and normal required proof upload",
       async () => {
@@ -1971,10 +2150,22 @@ export async function runNormalPartnerJourney(
           address: place.address,
           lat: place.lat,
           lng: place.lng,
-          arrivedAt: null,
-          departedAt: null,
+          arrivedAt: observedWaypointVisits.get(sequence)?.arrivedAt ?? null,
+          departedAt: observedWaypointVisits.get(sequence)?.departedAt ?? null,
         })),
       );
+      if (details.routeStops?.length) {
+        expect(observedWaypointVisits.size).toBe(places.length);
+        for (const waypoint of task.waypoints as DriverTaskRecord["waypoints"]) {
+          expect(Number.isFinite(Date.parse(waypoint.arrivedAt!))).toBe(true);
+          if (waypoint.sequence === places.length - 1)
+            expect(waypoint.departedAt).toBeNull();
+          else
+            expect(Date.parse(waypoint.departedAt!)).toBeGreaterThanOrEqual(
+              Date.parse(waypoint.arrivedAt!),
+            );
+        }
+      }
     }
     if (details) {
       expect(row.order_record).toMatchObject({

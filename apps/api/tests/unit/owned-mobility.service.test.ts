@@ -8979,3 +8979,370 @@ describe("travel selected places reach the existing dispatch task", () => {
     expect(task.sourcePlatform).toBeNull();
   });
 });
+
+describe("owned travel canonical waypoint visits", () => {
+  async function journey() {
+    const setup = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "travel_agency_transfer",
+        displayName: "SIM visits",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+    });
+    const stop = { address: "SIM repeated stop", lat: 25.04, lng: 121.51 };
+    const booking = await setup.service.createTenantBooking(
+      {
+        businessDispatchSubtype: "travel_agency_transfer",
+        pickup: { address: "SIM pickup", lat: 25.01, lng: 121.5 },
+        dropoff: { address: "SIM dropoff", lat: 25.06, lng: 121.55 },
+        passenger: { name: "SIM Rider", phone: "0900000000" },
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
+        partnerBookingDetails: {
+          subtype: "travel_agency_transfer",
+          groupCode: "SIM-VISITS",
+          groupSize: 1,
+          itineraryLink: "https://travel.example.test/visits",
+          rosterPassengers: ["SIM Rider"],
+          meetingPoint: "SIM pickup",
+          routeStops: [stop, { ...stop }],
+        },
+      },
+      "tenant-demo-001",
+    );
+    const dispatched = await setup.service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = await setup.service.assignDispatch({
+      dispatchJobId: dispatched.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    const taskId = assignment.taskId;
+    await setup.service.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-29T12:00:00.000Z",
+    });
+    await setup.service.departDriverTask(taskId, {
+      departedAt: "2026-04-29T12:01:00.000Z",
+    });
+    await setup.service.arrivedPickup(taskId, {
+      arrivedAt: "2026-04-29T12:02:00.000Z",
+    });
+    await setup.service.startDriverTask(taskId, {
+      startedAt: "2026-04-29T12:03:00.000Z",
+    });
+    return { ...setup, booking, assignment, taskId };
+  }
+  const arrive = (sequence: number, minute: number) => ({
+    waypointSequence: sequence,
+    arrivedAt: `2026-04-29T12:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+  const leave = (sequence: number, minute: number) => ({
+    waypointSequence: sequence,
+    departedAt: `2026-04-29T12:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+
+  it("records each repeated stop independently, preserves phase times on retries, and arrives at the destination before real completion", async () => {
+    const { service, taskId, booking } = await journey();
+    expect(service.getDriverTask(taskId).waypoints[0]).toMatchObject({
+      arrivedAt: "2026-04-29T12:02:00.000Z",
+      departedAt: "2026-04-29T12:03:00.000Z",
+    });
+    for (const sequence of [1, 2]) {
+      const arrival = arrive(sequence, 4 + (sequence - 1) * 2);
+      const departure = leave(sequence, 5 + (sequence - 1) * 2);
+      await service.arrivedPickup(taskId, arrival);
+      await service.arrivedPickup(taskId, arrive(sequence, 40));
+      expect(service.getDriverTask(taskId).waypoints[sequence]?.arrivedAt).toBe(
+        arrival.arrivedAt,
+      );
+      await service.departDriverTask(taskId, departure);
+      await service.departDriverTask(taskId, leave(sequence, 41));
+      expect(
+        service.getDriverTask(taskId).waypoints[sequence]?.departedAt,
+      ).toBe(departure.departedAt);
+      expect(service.getDriverTask(taskId).status).toBe("on_trip");
+    }
+    await service.arrivedPickup(taskId, arrive(3, 8));
+    const completed = await service.completeDriverTask(
+      taskId,
+      {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      },
+      "SIM-visit-complete",
+    );
+    expect(completed.status).toBe("completed");
+    expect(completed.waypoints[3]).toMatchObject({
+      arrivedAt: "2026-04-29T12:08:00.000Z",
+      departedAt: null,
+    });
+    expect(service.getOrder(booking.orderId).status).toBe("completed");
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((x) => x.eventType === "driver.waypoint_arrived"),
+    ).toHaveLength(3);
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((x) => x.eventType === "driver.waypoint_departed"),
+    ).toHaveLength(2);
+  });
+
+  it("rejects skipping, invalid indices, leaving before arrival and false completion without changing any canonical stop", async () => {
+    const { service, taskId } = await journey();
+    const before = structuredClone(service.getDriverTask(taskId));
+    for (const sequence of [-1, 0, 1.5, 2, 4, Number.NaN])
+      await expect(
+        service.arrivedPickup(taskId, arrive(sequence, 4)),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(1, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(3, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.completeDriverTask(taskId, {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      }),
+    ).rejects.toMatchObject({ code: "TRAVEL_WAYPOINTS_INCOMPLETE" });
+    expect(service.getDriverTask(taskId)).toEqual(before);
+  });
+
+  it("rejects invalid or backwards timestamps and keeps the same reported arrival after concurrent retries", async () => {
+    const { service, taskId } = await journey();
+    await expect(
+      service.arrivedPickup(taskId, {
+        waypointSequence: 1,
+        arrivedAt: "invalid",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.arrivedPickup(taskId, arrive(1, 2)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await Promise.all([
+      service.arrivedPickup(taskId, arrive(1, 4)),
+      service.arrivedPickup(taskId, arrive(1, 5)),
+    ]);
+    expect(service.getDriverTask(taskId).waypoints[1]?.arrivedAt).toBe(
+      arrive(1, 4).arrivedAt,
+    );
+    await expect(
+      service.departDriverTask(taskId, leave(1, 3)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(service.getDriverTask(taskId).waypoints[1]?.departedAt).toBeNull();
+  });
+
+  it("rejects local visit mutation for forwarded routes and preserves their source timestamps", async () => {
+    const { service, taskId } = await journey();
+    const task = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    task.sourcePlatform = "SIM-source-platform";
+    const before = structuredClone(task.waypoints);
+    await expect(
+      service.arrivedPickup(taskId, arrive(1, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(1, 5)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(service.getDriverTask(taskId).waypoints).toEqual(before);
+  });
+
+  async function databaseJourney() {
+    const setup = await journey();
+    const snapshot = setup.service.getReportingSnapshot();
+    let durable = structuredClone({
+      order: setup.service.getOrder(setup.booking.orderId),
+      task: setup.service.getDriverTask(setup.taskId),
+      assignment: snapshot.dispatchAssignments.find(
+        (x) => x.taskId === setup.taskId,
+      )!,
+      dispatchJob: snapshot.dispatchJobs.find(
+        (x) =>
+          x.dispatchJobId ===
+          setup.service.getDriverTask(setup.taskId).dispatchJobId,
+      )!,
+    });
+    const state = { failCommit: false, traces: [] as any[] };
+    const repository = {
+      isEnabled: () => true,
+      withTransaction: vi.fn(async (work: (tx: any) => Promise<any>) => {
+        const tx = { bundle: structuredClone(durable), traces: [] as any[] };
+        const result = await work(tx);
+        if (state.failCommit) throw new Error("SIM commit rejected");
+        durable = tx.bundle;
+        state.traces.push(...tx.traces);
+        return result;
+      }),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async (tx: any) =>
+        structuredClone(tx.bundle),
+      ),
+      persistOrderWorkflow: vi.fn(async (tx: any, changes: any) => {
+        if (changes.orders?.[0])
+          tx.bundle.order = structuredClone(changes.orders[0]);
+        if (changes.driverTasks?.[0])
+          tx.bundle.task = structuredClone(changes.driverTasks[0]);
+        tx.traces.push(...structuredClone(changes.dispatchTraceLogs ?? []));
+      }),
+      loadOrderActionContext: vi.fn(async () => ({
+        orders: [structuredClone(durable.order)],
+        driverTasks: [structuredClone(durable.task)],
+        dispatchAssignments: [structuredClone(durable.assignment)],
+        dispatchJobs: [structuredClone(durable.dispatchJob)],
+        dispatchTraceLogs: [],
+        dispatchAttempts: [],
+        passengerDisclosureSnapshots: [],
+      })),
+      reportPersistenceFailure: vi.fn(),
+    };
+    (setup.service as any).ownedMobilityRepository = repository;
+    return { ...setup, repository, state, durable: () => durable };
+  }
+
+  it("uses the locked durable visit for stale-cache retries and never repeats the trace", async () => {
+    const { service, taskId, repository, state, durable } =
+      await databaseJourney();
+    await service.arrivedPickup(taskId, arrive(1, 4));
+    const warm = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    warm.waypoints[1].arrivedAt = null;
+    const replay = await service.arrivedPickup(taskId, arrive(1, 5));
+    expect(replay.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
+    expect(durable().task.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
+    expect(repository.persistOrderWorkflow).toHaveBeenCalledTimes(1);
+    expect(state.traces).toHaveLength(1);
+  });
+
+  it("does not mutate warm route, order, trace or audit when the visit transaction rolls back", async () => {
+    const {
+      service,
+      taskId,
+      booking,
+      repository,
+      state,
+      durable,
+      auditNotificationService,
+    } = await databaseJourney();
+    const before = structuredClone({
+      task: service.getDriverTask(taskId),
+      order: service.getOrder(booking.orderId),
+      traces: service.listDispatchTrace(booking.orderId),
+    });
+    const auditCount =
+      auditNotificationService.recordAuditLog.mock.calls.length;
+    state.failCommit = true;
+    await expect(service.arrivedPickup(taskId, arrive(1, 4))).rejects.toThrow(
+      "SIM commit rejected",
+    );
+    expect(repository.persistOrderWorkflow).toHaveBeenCalledTimes(1);
+    expect({
+      task: service.getDriverTask(taskId),
+      order: service.getOrder(booking.orderId),
+      traces: service.listDispatchTrace(booking.orderId),
+    }).toEqual(before);
+    expect(durable().task.waypoints[1]?.arrivedAt).toBeNull();
+    expect(state.traces).toHaveLength(0);
+    expect(auditNotificationService.recordAuditLog.mock.calls.length).toBe(
+      auditCount,
+    );
+  });
+
+  it("rejects corrupt canonical places or assignment/order links within the locked bundle", async () => {
+    const { service, taskId, repository, durable } = await databaseJourney();
+    const original = structuredClone(durable());
+    for (const corrupt of [
+      () => {
+        durable().task.waypoints[1]!.address = "SIM different stop";
+      },
+      () => {
+        durable().task.waypoints[1]!.lat = 90;
+      },
+      () => {
+        durable().assignment.orderId = "SIM-other-order";
+      },
+      () => {
+        durable().assignment.driverId = "SIM-other-driver";
+      },
+      () => {
+        durable().dispatchJob.orderId = "SIM-other-order";
+      },
+    ]) {
+      Object.assign(durable(), structuredClone(original));
+      corrupt();
+      await expect(
+        service.arrivedPickup(taskId, arrive(1, 4)),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    }
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    expect(service.getDriverTask(taskId).waypoints[1]?.arrivedAt).toBeNull();
+  });
+
+  it("guards database completion before proof or settlement writes when required stops are missing", async () => {
+    const { service, taskId, repository } = await databaseJourney();
+    await expect(
+      service.completeDriverTask(taskId, {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      }),
+    ).rejects.toMatchObject({ code: "TRAVEL_WAYPOINTS_INCOMPLETE" });
+    expect(
+      repository.loadDriverTaskCompletionBundleForUpdate,
+    ).toHaveBeenCalledTimes(1);
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    expect(service.getDriverTask(taskId).status).toBe("on_trip");
+  });
+
+  it("keeps the normal controller refresh and driver ownership guard before local waypoint commands", async () => {
+    const { service, taskId, repository, durable } = await databaseJourney();
+    const controller = new OwnedMobilityController(service, {} as never);
+    const wrong = {
+      realm: "driver",
+      actorType: "driver_user",
+      actorId: "SIM-other-driver",
+    } as BootstrapRequestIdentity;
+    await expect(
+      controller.arrivePickup(taskId, arrive(1, 4), wrong),
+    ).rejects.toMatchObject({ code: "DRIVER_IDENTITY_MISMATCH" });
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    const warm = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    warm.waypoints = [];
+    const warmOrder = (service as any).orders.find(
+      (x: any) => x.orderId === durable().order.orderId,
+    );
+    warmOrder.partnerBookingDetails = undefined;
+    const actor = {
+      realm: "driver",
+      actorType: "driver_user",
+      actorId: durable().task.driverId,
+    } as BootstrapRequestIdentity;
+    const result = await controller.arrivePickup(taskId, arrive(1, 4), actor);
+    expect(repository.loadOrderActionContext).toHaveBeenCalledWith({ taskId });
+    expect(result.data.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
+  });
+});
