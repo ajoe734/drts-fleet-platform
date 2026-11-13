@@ -122,11 +122,6 @@
           "control": "[data-drt-operation='enterprise-create']",
           "before": [
             {
-              "kind": "fill",
-              "control": "#enterprise-booking-cost-center",
-              "value": "CC-PRD-07"
-            },
-            {
               "kind": "click",
               "control": "[data-drt-intent='enterprise-review']"
             }
@@ -150,11 +145,6 @@
             {
               "kind": "navigate",
               "path": "/bookings/new?bookingId={resultId}"
-            },
-            {
-              "kind": "fill",
-              "control": "#enterprise-booking-cost-center",
-              "value": "CC-PRD-07"
             },
             {
               "kind": "click",

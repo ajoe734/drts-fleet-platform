@@ -91,6 +91,10 @@ export class EnterpriseDispatchTenantClient {
     return { passengers, addresses, costCenters };
   }
 
+  async listActiveCostCenters(): Promise<TenantCostCenterRecord[]> {
+    return this.client.listCostCenters({ activeOnly: true });
+  }
+
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
   }

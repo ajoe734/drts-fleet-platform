@@ -112,11 +112,11 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "b2d6f8582d70e7cbd2d257fa890842cac426126e88ec37ce49b225ab61be69b8",
+      "df25090525fb6a8dc3994f2faa4da29aa9bad2f13be8e1a4eb7abb21a1590bda",
     ],
     [
       "run.cjs",
-      "7e72c0473f3ac6e2ab7e300b6c5d630d8b764edab42c23a5f5aaeebb3cfc46ff",
+      "0066f0089089aeae8be1f514d35ac5eaab9990b92d8ae2e5419eb882929d142a",
     ],
   ]) {
     if (
@@ -1124,6 +1124,9 @@ async function collect(env, head, transport) {
   }
   // Keep only LB/NEG observations joined to fixed, configured product services.
   for (const service of plan.services) {
+    // Agency owns a separate non-IAP host; its Run service, revision and IAM
+    // metadata above remain required. Preserve the original ten LB/IAP joins.
+    if (service.id === "agency-portal-web") continue;
     const negs =
       rawLists.negs?.filter(
         (n) =>
@@ -1377,7 +1380,7 @@ function serialize(report) {
       versions: 19,
       account: 2,
       policy: TOPOLOGY.length,
-      iap: TOPOLOGY.length,
+      iap: 10,
     }))
       if (report.records.filter((r) => r.kind === kind).length < count)
         fail("INSUFFICIENT_OBSERVATION");

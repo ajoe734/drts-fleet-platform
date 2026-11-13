@@ -126,6 +126,7 @@ function harness(
     session?: boolean;
     failDirectory?: boolean;
     emptyDirectory?: boolean;
+    costCenters?: TenantCostCenterRecord[];
   } = {},
 ) {
   const calls: ApiCall[] = [];
@@ -187,6 +188,7 @@ function harness(
             { status: 503 },
           );
         }
+        if (options.costCenters) return ok(options.costCenters);
         // Deliberately return an inactive record as well: the real form's
         // record handling must preserve activeFlag display semantics.
         return ok([costCenter, inactiveCostCenter]);
@@ -256,6 +258,11 @@ function harness(
       searchParams?: Promise<SearchParams>;
     }) => Promise<React.ReactElement>;
   }>(resolve(appRoot, "app/bookings/new/page.tsx"));
+  const { default: ReviewBookingPage } = load<{
+    default: (props: {
+      searchParams?: Promise<SearchParams>;
+    }) => Promise<React.ReactElement>;
+  }>(resolve(appRoot, "app/bookings/review/page.tsx"));
   const draft = load<{
     parseEnterpriseBookingDraft: (
       params: SearchParams,
@@ -294,6 +301,11 @@ function harness(
       await NewBookingPage({ searchParams: Promise.resolve(params) }),
     );
   }
+  async function mountReview(params: SearchParams) {
+    return render(
+      await ReviewBookingPage({ searchParams: Promise.resolve(params) }),
+    );
+  }
   function mountDraft(initialDraft: DirectoryDraft) {
     return render(
       React.createElement(bookingFormModule.EnterpriseBookingForm, {
@@ -321,6 +333,7 @@ function harness(
     router,
     fixture: enterpriseDispatchBookingRecord,
     mount,
+    mountReview,
     mountDraft,
     reviewDraft,
     draft,
@@ -374,7 +387,7 @@ describe("Enterprise normal booking reads the existing tenant master directory",
     vi.useRealTimers();
   });
 
-  it("real NewBookingPage verifies its session and reads all three SDK lists with original tenant and upstream headers, without preselecting a fixture cost center", async () => {
+  it("real NewBookingPage verifies its session and reads all three SDK lists with original tenant and upstream headers, preselecting the tenant's only active cost center instead of a fixture one", async () => {
     const h = harness();
     const { container } = await h.mount();
     const directoryCalls = h.calls.filter((call) =>
@@ -409,9 +422,14 @@ describe("Enterprise normal booking reads the existing tenant master directory",
         .find((call) => call.path.endsWith("cost-centers"))
         ?.query.get("activeOnly"),
     ).toBe("true");
-    expect(input(container, "cost-center").value).toBe("");
-    expect(h.reviewDraft(container).costCenterCode).toBe("");
-    expect(h.reviewDraft(container).costCenterLabel).toBe("");
+    // 2026-11-13: a tenant with exactly one active cost center gets it
+    // preselected; the fixture CC-PRD-07 is still never used.
+    expect(input(container, "cost-center").value).toBe(costCenter.code);
+    expect(h.reviewDraft(container).costCenterCode).toBe(costCenter.code);
+    expect(h.reviewDraft(container).costCenterLabel).toBe(
+      `${costCenter.code} · ${costCenter.name}`,
+    );
+    expect(screen.getByText("有效")).toBeTruthy();
     expect(screen.getByRole("button", { name: /陳同名.*E-001/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /陳同名.*E-002/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /停用員工/ })).toBeNull();
@@ -636,7 +654,7 @@ describe("Enterprise normal booking reads the existing tenant master directory",
     expect(h.reviewDraft(container).costCenterLabel).toBe("");
   });
 
-  it("preserves the original unseeded-tenant free-text cost-center flow after three successful empty canonical lists, through the real form, review and SDK payload", async () => {
+  it("hides the cost center for a tenant without active cost centers (2026-11-13 decision) and still books through the real form, review and SDK payload", async () => {
     const h = harness({ emptyDirectory: true });
     const { container } = await h.mount();
     expect(
@@ -658,10 +676,13 @@ describe("Enterprise normal booking reads the existing tenant master directory",
     expect(
       screen.queryByTestId("enterprise-booking-directory-unavailable"),
     ).toBeNull();
-    const costCenterControl = input(container, "cost-center");
-    expect(costCenterControl.tagName).toBe("INPUT");
-    expect(costCenterControl.value).toBe("");
-    fireEvent.change(costCenterControl, { target: { value: "LEGACY-07" } });
+    // No field and no check row: the tenant does not use cost centers, so
+    // nobody is asked to invent a code.
+    expect(
+      container.querySelector("#enterprise-booking-cost-center"),
+    ).toBeNull();
+    expect(screen.queryByText("成本中心")).toBeNull();
+    expect(screen.queryByText("待填")).toBeNull();
     fireEvent.change(input(container, "passenger"), {
       target: { value: "既有未建目錄乘客" },
     });
@@ -675,8 +696,8 @@ describe("Enterprise normal booking reads the existing tenant master directory",
       target: { value: "0933333333" },
     });
     const draft = h.reviewDraft(container);
-    expect(draft.costCenterCode).toBe("LEGACY-07");
-    expect(draft.costCenterLabel).toBe("LEGACY-07");
+    expect(draft.costCenterCode).toBe("");
+    expect(draft.costCenterLabel).toBe("");
     expect(draft.passengerId).toBeFalsy();
     expect(draft.pickupAddressId).toBeFalsy();
     expect(draft.dropoffAddressId).toBeFalsy();
@@ -687,7 +708,7 @@ describe("Enterprise normal booking reads the existing tenant master directory",
     await h.submitEnterpriseBookingDraft({
       draft,
       tenantId: TENANT_ID,
-      idempotencyKey: "original-unseeded-cost-center-command",
+      idempotencyKey: "unused-cost-center-command",
       clickNow: NOW,
       router: h.router,
     });
@@ -695,10 +716,13 @@ describe("Enterprise normal booking reads the existing tenant master directory",
     expect(posts).toHaveLength(1);
     expect(posts[0]?.wirePath).toBe("/control-plane-proxy/api/tenant/bookings");
     expect(posts[0]?.headers.get("idempotency-key")).toBe(
-      "original-unseeded-cost-center-command",
+      "unused-cost-center-command",
     );
+    // Empty, which the API normalizes to no cost center; never a fixture code.
+    expect(
+      (posts[0]?.body as { costCenter?: string } | undefined)?.costCenter ?? "",
+    ).toBe("");
     expect(posts[0]?.body).toMatchObject({
-      costCenter: "LEGACY-07",
       passenger: { name: "既有未建目錄乘客", phone: "0933333333" },
       pickup: { address: "新北市板橋區原上車處70號" },
       dropoff: { address: "新北市新莊區原下車處80號" },
@@ -707,7 +731,7 @@ describe("Enterprise normal booking reads the existing tenant master directory",
       expect.stringContaining("bookingId=booking-selected-masters"),
     );
 
-    // The legacy empty-directory path must not replace the existing record
+    // The empty-directory path must not replace the existing record
     // selector: populated tenants keep their catalogue code and master IDs.
     cleanup();
     const populated = harness();
@@ -722,5 +746,68 @@ describe("Enterprise normal booking reads the existing tenant master directory",
       dropoffAddressId: dropoffAddress.addressId,
       costCenterCode: costCenter.code,
     });
+  });
+
+  it("asks the booker to pick one of several active cost centers: none preselected, the check shows 待填 and review stays disabled until one is chosen", async () => {
+    const secondCostCenter: TenantCostCenterRecord = {
+      ...costCenter,
+      code: "OPS77",
+      name: "營運專案",
+    };
+    const h = harness({
+      costCenters: [costCenter, secondCostCenter, inactiveCostCenter],
+    });
+    const { container } = await h.mount();
+    const control = input(container, "cost-center");
+    expect(control.tagName).toBe("SELECT");
+    expect(control.value).toBe("");
+    expect(screen.getByText("待填")).toBeTruthy();
+    expect(screen.queryByText("有效")).toBeNull();
+    const reviewLink = () =>
+      container.querySelector<HTMLAnchorElement>(
+        '[data-drt-intent="enterprise-review"]',
+      );
+    expect(reviewLink()?.getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.change(control, { target: { value: secondCostCenter.code } });
+    expect(screen.getByText("有效")).toBeTruthy();
+    expect(screen.queryByText("待填")).toBeNull();
+    expect(reviewLink()?.getAttribute("aria-disabled")).toBe("false");
+    expect(h.reviewDraft(container)).toMatchObject({
+      costCenterCode: secondCostCenter.code,
+      costCenterLabel: `${secondCostCenter.code} · ${secondCostCenter.name}`,
+    });
+  });
+
+  it("review page lets a tenant without cost centers submit with none, but holds a cost-center tenant's empty draft at 待填", async () => {
+    const futureDate = "2026-10-31";
+    const reviewParams: SearchParams = {
+      pm: "other",
+      passenger: "審核頁乘客",
+      bookedBy: "審核頁下單人",
+      pickup: "新北市板橋區審核上車處1號",
+      dropoff: "新北市新莊區審核下車處2號",
+      date: futureDate,
+      time: "10:00",
+      contact: "0944444444",
+      cc: "",
+      ccLabel: "",
+      vehicle: "business",
+    };
+
+    const unused = harness({ emptyDirectory: true });
+    await unused.mountReview(reviewParams);
+    expect(
+      unused.calls.some((call) => call.path === "/api/tenant/cost-centers"),
+    ).toBe(true);
+    expect(screen.getByTestId("enterprise-booking-submit")).toBeTruthy();
+    expect(screen.queryByText("待填")).toBeNull();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    const used = harness();
+    await used.mountReview(reviewParams);
+    expect(screen.queryByTestId("enterprise-booking-submit")).toBeNull();
+    expect(screen.getByText("待填")).toBeTruthy();
   });
 });

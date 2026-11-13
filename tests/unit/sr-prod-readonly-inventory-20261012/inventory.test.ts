@@ -27,7 +27,7 @@ describe("protected production inventory actual exported boundaries", () => {
       report.records.filter((r: any) => r.kind === "revision"),
     ).toHaveLength(11);
     expect(report.records.filter((r: any) => r.kind === "iap")).toHaveLength(
-      11,
+      10,
     );
     const serviceIds = [
       "api",
@@ -53,11 +53,14 @@ describe("protected production inventory actual exported boundaries", () => {
         ["service", id],
         ["revision", `${id}:prod-${id}-00001`],
         ["policy", `${id}-policy`],
-        ["iap", `${id}-iap`],
       ])
         expect(
           report.records.find((r: any) => r.id === recordId),
         ).toMatchObject({ kind, status: "observed" });
+      if (id !== "agency-portal-web")
+        expect(
+          report.records.find((r: any) => r.id === `${id}-iap`),
+        ).toMatchObject({ kind: "iap", status: "observed" });
     }
     const agencyImage = `${f.plan.registry}/agency-portal-web@sha256:${"c".repeat(64)}`;
     expect(
@@ -76,6 +79,30 @@ describe("protected production inventory actual exported boundaries", () => {
         new URL(call.url).pathname.includes("/services/prod-agency-portal-web"),
       ),
     ).toHaveLength(3);
+    const agencyRecords = [
+      ["service", "agency-portal-web"],
+      ["revision", "agency-portal-web:prod-agency-portal-web-00001"],
+      ["policy", "agency-portal-web-policy"],
+    ];
+    for (const [kind, id] of agencyRecords) {
+      expect(report.records.find((r: any) => r.id === id)).toMatchObject({
+        kind,
+        status: "observed",
+      });
+      expect(() =>
+        c.serialize({
+          ...report,
+          records: report.records.filter((r: any) => r.id !== id),
+        }),
+      ).toThrow("INSUFFICIENT_OBSERVATION");
+    }
+    expect(
+      report.records.find((r: any) => r.id === "agency-portal-web").data
+        .ingress,
+    ).toBe("INGRESS_TRAFFIC_ALL");
+    expect(
+      report.records.some((r: any) => r.id === "agency-portal-web-iap"),
+    ).toBe(false);
     expect(
       report.records.find((r: any) => r.id === "api-policy").data
         .unconditionalDeployerInvoker,
@@ -317,7 +344,7 @@ describe("protected production inventory actual exported boundaries", () => {
           },
         ],
       },
-      ...["service", "revision", "policy", "iap"].map((kind) => ({
+      ...["service", "revision", "policy"].map((kind) => ({
         ...report,
         records: report.records.filter(
           (r: any) => r.kind !== kind || !r.id.startsWith("agency-portal-web"),

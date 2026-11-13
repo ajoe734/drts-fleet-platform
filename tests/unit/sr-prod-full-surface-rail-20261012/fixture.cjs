@@ -83,6 +83,23 @@ function fixture() {
     };
     headers[id] = { cookie: "fixture-signed-session=opaque" };
   }
+  // Existing external agency host, with its own ordinary agency cookie.
+  vars.PROD_GCP_AGENCY_PORTAL_SERVICE = "drts-prod-agency-portal-web";
+  vars.PROD_AGENCY_PORTAL_ORIGIN = "https://agency-portal-web.drts.invalid";
+  vars.PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED = "true";
+  delete vars.PROD_AGENCY_PORTAL_IAP_CLIENT_ID;
+  smoke["agency-portal-web"] = {
+    path: "/api/auth/session",
+    expect: {
+      "data.active": true,
+      "data.identity.realm": "agency",
+      "data.identity.actor_type": "agency_user",
+      "data.identity.agency_id": "agency-fixture",
+    },
+  };
+  headers["agency-portal-web"] = {
+    cookie: "drts_agency_session=fixture-agency-session",
+  };
   smoke["bank-console-web"] = {
     path: "/api/statements/2026-10/export",
     expect: { Period: "2026-10", StatementNo: "fixture-001" },

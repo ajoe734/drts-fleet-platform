@@ -797,9 +797,27 @@ function inferAddressName(address: string) {
   return head?.trim() || trimmed;
 }
 
+/**
+ * How the booking form treats the cost center for the signed-in tenant
+ * (product decision 2026-11-13):
+ * - `not_used`: the tenant has no active cost center. The field is hidden
+ *   and not required; the API accepts a booking without one.
+ * - `required`: the tenant has active cost centers (a single one is
+ *   preselected), or the directory could not be read, so the form cannot
+ *   tell and keeps asking.
+ */
+export type EnterpriseCostCenterMode = "required" | "not_used";
+
+export function resolveCostCenterMode(
+  activeCostCenterCount: number | null,
+): EnterpriseCostCenterMode {
+  return activeCostCenterCount === 0 ? "not_used" : "required";
+}
+
 export function isEnterpriseDraftComplete(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
+  costCenterMode: EnterpriseCostCenterMode = "required",
 ) {
   const basicFieldsValid = [
     draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
@@ -809,8 +827,9 @@ export function isEnterpriseDraftComplete(
     draft.reservationDate,
     draft.reservationTime,
     draft.onsiteContactPhone,
-    draft.costCenterCode,
-    draft.costCenterLabel,
+    ...(costCenterMode === "required"
+      ? [draft.costCenterCode, draft.costCenterLabel]
+      : []),
   ].every((value) => Boolean(value && value.trim().length > 0));
 
   if (!basicFieldsValid) {

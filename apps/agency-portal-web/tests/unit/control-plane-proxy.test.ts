@@ -121,4 +121,41 @@ describe("Agency controlled-download proxy", () => {
       error: "AGENCY_API_UNAVAILABLE",
     });
   });
+
+  it("streams the actual multi-taxi kind, signed query, same-record CSV and attachment filename unchanged", async () => {
+    const csv =
+      '"recordId","orderId","tripId"\r\n"mtr-SIM-1","SIM-order-1","SIM-trip-1"';
+    const payload = new TextEncoder().encode(csv);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(payload, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition":
+            'attachment; filename="multi-taxi-trip-records.csv"',
+        },
+      }),
+    );
+    global.fetch = fetchMock;
+    const response = await GET(
+      proxyRequest(
+        `downloads/multi-taxi-trip-records/ART-SIM-1${SIGNED_QUERY}`,
+      ),
+      pathContext("downloads", "multi-taxi-trip-records", "ART-SIM-1"),
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/api/downloads/multi-taxi-trip-records/ART-SIM-1${SIGNED_QUERY}`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/csv; charset=utf-8",
+    );
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="multi-taxi-trip-records.csv"',
+    );
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(payload);
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("cookie")).toBeNull();
+  });
 });

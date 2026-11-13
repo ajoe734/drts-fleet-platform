@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgencyAccessLogRecord,
@@ -21,6 +22,11 @@ import {
   type StoredReportJobRecord,
 } from "../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
+import {
+  InMemoryDocumentArtifactStore,
+  DocumentArtifactRebuildRegistry,
+} from "../../apps/api/src/common/document-artifacts";
+import { ControlledDownloadController } from "../../apps/api/src/modules/controlled-download/controlled-download.controller";
 
 // External runtime metadata only. Services, producer, worker, controller,
 // access policy, download metadata and agency audit execution remain real.
@@ -74,6 +80,19 @@ const ROW: MultiTaxiTripOperationalExportRow = {
   generatedAt: "2026-10-01T01:30:00.000Z",
   retainUntil: "2028-09-30T01:30:00.000Z",
 };
+// Independent golden publication: all 24 contract columns, then the original
+// ROW expanded literally (absent/null optional fields are empty). No producer
+// formatter, object-key projection or received download hash builds this oracle.
+const EXPECTED_CSV_BYTES = Buffer.from(
+  [
+    '"recordId","orderId","tripId","orderNoMasked","plateNo","plateNoMasked","reservedAt","pickupAt","dropoffAt","routeSummary","routeSource","distanceMeters","durationSeconds","payableFareMinor","actualFareMinor","collectedFareMinor","paymentStatus","tollMinor","tollSource","currency","farePolicyVersion","chargingMode","generatedAt","retainUntil"',
+    '"","","","SYN...01","","SYN...02","2026-10-01T01:00:00.000Z","","","","","","","320","320","","","0","","TWD","synthetic-fare-v3","meter","2026-10-01T01:30:00.000Z","2028-09-30T01:30:00.000Z"',
+  ].join("\r\n"),
+  "utf8",
+);
+const EXPECTED_CSV_SHA256 = createHash("sha256")
+  .update(EXPECTED_CSV_BYTES)
+  .digest("hex");
 const copy = <T>(value: T): T => structuredClone(value);
 type Worker = {
   processNextDurableReport(): Promise<boolean>;
@@ -145,10 +164,17 @@ function world(durable = true) {
     audit as unknown as AuditNotificationService,
     repository,
   );
+  // B reads committed jobs while its real process-private artifact port is
+  // observable through the existing signed-download controller, without HTTP.
+  const artifacts = new InMemoryDocumentArtifactStore();
+  const rebuilders = new DocumentArtifactRebuildRegistry();
   const b = new ReportingFilingService(
     audit as unknown as AuditNotificationService,
     repository,
+    artifacts,
+    rebuilders,
   );
+  const downloads = new ControlledDownloadController(artifacts, rebuilders);
   const accessLogs: AgencyAccessLogRecord[] = [];
   const auditStore = {
     isEnabled: () => true,
@@ -190,10 +216,39 @@ function world(durable = true) {
     directory,
     portal,
     platform,
+    downloads,
     beforeWrite: (callback: ReportJobWriter) => {
       beforeWrite = callback;
     },
   };
+}
+
+/** Verify the real signature/store/StreamableFile chain against independent bytes. */
+async function assertCsvDownload(w: ReturnType<typeof world>, link: string) {
+  const url = new URL(link, "https://synthetic.invalid");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const query = url.searchParams;
+  const file = await w.downloads.resolve(
+    decodeURIComponent(parts[1]!),
+    decodeURIComponent(parts[2]!),
+    query.get("signed_at") ?? undefined,
+    query.get("expires_at") ?? undefined,
+    query.get("key_id") ?? undefined,
+    query.get("manifest_hash") ?? undefined,
+    query.get("sig") ?? undefined,
+    query.get("sig_v") ?? undefined,
+  );
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.getStream()) chunks.push(Buffer.from(chunk));
+  const bytes = Buffer.concat(chunks);
+  expect(file.getHeaders()).toMatchObject({
+    type: "text/csv; charset=utf-8",
+    disposition: 'attachment; filename="multi-taxi-trip-records.csv"',
+  });
+  expect(bytes).toEqual(EXPECTED_CSV_BYTES);
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+    EXPECTED_CSV_SHA256,
+  );
 }
 
 async function enqueue(
@@ -303,7 +358,7 @@ describe("committed dedicated multi-taxi export reads across API instances", () 
       expect(download).toMatchObject({
         jobId: w.jobId,
         recordCount: 1,
-        manifestHash: stored?.artifact?.manifestHash,
+        manifestHash: EXPECTED_CSV_SHA256,
       });
       const url = new URL(
         download.download.downloadUrl,
@@ -312,7 +367,12 @@ describe("committed dedicated multi-taxi export reads across API instances", () 
       expect(url.searchParams.get("sig")).toBe(download.download.signature);
       expect(url.searchParams.get("manifest_hash")).toBe(download.manifestHash);
       expect(Date.parse(download.download.expiresAt)).not.toBeNaN();
+      expect(download.download.kind).toBe("multi-taxi-trip-records");
+      expect(download.download.subjectId).toBe(stored?.artifact?.artifactId);
+      expect(download.download.manifestHash).toBe(EXPECTED_CSV_SHA256);
+      await assertCsvDownload(w, download.download.downloadUrl);
     }
+    expect(stored?.artifact?.manifestHash).not.toBe(EXPECTED_CSV_SHA256);
     expect(w.accessLogs).toMatchObject([
       {
         action: "export_status",
@@ -327,7 +387,7 @@ describe("committed dedicated multi-taxi export reads across API instances", () 
         rowCount: 1,
         totalCount: 1,
         resourceId: w.jobId,
-        exportManifestHash: stored?.artifact?.manifestHash,
+        exportManifestHash: EXPECTED_CSV_SHA256,
       },
     ]);
     expect(w.store.withReportJobClaim).toHaveBeenCalledTimes(claims);
@@ -379,16 +439,22 @@ describe("committed dedicated multi-taxi export reads across API instances", () 
         outcome: "success",
         rowCount: 1,
         totalCount: 1,
-        exportManifestHash: committed.artifact?.manifestHash,
+        exportManifestHash: EXPECTED_CSV_SHA256,
         requestId: META.requestId,
       }),
     );
     releaseAppend.resolve();
-    expect((await pending).manifestHash).toBe(committed.artifact?.manifestHash);
+    const download = await pending;
+    expect(download.manifestHash).toBe(EXPECTED_CSV_SHA256);
     expect(returned).toBe(true);
     expect(w.directory.resolveActiveAccess).toHaveBeenCalledWith(
       expect.objectContaining({ principalId: AGENCY.principalId }),
     );
+    await assertCsvDownload(w, download.download.downloadUrl);
+    expect(w.rows.get(w.jobId)?.artifact?.manifestHash).toBe(
+      committed.artifact?.manifestHash,
+    );
+    expect(committed.artifact?.manifestHash).not.toBe(EXPECTED_CSV_SHA256);
   });
 
   it("reads completed storage without replacing B's legitimate queued boot snapshot", async () => {
@@ -401,10 +467,14 @@ describe("committed dedicated multi-taxi export reads across API instances", () 
     expect((await w.portal.getTripExportJob(AGENCY, jobId, META)).status).toBe(
       "completed",
     );
-    expect(
-      (await w.platform.downloadTripOperationalExport(jobId, PLATFORM)).data
-        .manifestHash,
-    ).toBe(w.rows.get(jobId)?.artifact?.manifestHash);
+    const logicalManifest = w.rows.get(jobId)?.artifact?.manifestHash;
+    const download = (
+      await w.platform.downloadTripOperationalExport(jobId, PLATFORM)
+    ).data;
+    expect(download.manifestHash).toBe(EXPECTED_CSV_SHA256);
+    await assertCsvDownload(w, download.download.downloadUrl);
+    expect(w.rows.get(jobId)?.artifact?.manifestHash).toBe(logicalManifest);
+    expect(logicalManifest).not.toBe(EXPECTED_CSV_SHA256);
     expect(w.b.getMultiTaxiTripExportJob(jobId, AGENCY).status).toBe("pending");
   });
 
