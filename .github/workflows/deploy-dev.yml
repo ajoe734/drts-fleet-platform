@@ -1164,8 +1164,9 @@ jobs:
           done
           # Fleet Partner Portal Google login sends ${origin}/api/auth/callback
           # as its redirect_uri; the API's validateRedirectUri rejects any origin
-          # missing from AUTH_ALLOWED_ORIGINS.
-          for origin in "${{ needs.prepare.outputs.fleet_partner_portal_origin }}"; do
+          # missing from AUTH_ALLOWED_ORIGINS. Same value prepare emits as
+          # fleet_partner_portal_origin (workflow-level env from vars).
+          for origin in "${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"; do
             [[ -n "$origin" ]] || continue
             if [[ ! "$origin" =~ ^https://[^/[:space:]]+$ ]]; then
               echo "::error::Fleet Partner Portal origin must be a bare HTTPS origin: $origin"

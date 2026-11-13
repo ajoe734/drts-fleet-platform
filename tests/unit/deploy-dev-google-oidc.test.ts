@@ -86,7 +86,6 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
       const outputs: Record<string, string> = {
         tenant_console_origin: "https://tenant.smarttransport.tw",
         enterprise_dispatch_origin: "https://dispatch.smarttransport.tw",
-        fleet_partner_portal_origin: fleet,
       };
       const assembly = workflow
         .slice(start, end)
@@ -101,7 +100,13 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
           },
         );
       const script = `set -euo pipefail\ntenant_console_cloud_run_origin=https://drts-dev-tenant-console-web-xyz.a.run.app\nenterprise_dispatch_cloud_run_origin=\nagency_portal_configured_origin=\nagency_portal_cloud_run_origin=https://drts-dev-agency-portal-web-xyz.a.run.app\n${assembly}\nprintf '%s' "$auth_allowed_origins"\n`;
-      const result = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      delete env.DEV_FLEET_PARTNER_PORTAL_ORIGIN;
+      if (fleet) env.DEV_FLEET_PARTNER_PORTAL_ORIGIN = fleet;
+      const result = spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env,
+      });
       expect(result.status, result.stderr).toBe(exit);
       if (exit !== 0) return;
       const origins = result.stdout.split(",");
