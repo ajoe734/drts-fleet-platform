@@ -605,9 +605,7 @@ export function PartnerBookingForm({
             name: "pickupAddress",
             label: t("field.pickupAddress"),
             fullSpan: true,
-            ...(pickupTextFallbackHint
-              ? { hint: pickupTextFallbackHint }
-              : {}),
+            ...(pickupTextFallbackHint ? { hint: pickupTextFallbackHint } : {}),
           })}
           {renderField({
             name: "dropoffAddress",
@@ -783,9 +781,9 @@ export function PartnerBookingForm({
                 ? t("book.map.coordinatesRequired")
                 : mapGate.code === "dispatch_manual_review_required"
                   ? t("book.map.manualReview")
-                : ready
-                  ? t("book.ready")
-                  : t("book.notReady")}
+                  : ready
+                    ? t("book.ready")
+                    : t("book.notReady")}
           </span>
           {mapGate.code === "dispatch_manual_review_required" ? (
             <CanvasBanner
