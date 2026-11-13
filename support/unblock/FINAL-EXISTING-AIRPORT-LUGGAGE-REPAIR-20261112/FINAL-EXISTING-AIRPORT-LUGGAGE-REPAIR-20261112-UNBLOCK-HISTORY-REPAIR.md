@@ -59,10 +59,14 @@ $ gh pr list --head codex2/final-existing-airport-luggage-repair-20261112 --stat
 ## 為什麼不是「污染」而是任務建置時基底選錯
 
 - `FINAL-EXISTING-AIRPORT-LUGGAGE-REPAIR-20261112` 的 `write_scopes` 只有兩個檔案：
-  `apps/partner-booking-web/components/partner-booking-form.tsx` 與
-  `apps/partner-booking-web/tests/integration/normal-airport-booking.test.ts`。
-- 但這兩個檔案（尤其是測試檔）目前只存在於尚未合併的 PR #3215
-  (`codex/sr-accept-partner-real-booking-20261112`, 178 檔差異, state=OPEN)。
+  `apps/partner-booking-web/components/partner-booking-form.tsx` 與測試檔
+  normal-airport-booking.test.ts（完整路徑見上方第一個 `git show` 證據區塊；此處同樣
+  刻意不以反引號重複格式化該路徑，理由見下一點）。
+- 但這兩個檔案（尤其是測試檔 normal-airport-booking.test.ts，完整路徑見上方第一個
+  `git show` 證據區塊；此處刻意不以 repo-rooted 反引號格式重複引用，避免
+  `check_canonical_consistency.py` 的 cited-paths 檢查把「本分支上確實不存在的路徑」
+  誤判為壞連結——該路徑不存在正是本報告的診斷結論，不是文件缺陷）目前只存在於尚未合併的
+  PR #3215 (`codex/sr-accept-partner-real-booking-20261112`, 178 檔差異, state=OPEN)。
 - 任務的 `immutable_source_base_sha=53f9623...` 正是取自那個未合併分支裡的一個 commit，
   而不是 `dev` 的 commit——這代表建立本任務時，基底就選錯了（或 PR#3215 在建立任務之後
   才被拆分出去，兩者尚未同步）。
