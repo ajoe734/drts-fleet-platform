@@ -67,11 +67,16 @@ const OPTIONAL_API_FIELDS = [
   "PSP_PROVIDER",
   "PSP_MERCHANT_ID",
   "PSP_SANDBOX",
+  "PSP_RETURN_URL",
+  "PSP_ORDER_RESULT_URL",
+  "PSP_BINDING_AUTH_AMOUNT_TWD",
   "PAX_PAYMENT_CAPTURE_ENABLED",
   "PAX_PAYMENT_CAPTURE_POLICY",
   "PAX_PAYMENT_RECOVERY_NOTICE_EXPIRES_AT",
   "PASSENGER_OTP_IP_HOURLY_LIMIT",
   "PASSENGER_OTP_TRUSTED_PROXY_HOPS",
+  "TWILIO_HTTP_TIMEOUT_MS",
+  "TWILIO_STATUS_CALLBACK_URL",
   "NOTIFICATION_FROM_EMAIL",
   "REMOTE_SMTP_HOST",
   "REMOTE_SMTP_PORT",
@@ -105,6 +110,12 @@ const OPTIONAL_SECRET_FIELDS = [
   "OIDC_CLIENT_SECRET",
   "PASSENGER_OTP_PEPPER",
   "PSP_API_KEY",
+  "PSP_HASH_KEY",
+  "PSP_HASH_IV",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_API_KEY_SID",
+  "TWILIO_API_KEY_SECRET",
+  "TWILIO_FROM_NUMBER",
   "PSP_TOKEN_ENCRYPTION_KEY_NAME",
   "REMOTE_SMTP_USERNAME",
   "REMOTE_SMTP_PASSWORD",
@@ -386,6 +397,17 @@ function buildPlan(vars, sha, tag, deployer) {
     )
       reject("PROD_RELEASE_SMOKE_CONFIG_JSON.bank-console-web CSV fixture");
     if (
+      id === "agency-portal-web" &&
+      (probe.expect["data.active"] !== true ||
+        probe.expect["data.identity.realm"] !== "agency" ||
+        probe.expect["data.identity.actor_type"] !== "agency_user" ||
+        typeof probe.expect["data.identity.agency_id"] !== "string" ||
+        !probe.expect["data.identity.agency_id"].trim())
+    )
+      reject(
+        "PROD_RELEASE_SMOKE_CONFIG_JSON.agency-portal-web authenticated agency session predicate",
+      );
+    if (
       route.endsWith("identity/context") &&
       (typeof probe.expect["data.principalId"] !== "string" ||
         !probe.expect["data.principalId"].trim() ||
@@ -542,7 +564,7 @@ function buildPlan(vars, sha, tag, deployer) {
       .every((s) => origins.includes(s.origin))
   )
     reject("PROD_AUTH_ALLOWED_ORIGINS (all active browser origins)");
-  apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(";");
+  apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(",");
   const agencyOrigin = services.find(
     (service) => service.id === "agency-portal-web",
   ).origin;

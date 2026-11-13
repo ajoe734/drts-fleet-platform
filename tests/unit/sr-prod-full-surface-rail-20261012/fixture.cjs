@@ -104,6 +104,20 @@ function fixture() {
     path: "/api/statements/2026-10/export",
     expect: { Period: "2026-10", StatementNo: "fixture-001" },
   };
+  // Match the real Agency BFF session envelope; a generic fixture flag cannot
+  // establish an active agency realm identity bound to an agency.
+  smoke["agency-portal-web"] = {
+    path: "/api/auth/session",
+    expect: {
+      "data.active": true,
+      "data.identity.realm": "agency",
+      "data.identity.actor_type": "agency_user",
+      "data.identity.agency_id": "agency-fixture",
+    },
+  };
+  headers["agency-portal-web"] = {
+    cookie: "drts_agency_session=opaque-agency-session-fixture",
+  };
   vars.PROD_AUTH_ALLOWED_ORIGINS = TOPOLOGY.filter(([id]) => id !== "api")
     .map(([, key]) => vars[`PROD_${key}_ORIGIN`])
     .join(";");

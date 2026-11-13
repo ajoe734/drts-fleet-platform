@@ -12,6 +12,7 @@ import type {
   NativePassengerAppStatePort,
 } from "@drts/passenger-client";
 import type { PassengerOAuthBrowserPort } from "../../components/auth/passenger-login-screen";
+import type { NativePaymentBrowserAvailability } from "../../components/payment/native-payment-methods-screen";
 
 type RawRequest = Pick<
   XMLHttpRequest,
@@ -94,6 +95,26 @@ export function createNativePassengerOAuthBrowser(
       if (result.type === "cancel" || result.type === "dismiss")
         return { type: result.type };
       throw new Error("oauth_browser_result_unconfirmed");
+    },
+  };
+}
+
+/** Native browser return is only a prompt for the SDK's server readback. */
+export function createNativePassengerPaymentBrowser(
+  browser: NativePassengerExpoModules["browser"],
+  callbackUri: string,
+): NativePaymentBrowserAvailability {
+  return {
+    status: "ready",
+    kind: "hosted",
+    port: {
+      async openAction(url) {
+        const result = await browser.openAuthSessionAsync(url, callbackUri);
+        if (result.type === "success") return { type: "returned" };
+        if (result.type === "cancel" || result.type === "dismiss")
+          return { type: "cancelled" };
+        throw new Error("payment_browser_result_unconfirmed");
+      },
     },
   };
 }
@@ -341,7 +362,10 @@ export function createNativePassengerPlatformPorts(input: {
       },
     },
     paymentFields: { status: "unavailable" },
-    paymentBrowser: { status: "unavailable" },
+    paymentBrowser: createNativePassengerPaymentBrowser(
+      modules.browser,
+      input.callbackUri,
+    ),
     bookingMap: { status: "unavailable" },
     notifications: input.notifications ?? { status: "disabled" },
   };
