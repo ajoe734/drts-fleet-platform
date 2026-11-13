@@ -266,10 +266,10 @@ export class SupplySubmissionService implements OnModuleInit {
             taxiDriverRegistrationArea:
               latestDraft?.taxiDriverRegistrationArea ?? "台北市",
             taxiDriverRegistrationExpiry,
-            supportedServiceProductCodes:
-              latestDraft?.supportedServiceProductCodes?.length
-                ? [...latestDraft.supportedServiceProductCodes]
-                : ["taxi_realtime"],
+            supportedServiceProductCodes: latestDraft
+              ?.supportedServiceProductCodes?.length
+              ? [...latestDraft.supportedServiceProductCodes]
+              : ["taxi_realtime"],
             lifecycleStatus: driver.lifecycleStatus,
             licensesValid: driver.licensesValid,
             ready: readiness
@@ -308,9 +308,7 @@ export class SupplySubmissionService implements OnModuleInit {
           const contractEndDate = contract.endAt
             ? contract.endAt.slice(0, 10)
             : null;
-          const policyEndDate = policy.endAt
-            ? policy.endAt.slice(0, 10)
-            : null;
+          const policyEndDate = policy.endAt ? policy.endAt.slice(0, 10) : null;
           const fallbackReasons: SupplyReadinessReasonCode[] = [];
           if (contract.lifecycleStatus === "missing") {
             fallbackReasons.push("CONTRACT_MISSING");
@@ -344,10 +342,10 @@ export class SupplySubmissionService implements OnModuleInit {
             seatCount: latestDraft?.seatCount ?? 4,
             luggageCapacity: latestDraft?.luggageCapacity ?? 2,
             businessArea: latestDraft?.businessArea ?? "台北市",
-            supportedServiceProductCodes:
-              latestDraft?.supportedServiceProductCodes?.length
-                ? [...latestDraft.supportedServiceProductCodes]
-                : ["taxi_realtime"],
+            supportedServiceProductCodes: latestDraft
+              ?.supportedServiceProductCodes?.length
+              ? [...latestDraft.supportedServiceProductCodes]
+              : ["taxi_realtime"],
             airportTransferEligible:
               latestDraft?.airportTransferEligible ?? false,
             fixedFareAllowed: latestDraft?.fixedFareAllowed ?? false,
@@ -837,10 +835,10 @@ export class SupplySubmissionService implements OnModuleInit {
         taxiDriverRegistrationExpiry:
           command.driverDraft?.taxiDriverRegistrationExpiry ??
           draft.taxiDriverRegistrationExpiry,
-        supportedServiceProductCodes:
-          command.driverDraft?.supportedServiceProductCodes ?? [
-            ...draft.supportedServiceProductCodes,
-          ],
+        supportedServiceProductCodes: command.driverDraft
+          ?.supportedServiceProductCodes ?? [
+          ...draft.supportedServiceProductCodes,
+        ],
         preferredVehicleSubmissionId:
           command.driverDraft?.preferredVehicleSubmissionId !== undefined
             ? command.driverDraft.preferredVehicleSubmissionId
@@ -915,10 +913,10 @@ export class SupplySubmissionService implements OnModuleInit {
       luggageCapacity:
         command.vehicleDraft?.luggageCapacity ?? draft.luggageCapacity,
       businessArea: command.vehicleDraft?.businessArea ?? draft.businessArea,
-      supportedServiceProductCodes:
-        command.vehicleDraft?.supportedServiceProductCodes ?? [
-          ...draft.supportedServiceProductCodes,
-        ],
+      supportedServiceProductCodes: command.vehicleDraft
+        ?.supportedServiceProductCodes ?? [
+        ...draft.supportedServiceProductCodes,
+      ],
       airportTransferEligible:
         command.vehicleDraft?.airportTransferEligible ??
         draft.airportTransferEligible,
@@ -1009,6 +1007,7 @@ export class SupplySubmissionService implements OnModuleInit {
 
     this.submissions = [submission, ...this.submissions];
     this.driverDrafts = [draft, ...this.driverDrafts];
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
     await this.persistChanges(
       { submissions: [submission], driverDrafts: [draft] },
       "create driver draft",
@@ -1031,7 +1030,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async updateDriverDraft(
@@ -1095,7 +1094,11 @@ export class SupplySubmissionService implements OnModuleInit {
   ) {
     await this.syncState();
     this.validateVehicleDraft(command);
-    this.assertVehiclePlateAvailable(command.plateNo, undefined, fleetPartnerId);
+    this.assertVehiclePlateAvailable(
+      command.plateNo,
+      undefined,
+      fleetPartnerId,
+    );
 
     const now = new Date().toISOString();
     const submissionId = randomUUID();
@@ -1129,6 +1132,7 @@ export class SupplySubmissionService implements OnModuleInit {
 
     this.submissions = [submission, ...this.submissions];
     this.vehicleDrafts = [draft, ...this.vehicleDrafts];
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
     await this.persistChanges(
       { submissions: [submission], vehicleDrafts: [draft] },
       "create vehicle draft",
@@ -1151,7 +1155,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async updateVehicleDraft(
@@ -1267,6 +1271,8 @@ export class SupplySubmissionService implements OnModuleInit {
           )
         : undefined;
 
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
+
     await this.persistChanges(
       {
         submissions: [submission],
@@ -1294,7 +1300,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async withdrawSupplySubmission(
@@ -1805,7 +1811,7 @@ export class SupplySubmissionService implements OnModuleInit {
     if (existingVehicle) {
       const fleetPartnerOwned = Boolean(
         fleetPartnerId &&
-          this.isVehicleOwnedByFleet(existingVehicle.vehicleId, fleetPartnerId),
+        this.isVehicleOwnedByFleet(existingVehicle.vehicleId, fleetPartnerId),
       );
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
