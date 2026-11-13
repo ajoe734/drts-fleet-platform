@@ -61,6 +61,15 @@ const apiEnvironment = {
   DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
   REPORTING_SNAPSHOT_SCHEDULER_ENABLED: "false",
 };
+// Reuse the existing hosted-only external-scanner HTTP fixture. The genuine
+// adapter still re-reads uploaded bytes and checks SHA/size correlation. This
+// is not real malware-engine evidence; product scanner selection is unchanged.
+const apiNodeOptions = [
+  process.env.NODE_OPTIONS,
+  `--require=${JSON.stringify(resolve(__dirname, "tests/e2e/fixtures/fleet-upload-scanner.cjs"))}`,
+]
+  .filter(Boolean)
+  .join(" ");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -90,14 +99,18 @@ export default defineConfig({
     : [
         {
           command: "pnpm --filter @drts/api start",
-          env: apiEnvironment,
+          env: { ...apiEnvironment, NODE_OPTIONS: apiNodeOptions },
           url: `${apiOrigin}/health`,
           reuseExistingServer: false,
           timeout: 180_000,
         },
         {
           command: "pnpm --filter @drts/api start",
-          env: { ...apiEnvironment, API_PORT: "3002" },
+          env: {
+            ...apiEnvironment,
+            API_PORT: "3002",
+            NODE_OPTIONS: apiNodeOptions,
+          },
           url: "http://127.0.0.1:3002/health",
           reuseExistingServer: false,
           timeout: 180_000,

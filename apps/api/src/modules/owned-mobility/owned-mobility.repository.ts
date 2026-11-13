@@ -26,6 +26,16 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 
+/** Internal list owner, derived from the same verified identity as single GET. */
+export interface PartnerBookingListScope {
+  tenantId: string;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string;
+  passengerId: string | null;
+  comparePassenger: boolean;
+}
+
 type JsonRecordRow = {
   record: unknown;
 };
@@ -663,6 +673,7 @@ export class OwnedMobilityRepository {
   async queryTenantBookings(
     tenantId: string,
     query: TenantBookingListQuery,
+    partnerScope?: PartnerBookingListScope,
   ): Promise<{ items: OwnedOrderRecord[]; total: number }> {
     if (!this.isEnabled()) {
       return { items: [], total: 0 };
@@ -671,6 +682,36 @@ export class OwnedMobilityRepository {
     const conditions: string[] = ["tenant_id = $1", "booking_id IS NOT NULL"];
     const values: unknown[] = [tenantId];
     let paramIndex = 2;
+
+    // Apply the existing single-GET relation before both COUNT and LIMIT.
+    // Legacy bookings without passengerId retain their existing entry access.
+    if (partnerScope) {
+      for (const [field, value] of [
+        ["partnerId", partnerScope.partnerId],
+        ["partnerProgramId", partnerScope.partnerProgramId],
+      ] as const) {
+        conditions.push(
+          "NULLIF(record->>'" +
+            field +
+            "', '') IS NOT DISTINCT FROM $" +
+            paramIndex,
+        );
+        values.push(value);
+        paramIndex += 1;
+      }
+      conditions.push("record->>'partnerEntrySlug' = $" + paramIndex);
+      values.push(partnerScope.partnerEntrySlug);
+      paramIndex += 1;
+      if (partnerScope.comparePassenger && partnerScope.passengerId) {
+        conditions.push(
+          "(NULLIF(record->'passenger'->>'passengerId', '') IS NULL OR record->'passenger'->>'passengerId' = $" +
+            paramIndex +
+            ")",
+        );
+        values.push(partnerScope.passengerId);
+        paramIndex += 1;
+      }
+    }
 
     // Optional exact passengerId
     if (query.passengerId?.trim()) {

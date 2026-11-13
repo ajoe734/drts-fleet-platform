@@ -25,6 +25,7 @@ import type {
   MultiTaxiOperatingAuthorizationRecord,
 } from "@drts/contracts";
 import { decodeTenantWire } from "../sr-qa-tenant-001/http-boundary";
+import { resolveRouteStepUpPolicy } from "../../../../apps/api/src/common/auth/step-up.policy";
 import { ControlledReceiver, type ReceiverScope } from "./controlled-receiver";
 import type { ServiceProductRecord } from "../../../../apps/api/src/modules/service-product/service-product.types";
 import type { SyntheticEvent } from "./synthetic-event";
@@ -120,9 +121,9 @@ export class PartnerFixture {
         ? { "idempotency-key": randomUUID() }
         : {}),
     };
-    // The authoritative policy also gates tenant webhook creation/test/update.
-    // Let it decide whether this exact action/session requires a proof.
-    if (method !== "GET" && token) {
+    // Use the same route resolver as the real proof service. Setup mutations
+    // without a step-up action must not spend the proof endpoint's quota.
+    if (token && resolveRouteStepUpPolicy(method, `/api/${apiPath}`)) {
       const requestProof = () =>
         fetch(`${origin}/api/identity/step-up-proofs`, {
           method: "POST",
@@ -137,15 +138,27 @@ export class PartnerFixture {
         // Respect the existing server throttle once; never disable the guard
         // or retry a successful mutation. This is setup, not rate-limit UAT.
         const delay = Number(proof.headers.get("retry-after") ?? 60);
-        expect(delay > 0 && delay <= 60).toBe(true);
+        expect(
+          delay > 0 && delay <= 60,
+          `step-up ${apiPath}: HTTP 429 Retry-After=${Number.isFinite(delay) ? delay : "non-numeric"}`,
+        ).toBe(true);
         await proof.arrayBuffer();
         await new Promise((resolve) =>
           setTimeout(resolve, delay * 1_000 + 500),
         );
         proof = await requestProof();
       }
-      expect(proof.status, `step-up ${apiPath}`).toBe(201);
-      const envelope = decodeTenantWire(await proof.json());
+      const proofWire = await proof.json().catch(() => null);
+      const code = proofWire?.error?.code;
+      const safeCode =
+        typeof code === "string" && /^[A-Z0-9_]{1,80}$/.test(code)
+          ? code
+          : "unreported";
+      expect(
+        proof.status,
+        `step-up ${apiPath}: HTTP ${proof.status} code=${safeCode}`,
+      ).toBe(201);
+      const envelope = decodeTenantWire(proofWire);
       expect(typeof envelope.data.required).toBe("boolean");
       if (envelope.data.required) {
         expect(typeof envelope.data.stepUpReference).toBe("string");

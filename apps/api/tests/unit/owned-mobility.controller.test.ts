@@ -119,6 +119,10 @@ describe("OwnedMobilityController tenant booking routes", () => {
       resolvePersistedOrder: vi.fn().mockResolvedValue({
         orderId: "order-e2e-001",
       }),
+      resolvePartnerOrderView: vi.fn().mockResolvedValue({
+        orderId: "order-e2e-001",
+        progress: { orderId: "order-e2e-001" },
+      }),
       getTenantBooking: vi.fn().mockReturnValue({
         bookingId: "booking-e2e-001",
       }),
@@ -178,18 +182,18 @@ describe("OwnedMobilityController tenant booking routes", () => {
       booking: { bookingId: "booking-e2e-001" },
       order: { orderId: "order-e2e-001" },
     });
-    expect(service.getTenantBooking).toHaveBeenCalledWith(
-      "tenant-e2e-001",
-      "booking-e2e-001",
-      identity,
-    );
-    expect(service.getOrder).toHaveBeenCalledWith("order-e2e-001", identity);
+    expect(service.getTenantBooking).not.toHaveBeenCalled();
+    expect(service.getOrder).not.toHaveBeenCalled();
     expect(service.resolvePersistedTenantBooking).toHaveBeenCalledWith(
       "tenant-e2e-001",
       "booking-e2e-001",
       identity,
     );
     expect(service.resolvePersistedOrder).toHaveBeenCalledWith(
+      "order-e2e-001",
+      identity,
+    );
+    expect(service.resolvePartnerOrderView).toHaveBeenCalledWith(
       "order-e2e-001",
       identity,
     );
@@ -405,5 +409,56 @@ describe("OwnedMobilityController updateDriverTaskEta", () => {
     expect(error).toBeDefined();
     expect(error.code).toBe("DRIVER_IDENTITY_MISMATCH");
     expect(service.updateDriverTaskEta).not.toHaveBeenCalled();
+  });
+});
+
+describe("C032 partner booking replay response", () => {
+  it("reads a cached create receipt from persistence when the current replica has no order cache", async () => {
+    const coldCache = vi.fn(() => {
+      throw new Error("BOOKING_NOT_FOUND in cold replica");
+    });
+    const service = {
+      createTenantBooking: vi.fn().mockResolvedValue({
+        bookingId: "booking-persisted-replay",
+        orderId: "d65fd5e6-b17d-48d2-8f35-5dfef3620916",
+        replayed: true,
+      }),
+      getTenantBooking: coldCache,
+      getOrder: coldCache,
+      resolvePersistedTenantBooking: vi.fn().mockResolvedValue({
+        bookingId: "booking-persisted-replay",
+        orderId: "d65fd5e6-b17d-48d2-8f35-5dfef3620916",
+      }),
+      resolvePersistedOrder: vi.fn().mockResolvedValue({
+        bookingId: "booking-persisted-replay",
+        orderId: "d65fd5e6-b17d-48d2-8f35-5dfef3620916",
+      }),
+    };
+    const controller = new OwnedMobilityController(
+      service as unknown as OwnedMobilityService,
+      {} as never,
+    );
+    const response = await controller.createPartnerBooking(
+      {} as never,
+      null,
+      "tenant-demo-001",
+    );
+    expect(response.data).toMatchObject({
+      replayed: true,
+      booking: {
+        bookingId: "booking-persisted-replay",
+        orderId: "d65fd5e6-b17d-48d2-8f35-5dfef3620916",
+      },
+      order: {
+        bookingId: "booking-persisted-replay",
+        orderId: "d65fd5e6-b17d-48d2-8f35-5dfef3620916",
+      },
+    });
+    expect(coldCache).not.toHaveBeenCalled();
+    const failure = new Error("durable read unavailable");
+    service.resolvePersistedOrder.mockRejectedValueOnce(failure);
+    await expect(
+      controller.createPartnerBooking({} as never, null, "tenant-demo-001"),
+    ).rejects.toBe(failure);
   });
 });

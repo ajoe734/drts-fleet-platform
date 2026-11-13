@@ -889,6 +889,19 @@ export class BillingSettlementRepository {
     );
   }
 
+  /** Canonical invoice register for the existing cross-tenant operational read. */
+  async listAllInvoices() {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices ORDER BY created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<StoredTenantInvoiceRecord>(
+        row.record,
+        "billing.phase1_tenant_invoices",
+      ),
+    );
+  }
+
   /** Fresh tenant-scoped reads: never resolve mail recipients from process seeds. */
   async listInvoicesForTenant(tenantId: string) {
     const result = await this.databaseService!.query<JsonRecordRow>(
@@ -1179,10 +1192,9 @@ export class BillingSettlementRepository {
 
   /**
    * Distinct `YYYY-MM` period months that have at least one live card-benefit
-   * airport-transfer settlement trip for the issuer tenant. Mirrors the
-   * `partner_airport` channel predicate (`settlementChannelKeyForTrip`) plus the
-   * benefit/issuer reference requirement so statement period discovery does not
-   * miss periods that exist only in live repository data (not seed memory).
+   * airport-transfer settlement trip for the issuer tenant. Canonical card
+   * subtype and benefit/issuer references match the service's statement filter;
+   * travel and insurance references do not make a trip a card benefit.
    */
   async listLiveCardBenefitSettlementPeriods(
     tenantId: string,
@@ -1207,11 +1219,8 @@ export class BillingSettlementRepository {
           AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
           AND COALESCE(orders.record->>'orderSource', '')
             NOT IN ('external_platform', 'phone')
-          AND (
-            COALESCE(orders.record->>'businessDispatchSubtype', '')
-              = 'credit_card_airport_transfer'
-            OR COALESCE(orders.record->>'partnerId', '') <> ''
-          )
+          AND COALESCE(orders.record->>'businessDispatchSubtype', '')
+            = 'credit_card_airport_transfer'
           AND COALESCE(orders.record->>'benefitReference', '') <> ''
           AND COALESCE(orders.record->>'issuerAuthorizationRef', '') <> ''
       `,

@@ -63,6 +63,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { TenantVisibility } from "../../common/tenant-scope";
 import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
@@ -1958,6 +1959,21 @@ export class BillingSettlementService implements OnModuleInit {
 
   listPlatformInvoices() {
     return this.tenantInvoices.map((invoice) => this.cloneInvoice(invoice));
+  }
+
+  async listPlatformInvoicesFresh(visibility: TenantVisibility) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.listPlatformInvoices();
+    }
+    const invoices =
+      visibility.scope === "tenant"
+        ? await this.billingSettlementRepository.listInvoicesForTenant(
+            visibility.tenantId,
+          )
+        : await this.billingSettlementRepository.listAllInvoices();
+    return invoices.map((invoice) =>
+      this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice)),
+    );
   }
 
   listSettlementMatrix(): SettlementMatrixRecord[] {
@@ -4008,10 +4024,7 @@ export class BillingSettlementService implements OnModuleInit {
     for (const trip of this.liveSettlementTrips.values()) {
       if (
         trip.tenantId === tenantId &&
-        settlementChannelKeyForTrip(trip) ===
-          SETTLEMENT_STATEMENT_CHANNEL_KEY &&
-        Boolean(trip.benefitReference) &&
-        Boolean(trip.issuerAuthorizationRef)
+        this.isCardBenefitSettlementTrip(trip)
       ) {
         months.add(this.toPeriodMonth(trip.completedAt));
       }
@@ -4046,9 +4059,19 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
-  private isCardBenefitSettlementTrip(trip: BillingSettlementTripRecord) {
+  private isCardBenefitSettlementTrip(
+    trip: Pick<
+      LiveSettlementTripRecord,
+      | "businessDispatchSubtype"
+      | "orderSource"
+      | "partnerId"
+      | "benefitReference"
+      | "issuerAuthorizationRef"
+    >,
+  ) {
     return (
-      this.getSettlementChannelKey(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+      trip.businessDispatchSubtype === "credit_card_airport_transfer" &&
+      settlementChannelKeyForTrip(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
       Boolean(trip.benefitReference) &&
       Boolean(trip.issuerAuthorizationRef)
     );
@@ -4764,10 +4787,7 @@ export class BillingSettlementService implements OnModuleInit {
     // so the full delivered fare is the platform-funded (sponsor-reimbursed)
     // portion. Without this, statements collapse subsidisedAmount to 0 and
     // understate issuerPayable. Non-card-benefit live trips carry no subsidy.
-    const isCardBenefitTrip =
-      settlementChannelKeyForTrip(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
-      Boolean(trip.benefitReference) &&
-      Boolean(trip.issuerAuthorizationRef);
+    const isCardBenefitTrip = this.isCardBenefitSettlementTrip(trip);
     const platformFundedDiscount = isCardBenefitTrip
       ? { ...trip.grossEarning }
       : this.money(0);

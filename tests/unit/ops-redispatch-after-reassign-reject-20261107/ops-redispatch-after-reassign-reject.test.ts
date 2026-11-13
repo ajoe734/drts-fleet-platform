@@ -364,3 +364,191 @@ describe("Ops canonical order survives reassignment followed by driver rejection
     );
   });
 });
+
+// UI-only authority projection check: the existing upstream HTTP SIM delivers
+// the typed order requirement; domain qualification is tested separately.
+it.each([true, false])(
+  "Ops same-order detail preserves optional wheelchair requirement (%s)",
+  async (accessible) => {
+    const f = await fixture();
+    const state = await f.snapshot();
+    if (accessible)
+      state.order = { ...state.order, serviceSelection: { accessible: true } };
+    const { document } = await actualPage(state);
+    expect(
+      document.querySelector(`[data-ops-order-id="${state.order.orderId}"]`),
+    ).not.toBeNull();
+    const requirement = Array.from(document.body.querySelectorAll("*")).filter(
+      (node) =>
+        node.childElementCount === 0 && node.textContent?.trim() === "輪椅需求",
+    );
+    expect(requirement).toHaveLength(accessible ? 1 : 0);
+    expect(state.order.orderId).toBe(f.booking.orderId);
+  },
+);
+
+// UI-only reads of normal typed order snapshots. The real Page, Ops SDK,
+// CanvasDL and React render execute; HTTP transport and external program facts
+// are explicit SIMs. These cases do not assert product/supply qualification.
+function fulfillmentLeafText(panel: Element) {
+  return Array.from(panel.querySelectorAll("*"))
+    .filter((node) => node.childElementCount === 0)
+    .map((node) => node.textContent?.trim());
+}
+
+it.each([
+  {
+    subtype: "credit_card_airport_transfer" as const,
+    patch: {
+      direction: "pickup" as const,
+      flightNo: "SIM-OPS-FLIGHT-892",
+      terminal: "SIM-OPS-T2",
+      luggageCount: 0,
+    },
+    expected: [
+      "Airport pickup",
+      "Flight",
+      "SIM-OPS-FLIGHT-892",
+      "Terminal",
+      "SIM-OPS-T2",
+      "Luggage count",
+      "0",
+    ],
+  },
+  {
+    subtype: "travel_agency_transfer" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-OPS-GROUP-17",
+        groupSize: 2,
+        itineraryLink: "https://itinerary.example.invalid/SIM-OPS-GROUP-17",
+        rosterPassengers: ["SIM團員甲", "SIM團員乙"],
+        meetingPoint: "SIM-OPS南側集合處",
+        guideName: "SIM metadata-only guide",
+        guidePhone: "SIM metadata-only phone",
+        viaStops: ["SIM planned museum", "SIM planned hotel"],
+        signage: "SIM group welcome sign",
+      },
+      onsiteContact: { name: "SIM Canonical Guide", phone: "0900000077" },
+    },
+    expected: [
+      "SIM-OPS-GROUP-17",
+      "Group size",
+      "2",
+      "Meeting point",
+      "SIM-OPS南側集合處",
+      "https://itinerary.example.invalid/SIM-OPS-GROUP-17",
+      "SIM團員甲、SIM團員乙",
+      "Tour guide contact",
+      "SIM Canonical Guide",
+      "Tour guide phone",
+      "0900000077",
+      "Planned stops (not a navigation route)",
+      "SIM planned museum → SIM planned hotel",
+      "Pickup signage",
+      "SIM group welcome sign",
+    ],
+  },
+  {
+    subtype: "insurance_replacement_vehicle" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "insurance_replacement_vehicle" as const,
+        claimNumber: "SIM-OPS-CLAIM-36",
+        policyNumber: "SIM-OPS-POLICY-36",
+        claimReference: "SIM-OPS-REFERENCE-36",
+        claimantName: "SIM-OPS代步使用人",
+        replacementStart: "2199-11-12T01:30:00.000Z",
+        replacementEnd: "2199-11-14T09:00:00.000Z",
+        replacementVehicleClass: "SIM-OPS中型代步車",
+        caseHandler: "SIM-OPS理賠聯絡員",
+      },
+    },
+    expected: [
+      "SIM-OPS-CLAIM-36",
+      "SIM-OPS代步使用人",
+      "Replacement vehicle class",
+      "SIM-OPS中型代步車",
+      "Replacement start (UTC)",
+      "Replacement end (UTC)",
+      "SIM-OPS理賠聯絡員",
+    ],
+  },
+])(
+  "Ops detail renders $subtype fulfillment facts from the same-order API record",
+  async ({ subtype, patch, expected }) => {
+    const f = await fixture();
+    const state = await f.snapshot();
+    state.order = {
+      ...state.order,
+      businessDispatchSubtype: subtype,
+      serviceProductCode: subtype,
+      ...patch,
+    };
+    const { document, refresh } = await actualPage(state);
+    const panel = document.querySelector(
+      `[data-ops-fulfillment-order-id="${state.order.orderId}"]`,
+    );
+    expect(
+      panel,
+      "same-order fulfillment facts are visible to dispatch",
+    ).not.toBeNull();
+    expect(panel!.getAttribute("data-ops-fulfillment-subtype")).toBe(subtype);
+    const values = fulfillmentLeafText(panel!);
+    for (const item of expected) expect(values).toContain(item);
+    if (subtype === "insurance_replacement_vehicle") {
+      const contents = panel!.textContent ?? "";
+      expect(contents).toContain("2199");
+      expect(contents).toContain("01:30");
+      expect(contents).toContain("09:00");
+    }
+    expect(
+      document.querySelector(`[data-ops-order-id="${f.booking.orderId}"]`),
+    ).not.toBeNull();
+    expect(state.order.orderId).toBe(f.booking.orderId);
+    expect(refresh.props.enabled).toBe(true);
+    expect(refresh.props.intervalMs).toBe(5_000);
+  },
+);
+
+it("Ops detail shows unavailable insurance fulfillment fields instead of inventing program facts", async () => {
+  const f = await fixture();
+  const state = await f.snapshot();
+  state.order = {
+    ...state.order,
+    businessDispatchSubtype: "insurance_replacement_vehicle",
+    serviceProductCode: "insurance_replacement_vehicle",
+  };
+  const { document } = await actualPage(state);
+  const panel = document.querySelector(
+    `[data-ops-fulfillment-order-id="${state.order.orderId}"]`,
+  );
+  expect(panel).not.toBeNull();
+  const values = fulfillmentLeafText(panel!);
+  expect(values).toContain("Replacement vehicle class");
+  expect(values).toContain("Not provided");
+  expect(panel!.textContent).not.toContain("SIM-OPS中型代步車");
+  expect(panel!.textContent).not.toContain("undefined");
+  expect(state.order.orderId).toBe(f.booking.orderId);
+});
+
+it("Ops ordinary enterprise detail does not present an unrelated program snapshot as its fulfillment", async () => {
+  const f = await fixture();
+  const state = await f.snapshot();
+  state.order.partnerBookingDetails = {
+    subtype: "travel_agency_transfer",
+    groupCode: "SIM-OPS-UNRELATED-GROUP",
+    groupSize: 2,
+    itineraryLink: "https://itinerary.example.invalid/SIM-OPS-UNRELATED-GROUP",
+    rosterPassengers: ["SIM不相關旅客"],
+    meetingPoint: "SIM不相關集合點",
+  };
+  const { document } = await actualPage(state);
+  expect(document.querySelector("[data-ops-fulfillment-order-id]")).toBeNull();
+  expect(document.body.textContent).not.toContain("SIM-OPS-UNRELATED-GROUP");
+  expect(document.body.textContent).not.toContain("SIM不相關集合點");
+  expect(
+    document.querySelector(`[data-ops-order-id="${f.booking.orderId}"]`),
+  ).not.toBeNull();
+});

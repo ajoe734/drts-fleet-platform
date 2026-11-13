@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { PartnerFixture } from "./partner-fixture";
+import { displayOrderNo } from "../../../../apps/referral-embed-web/lib/order-display";
 import {
   EMBED_ORIGIN,
   NavigationFixture,
@@ -168,11 +169,16 @@ test.describe("Hosted navigation and session boundaries", () => {
     const foreignNav = await navFixture.issue(foreign, foreignOrder);
     const priorCookie = await navFixture.cookie(page.context());
     const consumes = [];
-    for (const via of paths)
-      consumes.push(
-        (await navFixture.consume(page.context(), foreignNav, via)).status(),
-      );
-    expect(consumes).toEqual([403, 400, 400]);
+    for (const via of paths) {
+      const refused = await navFixture.consume(page.context(), foreignNav, via);
+      consumes.push(refused.status());
+      if (via !== "navigation")
+        expect(await refused.json()).toMatchObject({
+          ok: false,
+          code: "SESSION_MISMATCH",
+        });
+    }
+    expect(consumes).toEqual([403, 403, 403]);
     expect(
       (await navFixture.cookie(page.context())).value === priorCookie.value,
     ).toBe(true);
@@ -197,7 +203,7 @@ test.describe("Hosted navigation and session boundaries", () => {
       });
     }
     // FIX-HISTORY deliberately returns 404 when the authenticated history
-    // list contains no matching order; missing sessions still return 400.
+    // list contains no matching order; missing sessions return 401.
     const unknownHistory = await page
       .context()
       .request.get(`${EMBED_ORIGIN}/api/referral/history/${orderId}-unknown`);
@@ -207,7 +213,7 @@ test.describe("Hosted navigation and session boundaries", () => {
     const unauthenticatedHistory = await page
       .context()
       .request.get(`${EMBED_ORIGIN}/api/referral/history/${orderId}`);
-    expect(unauthenticatedHistory.status()).toBe(400);
+    expect(unauthenticatedHistory.status()).toBe(401);
     expect(await unauthenticatedHistory.json()).toMatchObject({ ok: false });
     await test.info().attach("navigation-cross-scope", {
       contentType: "application/json",
@@ -224,7 +230,7 @@ test.describe("Hosted navigation and session boundaries", () => {
       }),
     });
     expect(reads).toEqual([
-      { surface: "receipt", status: 400, ok: false, returnedOrder: null },
+      { surface: "receipt", status: 403, ok: false, returnedOrder: null },
       { surface: "history", status: 404, ok: false, returnedOrder: null },
     ]);
   });
@@ -245,9 +251,13 @@ test.describe("Hosted navigation and session boundaries", () => {
     const stale = await navFixture.issue(entry, orderId);
     const other = await navFixture.issue(alternate, otherOrderId);
     for (const via of paths) {
-      expect(
-        (await navFixture.consume(page.context(), other, via)).status(),
-      ).toBe(via === "navigation" ? 403 : 400);
+      const refused = await navFixture.consume(page.context(), other, via);
+      expect(refused.status()).toBe(403);
+      if (via !== "navigation")
+        expect(await refused.json()).toMatchObject({
+          ok: false,
+          code: "SESSION_MISMATCH",
+        });
     }
     expect((await navFixture.active(page.context())).trip.orderId).toBe(
       orderId,
@@ -260,7 +270,7 @@ test.describe("Hosted navigation and session boundaries", () => {
       (
         await page.context().request.get(`${EMBED_ORIGIN}/api/referral/active`)
       ).status(),
-    ).toBe(400);
+    ).toBe(401);
     expect(
       (await navFixture.consume(page.context(), first, "navigation")).status(),
     ).toBe(403);
@@ -272,9 +282,13 @@ test.describe("Hosted navigation and session boundaries", () => {
     await navFixture.land(page, other);
     const switched = await navFixture.cookie(page.context());
     for (const via of paths) {
-      expect(
-        (await navFixture.consume(page.context(), stale, via)).status(),
-      ).toBe(via === "navigation" ? 403 : 400);
+      const refused = await navFixture.consume(page.context(), stale, via);
+      expect(refused.status()).toBe(403);
+      if (via !== "navigation")
+        expect(await refused.json()).toMatchObject({
+          ok: false,
+          code: "SESSION_MISMATCH",
+        });
     }
     expect(
       (await navFixture.cookie(page.context())).value === switched.value,
@@ -331,11 +345,16 @@ test.describe("Hosted navigation and session boundaries", () => {
       }
       expect((await navFixture.persisted(nav)).consumed_at).not.toBeNull();
       const statuses = [];
-      for (const replay of paths)
-        statuses.push(
-          (await navFixture.consume(page.context(), nav, replay)).status(),
-        );
-      expect(statuses).toEqual([403, 400, 400]);
+      for (const replay of paths) {
+        const refused = await navFixture.consume(page.context(), nav, replay);
+        statuses.push(refused.status());
+        if (replay !== "navigation")
+          expect(await refused.json()).toMatchObject({
+            ok: false,
+            code: "REFERRAL_HANDOFF_REPLAYED",
+          });
+      }
+      expect(statuses).toEqual([403, 409, 409]);
       // The protected API consumer is independently reachable; it must share
       // the durable replay ledger used by both BFF handlers. EXCP_001 is
       // retired: this caller authenticates with the same Google workload
@@ -379,7 +398,22 @@ test.describe("Hosted navigation and session boundaries", () => {
     expect(form.headers().location).toBe(`${EMBED_ORIGIN}${returnTo}`);
     await navFixture.activate(page.context(), safe);
     await page.goto(form.headers().location!);
-    await expect(page.getByText(orderId, { exact: false })).toBeVisible();
+    const active = await navFixture.active(page.context());
+    expect(active.trip.orderId).toBe(orderId);
+    const persistedOrders = (
+      await fixture.db.query(
+        "SELECT order_no FROM ops.phase1_owned_orders WHERE order_id=$1",
+        [orderId],
+      )
+    ).rows;
+    expect(persistedOrders).toHaveLength(1);
+    const orderNo = persistedOrders[0]!.order_no;
+    expect(typeof orderNo).toBe("string");
+    expect(orderNo.trim().length).toBeGreaterThan(0);
+    expect(active.trip.orderNo).toBe(orderNo);
+    await expect(
+      page.getByText(`訂單 ${displayOrderNo(orderNo)}`, { exact: true }),
+    ).toBeVisible();
     const expired = await navFixture.issue(entry, orderId);
     await page.context().clearCookies();
     await new Promise((resolve) =>
@@ -388,10 +422,15 @@ test.describe("Hosted navigation and session boundaries", () => {
         Math.max(0, Date.parse(expired.handoff.expiresAt) - Date.now()) + 1_000,
       ),
     );
-    for (const via of paths)
-      expect(
-        (await navFixture.consume(page.context(), expired, via)).status(),
-      ).toBe(via === "navigation" ? 403 : 400);
+    for (const via of paths) {
+      const refused = await navFixture.consume(page.context(), expired, via);
+      expect(refused.status()).toBe(via === "navigation" ? 403 : 410);
+      if (via !== "navigation")
+        expect(await refused.json()).toMatchObject({
+          ok: false,
+          code: "REFERRAL_HANDOFF_EXPIRED",
+        });
+    }
     expect((await navFixture.persisted(expired)).consumed_at).toBeNull();
     await test.info().attach("handoff-consumption-matrix", {
       contentType: "application/json",

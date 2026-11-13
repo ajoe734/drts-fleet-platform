@@ -107,6 +107,8 @@ describe("partner booking program form utilities", () => {
     draft.groupSize = "18";
     draft.itineraryLink =
       "https://booking.adventure-works.example/itinerary/GRP-101";
+    draft.guideName = "SIM Tour Guide";
+    draft.guidePhone = "0900000099";
     draft.luggageCount = "12";
     draft.meetingPoint = "North Gate coach bay";
     draft.rosterPassengers = "Tour Leader\\nPassenger A\\nPassenger B";

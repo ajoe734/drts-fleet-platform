@@ -1,0 +1,1339 @@
+// @vitest-environment jsdom
+import { createRequire } from "node:module";
+import path from "node:path";
+import type { ReactElement, ReactNode } from "react";
+import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
+import { PLATFORM_CURRENCY } from "@drts/contracts";
+import type {
+  BookingRequirements,
+  DriverTaskRecord,
+  OwnedOrderRecord,
+  UnifiedDriverTaskView,
+} from "@drts/contracts";
+import TripScreen from "../../../apps/driver-app/app/trip";
+import JobsScreen from "../../../apps/driver-app/app/jobs";
+import { DriverBottomTabBar } from "../../../apps/driver-app/components/driver-bottom-tab-bar";
+import { initializeDriverIdentity } from "../../../apps/driver-app/lib/api-client";
+
+// Actual app React/renderer, Trip/Jobs, task helpers, identity factory and SDK.
+// Native views/maps/sensors, Expo navigation and HTTP are simulated boundaries.
+// No browser server, device, external platform or PostgreSQL delivery is claimed.
+const driverRequire = createRequire(
+  path.resolve(import.meta.dirname, "../../../apps/driver-app/package.json"),
+);
+const React: typeof import("react") = driverRequire("react");
+type NativeNode = {
+  type: unknown;
+  props: Record<string, unknown>;
+  children: Array<NativeNode | string>;
+  findAll(predicate: (node: NativeNode) => boolean): NativeNode[];
+};
+type Mounted = { root: NativeNode; unmount(): void };
+const renderer: {
+  create(element: ReactElement): Mounted;
+  act(callback: () => void | Promise<void>): Promise<void>;
+} = driverRequire("react-test-renderer");
+
+type Route = { pathname: string; params?: { taskId?: string } };
+const ports = vi.hoisted(() => {
+  vi.stubEnv("EXPO_PUBLIC_API_URL", "https://driver-replay.example.invalid");
+  vi.stubEnv("EXPO_PUBLIC_DRIVER_ID", "driver-replay-sim");
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+    configurable: true,
+    writable: true,
+    value: true,
+  });
+  return {
+    selectedTaskId: "task-A",
+    navigate: undefined as ((tab: "trip" | "jobs") => void) | undefined,
+    push: vi.fn<(route: Route | string) => void>(),
+    replace: vi.fn(),
+    alerts: vi.fn(),
+    heartbeatActive: false,
+  };
+});
+
+// App-local package paths identify the same modules imported by real screens.
+// They do not rely on undeclared root-level React Native/Expo package aliases.
+vi.mock("../../../apps/driver-app/node_modules/react-native", () => ({
+  ActivityIndicator: "ActivityIndicator",
+  Alert: { alert: ports.alerts },
+  Image: "Image",
+  KeyboardAvoidingView: "KeyboardAvoidingView",
+  Modal: "Modal",
+  Pressable: "Pressable",
+  ScrollView: "ScrollView",
+  Text: "Text",
+  TextInput: "TextInput",
+  View: "View",
+  Linking: { openURL: vi.fn(), canOpenURL: async () => true },
+  Platform: {
+    OS: "web",
+    select: (options: { web?: unknown; default?: unknown }) =>
+      options.web ?? options.default,
+  },
+  StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 },
+  PanResponder: { create: () => ({ panHandlers: {} }) },
+  Animated: {
+    Value: class {
+      setValue() {}
+      stopAnimation() {}
+      interpolate() {
+        return 0;
+      }
+    },
+    View: "AnimatedView",
+    spring: () => ({ start() {} }),
+    timing: () => ({ start() {} }),
+    sequence: () => ({ start() {} }),
+  },
+}));
+vi.mock("../../../apps/driver-app/node_modules/@expo/vector-icons", () => ({
+  Ionicons: "Ionicons",
+}));
+vi.mock("../../../apps/driver-app/node_modules/expo-router", () => ({
+  Redirect: "Redirect",
+  useLocalSearchParams: () => ({ taskId: ports.selectedTaskId }),
+  useRouter: () => ({
+    push: ports.push,
+    replace: ports.replace,
+    canDismiss: () => false,
+    dismissAll: vi.fn(),
+  }),
+}));
+vi.mock("../../../apps/driver-app/node_modules/expo-image-picker", () => ({}));
+vi.mock(
+  "../../../apps/driver-app/node_modules/react-native-safe-area-context",
+  () => ({
+    useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+  }),
+);
+vi.mock("../../../apps/driver-app/node_modules/react-native-maps", () => ({
+  default: "MapView",
+  Marker: "Marker",
+  PROVIDER_GOOGLE: "google",
+}));
+vi.mock("expo-constants", () => ({
+  default: {
+    expoConfig: {
+      extra: {
+        apiBaseUrl: "https://driver-replay.example.invalid",
+        driverActorId: "driver-replay-sim",
+      },
+    },
+  },
+}));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => undefined,
+  deleteItemAsync: async () => undefined,
+}));
+
+type VisualProps = {
+  children?: ReactNode;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  label?: ReactNode;
+  body?: ReactNode;
+  value?: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  footer?: ReactNode;
+  bottomBar?: ReactNode;
+  onPress?: () => void;
+  disabled?: boolean;
+};
+function visual(props: VisualProps) {
+  return React.createElement(
+    "NativeVisual",
+    null,
+    props.title,
+    props.subtitle,
+    props.label,
+    props.body,
+    props.value,
+    props.description,
+    props.children,
+    props.actions,
+    props.footer,
+    props.bottomBar,
+  );
+}
+function button(props: VisualProps) {
+  return React.createElement(
+    "NativeButton",
+    { onPress: props.onPress, disabled: props.disabled },
+    props.children ?? props.label ?? props.title,
+  );
+}
+vi.mock("@/components/canvas-primitives", async () => {
+  const { driverCanvasTheme } = await vi.importActual<
+    typeof import("../../../apps/driver-app/components/canvas-primitives")
+  >("@/components/canvas-primitives");
+  return {
+    Banner: visual,
+    Btn: button,
+    Card: visual,
+    DL: visual,
+    Field: visual,
+    Input: "Input",
+    KPI: visual,
+    PageHeader: visual,
+    Pill: visual,
+    Shell: visual,
+    driverCanvasTheme,
+  };
+});
+vi.mock("@/components/ui", () => ({
+  AuthorityBanner: visual,
+  PlatformBadge: visual,
+}));
+vi.mock("@/lib/driver-location-heartbeat", () => ({
+  getLatestDriverLocationUpdate: () => null,
+  stopDriverLocationHeartbeat: async () => undefined,
+  subscribeToDriverLocationUpdates: () => () => undefined,
+  syncDriverLocationHeartbeat: async () => ({
+    status: ports.heartbeatActive ? "active" : "idle",
+    message: null,
+    latestUpdate: null,
+  }),
+}));
+vi.mock("@/lib/driver-tracking-recovery", () => ({
+  subscribeTrackingDiagnostic: () => () => undefined,
+  formatTrackingGapNotice: () => null,
+}));
+
+const mountedScreens: Mounted[] = [];
+function text(node: NativeNode | string): string {
+  return typeof node === "string" ? node : node.children.map(text).join(" ");
+}
+function one(nodes: NativeNode[], description: string): NativeNode {
+  expect(nodes, description).toHaveLength(1);
+  const node = nodes[0];
+  if (!node) throw new Error(`Missing ${description}`);
+  return node;
+}
+function trip(mounted: Mounted) {
+  return one(
+    mounted.root.findAll((node) => node.type === "TripOutlet"),
+    "persistent Trip outlet",
+  );
+}
+async function press(node: NativeNode) {
+  expect(node.props.disabled).not.toBe(true);
+  const onPress = node.props.onPress;
+  if (typeof onPress !== "function")
+    throw new Error("Native control has no onPress");
+  await renderer.act(async () => {
+    onPress();
+  });
+}
+async function waitForState(assertion: () => void) {
+  await vi.waitFor(async () => {
+    await renderer.act(async () => {
+      await Promise.resolve();
+    });
+    assertion();
+  });
+}
+
+function ownedTask(
+  taskId: string,
+  status: DriverTaskRecord["status"],
+): DriverTaskRecord {
+  return {
+    taskId,
+    orderId: `order-${taskId}`,
+    dispatchJobId: `job-${taskId}`,
+    assignmentId: `assignment-${taskId}`,
+    driverId: "driver-replay-sim",
+    vehicleId: "vehicle-sim",
+    sourcePlatform: null,
+    routeProvided: true,
+    waypoints: [],
+    status,
+    acceptedAt:
+      status === "pending_acceptance" ? null : "2026-11-07T06:00:00.000Z",
+    departedAt:
+      status === "pending_acceptance" ? null : "2026-11-07T06:01:00.000Z",
+    arrivedPickupAt:
+      status === "pending_acceptance" ? null : "2026-11-07T06:02:00.000Z",
+    startedAt:
+      status === "pending_acceptance" ? null : "2026-11-07T06:05:00.000Z",
+    completedAt: null,
+    actualDistanceKm: null,
+    actualDurationSec: null,
+    fare: null,
+    proof: null,
+  };
+}
+function taskView(record: DriverTaskRecord): UnifiedDriverTaskView {
+  return {
+    taskId: record.taskId,
+    orderId: record.orderId,
+    orderDomain: "owned",
+    sourcePlatform: "drts",
+    platformDisplayName: "DRTS",
+    externalOrderId: null,
+    nativeStatus: record.status,
+    localStatus: record.status,
+    driverActionState:
+      record.status === "completed"
+        ? "completed"
+        : record.status === "pending_acceptance"
+          ? "action_required"
+          : "in_progress",
+    allowedActions:
+      record.status === "completed"
+        ? []
+        : record.status === "pending_acceptance"
+          ? ["accept", "reject"]
+          : ["depart"],
+    routeLocked: false,
+    fareAuthority: "drts",
+    settlementAuthority: "drts",
+    driverPayoutAuthority: "drts",
+    requiresManualFallback: false,
+    requiresReauth: false,
+    syncIssueSummary: null,
+    blockingReason: null,
+    pickupSummary: `pickup-${record.taskId}`,
+    dropoffSummary: `dropoff-${record.taskId}`,
+    deadlineAt: null,
+    updatedAt: "2026-11-07T06:30:00.000Z",
+    orderSummary: {
+      orderId: record.orderId,
+      serviceBucket: "standard_taxi",
+      serviceProductCode: "taxi_realtime",
+      dispatchSemantics: "realtime",
+      businessDispatchSubtype: null,
+      fixedPrice: false,
+      quotedFare: null,
+    },
+  };
+}
+function order(record: DriverTaskRecord): OwnedOrderRecord {
+  return {
+    orderId: record.orderId,
+    orderNo: record.orderId,
+    orderSource: "app",
+    orderDomain: "owned",
+    tenantId: null,
+    partnerId: null,
+    partnerProgramId: null,
+    partnerEntrySlug: null,
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    passengerDisclosure: null,
+    serviceBucket: "standard_taxi",
+    serviceProductCode: "taxi_realtime",
+    dispatchSemantics: "realtime",
+    businessDispatchSubtype: null,
+    status:
+      record.status === "completed"
+        ? "completed"
+        : record.status === "pending_acceptance"
+          ? "assigned"
+          : "driver_accepted",
+    pickup: { address: `pickup-${record.taskId}`, lat: 25.04, lng: 121.51 },
+    dropoff: { address: `dropoff-${record.taskId}`, lat: 25.05, lng: 121.52 },
+    passenger: { name: "SIM passenger", phone: "0900000000" },
+    bookingId: null,
+    bookingType: null,
+    etaSnapshot: null,
+    callId: null,
+    recordingId: null,
+    reservationWindowStart: null,
+    reservationWindowEnd: null,
+    recurrenceRule: null,
+    modifiableUntil: null,
+    cancelableUntil: null,
+    bookedBy: null,
+    onsiteContact: null,
+    costCenter: null,
+    vehiclePreference: null,
+    benefitReference: null,
+    direction: null,
+    flightNo: null,
+    terminal: null,
+    luggageCount: null,
+    notes: null,
+    fixedPrice: false,
+    quotedFare: null,
+    quotedFareSource: null,
+    quotedFareRuleVersion: null,
+    manualFareOverride: null,
+    exceptionHold: null,
+    proofRequirements: {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    },
+    approvalState: "not_required",
+    approvalRequestIds: [],
+    complianceFlags: [],
+    cancelledAt: null,
+    cancelReason: null,
+    reservationHoldStatus: "none",
+    reservationHoldId: null,
+    reservationHoldExpiresAt: null,
+    dispatchAttemptCount: 0,
+    lastDispatchFailureReason: null,
+    noSupplyEscalation: null,
+    dispatchTimeout: null,
+    createdAt: "2026-11-07T06:00:00.000Z",
+    updatedAt: "2026-11-07T06:30:00.000Z",
+  };
+}
+function response(data: unknown, status = 200) {
+  return new Response(
+    JSON.stringify({ data, meta: { traceId: "SIM-driver-replay" } }),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+function createRequirementHarness(accessible: boolean) {
+  const record = ownedTask("task-A", "pending_acceptance");
+  if (accessible) record.serviceSelection = { accessible: true };
+  const view = taskView(record);
+  const owned = order(record);
+  if (record.serviceSelection) {
+    view.serviceSelection = record.serviceSelection;
+    owned.serviceSelection = record.serviceSelection;
+  }
+  const paths: string[] = [];
+  const unexpected: string[] = [];
+  const completionRequests: {
+    taskId: string;
+    body: Record<string, unknown>;
+  }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" || input instanceof URL
+          ? String(input)
+          : input.url,
+      );
+      const method = init?.method ?? "GET";
+      paths.push(url.pathname);
+      if (
+        method === "GET" &&
+        url.pathname === "/api/admin/flags/driver-app.tasks/enabled"
+      )
+        return response({ key: "driver-app.tasks", enabled: true });
+      if (method === "GET" && url.pathname === "/api/driver/tasks")
+        return response({ items: [record] });
+      if (method === "GET" && url.pathname === "/api/driver/task-views")
+        return response({ items: [view] });
+      if (method === "GET" && url.pathname === "/api/platform-presence")
+        return response({
+          driverId: record.driverId,
+          presences: [],
+          availablePlatforms: [],
+        });
+      if (
+        method === "GET" &&
+        (url.pathname === `/api/driver/tasks/${record.taskId}/order` ||
+          url.pathname === `/api/orders/${record.orderId}`)
+      )
+        return response(owned);
+      if (
+        method === "POST" &&
+        url.pathname === `/api/driver/tasks/${record.taskId}/complete`
+      ) {
+        const body = JSON.parse(String(init?.body));
+        completionRequests.push({ taskId: record.taskId, body });
+        Object.assign(record, body, { status: "completed" });
+        Object.assign(view, taskView(record));
+        owned.status = "completed";
+        return response(record);
+      }
+      unexpected.push(`${method} ${url.pathname}`);
+      throw new Error(`Unexpected UC16 HTTP SIM: ${method} ${url.pathname}`);
+    }),
+  );
+  ports.push.mockImplementation((route) => {
+    if (
+      typeof route === "string" ||
+      route.pathname !== "/trip" ||
+      route.params?.taskId !== record.taskId
+    )
+      throw new Error("Unexpected same-order navigation boundary");
+    ports.selectedTaskId = route.params.taskId;
+    ports.navigate?.("trip");
+  });
+  function MountedTabs() {
+    const [tab, setTab] = React.useState<"trip" | "jobs">("trip");
+    const [, changedRoute] = React.useReducer((value: number) => value + 1, 0);
+    React.useEffect(() => {
+      ports.navigate = (next) => {
+        setTab(next);
+        changedRoute();
+      };
+      return () => {
+        ports.navigate = undefined;
+      };
+    }, []);
+    return React.createElement(
+      "NativeTabsBoundary",
+      null,
+      React.createElement(
+        "TripOutlet",
+        { hidden: tab !== "trip" },
+        React.createElement(TripScreen),
+      ),
+      tab === "jobs"
+        ? React.createElement(
+            "JobsOutlet",
+            null,
+            React.createElement(JobsScreen),
+          )
+        : null,
+      React.createElement(DriverBottomTabBar, {
+        currentRouteName: tab,
+        onTabPress: (key) => {
+          if (key === "jobs" || key === "trip") ports.navigate?.(key);
+        },
+      }),
+    );
+  }
+  return {
+    record,
+    view,
+    owned,
+    completionRequests,
+    paths,
+    unexpected,
+    async mount() {
+      await initializeDriverIdentity();
+      let mounted!: Mounted;
+      await renderer.act(async () => {
+        mounted = renderer.create(React.createElement(MountedTabs));
+      });
+      mountedScreens.push(mounted);
+      await waitForState(() =>
+        expect(text(trip(mounted))).toContain("task-A · order-task-A"),
+      );
+      await waitForState(() =>
+        expect(paths).toContain(`/api/driver/tasks/${record.taskId}/order`),
+      );
+      expect(unexpected).toEqual([]);
+      return mounted;
+    },
+  };
+}
+beforeEach(() => {
+  ports.selectedTaskId = "task-A";
+  ports.navigate = undefined;
+  ports.push.mockClear();
+  ports.replace.mockClear();
+  ports.alerts.mockClear();
+  ports.heartbeatActive = false;
+  window.sessionStorage.clear();
+});
+afterEach(async () => {
+  for (const mounted of mountedScreens.splice(0))
+    await renderer.act(async () => {
+      mounted.unmount();
+    });
+  vi.unstubAllGlobals();
+  window.sessionStorage.clear();
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
+
+// Native/HTTP/navigation are explicit external SIMs. Keep actual Jobs, Trip,
+// registry-independent task/view renderers, real SDK identity and HTTP calls.
+it.each([true, false])(
+  "Driver Jobs layouts and normal Trip retain only the same-order wheelchair requirement (%s)",
+  async (accessible) => {
+    const h = createRequirementHarness(accessible);
+    const mounted = await h.mount();
+    expect(text(trip(mounted)).includes("輪椅需求")).toBe(accessible);
+    const sameTrip = one(
+      mounted.root.findAll((node) => node.type === TripScreen),
+      "actual persistent Trip",
+    );
+    await press(
+      one(
+        mounted.root.findAll(
+          (node) =>
+            node.type === "Pressable" &&
+            node.props.testID === "driver-tab-jobs",
+        ),
+        "real Jobs tab",
+      ),
+    );
+    function jobs() {
+      return one(
+        mounted.root.findAll((node) => node.type === "JobsOutlet"),
+        "actual Jobs outlet",
+      );
+    }
+    await waitForState(() => expect(text(jobs())).toContain(h.record.taskId));
+    expect(text(jobs()).includes("輪椅需求")).toBe(accessible);
+    await press(
+      one(
+        jobs().findAll(
+          (node) => node.type === "NativeButton" && text(node) === "佇列",
+        ),
+        "actual dense-layout toggle",
+      ),
+    );
+    expect(text(jobs()).includes("輪椅需求")).toBe(accessible);
+    await press(
+      one(
+        jobs().findAll(
+          (node) =>
+            node.type === "Pressable" &&
+            node.props.accessibilityRole === "button" &&
+            text(node).includes(h.record.taskId),
+        ),
+        "same task real Jobs row",
+      ),
+    );
+    expect(ports.push).toHaveBeenLastCalledWith({
+      pathname: "/trip",
+      params: { taskId: h.record.taskId },
+    });
+    expect(
+      one(
+        mounted.root.findAll((node) => node.type === TripScreen),
+        "same persistent Trip",
+      ),
+    ).toBe(sameTrip);
+    expect(text(trip(mounted))).toContain(
+      `${h.record.taskId} · ${h.record.orderId}`,
+    );
+    expect(text(trip(mounted)).includes("輪椅需求")).toBe(accessible);
+    expect(h.unexpected).toEqual([]);
+    expect(ports.alerts).not.toHaveBeenCalled();
+  },
+);
+
+function normalMultiTaxiCompletionHarness(fixedPrice: boolean) {
+  const h = createRequirementHarness(true);
+  ports.heartbeatActive = true;
+  h.record.status = "on_trip";
+  h.record.startedAt = new Date().toISOString();
+  Object.assign(h.view, taskView(h.record), { allowedActions: ["complete"] });
+  Object.assign(h.owned, {
+    runtimeProfileCode: "multi_taxi_direct",
+    serviceProductCode: "taxi_reservation",
+    dispatchSemantics: "reservation",
+    status: "on_trip",
+    fixedPrice,
+    quotedFare: fixedPrice
+      ? { currency: PLATFORM_CURRENCY, amountMinor: 12000 }
+      : null,
+  });
+  return h;
+}
+function completeControl(mounted: Mounted) {
+  return one(
+    trip(mounted).findAll(
+      (node) => node.type === "NativeButton" && text(node) === "完成行程",
+    ),
+    "actual Trip complete button",
+  );
+}
+async function enterFare(mounted: Mounted, label: string, value: string) {
+  const field = one(
+    trip(mounted).findAll(
+      (node) => node.type === visual && node.props.label === label,
+    ),
+    label,
+  );
+  const control = one(
+    field.findAll((node) => node.type === "Input"),
+    `${label} actual Input`,
+  );
+  const change = control.props.onChangeText;
+  if (typeof change !== "function") throw new Error("Fare Input unavailable");
+  await renderer.act(async () => {
+    change(value);
+  });
+}
+
+it("normal multi-taxi metered Trip explains the required fare before completing the same wheelchair task with entered values", async () => {
+  const h = normalMultiTaxiCompletionHarness(false);
+  const mounted = await h.mount();
+  expect(text(trip(mounted))).toContain("輪椅需求");
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain(
+      "本行程完單需填齊四項車資與實際總額；未發生的項目請填 0。",
+    ),
+  );
+  expect(text(trip(mounted))).not.toContain("全空可沿用原完單方式");
+  expect(completeControl(mounted).props.disabled).toBe(true);
+  expect(h.completionRequests).toEqual([]);
+  for (const [label, value] of [
+    ["實際起步費", "85"],
+    ["實際里程費", "10"],
+    ["實際延滯費", "0"],
+    ["實際夜間加成", "0"],
+    ["實際車資總額", "95"],
+  ])
+    await enterFare(mounted, label!, value!);
+  await waitForState(() =>
+    expect(completeControl(mounted).props.disabled).toBe(false),
+  );
+  await press(completeControl(mounted));
+  await waitForState(() => expect(h.completionRequests).toHaveLength(1));
+  expect(h.completionRequests[0]).toMatchObject({
+    taskId: h.record.taskId,
+    body: {
+      actualFareBreakdown: {
+        startMinor: 8500,
+        distanceMinor: 1000,
+        delayMinor: 0,
+        nightMinor: 0,
+      },
+      fare: { currency: PLATFORM_CURRENCY, amountMinor: 9500 },
+    },
+  });
+  expect(h.record.orderId).toBe(h.owned.orderId);
+  await waitForState(() => expect(h.record.status).toBe("completed"));
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal multi-taxi fixed-price Trip keeps its approved fare when completion fields are blank", async () => {
+  const h = normalMultiTaxiCompletionHarness(true);
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("固定價行程沿用訂單核定車資"),
+  );
+  expect(text(trip(mounted))).not.toContain(
+    "本行程完單需填齊四項車資與實際總額",
+  );
+  await waitForState(() =>
+    expect(completeControl(mounted).props.disabled).toBe(false),
+  );
+  await press(completeControl(mounted));
+  await waitForState(() => expect(h.completionRequests).toHaveLength(1));
+  expect(h.completionRequests[0]?.taskId).toBe(h.record.taskId);
+  expect(h.completionRequests[0]?.body).not.toHaveProperty("fare");
+  expect(h.completionRequests[0]?.body).not.toHaveProperty(
+    "actualFareBreakdown",
+  );
+  expect(h.owned.quotedFare).toEqual({
+    currency: PLATFORM_CURRENCY,
+    amountMinor: 12000,
+  });
+  expect(h.unexpected).toEqual([]);
+});
+
+// Normal API-owned program facts stay on this selected task/order. Eligibility,
+// issuer, travel roster and insurance facts here are explicit transport SIMs;
+// actual Trip rendering, app identity factory and shared SDK remain real.
+function programFulfillmentHarness(
+  subtype:
+    | "credit_card_airport_transfer"
+    | "travel_agency_transfer"
+    | "insurance_replacement_vehicle",
+) {
+  const h = createRequirementHarness(false);
+  h.record.serviceProductCode = subtype;
+  Object.assign(h.owned, {
+    serviceBucket: "business_dispatch",
+    serviceProductCode: subtype,
+    businessDispatchSubtype: subtype,
+    dispatchSemantics: "reservation",
+    fixedPrice: true,
+    quotedFare: { currency: PLATFORM_CURRENCY, amountMinor: 150000 },
+  });
+  Object.assign(h.view.orderSummary!, {
+    serviceBucket: "business_dispatch",
+    serviceProductCode: subtype,
+    businessDispatchSubtype: subtype,
+    dispatchSemantics: "reservation",
+    fixedPrice: true,
+    quotedFare: h.owned.quotedFare,
+  });
+  return h;
+}
+function fulfillmentPanel(mounted: Mounted) {
+  return one(
+    trip(mounted).findAll(
+      (node) =>
+        node.type === "View" &&
+        node.props.testID === "driver-partner-fulfillment",
+    ),
+    "selected task's fulfillment information",
+  );
+}
+
+it.each([
+  {
+    subtype: "credit_card_airport_transfer" as const,
+    patch: {
+      direction: "pickup" as const,
+      flightNo: "SIM-FLIGHT-892",
+      terminal: "SIM-T2",
+      luggageCount: 0,
+    },
+    expected: ["接機", "SIM-FLIGHT-892", "SIM-T2", "行李件數 0"],
+  },
+  {
+    subtype: "travel_agency_transfer" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-GROUP-17",
+        groupSize: 2,
+        itineraryLink: "https://itinerary.example.invalid/SIM-GROUP-17",
+        rosterPassengers: ["SIM團員甲", "SIM團員乙"],
+        meetingPoint: "SIM南側集合處",
+        guideName: "SIM metadata-only guide",
+        guidePhone: "SIM metadata-only phone",
+        viaStops: ["SIM規劃博物館", "SIM規劃飯店"],
+        signage: "SIM舉牌文字",
+      },
+      onsiteContact: { name: "SIM實際導遊聯絡人", phone: "0900000077" },
+    },
+    expected: [
+      "SIM-GROUP-17",
+      "團體人數 2",
+      "SIM南側集合處",
+      "https://itinerary.example.invalid/SIM-GROUP-17",
+      "SIM團員甲、SIM團員乙",
+      "領隊／導遊聯絡人 SIM實際導遊聯絡人",
+      "領隊／導遊電話 0900000077",
+      "規劃停靠點（非導航路線） SIM規劃博物館 → SIM規劃飯店",
+      "舉牌文字 SIM舉牌文字",
+    ],
+  },
+  {
+    subtype: "insurance_replacement_vehicle" as const,
+    patch: {
+      partnerBookingDetails: {
+        subtype: "insurance_replacement_vehicle" as const,
+        claimNumber: "SIM-CLAIM-36",
+        policyNumber: "SIM-POLICY-36",
+        claimReference: "SIM-REFERENCE-36",
+        claimantName: "SIM代步使用人",
+        replacementStart: "2199-11-12T01:30:00.000Z",
+        replacementEnd: "2199-11-14T09:00:00.000Z",
+        replacementVehicleClass: "SIM中型代步車",
+        caseHandler: "SIM理賠聯絡員",
+      },
+    },
+    expected: [
+      "SIM-CLAIM-36",
+      "SIM代步使用人",
+      "SIM中型代步車",
+      "代步起始（UTC） 2199-11-12 01:30",
+      "代步結束（UTC） 2199-11-14 09:00",
+      "SIM理賠聯絡員",
+    ],
+  },
+])(
+  "normal Driver Trip renders $subtype fulfillment facts from its same-order API read",
+  async ({ subtype, patch, expected }) => {
+    const h = programFulfillmentHarness(subtype);
+    Object.assign(h.owned, patch);
+    const mounted = await h.mount();
+    await waitForState(() =>
+      expect(text(trip(mounted))).toContain(expected[0]!),
+    );
+    const panel = fulfillmentPanel(mounted);
+    for (const value of expected) expect(text(panel)).toContain(value);
+    expect(text(trip(mounted))).toContain(
+      `${h.record.taskId} · ${h.record.orderId}`,
+    );
+    expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
+    expect(h.record.orderId).toBe(h.owned.orderId);
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal Driver Trip marks missing insurance fulfillment facts as unavailable instead of inventing a policy or vehicle", async () => {
+  const h = programFulfillmentHarness("insurance_replacement_vehicle");
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("服務行程資訊"),
+  );
+  const information = text(fulfillmentPanel(mounted));
+  expect(information).toContain("代步車型 未提供");
+  expect(information).toContain("代步起始（UTC） 未提供");
+  expect(information).not.toContain("SIM中型代步車");
+  expect(information).not.toContain("undefined");
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Driver Trip clears the previous program details when selecting a different ordinary task", async () => {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  h.owned.partnerBookingDetails = {
+    subtype: "travel_agency_transfer",
+    groupCode: "SIM-OLD-GROUP",
+    groupSize: 2,
+    itineraryLink: "https://itinerary.example.invalid/SIM-OLD-GROUP",
+    rosterPassengers: ["SIM前單旅客"],
+    meetingPoint: "SIM前單集合處",
+  };
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("SIM前單集合處"),
+  );
+  const next = ownedTask("task-B", "pending_acceptance");
+  Object.assign(h.record, next);
+  Object.assign(h.view, taskView(next));
+  Object.assign(h.owned, order(next));
+  // The old optional snapshot remains on the transport object intentionally;
+  // this ordinary task must not advertise it as a program's current facts.
+  ports.selectedTaskId = next.taskId;
+  await renderer.act(async () => ports.navigate?.("trip"));
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain(`${next.taskId} · ${next.orderId}`),
+  );
+  await waitForState(() =>
+    expect(h.paths).toContain(`/api/driver/tasks/${next.taskId}/order`),
+  );
+  expect(text(trip(mounted))).not.toContain("SIM前單集合處");
+  expect(text(trip(mounted))).not.toContain("SIM-OLD-GROUP");
+  expect(
+    trip(mounted).findAll(
+      (node) => node.props.testID === "driver-partner-fulfillment",
+    ),
+  ).toHaveLength(0);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Driver Trip leaves legacy guide contact unavailable instead of using passenger or metadata as a substitute", async () => {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  Object.assign(h.owned, {
+    onsiteContact: null,
+    partnerBookingDetails: {
+      subtype: "travel_agency_transfer",
+      groupCode: "SIM-LEGACY-GROUP",
+      groupSize: 1,
+      itineraryLink: "https://travel.example.test/SIM-legacy",
+      meetingPoint: "SIM legacy meeting",
+      rosterPassengers: ["SIM Legacy Traveller"],
+      guideName: "SIM metadata-only guide",
+      guidePhone: "0900000099",
+    },
+  });
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("SIM-LEGACY-GROUP"),
+  );
+  const panel = text(fulfillmentPanel(mounted));
+  expect(panel).toContain("領隊／導遊聯絡人 未提供");
+  expect(panel).toContain("領隊／導遊電話 未提供");
+  expect(panel).not.toContain("SIM metadata-only guide");
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+function waypointTripHarness() {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  ports.heartbeatActive = true;
+  h.record.status = "on_trip";
+  h.record.startedAt = "2026-11-13T00:01:00.000Z";
+  h.owned.status = "on_trip";
+  const routeStops = [
+    { address: "SIM museum", lat: 25.03, lng: 121.53 },
+    { ...h.owned.pickup },
+  ];
+  h.owned.partnerBookingDetails = {
+    subtype: "travel_agency_transfer",
+    groupCode: "SIM-WAYPOINT-GROUP",
+    groupSize: 1,
+    itineraryLink: "https://travel.example.invalid/SIM-waypoints",
+    rosterPassengers: ["SIM traveller"],
+    meetingPoint: "SIM meeting",
+    routeStops,
+  };
+  h.record.waypoints = [h.owned.pickup, ...routeStops, h.owned.dropoff].map(
+    (place, sequence, places) => ({
+      sequence,
+      label:
+        sequence === 0
+          ? "上車點"
+          : sequence === places.length - 1
+            ? "下車點"
+            : "停靠點 " + sequence,
+      address: place.address,
+      lat: place.lat ?? null,
+      lng: place.lng ?? null,
+      arrivedAt: sequence === 0 ? "2026-11-13T00:00:00.000Z" : null,
+      departedAt: sequence === 0 ? h.record.startedAt : null,
+    }),
+  );
+  Object.assign(h.view, taskView(h.record), { allowedActions: ["complete"] });
+  const visits: Array<{
+    taskId: string;
+    endpoint: string;
+    body: Record<string, unknown>;
+  }> = [];
+  const controls = { failNext: false, wait: null as Promise<void> | null };
+  const delegate = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(
+        typeof input === "string" || input instanceof URL
+          ? String(input)
+          : input.url,
+      );
+      const endpoint = url.pathname.split("/").at(-1)!;
+      if (
+        init?.method !== "POST" ||
+        !["arrived_pickup", "depart"].includes(endpoint)
+      )
+        return delegate(input, init);
+      const snapshot = structuredClone(h.record);
+      expect(url.pathname).toBe(
+        "/api/driver/tasks/" + snapshot.taskId + "/" + endpoint,
+      );
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      visits.push({ taskId: snapshot.taskId, endpoint, body });
+      if (controls.wait) await controls.wait;
+      if (controls.failNext) {
+        controls.failNext = false;
+        return response(
+          { message: "SIM canonical conflict; reload required" },
+          409,
+        );
+      }
+      const waypoint = snapshot.waypoints.find(
+        (item) => item.sequence === body.waypointSequence,
+      );
+      if (!waypoint) throw new Error("Unexpected waypoint HTTP SIM sequence");
+      if (endpoint === "arrived_pickup")
+        waypoint.arrivedAt = String(body.arrivedAt);
+      else waypoint.departedAt = String(body.departedAt);
+      if (h.record.taskId === snapshot.taskId)
+        Object.assign(h.record, snapshot);
+      return response(snapshot);
+    }),
+  );
+  return { ...h, visits, controls };
+}
+
+function waypointControl(mounted: Mounted, label: string) {
+  return one(
+    trip(mounted).findAll(
+      (node) => node.type === "NativeButton" && text(node) === label,
+    ),
+    label,
+  );
+}
+
+it("normal Trip sends ordered arrival/departure commands for every repeated-place waypoint before enabling completion", async () => {
+  const h = waypointTripHarness();
+  const mounted = await h.mount();
+  const expected = [
+    [1, "arrived_pickup", "抵達停靠點 1"],
+    [1, "depart", "離開停靠點 1"],
+    [2, "arrived_pickup", "抵達停靠點 2"],
+    [2, "depart", "離開停靠點 2"],
+    [3, "arrived_pickup", "抵達下車點"],
+  ] as const;
+  for (const [index, [sequence, endpoint, label]] of expected.entries()) {
+    await waitForState(() =>
+      expect(waypointControl(mounted, label).props.disabled).toBe(false),
+    );
+    expect(
+      trip(mounted).findAll(
+        (node) => node.type === "NativeButton" && text(node) === "完成行程",
+      ),
+    ).toHaveLength(0);
+    await press(waypointControl(mounted, label));
+    await waitForState(() => expect(h.visits).toHaveLength(index + 1));
+    expect(h.visits[index]).toMatchObject({
+      taskId: h.record.taskId,
+      endpoint,
+      body: { waypointSequence: sequence },
+    });
+    expect(
+      Number.isFinite(
+        Date.parse(
+          String(
+            h.visits[index]!.body[
+              endpoint === "depart" ? "departedAt" : "arrivedAt"
+            ],
+          ),
+        ),
+      ),
+    ).toBe(true);
+    expect(h.record.status).toBe("on_trip");
+    expect(h.completionRequests).toEqual([]);
+  }
+  await waitForState(() =>
+    expect(completeControl(mounted).props.disabled).toBe(false),
+  );
+  expect(h.record.waypoints[2]!.lat).toBe(h.record.waypoints[0]!.lat);
+  expect(h.record.waypoints[2]!.arrivedAt).not.toBeNull();
+  expect(h.record.waypoints[3]!.departedAt).toBeNull();
+  await press(completeControl(mounted));
+  await waitForState(() => expect(h.completionRequests).toHaveLength(1));
+  expect(h.record.status).toBe("completed");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip reloads canonical waypoint state after a rejected visit without optimistic advancement", async () => {
+  const h = waypointTripHarness();
+  h.controls.failNext = true;
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false),
+  );
+  const readsBefore = h.paths.filter(
+    (path) => path === "/api/driver/tasks",
+  ).length;
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() =>
+    expect(
+      h.paths.filter((path) => path === "/api/driver/tasks").length,
+    ).toBeGreaterThan(readsBefore),
+  );
+  await waitForState(() =>
+    expect(ports.alerts).toHaveBeenCalledWith("錯誤", expect.any(String)),
+  );
+  expect(h.record.waypoints[1]!.arrivedAt).toBeNull();
+  expect(h.record.waypoints[2]!.arrivedAt).toBeNull();
+  expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false);
+  expect(h.completionRequests).toEqual([]);
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() =>
+    expect(waypointControl(mounted, "離開停靠點 1").props.disabled).toBe(false),
+  );
+  expect(h.visits.map((visit) => visit.body.waypointSequence)).toEqual([1, 1]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip ignores an old waypoint response after changing to another selected task", async () => {
+  const h = waypointTripHarness();
+  let release!: () => void;
+  h.controls.wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(waypointControl(mounted, "抵達停靠點 1").props.disabled).toBe(false),
+  );
+  await press(waypointControl(mounted, "抵達停靠點 1"));
+  await waitForState(() => expect(h.visits).toHaveLength(1));
+  const next = ownedTask("task-B", "pending_acceptance");
+  Object.assign(h.record, next);
+  Object.assign(h.view, taskView(next));
+  Object.assign(h.owned, order(next), { partnerBookingDetails: undefined });
+  ports.selectedTaskId = next.taskId;
+  await renderer.act(async () => ports.navigate?.("trip"));
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("task-B · order-task-B"),
+  );
+  ports.alerts.mockClear();
+  await renderer.act(async () => {
+    release();
+    await Promise.resolve();
+  });
+  await waitForState(() =>
+    expect(waypointControl(mounted, "接受任務").props.disabled).toBe(false),
+  );
+  expect(h.record.taskId).toBe("task-B");
+  expect(h.record.waypoints).toEqual([]);
+  expect(text(trip(mounted))).not.toContain("停靠點 1");
+  expect(ports.alerts).not.toHaveBeenCalled();
+  expect(h.visits).toHaveLength(1);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+// Phone fixtures use the existing real SDK and mounted Trip. Only HTTP/native
+// ports are simulated; no PSTN, real phone call, server or PG proof is claimed.
+function phoneRequirements(
+  role: BookingRequirements["driverContactRole"],
+  selfBooking = false,
+): BookingRequirements {
+  const passengerContact = { name: "SIM 乘車人乙", phone: "0900000102" };
+  return {
+    passengerCount: selfBooking ? 1 : 3,
+    luggageCount: selfBooking ? 0 : 2,
+    luggageSize: "standard",
+    requiredCapabilities: [],
+    bookerContact: selfBooking
+      ? passengerContact
+      : { name: "SIM 代叫人甲", phone: "0900000101" },
+    passengerContact,
+    driverContactRole: role,
+    policyVersion: "SIM-phone-policy",
+    validationReference: "SIM-phone-validation",
+  };
+}
+
+function phoneHarness(requirements?: BookingRequirements) {
+  const h = createRequirementHarness(false);
+  h.owned.orderSource = "phone";
+  h.owned.callId = "SIM-phone-call";
+  if (requirements) {
+    h.record.bookingRequirements = requirements;
+    h.owned.bookingRequirements = requirements;
+    // The production interceptor sends snake_case; real SDK conversion must
+    // preserve nested canonical contacts and explicit zero luggage.
+    const wireRequirements = {
+      passenger_count: requirements.passengerCount,
+      luggage_count: requirements.luggageCount,
+      luggage_size: requirements.luggageSize,
+      required_capabilities: requirements.requiredCapabilities,
+      booker_contact: requirements.bookerContact,
+      passenger_contact: requirements.passengerContact,
+      driver_contact_role: requirements.driverContactRole,
+      policy_version: requirements.policyVersion,
+      validation_reference: requirements.validationReference,
+    };
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const reply = await originalFetch(input, init);
+        const url = new URL(
+          typeof input === "string" || input instanceof URL
+            ? String(input)
+            : input.url,
+        );
+        if (
+          url.pathname !== "/api/driver/tasks" &&
+          url.pathname !== `/api/driver/tasks/${h.record.taskId}/order`
+        )
+          return reply;
+        const envelope = await reply.json();
+        const records =
+          url.pathname === "/api/driver/tasks"
+            ? envelope.data.items
+            : [envelope.data];
+        for (const record of records) {
+          delete record.bookingRequirements;
+          record.booking_requirements = wireRequirements;
+        }
+        return response(envelope.data, reply.status);
+      },
+    );
+  }
+  return h;
+}
+
+async function phoneCard(mounted: Mounted) {
+  await waitForState(() =>
+    expect(
+      trip(mounted).findAll(
+        (node) =>
+          node.type === "View" &&
+          node.props.testID === "driver-partner-fulfillment",
+      ),
+    ).toHaveLength(1),
+  );
+  return one(
+    trip(mounted).findAll(
+      (node) =>
+        node.type === "View" &&
+        node.props.testID === "driver-partner-fulfillment",
+    ),
+    "same-task canonical fulfillment card",
+  );
+}
+
+it.each([
+  {
+    title: "self booking",
+    role: "booker" as const,
+    self: true,
+    name: "SIM 乘車人乙",
+    phone: "0900000102",
+    roleLabel: "叫車聯絡人",
+  },
+  {
+    title: "proxy booking contacting passenger",
+    role: "passenger" as const,
+    self: false,
+    name: "SIM 乘車人乙",
+    phone: "0900000102",
+    roleLabel: "乘車聯絡人",
+  },
+  {
+    title: "proxy booking contacting booker",
+    role: "booker" as const,
+    self: false,
+    name: "SIM 代叫人甲",
+    phone: "0900000101",
+    roleLabel: "叫車聯絡人",
+  },
+])(
+  "normal phone Trip displays canonical $title contact and load through SDK wire",
+  async ({ role, self, name, phone, roleLabel }) => {
+    const requirements = phoneRequirements(role, self);
+    const h = phoneHarness(requirements);
+    const mounted = await h.mount();
+    const content = text(await phoneCard(mounted));
+    expect(content).toContain(`接車聯絡角色 ${roleLabel}`);
+    expect(content).toContain(`接車聯絡人姓名 ${name}`);
+    expect(content).toContain(`接車聯絡電話 ${phone}`);
+    expect(content).toContain(`乘車人數 ${requirements.passengerCount}`);
+    expect(content).toContain(`行李件數 ${requirements.luggageCount}`);
+    expect(content).toContain("行李尺寸 標準");
+    if (!self) {
+      expect(content).not.toContain(
+        role === "booker" ? "0900000102" : "0900000101",
+      );
+      expect(content).not.toContain(
+        role === "booker" ? "SIM 乘車人乙" : "SIM 代叫人甲",
+      );
+    }
+    expect(content).not.toContain(h.owned.passenger.name);
+    expect(content).not.toContain(h.owned.passenger.phone);
+    expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("legacy phone Trip without canonical requirements does not invent a contact or load", async () => {
+  const h = phoneHarness();
+  h.owned.luggageCount = 4;
+  const mounted = await h.mount();
+  const content = text(await phoneCard(mounted));
+  for (const label of [
+    "接車聯絡角色",
+    "接車聯絡人姓名",
+    "接車聯絡電話",
+    "乘車人數",
+    "行李件數",
+    "行李尺寸",
+  ]) {
+    expect(content).toContain(`${label} 未提供`);
+  }
+  expect(content).not.toContain(h.owned.passenger.name);
+  expect(content).not.toContain(h.owned.passenger.phone);
+  expect(content).not.toContain("行李件數 4");
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("phone Trip does not replace a missing selected contact with another role or the passenger profile", async () => {
+  const requirements = phoneRequirements("passenger");
+  requirements.passengerContact = { name: "", phone: "" };
+  const h = phoneHarness(requirements);
+  const mounted = await h.mount();
+  const content = text(await phoneCard(mounted));
+  expect(content).toContain("接車聯絡角色 乘車聯絡人");
+  expect(content).toContain("接車聯絡人姓名 未提供");
+  expect(content).toContain("接車聯絡電話 未提供");
+  expect(content).toContain("乘車人數 3");
+  expect(content).toContain("行李件數 2");
+  expect(content).not.toContain(requirements.bookerContact.name);
+  expect(content).not.toContain(requirements.bookerContact.phone);
+  expect(content).not.toContain(h.owned.passenger.name);
+  expect(content).not.toContain(h.owned.passenger.phone);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});

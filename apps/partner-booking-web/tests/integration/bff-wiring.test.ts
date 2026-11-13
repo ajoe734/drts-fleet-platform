@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  groupPartnerTravelBookings,
+  loadPartnerBookingHistory,
+  loadPartnerBookingRecord,
+} from "@/lib/partner-booking-read-model";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BookingRecord,
   OwnedOrderRecord,
@@ -15,10 +20,12 @@ import {
   getPartnerRouteContext,
   getPartnerTrip,
   getPublicPartnerEntry,
+  listAllPartnerBookings,
   PartnerAuthorityError,
   resolvePartnerBrand,
   verifyPartnerEligibility,
   type PartnerSessionRecord,
+  type PartnerBookingCollection,
 } from "@/lib/api-client";
 
 const activeEntry = {
@@ -631,7 +638,9 @@ describe("partner-booking-web BFF wiring", () => {
     expect(
       (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
     ).toBeUndefined();
-    await expect(getPartnerRouteContext("adventureworks")).rejects.toMatchObject({
+    await expect(
+      getPartnerRouteContext("adventureworks"),
+    ).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_REQUEST_FAILED",
       status: 500,
     });
@@ -848,6 +857,16 @@ describe("partner-booking-web BFF wiring", () => {
       updatedAt: "2026-05-19T00:00:00.000Z",
     } as unknown as OwnedOrderRecord;
 
+    const receipt = {
+      orderId: order.orderId,
+      bookingId: booking.bookingId,
+      orderNo: order.orderNo,
+      orderStatus: order.status,
+      quotedFare: null,
+      completion: null,
+      payment: { availability: "not_recorded", status: null, amount: null },
+    };
+
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -870,7 +889,7 @@ describe("partner-booking-web BFF wiring", () => {
       )
       .mockResolvedValueOnce(
         jsonResponse({
-          data: order,
+          data: receipt,
           meta: { requestId: "r4", timestamp: "t4" },
         }),
       );
@@ -893,7 +912,7 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toEqual(booking);
     await expect(getPartnerTrip(session, "order-001")).resolves.toEqual(order);
     await expect(getPartnerReceipt(session, "order-001")).resolves.toEqual(
-      order,
+      receipt,
     );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -928,5 +947,613 @@ describe("partner-booking-web BFF wiring", () => {
         }),
       }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      API_URL + "/api/partner/orders/order-001/receipt",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+          "x-realm": "partner",
+          "x-tenant-id": "tenant-001",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("normal Partner direct requests to a private Cloud Run API", () => {
+  it.each(["entry", "trip", "create"] as const)(
+    "carries the existing transport token for %s without replacing product identity",
+    async (operation) => {
+      const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+      process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+      clearPartnerEntryAuthorityCacheForTests();
+      const calls: { url: string; headers: Headers }[] = [];
+      const order = {
+        orderId: "SIM-cloud-order",
+        bookingId: "SIM-cloud-booking",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL, init?: RequestInit) => {
+          const url = new URL(String(input));
+          calls.push({ url: url.href, headers: new Headers(init?.headers) });
+          if (url.hostname === "metadata.google.internal")
+            return new Response("SIM-google-transport-token", { status: 200 });
+          return jsonResponse({
+            data:
+              operation === "entry"
+                ? activeEntry
+                : operation === "create"
+                  ? {
+                      booking: {
+                        bookingId: order.bookingId,
+                        orderId: order.orderId,
+                      },
+                      order,
+                    }
+                  : order,
+            meta: {
+              requestId: "SIM-cloud-transport",
+              timestamp: "2026-11-12T00:00:00Z",
+            },
+          });
+        }),
+      );
+      try {
+        if (operation === "entry") await getPublicPartnerEntry("acme");
+        else if (operation === "trip")
+          await getPartnerTrip(session, order.orderId);
+        else
+          await createPartnerBooking(session, {
+            businessDispatchSubtype: "credit_card_airport_transfer",
+            partnerEntrySlug: "acme",
+            eligibilityVerificationId: "SIM-eligibility",
+            pickup: { address: "SIM A", lat: 25, lng: 121 },
+            dropoff: { address: "SIM B", lat: 25.1, lng: 121.1 },
+            reservationWindowStart: "2099-11-12T10:00:00Z",
+            reservationWindowEnd: "2099-11-12T11:00:00Z",
+            passenger: { name: "SIM Passenger", phone: "0900000000" },
+          });
+        expect(calls).toHaveLength(2);
+        const metadata = new URL(calls[0]!.url);
+        expect(metadata.hostname).toBe("metadata.google.internal");
+        expect(metadata.searchParams.get("audience")).toBe(
+          process.env.DRTS_API_AUTH_AUDIENCE,
+        );
+        expect(calls[0]!.headers.get("Metadata-Flavor")).toBe("Google");
+        const outbound = calls[1]!.headers;
+        expect(outbound.get("x-serverless-authorization")).toBe(
+          "Bearer SIM-google-transport-token",
+        );
+        expect(outbound.get("x-drts-google-id-token")).toBe(
+          "SIM-google-transport-token",
+        );
+        expect(outbound.get("Authorization")).toBe(
+          operation === "entry" ? null : "Bearer partner-token",
+        );
+        expect(outbound.get("x-request-id")).toBeTruthy();
+      } finally {
+        if (oldAudience === undefined)
+          delete process.env.DRTS_API_AUTH_AUDIENCE;
+        else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+        clearPartnerEntryAuthorityCacheForTests();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("does not invent a transport token when the existing metadata source has none", async () => {
+    const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+    process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+    const calls: Headers[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.hostname === "metadata.google.internal")
+          return new Response(null, { status: 503 });
+        calls.push(new Headers(init?.headers));
+        return jsonResponse({
+          data: { orderId: "SIM-cloud-order" },
+          meta: { requestId: "SIM-cloud-no-token", timestamp: "t" },
+        });
+      }),
+    );
+    try {
+      await getPartnerTrip(session, "SIM-cloud-order");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.get("x-serverless-authorization")).toBeNull();
+      expect(calls[0]!.get("x-drts-google-id-token")).toBeNull();
+      expect(calls[0]!.get("Authorization")).toBe("Bearer partner-token");
+    } finally {
+      if (oldAudience === undefined) delete process.env.DRTS_API_AUTH_AUDIENCE;
+      else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("normal Partner order progress wire compatibility", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    clearPartnerEntryAuthorityCacheForTests();
+  });
+
+  it("preserves fresh progress on the same ordinary order GET and its original bearer", async () => {
+    const progress = {
+      orderId: "SIM-wire-order",
+      availability: "available",
+      currentTask: { taskId: "SIM-wire-task" },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: { orderId: "SIM-wire-order", progress },
+        meta: {},
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      getPartnerTrip(session, "SIM-wire-order"),
+    ).resolves.toMatchObject({ orderId: "SIM-wire-order", progress });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/orders/SIM-wire-order`,
+      expect.objectContaining({
+        cache: "no-store",
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+        }),
+      }),
+    );
+  });
+
+  it("rejects cross-order progress through the original server read helper without exposing the session", async () => {
+    const privateToken = "SIM-wire-server-only";
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(path);
+        if (path === "/api/partner/entries/acme")
+          return jsonResponse({ data: activeEntry, meta: {} });
+        if (path === "/api/partner/ingress/handoff")
+          return jsonResponse({
+            data: {
+              accessToken: privateToken,
+              expiresIn: "15m",
+              tokenType: "Bearer",
+              identity: session.identity,
+            },
+            meta: {},
+          });
+        expect(new Headers(init?.headers).get("Authorization")).toBe(
+          "Bearer " + privateToken,
+        );
+        if (path === "/api/partner/bookings/SIM-wire-booking")
+          return jsonResponse({
+            data: { bookingId: "SIM-wire-booking", orderId: "SIM-wire-order" },
+            meta: {},
+          });
+        if (path === "/api/partner/orders/SIM-wire-order")
+          return jsonResponse({
+            data: {
+              bookingId: "SIM-wire-booking",
+              orderId: "SIM-wire-order",
+              progress: { orderId: "unrelated-order" },
+            },
+            meta: {},
+          });
+        throw new Error("Unexpected normal wire route: " + path);
+      }),
+    );
+    await expect(
+      loadPartnerBookingRecord("acme", {
+        partnerUserRef: "SIM-existing-owner",
+        bookingId: "SIM-wire-booking",
+      }),
+    ).rejects.toMatchObject({ code: "PARTNER_BOOKING_READBACK_MISMATCH" });
+    expect(calls).toEqual([
+      "/api/partner/entries/acme",
+      "/api/partner/ingress/handoff",
+      "/api/partner/bookings/SIM-wire-booking",
+      "/api/partner/orders/SIM-wire-order",
+    ]);
+  });
+});
+
+describe("persisted Partner tour slot aggregation", () => {
+  type TravelDetails = Extract<
+    NonNullable<BookingRecord["partnerBookingDetails"]>,
+    { subtype: "travel_agency_transfer" }
+  >;
+  const tourBooking = (
+    id: string,
+    details: Partial<TravelDetails> = {},
+    record: Partial<BookingRecord> = {},
+  ): BookingRecord =>
+    ({
+      bookingId: `booking-${id}`,
+      orderId: `order-${id}`,
+      tenantId: "tenant-001",
+      partnerId: "partner-001",
+      partnerProgramId: "program-001",
+      partnerEntrySlug: "acme",
+      status: "completed",
+      orderStatus: "completed",
+      businessDispatchSubtype: "travel_agency_transfer",
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer",
+        groupCode: "SIM-tour",
+        groupSize: 2,
+        itineraryLink: "https://example.invalid/SIM-itinerary",
+        rosterPassengers: ["SIM passenger"],
+        meetingPoint: "SIM meeting point",
+        guideName: "SIM guide",
+        guidePhone: "0900000000",
+        planSourceKind: "sim",
+        planSourceId: "SIM-source",
+        planSourceRevision: "r1",
+        planSourceLabel: "Same display label",
+        planLegId: "leg-1",
+        planLegLabel: "Same display label",
+        planLegIndex: 1,
+        planLegCount: 1,
+        planBatchId: "batch-1",
+        planBatchLabel: "Same display label",
+        planBatchIndex: 1,
+        planBatchCount: 1,
+        planVehicleId: "vehicle-1",
+        planVehicleLabel: "Same display label",
+        planVehicleCount: 1,
+        ...details,
+      },
+      ...record,
+    }) as BookingRecord;
+  const collection = (items: BookingRecord[]): PartnerBookingCollection => ({
+    items,
+    totalItems: items.length,
+    pagesRead: 1,
+    complete: true,
+    issues: [],
+  });
+  const pageResponse = (
+    items: BookingRecord[],
+    page: number,
+    totalItems: number,
+  ) =>
+    jsonResponse({
+      data: {
+        items,
+        pagination: {
+          page,
+          pageSize: 20,
+          totalItems,
+          totalPages: Math.ceil(totalItems / 20),
+        },
+      },
+      meta: {},
+    });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearPartnerEntryAuthorityCacheForTests();
+  });
+
+  it("reads beyond the first twenty orders with the original scoped bearer before completing a tour", async () => {
+    const bookings = Array.from({ length: 21 }, (_, index) =>
+      tourBooking(String(index), {
+        planVehicleId: `vehicle-${index + 1}`,
+        planVehicleCount: 21,
+      }),
+    );
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/api/partner/bookings");
+      expect(url.searchParams.get("pageSize")).toBe("20");
+      expect(new Headers(init?.headers).get("Authorization")).toBe(
+        "Bearer partner-token",
+      );
+      expect(init?.method).toBe("GET");
+      const page = Number(url.searchParams.get("page"));
+      return pageResponse(bookings.slice((page - 1) * 20, page * 20), page, 21);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await listAllPartnerBookings(session);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      complete: true,
+      totalItems: 21,
+      pagesRead: 2,
+      issues: [],
+    });
+    expect(groupPartnerTravelBookings(result).groups[0]).toMatchObject({
+      completed: true,
+      missingVehicleCount: 0,
+    });
+    expect(groupPartnerTravelBookings(result).groups[0]?.slots).toHaveLength(
+      21,
+    );
+    const firstPageOnly = groupPartnerTravelBookings(
+      collection(bookings.slice(0, 20)),
+    ).groups[0];
+    expect(firstPageOnly).toMatchObject({
+      completed: false,
+      missingVehicleCount: 1,
+    });
+  });
+
+  it("flags repeated pages and changing totals rather than reporting whole-tour completion", async () => {
+    const bookings = Array.from({ length: 20 }, (_, index) =>
+      tourBooking(String(index), {
+        planVehicleId: String(index),
+        planVehicleCount: 21,
+      }),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse(bookings, 1, 21))
+      .mockResolvedValueOnce(pageResponse([bookings[0]!], 2, 21));
+    vi.stubGlobal("fetch", fetchMock);
+    const repeated = await listAllPartnerBookings(session);
+    expect(repeated.complete).toBe(false);
+    expect(repeated.issues).toContain("duplicate_booking");
+    expect(groupPartnerTravelBookings(repeated).groups[0]?.completed).toBe(
+      false,
+    );
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(pageResponse(bookings, 1, 21))
+      .mockResolvedValueOnce(pageResponse([tourBooking("new")], 2, 22));
+    const changed = await listAllPartnerBookings(session);
+    expect(changed.complete).toBe(false);
+    expect(changed.issues).toContain("pagination_changed");
+  });
+
+  it("keeps the ordinary history page while aggregating all travel pages through the existing session", async () => {
+    const bookings = Array.from({ length: 21 }, (_, index) =>
+      tourBooking(String(index), {
+        planVehicleId: String(index),
+        planVehicleCount: 21,
+      }),
+    );
+    const travelEntry = {
+      ...activeEntry,
+      businessDispatchSubtype: "travel_agency_transfer",
+      eligibilityMode: "none",
+    };
+    const pages: number[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/partner/entries/acme")
+          return jsonResponse({ data: travelEntry, meta: {} });
+        if (url.pathname === "/api/partner/ingress/handoff")
+          return jsonResponse({
+            data: {
+              accessToken: "SIM-tour-private-token",
+              expiresIn: "15m",
+              tokenType: "Bearer",
+              identity: session.identity,
+            },
+            meta: {},
+          });
+        expect(new Headers(init?.headers).get("Authorization")).toBe(
+          "Bearer SIM-tour-private-token",
+        );
+        if (url.pathname === "/api/partner/bookings") {
+          const page = Number(url.searchParams.get("page"));
+          pages.push(page);
+          return pageResponse(
+            bookings.slice((page - 1) * 20, page * 20),
+            page,
+            21,
+          );
+        }
+        if (url.pathname === "/api/auth/session")
+          return jsonResponse({
+            data: { active: true, identity: session.identity },
+            meta: {},
+          });
+        throw new Error("Unexpected tour history read: " + url.pathname);
+      }),
+    );
+    const model = await loadPartnerBookingHistory("acme", {
+      partnerUserRef: "SIM-original-partner-user",
+      page: "2",
+    });
+    expect(model.bookings.pagination.page).toBe(2);
+    expect(model.bookings.items.map((booking) => booking.bookingId)).toEqual([
+      "booking-20",
+    ]);
+    expect(pages).toEqual([2, 1, 2]);
+    expect(model.travel?.groups[0]?.slots).toHaveLength(21);
+    expect(model.travel?.groups[0]?.completed).toBe(true);
+    expect(JSON.stringify(model)).not.toContain("SIM-tour-private-token");
+  });
+
+  it("keeps source revision, tenant, leg, batch and vehicle identities separate despite identical labels", () => {
+    const result = groupPartnerTravelBookings(
+      collection([
+        tourBooking("original", { planVehicleCount: 2 }),
+        tourBooking("other-vehicle", {
+          planVehicleId: "vehicle-2",
+          planVehicleCount: 2,
+        }),
+        tourBooking("other-source", { planSourceId: "SIM-other-source" }),
+        tourBooking("other-revision", { planSourceRevision: "r2" }),
+        tourBooking("other-tenant", {}, { tenantId: "tenant-002" }),
+      ]),
+    );
+    expect(result.groups).toHaveLength(4);
+    const original = result.groups.find(
+      (group) =>
+        group.sourceId === "SIM-source" &&
+        group.sourceRevision === "r1" &&
+        group.slots.length === 2,
+    );
+    expect(original?.slots.map((slot) => slot.vehicleId)).toEqual([
+      "vehicle-1",
+      "vehicle-2",
+    ]);
+    expect(original?.slots.every((slot) => !slot.duplicate)).toBe(true);
+    expect(original?.completed).toBe(true);
+  });
+
+  it("requires every declared leg, batch and vehicle and preserves duplicate-slot order references", () => {
+    const incomplete = groupPartnerTravelBookings(
+      collection([
+        tourBooking("one", {
+          planLegCount: 2,
+          planBatchCount: 2,
+          planVehicleCount: 2,
+        }),
+      ]),
+    ).groups[0];
+    expect(incomplete).toMatchObject({
+      missingLegCount: 1,
+      missingBatchCount: 1,
+      missingVehicleCount: 1,
+      completed: false,
+    });
+    const bookings: BookingRecord[] = [];
+    for (let leg = 1; leg <= 2; leg += 1) {
+      for (let batch = 1; batch <= 2; batch += 1) {
+        for (let vehicle = 1; vehicle <= 2; vehicle += 1) {
+          bookings.push(
+            tourBooking(`${leg}-${batch}-${vehicle}`, {
+              planLegId: `leg-${leg}`,
+              planLegIndex: leg,
+              planLegCount: 2,
+              planBatchId: `batch-${batch}`,
+              planBatchIndex: batch,
+              planBatchCount: 2,
+              planVehicleId: `vehicle-${vehicle}`,
+              planVehicleCount: 2,
+            }),
+          );
+        }
+      }
+    }
+    expect(
+      groupPartnerTravelBookings(collection(bookings)).groups[0]?.completed,
+    ).toBe(true);
+    const duplicate = {
+      ...bookings[0]!,
+      bookingId: "booking-duplicate",
+      orderId: "order-duplicate",
+      status: "active" as const,
+      orderStatus: "assigned" as const,
+    };
+    const group = groupPartnerTravelBookings(
+      collection([...bookings, duplicate]),
+    ).groups[0]!;
+    expect(group.completed).toBe(false);
+    expect(group.slots).toHaveLength(8);
+    expect(group.slots[0]).toMatchObject({ duplicate: true, completed: false });
+    expect(group.slots[0]?.bookings.map((booking) => booking.orderId)).toEqual([
+      "order-1-1-1",
+      "order-duplicate",
+    ]);
+    const pending = bookings.map((booking, index) =>
+      index === 7 ? { ...booking, orderStatus: "on_trip" as const } : booking,
+    );
+    expect(
+      groupPartnerTravelBookings(collection(pending)).groups[0]?.completed,
+    ).toBe(false);
+  });
+
+  it("shows a cancelled slot as missing, permits its real replacement and rejects ambiguous slot counts or reused order IDs", () => {
+    const cancelled = tourBooking(
+      "cancelled",
+      {},
+      { status: "cancelled", orderStatus: "cancelled" },
+    );
+    expect(
+      groupPartnerTravelBookings(collection([cancelled])).groups[0],
+    ).toMatchObject({ missingVehicleCount: 1, completed: false });
+    const replacement = groupPartnerTravelBookings(
+      collection([cancelled, tourBooking("replacement")]),
+    ).groups[0]!;
+    expect(replacement.completed).toBe(true);
+    expect(replacement.slots[0]).toMatchObject({
+      duplicate: false,
+      missing: false,
+    });
+    expect(replacement.slots[0]?.bookings).toHaveLength(2);
+    const inconsistent = groupPartnerTravelBookings(
+      collection([
+        tourBooking("one", { planVehicleCount: 2 }),
+        tourBooking("two", { planVehicleId: "vehicle-2", planVehicleCount: 3 }),
+      ]),
+    ).groups[0];
+    expect(inconsistent).toMatchObject({
+      metadataConsistent: false,
+      completed: false,
+    });
+    const reused = groupPartnerTravelBookings(
+      collection([
+        tourBooking("one", { planVehicleCount: 2 }),
+        tourBooking(
+          "two",
+          { planVehicleId: "vehicle-2", planVehicleCount: 2 },
+          { orderId: "order-one" },
+        ),
+      ]),
+    ).groups[0];
+    expect(reused).toMatchObject({
+      metadataConsistent: false,
+      completed: false,
+    });
+  });
+
+  it("does not let insurance orders carrying travel metadata fill a tour slot or complete a tour", () => {
+    const travel = tourBooking("travel", { planVehicleCount: 2 });
+    const insurance = tourBooking(
+      "insurance",
+      { planVehicleId: "vehicle-2", planVehicleCount: 2 },
+      { businessDispatchSubtype: "insurance_replacement_vehicle" },
+    );
+    const group = groupPartnerTravelBookings(collection([travel, insurance]))
+      .groups[0]!;
+    expect(group.slots).toHaveLength(1);
+    expect(
+      group.slots[0]?.bookings.map((booking) => booking.bookingId),
+    ).toEqual(["booking-travel"]);
+    expect(group).toMatchObject({ missingVehicleCount: 1, completed: false });
+    expect(groupPartnerTravelBookings(collection([insurance]))).toEqual({
+      groups: [],
+      ungroupedTravelBookings: 0,
+    });
+  });
+
+  it("keeps legacy bookings without slot identity in ordinary history and propagates the original forbidden read", async () => {
+    const legacy = tourBooking("legacy");
+    delete (legacy.partnerBookingDetails as TravelDetails).planSourceId;
+    expect(groupPartnerTravelBookings(collection([legacy]))).toEqual({
+      groups: [],
+      ungroupedTravelBookings: 1,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: { code: "PARTNER_SCOPE_FORBIDDEN", message: "Forbidden" },
+          },
+          403,
+        ),
+      ),
+    );
+    await expect(listAllPartnerBookings(session)).rejects.toMatchObject({
+      status: 403,
+      code: "PARTNER_SCOPE_FORBIDDEN",
+    });
   });
 });

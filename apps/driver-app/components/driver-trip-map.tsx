@@ -15,6 +15,7 @@ import { driverCanvasTheme } from "@/components/canvas-primitives";
 import {
   buildDriverTripNavigationModel,
   getDriverLocationFixState,
+  isValidDriverCoordinate,
   openDriverNavigation,
   type DriverLocationFixInput,
   type DriverNavigationCoordinate,
@@ -31,7 +32,7 @@ function buildNativeMapRegion(
 ) {
   const points = [
     ...stops,
-    ...(driverLocation
+    ...(driverLocation && isValidDriverCoordinate(driverLocation)
       ? [
           {
             latitude: driverLocation.latitude,
@@ -202,10 +203,9 @@ export default function DriverTripMap({
         ? "warning"
         : "info",
   );
-  const nativePoints = [
-    model.stops.pickup.coordinate,
-    model.stops.dropoff.coordinate,
-  ].filter((point): point is DriverNavigationCoordinate => point !== null);
+  const nativePoints = model.orderedStops
+    .map((stop) => stop.coordinate)
+    .filter((point): point is DriverNavigationCoordinate => point !== null);
   const nativeMapEnabled =
     nativeMapAvailable && Platform.OS !== "web" && nativePoints.length > 0;
   const initialRegion = nativeMapEnabled
@@ -241,7 +241,7 @@ export default function DriverTripMap({
           <Text style={styles.eyebrow}>Trip Map & Navigation Handoff</Text>
           <Text style={styles.title}>座標導航交接</Text>
           <Text style={styles.subtitle}>
-            以後端同步的上下車座標交接外部導航，不以地址文字推測路線。
+            依同步停靠順序逐站交接外部導航，不以地址文字推測路線。
           </Text>
         </View>
         <View
@@ -286,6 +286,7 @@ export default function DriverTripMap({
         </View>
         {nativeMapEnabled && initialRegion ? (
           <MapView
+            key={`${task.taskId}:${nativePoints.map((point) => `${point.latitude},${point.longitude}`).join(";")}`}
             accessibilityLabel="Driver trip Google map"
             initialRegion={initialRegion}
             mapType="standard"
@@ -296,33 +297,49 @@ export default function DriverTripMap({
             }
             style={styles.nativeMap}
           >
-            {model.stops.pickup.coordinate ? (
-              <Marker
-                coordinate={model.stops.pickup.coordinate}
-                description={model.stops.pickup.address}
-                pinColor={driverCanvasTheme.success}
-                title={model.stops.pickup.label}
-              />
-            ) : null}
-            {model.stops.dropoff.coordinate ? (
-              <Marker
-                coordinate={model.stops.dropoff.coordinate}
-                description={model.stops.dropoff.address}
-                pinColor={driverCanvasTheme.danger}
-                title={model.stops.dropoff.label}
-              />
-            ) : null}
+            {model.orderedStops.map((stop, index) =>
+              stop.coordinate ? (
+                <Marker
+                  key={stop.target}
+                  coordinate={stop.coordinate}
+                  description={stop.address}
+                  pinColor={
+                    index === 0
+                      ? driverCanvasTheme.success
+                      : index === model.orderedStops.length - 1
+                        ? driverCanvasTheme.danger
+                        : driverCanvasTheme.info
+                  }
+                  title={`${index + 1}. ${stop.label}`}
+                />
+              ) : null,
+            )}
           </MapView>
         ) : (
           <View style={styles.pinRow}>
-            <View style={[styles.pin, styles.pickupPin]} />
-            <View style={styles.pinConnector} />
-            <View style={[styles.pin, styles.dropoffPin]} />
+            {model.orderedStops.map((stop, index) => (
+              <React.Fragment key={stop.target}>
+                {index > 0 ? <View style={styles.pinConnector} /> : null}
+                <View
+                  accessibilityLabel={`${index + 1}. ${stop.label}: ${stop.coordinateLabel}`}
+                  style={[
+                    styles.pin,
+                    !stop.coordinate
+                      ? styles.missingPin
+                      : index === 0
+                        ? styles.pickupPin
+                        : index === model.orderedStops.length - 1
+                          ? styles.dropoffPin
+                          : styles.waypointPin,
+                  ]}
+                />
+              </React.Fragment>
+            ))}
           </View>
         )}
         <Text style={styles.previewMeta}>
           {model.hasNavigableRoute
-            ? "Pickup/dropoff pins use synced coordinates and can open external navigation."
+            ? "停靠點依同步順序顯示，可逐站開啟外部導航；不代表已計算路線、ETA 或行程進度。"
             : "座標資料不完整；畫面保留地址與 fallback 指引，導航按鈕僅在座標有效時啟用。"}
         </Text>
       </View>
@@ -357,18 +374,15 @@ export default function DriverTripMap({
         </Text>
       ) : null}
 
-      <StopCoordinateCard
-        stop={model.stops.pickup}
-        onOpenNavigation={(stop, provider) =>
-          void handleOpenNavigation(stop, provider)
-        }
-      />
-      <StopCoordinateCard
-        stop={model.stops.dropoff}
-        onOpenNavigation={(stop, provider) =>
-          void handleOpenNavigation(stop, provider)
-        }
-      />
+      {model.orderedStops.map((stop) => (
+        <StopCoordinateCard
+          key={stop.target}
+          stop={stop}
+          onOpenNavigation={(selectedStop, provider) =>
+            void handleOpenNavigation(selectedStop, provider)
+          }
+        />
+      ))}
 
       <Text style={styles.fallbackCopy}>
         Offline fallback: 若地圖 provider、GPS 或導航 App
@@ -505,6 +519,7 @@ const styles = StyleSheet.create({
   },
   pinRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
@@ -526,6 +541,13 @@ const styles = StyleSheet.create({
   dropoffPin: {
     backgroundColor: driverCanvasTheme.danger,
     shadowColor: driverCanvasTheme.danger,
+  },
+  waypointPin: {
+    backgroundColor: driverCanvasTheme.info,
+    shadowColor: driverCanvasTheme.info,
+  },
+  missingPin: {
+    backgroundColor: driverCanvasTheme.textMuted,
   },
   pinConnector: {
     flex: 1,

@@ -206,7 +206,7 @@ export default function DriverTripMap({
           <Text style={styles.eyebrow}>Trip Map & Navigation Handoff</Text>
           <Text style={styles.title}>座標導航交接</Text>
           <Text style={styles.subtitle}>
-            以後端同步的上下車座標交接外部導航，不以地址文字推測路線。
+            依同步停靠順序逐站交接外部導航，不以地址文字推測路線。
           </Text>
         </View>
         <View
@@ -248,13 +248,26 @@ export default function DriverTripMap({
           </Text>
         </View>
         <View style={styles.pinRow}>
-          <View style={[styles.pin, styles.pickupPin]} />
-          <View style={styles.pinConnector} />
-          <View style={[styles.pin, styles.dropoffPin]} />
+          {model.orderedStops.map((stop, index) => (
+            <View
+              key={stop.target}
+              accessibilityLabel={`${index + 1}. ${stop.label}: ${stop.coordinateLabel}`}
+              style={[
+                styles.pin,
+                !stop.coordinate
+                  ? styles.missingPin
+                  : index === 0
+                    ? styles.pickupPin
+                    : index === model.orderedStops.length - 1
+                      ? styles.dropoffPin
+                      : styles.waypointPin,
+              ]}
+            />
+          ))}
         </View>
         <Text style={styles.previewMeta}>
           {model.hasNavigableRoute
-            ? "Pickup/dropoff pins use synced coordinates and can open external navigation."
+            ? "停靠點依同步順序顯示，可逐站開啟外部導航；不代表已計算路線、ETA 或行程進度。"
             : "座標資料不完整；畫面保留地址與 fallback 指引，導航按鈕僅在座標有效時啟用。"}
         </Text>
       </View>
@@ -289,18 +302,15 @@ export default function DriverTripMap({
         </Text>
       ) : null}
 
-      <StopCoordinateCard
-        stop={model.stops.pickup}
-        onOpenNavigation={(stop, provider) =>
-          void handleOpenNavigation(stop, provider)
-        }
-      />
-      <StopCoordinateCard
-        stop={model.stops.dropoff}
-        onOpenNavigation={(stop, provider) =>
-          void handleOpenNavigation(stop, provider)
-        }
-      />
+      {model.orderedStops.map((stop) => (
+        <StopCoordinateCard
+          key={stop.target}
+          stop={stop}
+          onOpenNavigation={(selectedStop, provider) =>
+            void handleOpenNavigation(selectedStop, provider)
+          }
+        />
+      ))}
 
       <Text style={styles.fallbackCopy}>
         Offline fallback: 若地圖 provider、GPS 或導航 App
@@ -432,6 +442,7 @@ const styles = StyleSheet.create({
   },
   pinRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
@@ -454,13 +465,12 @@ const styles = StyleSheet.create({
     backgroundColor: driverCanvasTheme.danger,
     shadowColor: driverCanvasTheme.danger,
   },
-  pinConnector: {
-    flex: 1,
-    maxWidth: 128,
-    height: 2,
-    borderTopWidth: 2,
-    borderStyle: "dashed",
-    borderColor: driverCanvasTheme.borderStrong,
+  waypointPin: {
+    backgroundColor: driverCanvasTheme.info,
+    shadowColor: driverCanvasTheme.info,
+  },
+  missingPin: {
+    backgroundColor: driverCanvasTheme.textMuted,
   },
   previewMeta: {
     fontSize: 11.5,

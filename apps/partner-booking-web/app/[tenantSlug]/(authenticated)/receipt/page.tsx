@@ -1,36 +1,59 @@
 import { notFound, redirect } from "next/navigation";
-import { PartnerBookingReferenceFunnel } from "@drts/ui-web/partner-booking";
+import { PartnerAuthorityError } from "@/lib/api-client";
 import {
-  PartnerAuthorityError,
-  getPartnerRouteContext,
-} from "@/lib/api-client";
+  loadPartnerBookingRecord,
+  type PartnerReadSearch,
+} from "@/lib/partner-booking-read-model";
+import {
+  PartnerBookingRecord,
+  PartnerBookingReadError,
+} from "@/components/partner-booking-record";
+import { PartnerPaymentReceipt } from "@/components/partner-payment-receipt";
 import { getServerLocale } from "@/lib/server-locale";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams?: Promise<PartnerReadSearch>;
 };
 
-export default async function PartnerReceiptPage({ params }: PageProps) {
+export default async function PartnerReceiptPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const query = (await searchParams) ?? {};
   const locale = await getServerLocale();
   try {
-    const { brand } = await getPartnerRouteContext(tenantSlug);
+    const record = await loadPartnerBookingRecord(tenantSlug, query, true);
     return (
-      <PartnerBookingReferenceFunnel
-        brand={brand}
-        activeScreen="receipt"
-        basePath={`/${tenantSlug}`}
-        locale={locale}
-      />
+      <>
+        <PartnerBookingRecord
+          booking={record.booking}
+          principal={record.principal}
+          order={record.order}
+          entrySlug={record.entry.entrySlug}
+          partnerUserRef={record.partnerUserRef}
+          locale={locale}
+          screen="receipt"
+        />
+        {record.receipt ? (
+          <PartnerPaymentReceipt
+            receipt={record.receipt}
+            locale={locale}
+            tourIncluded={
+              record.booking.businessDispatchSubtype ===
+              "travel_agency_transfer"
+            }
+          />
+        ) : null}
+      </>
     );
   } catch (error) {
     if (error instanceof PartnerAuthorityError) {
-      if (error.code === "PARTNER_ENTRY_NOT_FOUND") {
-        notFound();
-      }
-      if (error.code === "PARTNER_ENTRY_INACTIVE") {
-        redirect(`/${tenantSlug}/inactive`);
-      }
+      if (error.code === "PARTNER_ENTRY_NOT_FOUND") notFound();
+      if (error.code === "PARTNER_ENTRY_INACTIVE")
+        redirect("/" + encodeURIComponent(tenantSlug) + "/inactive");
+      return <PartnerBookingReadError locale={locale} code={error.code} />;
     }
     throw error;
   }

@@ -1,3 +1,20 @@
+import type { ComputeGeoRouteCommand } from "@drts/contracts";
+import { GeoController } from "../../src/modules/geo/geo.controller";
+import { GeoService } from "../../src/modules/geo/geo.service";
+import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
+import { MockGeoProvider } from "../../src/modules/geo/mock-geo.provider";
+import type { BootstrapRequestIdentity } from "../../src/common/auth";
+import type {
+  DispatchAssignmentRecord,
+  DispatchJobRecord,
+  DriverTaskRecord,
+  DriverProfileRecord,
+} from "@drts/contracts";
+import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
+import { RegulatoryRegistryRepository } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
+import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { domainFixture } from "../../../../tests/unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
@@ -24,6 +41,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import {
+  OwnedMobilityRepository,
   OwnedOrderDuplicateVoiceLinkError,
   OwnedOrderVersionConflictError,
 } from "../../src/modules/owned-mobility/owned-mobility.repository";
@@ -279,6 +297,7 @@ function createOwnedMobilityService(options?: {
     service,
     regulatoryRegistryService,
     auditNotificationService,
+    vehicleEligibilityService,
   };
 }
 
@@ -7685,5 +7704,2007 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
       taskId,
       fareTotal: 1500,
     });
+  });
+});
+
+// Only the SQL transport is modelled. Creation, JSONB serialization and fresh
+// repository/service readback use the production classes; this is not a PG claim.
+describe("C032 noncore booking detail persistence", () => {
+  it.each([
+    {
+      subtype: "travel_agency_transfer" as const,
+      details: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-TOUR-20261111",
+        routeStops: [
+          { address: "SIM persisted stop", lat: 25.04, lng: 121.51 },
+        ],
+        groupSize: 2,
+        itineraryLink: "https://travel.example.test/itinerary/SIM-TOUR",
+        rosterPassengers: ["SIM Tour Leader", "SIM Passenger"],
+        meetingPoint: "SIM terminal meeting point",
+      },
+    },
+    {
+      subtype: "insurance_replacement_vehicle" as const,
+      details: {
+        subtype: "insurance_replacement_vehicle" as const,
+        claimNumber: "SIM-CLAIM-20261111",
+        policyNumber: "SIM-POLICY-20261111",
+        claimReference: "SIM-CASE-20261111",
+        claimantName: "SIM Insured Passenger",
+        replacementStart: "2099-06-05T10:00:00.000Z",
+        replacementEnd: "2099-06-06T10:00:00.000Z",
+        replacementVehicleClass: "business_vehicle",
+        caseHandler: "SIM Claim Handler",
+      },
+    },
+  ])(
+    "preserves $subtype intake through real JSONB write and a cold service read",
+    async ({ subtype, details }) => {
+      const rows = new Map<string, Record<string, unknown>>();
+      const query = vi.fn(
+        async (text: string, values: readonly unknown[] = []) => {
+          if (text.includes("INSERT INTO ops.phase1_owned_orders")) {
+            const record = JSON.parse(String(values[14])) as Record<
+              string,
+              unknown
+            >;
+            rows.set(String(record.orderId), record);
+            return { rows: [], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO ops.phase1_dispatch_trace_logs")) {
+            return { rows: [], rowCount: 1 };
+          }
+          if (
+            text.includes("SELECT record") &&
+            text.includes("FROM ops.phase1_owned_orders")
+          ) {
+            const record = text.includes("booking_id = $1")
+              ? [...rows.values()].find(
+                  (row) =>
+                    row.bookingId === values[0] && row.tenantId === values[1],
+                )
+              : rows.get(String(values[0]));
+            return {
+              rows: record ? [{ record: structuredClone(record) }] : [],
+              rowCount: record ? 1 : 0,
+            };
+          }
+          throw new Error("Unsupported C032 unit SQL: " + text);
+        },
+      );
+      const repository = new OwnedMobilityRepository({
+        isEnabled: () => true,
+        query,
+      } as never);
+      const producer = createOwnedMobilityService({
+        repository: repository as never,
+        serviceProductOverrides: {
+          serviceProductType: subtype,
+          displayName: "SIM noncore product",
+          timing: "reservation",
+          active: true,
+          defaultBillingMode: "partner_settlement",
+          defaultProofRequirements: ["photo"],
+        },
+      }).service;
+      // The object spread also compiles on the old command contract. Baseline
+      // failure must be the missing persisted facts, not a missing new import.
+      const created = await producer.createTenantBooking(
+        {
+          businessDispatchSubtype: subtype,
+          pickup: { address: "SIM Pickup" },
+          dropoff: { address: "SIM Dropoff" },
+          passenger: { name: "SIM Rider", phone: "0912000000" },
+          reservationWindowStart: "2099-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2099-06-05T11:00:00.000Z",
+          ...{
+            partnerBookingDetails: details,
+            mapFallbackReview: {
+              reasonCode: "dispatch_manual_review_required",
+              providerAvailable: false,
+              providerDegraded: false,
+              providerReasonCode: "unavailable",
+            },
+          },
+        },
+        "tenant-demo-001",
+      );
+      await vi.waitFor(() => expect(rows.has(created.orderId)).toBe(true));
+      const consumer = createOwnedMobilityService({
+        repository: repository as never,
+      }).service;
+      await expect(
+        consumer.resolvePersistedOrder(created.orderId),
+      ).resolves.toMatchObject({
+        orderId: created.orderId,
+        bookingId: created.bookingId,
+        partnerBookingDetails: details,
+        mapFallbackReview: {
+          reasonCode: "dispatch_manual_review_required",
+          providerAvailable: false,
+        },
+        queueFamily: "manual_review_queue",
+      });
+      await expect(
+        consumer.resolvePersistedTenantBooking(
+          "tenant-demo-001",
+          created.bookingId,
+        ),
+      ).resolves.toMatchObject({
+        orderId: created.orderId,
+        bookingId: created.bookingId,
+        partnerBookingDetails: details,
+      });
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining("booking_id = $1"),
+        [created.bookingId, "tenant-demo-001"],
+      );
+    },
+  );
+});
+
+describe("partner booking history uses the existing single-booking read relation", () => {
+  function seededPartnerBookings() {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const make = (
+      id: string,
+      overrides: Omit<Parameters<typeof buildOrderFixture>[0], "orderId">,
+    ) =>
+      buildOrderFixture({
+        bookingId: "booking-" + id,
+        tenantId: "SIM-tenant",
+        partnerId: "SIM-partner",
+        partnerProgramId: "SIM-program",
+        partnerEntrySlug: "sim-entry",
+        serviceBucket: "business_dispatch",
+        businessDispatchSubtype: "travel_agency_transfer",
+        status: "created",
+        createdAt: "2026-11-12T10:00:00Z",
+        reservationWindowStart: "2099-01-01T10:00:00Z",
+        reservationWindowEnd: "2099-01-01T11:00:00Z",
+        ...overrides,
+        orderId: id,
+      });
+    Reflect.set(service, "orders", [
+      make("SIM-other-entry", {
+        partnerEntrySlug: "another-entry",
+        createdAt: "2026-11-12T15:00:00Z",
+      }),
+      make("SIM-other-program", {
+        partnerProgramId: "another-program",
+        createdAt: "2026-11-12T14:00:00Z",
+      }),
+      make("SIM-other-passenger", {
+        passenger: {
+          passengerId: "another-resident",
+          name: "SIM Other",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T13:00:00Z",
+      }),
+      make("SIM-legacy", {
+        passenger: {
+          passengerId: null,
+          name: "SIM Legacy",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T12:00:00Z",
+      }),
+      make("SIM-current", {
+        passenger: {
+          passengerId: "SIM-resident",
+          name: "SIM Current",
+          phone: "0900000000",
+        },
+        createdAt: "2026-11-12T11:00:00Z",
+      }),
+      make("SIM-other-tenant", { tenantId: "another-tenant" }),
+    ]);
+    const identity = {
+      authMode: "jwt_bearer",
+      actorType: "referral_passenger",
+      actorId: "SIM-resident",
+      drtsPassengerId: "SIM-resident",
+      realm: "partner",
+      tenantId: "SIM-tenant",
+      partnerId: "SIM-partner",
+      partnerProgramId: "SIM-program",
+      partnerEntrySlug: "sim-entry",
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: ["partner:book"],
+    } as NonNullable<Parameters<typeof service.listTenantBookings>[2]>;
+    return { service, identity };
+  }
+
+  it("filters current and legacy allowed records before total and pagination", async () => {
+    const { service, identity } = seededPartnerBookings();
+    // Existing callable on the unmodified product: valid feature RED is wrong
+    // visible records/total, never a missing method/module or auth fixture.
+    const first = await service.listTenantBookings(
+      "SIM-tenant",
+      { dateField: "createdAt", page: 1, pageSize: 1 },
+      identity,
+    );
+    expect(first.pagination.totalItems).toBe(2);
+    expect(first.items.map((item) => item.orderId)).toEqual(["SIM-legacy"]);
+    const second = await service.listTenantBookings(
+      "SIM-tenant",
+      { dateField: "createdAt", page: 2, pageSize: 1 },
+      identity,
+    );
+    expect(second.items.map((item) => item.orderId)).toEqual(["SIM-current"]);
+    expect(second.pagination.totalItems).toBe(2);
+  });
+
+  it("preserves entry-key and ordinary tenant read behavior without inventing personal ownership", async () => {
+    const { service, identity } = seededPartnerBookings();
+    const entryKey = {
+      ...identity,
+      actorType: "partner_api_key",
+      actorId: "SIM-key",
+    } as typeof identity;
+    const partner = await service.listTenantBookings(
+      "SIM-tenant",
+      { pageSize: 20 },
+      entryKey,
+    );
+    expect(partner.items.map((item) => item.orderId).sort()).toEqual([
+      "SIM-current",
+      "SIM-legacy",
+      "SIM-other-passenger",
+    ]);
+    const tenant = {
+      ...identity,
+      realm: "tenant",
+      actorType: "tenant_admin",
+    } as typeof identity;
+    const ordinary = await service.listTenantBookings(
+      "SIM-tenant",
+      { pageSize: 20 },
+      tenant,
+    );
+    expect(ordinary.pagination.totalItems).toBe(5);
+  });
+});
+
+// Actual existing controller/service/repositories, with only a finite SQL data port.
+// No HTTP listener, AppModule, PG, browser, supply/auth business mock or new callable RED.
+function partnerProgressFixture(
+  subtype:
+    | "credit_card_airport_transfer"
+    | "travel_agency_transfer"
+    | "insurance_replacement_vehicle" = "travel_agency_transfer",
+) {
+  const now = Date.parse("2026-11-12T08:00:00.000Z");
+  vi.spyOn(Date, "now").mockReturnValue(now);
+  const stamp = new Date(now).toISOString();
+  const order = buildOrderFixture({
+    orderId: "SIM-progress-order",
+    bookingId: "SIM-progress-booking",
+    orderSource: "web",
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: subtype,
+    tenantId: "SIM-progress-tenant",
+    partnerId: "SIM-progress-partner",
+    partnerProgramId: "SIM-progress-program",
+    partnerEntrySlug: "SIM-progress-entry",
+    passenger: {
+      name: "SIM Rider",
+      phone: "0900000000",
+      passengerId: "SIM-progress-passenger",
+    },
+    status: "driver_accepted",
+  });
+  const task = {
+    taskId: "SIM-progress-task",
+    orderId: order.orderId,
+    assignmentId: "SIM-progress-assignment",
+    dispatchJobId: "SIM-progress-job",
+    driverId: "SIM-progress-driver",
+    vehicleId: "SIM-progress-vehicle",
+    status: "accepted",
+    sourcePlatform: null,
+    routeProvided: false,
+    waypoints: [],
+    acceptedAt: stamp,
+    departedAt: null,
+    arrivedPickupAt: null,
+    startedAt: null,
+    completedAt: null,
+    actualDistanceKm: null,
+    actualDurationSec: null,
+    fare: null,
+    proof: null,
+  } as DriverTaskRecord;
+  const assignment = {
+    assignmentId: task.assignmentId,
+    dispatchJobId: task.dispatchJobId,
+    orderId: order.orderId,
+    taskId: task.taskId,
+    driverId: task.driverId,
+    vehicleId: task.vehicleId,
+    assignmentType: "fixed_price",
+    status: "accepted",
+    acceptedAt: stamp,
+    rejectedAt: null,
+    rejectReasonCode: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  } as DispatchAssignmentRecord;
+  const job = {
+    dispatchJobId: task.dispatchJobId,
+    orderId: order.orderId,
+    status: "assigned",
+    mode: "auto",
+    latestEtaMinutes: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  } as DispatchJobRecord;
+  const state = {
+    order,
+    contextOrder: order,
+    tasks: [task],
+    assignments: [assignment],
+    jobs: [job],
+    contextMissing: false,
+    failure: null as Error | null,
+    vehicle: { vehicleId: task.vehicleId, plateNo: "SIM-DURABLE-PLATE" } as {
+      vehicleId: string;
+      plateNo: string;
+    } | null,
+    driver: { driverId: task.driverId, name: "Do Not Infer This Surname" } as {
+      driverId: string;
+      name: string;
+    } | null,
+    profile: {
+      driverId: task.driverId,
+      name: "SIM Whole Name",
+      driverSurname: "林",
+      phone: null,
+      email: null,
+      photoUrl: null,
+      emergencyContact: null,
+      bankAccount: null,
+      deviceBindings: [],
+      updatedAt: stamp,
+    } as DriverProfileRecord | null,
+    location: {
+      driver_id: task.driverId,
+      lat: 25,
+      lng: 121,
+      accuracy_m: 20 as number | null,
+      recorded_at: stamp,
+      updated_at: stamp,
+    } as {
+      driver_id: string;
+      lat: number;
+      lng: number;
+      accuracy_m: number | null;
+      recorded_at: string;
+      updated_at: string;
+    } | null,
+    event: {
+      event_id: "SIM-progress-event",
+      device_id: "SIM-device",
+      driver_id: task.driverId,
+      vehicle_id: task.vehicleId,
+      task_id: task.taskId,
+      sequence_no: 1,
+      recorded_at: stamp,
+      received_at: stamp,
+      lat: 25,
+      lng: 121,
+      accuracy_m: 20 as number | null,
+      work_state: "available",
+      app_state: "foreground",
+      transport_mode: "foreground",
+      network_type: "wifi",
+    },
+  };
+  const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
+    const text = sql.replace(/\s+/g, " ").trim();
+    if (state.failure) throw state.failure;
+    if (text.startsWith("SELECT jsonb_build_object("))
+      return {
+        rows: state.contextMissing
+          ? []
+          : [
+              {
+                record: {
+                  orders: [structuredClone(state.contextOrder)],
+                  dispatchJobs: structuredClone(state.jobs),
+                  dispatchAttempts: [],
+                  dispatchAssignments: structuredClone(state.assignments),
+                  driverTasks: structuredClone(state.tasks),
+                  dispatchTraceLogs: [],
+                  passengerDisclosureSnapshots: [],
+                },
+              },
+            ],
+      };
+    if (text.includes("FROM ops.phase1_owned_orders"))
+      return {
+        rows:
+          values?.[0] === order.orderId
+            ? [{ record: structuredClone(state.order) }]
+            : [],
+      };
+    if (text.includes("FROM reg.phase1_registry_drivers"))
+      return {
+        rows: state.driver ? [{ record: structuredClone(state.driver) }] : [],
+      };
+    if (text.includes("FROM reg.phase1_registry_vehicles"))
+      return {
+        rows: state.vehicle ? [{ record: structuredClone(state.vehicle) }] : [],
+      };
+    if (text.includes("FROM ops.phase1_driver_profiles"))
+      return {
+        rows: state.profile ? [{ record: structuredClone(state.profile) }] : [],
+      };
+    if (text.includes("FROM reg.driver_public_registration_credentials"))
+      return { rows: [] };
+    if (text.includes("FROM telemetry.driver_location_events"))
+      return { rows: [structuredClone(state.event)] };
+    if (text.includes("FROM ops.phase1_driver_locations"))
+      return { rows: state.location ? [structuredClone(state.location)] : [] };
+    throw new Error("Unexpected finite progress SQL: " + text);
+  });
+  const database = { isEnabled: () => true, query };
+  const repository = new OwnedMobilityRepository(database as never);
+  const registryRepository = new RegulatoryRegistryRepository(
+    database as never,
+  );
+  const profileService = new DriverProfileService(
+    {} as never,
+    new DriverProfileRepository(database as never),
+  );
+  const registry = new RegulatoryRegistryService(
+    {} as never,
+    {} as never,
+    profileService,
+    registryRepository,
+  );
+  const { service } = createOwnedMobilityService();
+  Reflect.set(service, "ownedMobilityRepository", repository);
+  Reflect.set(service, "receiptRegistryRepository", registryRepository);
+  Reflect.set(service, "regulatoryRegistryService", registry);
+  // The cache is deliberately a newer-looking but stale state.
+  Reflect.set(service, "orders", [
+    { ...order, status: "created", updatedAt: "2099-01-01T00:00:00.000Z" },
+  ]);
+  const identity = {
+    realm: "partner",
+    actorType: "referral_passenger",
+    actorId: "SIM-progress-passenger",
+    drtsPassengerId: "SIM-progress-passenger",
+    tenantId: order.tenantId,
+    partnerId: order.partnerId,
+    partnerProgramId: order.partnerProgramId,
+    partnerEntrySlug: order.partnerEntrySlug,
+  } as BootstrapRequestIdentity;
+  const controller = new OwnedMobilityController(service, {} as never);
+  const read = async (owner = identity) => {
+    const response = await controller.getPartnerOrder(
+      order.orderId,
+      owner,
+      "SIM-progress-request",
+    );
+    // Existing callable RED is an actual missing-response-field assertion,
+    // never a missing new method/import or property-dereference TypeError.
+    expect(response.data).toHaveProperty("progress");
+    return response as unknown as {
+      data: {
+        orderId: string;
+        status: string;
+        progress: {
+          availability: string;
+          reason: string | null;
+          currentTask: DriverTaskRecord | null;
+          driver: { driverSurname: string | null } | null;
+          vehicle: { plateNo: string | null } | null;
+          location: {
+            status: string;
+            position: { lat: number; lng: number } | null;
+          };
+        };
+      };
+    };
+  };
+  return {
+    state,
+    service,
+    repository,
+    registryRepository,
+    identity,
+    controller,
+    read,
+    query,
+    now,
+    profileService,
+  };
+}
+
+describe("normal partner same-order durable progress", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    "credit_card_airport_transfer",
+    "travel_agency_transfer",
+    "insurance_replacement_vehicle",
+  ] as const)(
+    "reads a cold %s order through the existing controller without a P5 disclosure prerequisite",
+    async (subtype) => {
+      const f = partnerProgressFixture(subtype);
+      const result = await f.read();
+      expect(result).toMatchObject({
+        data: {
+          orderId: f.state.order.orderId,
+          status: "driver_accepted",
+          progress: {
+            availability: "available",
+            currentTask: {
+              taskId: "SIM-progress-task",
+              driverId: "SIM-progress-driver",
+              vehicleId: "SIM-progress-vehicle",
+              status: "accepted",
+            },
+            driver: {
+              driverSurname: "林",
+              driverSurnameSource: "driver_profile_declared",
+            },
+            vehicle: { plateNo: "SIM-DURABLE-PLATE" },
+            location: { status: "fresh", position: { lat: 25, lng: 121 } },
+          },
+        },
+      });
+      expect(
+        f.query.mock.calls.every(
+          ([sql]) => !/FOR UPDATE|^\s*(INSERT|UPDATE|DELETE)/.test(sql),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("reloads actual acceptance, departure, arrival, boarding and completion times for the same task", async () => {
+    const f = partnerProgressFixture();
+    const task = f.state.tasks[0]!;
+    for (const [status, orderStatus, field] of [
+      ["accepted", "driver_accepted", "acceptedAt"],
+      ["enroute_pickup", "enroute_pickup", "departedAt"],
+      ["arrived_pickup", "arrived_pickup", "arrivedPickupAt"],
+      ["on_trip", "on_trip", "startedAt"],
+      ["proof_pending", "proof_pending", "startedAt"],
+      ["completed", "completed", "completedAt"],
+    ] as const) {
+      task.status = status;
+      f.state.order.status = orderStatus;
+      task[field] = new Date(f.now - 1000).toISOString();
+      if (status === "completed") f.state.assignments[0]!.status = "completed";
+      const result = await f.read();
+      expect(result.data.progress.currentTask).toMatchObject({
+        taskId: task.taskId,
+        status,
+        [field]: task[field],
+      });
+      if (status === "completed")
+        expect(result.data.progress.location).toMatchObject({
+          status: "not_live",
+          position: null,
+        });
+    }
+  });
+
+  it("uses the valid reassignment and never displays the rejected driver or its latest telemetry", async () => {
+    const f = partnerProgressFixture();
+    const oldTask = {
+      ...f.state.tasks[0]!,
+      taskId: "old-task",
+      assignmentId: "old-assignment",
+      driverId: "old-driver",
+      vehicleId: "old-vehicle",
+      status: "rejected" as const,
+    };
+    f.state.tasks.unshift(oldTask);
+    f.state.assignments.unshift({
+      ...f.state.assignments[0]!,
+      taskId: oldTask.taskId,
+      assignmentId: oldTask.assignmentId,
+      driverId: oldTask.driverId,
+      vehicleId: oldTask.vehicleId,
+      status: "rejected",
+    });
+    const result = await f.read();
+    expect(result.data.progress.currentTask).toMatchObject({
+      taskId: "SIM-progress-task",
+      driverId: "SIM-progress-driver",
+    });
+    expect(JSON.stringify(result.data.progress)).not.toContain("old-driver");
+    f.state.order.status = "redispatch_required";
+    f.state.tasks[1]!.status = "cancelled";
+    f.state.assignments[1]!.status = "cancelled";
+    expect((await f.read()).data.progress).toMatchObject({
+      currentTask: null,
+      driver: null,
+      vehicle: null,
+      location: { status: "not_live", position: null },
+    });
+  });
+
+  it.each(["broken-link", "two-active"])(
+    "does not select an arbitrary task for %s",
+    async (mode) => {
+      const f = partnerProgressFixture();
+      if (mode === "broken-link")
+        f.state.assignments[0]!.vehicleId = "different-vehicle";
+      else {
+        f.state.tasks.push({
+          ...f.state.tasks[0]!,
+          taskId: "second-task",
+          assignmentId: "second-assignment",
+        });
+        f.state.assignments.push({
+          ...f.state.assignments[0]!,
+          taskId: "second-task",
+          assignmentId: "second-assignment",
+        });
+      }
+      expect((await f.read()).data.progress).toMatchObject({
+        availability: "unavailable",
+        reason: "inconsistent_context",
+        currentTask: null,
+        driver: null,
+        vehicle: null,
+      });
+    },
+  );
+
+  it.each([
+    [90000, 100, "fresh"],
+    [90001, 20, "stale"],
+    [0, 101, "low_accuracy"],
+    [0, null, "fresh"],
+  ] as const)(
+    "uses existing GPS semantics age=%s accuracy=%s",
+    async (age, accuracy, expected) => {
+      const f = partnerProgressFixture();
+      const stamp = new Date(f.now - age).toISOString();
+      Object.assign(f.state.location!, {
+        recorded_at: stamp,
+        updated_at: stamp,
+        accuracy_m: accuracy,
+      });
+      Object.assign(f.state.event, {
+        recorded_at: stamp,
+        received_at: stamp,
+        accuracy_m: accuracy,
+      });
+      const location = (await f.read()).data.progress.location;
+      expect(location.status).toBe(expected);
+      expect(location.position).toEqual(
+        expected === "fresh" ? { lat: 25, lng: 121 } : null,
+      );
+    },
+  );
+
+  it.each(["task_id", "vehicle_id", "driver_id", "received_at"] as const)(
+    "does not borrow the wrong telemetry %s",
+    async (field) => {
+      const f = partnerProgressFixture();
+      f.state.event[field] =
+        field === "received_at" ? "2026-11-12T07:59:59.000Z" : "unrelated";
+      expect((await f.read()).data.progress.location).toMatchObject({
+        status: "context_mismatch",
+        position: null,
+      });
+    },
+  );
+
+  it("distinguishes absent telemetry and durable display facts from source failures", async () => {
+    const f = partnerProgressFixture();
+    f.state.location = null;
+    f.state.vehicle = null;
+    f.state.profile = null;
+    expect((await f.read()).data.progress).toMatchObject({
+      driver: { driverSurname: null },
+      vehicle: { plateNo: null },
+      location: { status: "missing", position: null },
+    });
+    f.state.failure = new Error("real read unavailable");
+    await expect(f.read()).rejects.toBe(f.state.failure);
+  });
+
+  it("clears a previously read surname when the persisted profile has been removed", async () => {
+    const f = partnerProgressFixture();
+    expect((await f.read()).data.progress.driver?.driverSurname).toBe("林");
+    f.state.profile = null;
+    expect((await f.read()).data.progress.driver?.driverSurname).toBeNull();
+    expect(JSON.stringify((await f.read()).data.progress)).not.toContain(
+      "Do Not Infer",
+    );
+  });
+
+  it.each([
+    "partnerId",
+    "partnerProgramId",
+    "partnerEntrySlug",
+    "tenantId",
+    "drtsPassengerId",
+  ] as const)(
+    "keeps the original %s ownership rule before progress reads",
+    async (field) => {
+      const f = partnerProgressFixture();
+      await expect(
+        f.read({ ...f.identity, [field]: "another-scope" }),
+      ).rejects.toMatchObject({ code: "PARTNER_SCOPE_MISMATCH" });
+      expect(
+        f.query.mock.calls.every(
+          ([sql]) =>
+            !sql.includes("jsonb_build_object") &&
+            !sql.includes("reg.phase1") &&
+            !sql.includes("driver_location"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("rechecks the aggregate's newer owner before reading its driver or vehicle", async () => {
+    const f = partnerProgressFixture();
+    f.state.contextOrder = {
+      ...f.state.order,
+      partnerProgramId: "changed-owner",
+    };
+    await expect(f.read()).rejects.toMatchObject({
+      code: "PARTNER_SCOPE_MISMATCH",
+    });
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("reg.phase1"))).toBe(
+      false,
+    );
+  });
+
+  it("does not call a missing aggregate a known unassigned trip", async () => {
+    const f = partnerProgressFixture();
+    f.state.contextMissing = true;
+    await expect(f.read()).rejects.toMatchObject({
+      code: "PARTNER_PROGRESS_CONTEXT_UNAVAILABLE",
+    });
+  });
+
+  it("never borrows cached display or tracking facts when the registry reader is unavailable", async () => {
+    const f = partnerProgressFixture();
+    Reflect.set(f.service, "receiptRegistryRepository", undefined);
+    expect((await f.read()).data.progress).toMatchObject({
+      availability: "available",
+      currentTask: { taskId: "SIM-progress-task" },
+      driver: { driverSurname: null },
+      vehicle: { plateNo: null },
+      location: { status: "unavailable", position: null },
+    });
+    expect(
+      f.query.mock.calls.some(
+        ([sql]) =>
+          sql.includes("reg.phase1") || sql.includes("driver_location"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps progress unavailable when no durable adapter exists", async () => {
+    const f = partnerProgressFixture();
+    Reflect.set(f.service, "ownedMobilityRepository", undefined);
+    expect((await f.read()).data.progress).toMatchObject({
+      availability: "unavailable",
+      reason: "source_unavailable",
+      currentTask: null,
+      location: { status: "unavailable", position: null },
+    });
+  });
+});
+
+// R2: the old read callable exists and returns valid A, but cannot hide broken B.
+describe("normal partner progress accounts for every live tuple", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    "orphan-task",
+    "broken-second-pair",
+    "orphan-assignment",
+    "orphan-completed-task",
+    "orphan-completed-assignment",
+  ] as const)(
+    "keeps a complete A unavailable when the same order also has %s",
+    async (shape) => {
+      const f = partnerProgressFixture();
+      const taskB = {
+        ...f.state.tasks[0]!,
+        taskId: "SIM-second-task",
+        assignmentId: "SIM-second-assignment",
+        driverId: "SIM-second-driver",
+        vehicleId: "SIM-second-vehicle",
+      };
+      const assignmentB = {
+        ...f.state.assignments[0]!,
+        taskId: taskB.taskId,
+        assignmentId: taskB.assignmentId,
+        driverId: taskB.driverId,
+        vehicleId: taskB.vehicleId,
+      };
+      if (shape === "orphan-completed-task") taskB.status = "completed";
+      if (shape === "orphan-completed-assignment")
+        assignmentB.status = "completed";
+      if (
+        shape !== "orphan-assignment" &&
+        shape !== "orphan-completed-assignment"
+      )
+        f.state.tasks.push(taskB);
+      if (shape !== "orphan-task" && shape !== "orphan-completed-task")
+        f.state.assignments.push(assignmentB);
+      if (shape === "broken-second-pair")
+        assignmentB.driverId = "SIM-mismatched-driver";
+      const result = await f.read();
+      expect(result.data.progress).toMatchObject({
+        availability: "unavailable",
+        reason: "inconsistent_context",
+        currentTask: null,
+        driver: null,
+        vehicle: null,
+        location: { status: "unavailable", position: null },
+      });
+      expect(
+        f.query.mock.calls.some(
+          ([sql]) =>
+            sql.includes("reg.phase1") || sql.includes("driver_location"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["cancelled", "rejected"] as const)(
+    "ignores an old %s pair while reading the one real current A",
+    async (status) => {
+      const f = partnerProgressFixture();
+      const oldTask = {
+        ...f.state.tasks[0]!,
+        taskId: "SIM-old-task",
+        assignmentId: "SIM-old-assignment",
+        driverId: "SIM-old-driver",
+        vehicleId: "SIM-old-vehicle",
+        status,
+      };
+      f.state.tasks.unshift(oldTask);
+      f.state.assignments.unshift({
+        ...f.state.assignments[0]!,
+        taskId: oldTask.taskId,
+        assignmentId: oldTask.assignmentId,
+        driverId: oldTask.driverId,
+        vehicleId: oldTask.vehicleId,
+        status,
+      });
+      expect((await f.read()).data.progress).toMatchObject({
+        availability: "available",
+        currentTask: { taskId: "SIM-progress-task" },
+        vehicle: { plateNo: "SIM-DURABLE-PLATE" },
+      });
+    },
+  );
+});
+
+const AIRPORT_ROUTE_SIM_HOME = { lat: 25.033964, lng: 121.564468 };
+const AIRPORT_ROUTE_SIM_AIRPORT = { lat: 25.0797, lng: 121.2342 };
+const AIRPORT_ROUTE_SIM_OTHER_CITY = { lat: 25.06, lng: 121.58 };
+const AIRPORT_ROUTE_SIM_CONTEXT = {
+  actorId: "unit-airport-coverage-operator",
+  actorType: "platform_admin" as const,
+};
+
+// External airport identity/operating-area facts are explicit SIM. These are
+// normal service mutations; neither geometry nor route business logic is stubbed.
+async function createAirportRouteAreas(
+  areas = new ServiceAreaService(),
+  airportOptions: {
+    metadata?: Record<string, unknown>;
+    products?: ("credit_card_airport_transfer" | "taxi_realtime")[];
+    effectiveFrom?: string;
+    effectiveUntil?: string | null;
+    publish?: boolean;
+  } = {},
+) {
+  const cityGeometry = areas
+    .listServiceAreas()
+    .find((area) => area.areaCode === "TAIPEI_CORE")!.geometry;
+  const city = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_CITY",
+      displayName: "Explicit SIM airport-product city coverage",
+      geometry: cityGeometry,
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      effectiveFrom: "2020-01-01T00:00:00.000Z",
+      metadata: { externalFacts: "SIM" },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  await areas.publishServiceArea(
+    city.record.serviceAreaId,
+    {},
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  const airport = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_IDENTITY",
+      displayName: "Explicit SIM airport identity boundary",
+      geometry: {
+        type: "circle",
+        center: AIRPORT_ROUTE_SIM_AIRPORT,
+        radiusMeters: 6500,
+      },
+      serviceProductTypes: airportOptions.products ?? [
+        "credit_card_airport_transfer",
+      ],
+      effectiveFrom: airportOptions.effectiveFrom ?? "2020-01-01T00:00:00.000Z",
+      effectiveUntil: airportOptions.effectiveUntil ?? null,
+      metadata: airportOptions.metadata ?? {
+        airportIataCode: "TPE",
+        externalFacts: "SIM",
+      },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  if (airportOptions.publish !== false) {
+    await areas.publishServiceArea(
+      airport.record.serviceAreaId,
+      {},
+      AIRPORT_ROUTE_SIM_CONTEXT,
+    );
+  }
+  return { areas, city: city.record, airport: airport.record };
+}
+
+async function readActualAirportPreview(
+  areas: ServiceAreaService,
+  pickup: { lat: number; lng: number },
+  dropoff: { lat: number; lng: number },
+  direction: "pickup" | "dropoff",
+) {
+  // Reflect.construct also runs on the old real GeoService constructor: an old
+  // caller missing the new response field fails an assertion, not an import.
+  const geo = Reflect.construct(GeoService, [
+    new MockGeoProvider(),
+    new GeoProviderConfigService({
+      NODE_ENV: "test",
+      DRTS_ENV: "test",
+      MAP_PROVIDER_MODE: "mock",
+    }),
+    undefined,
+    undefined,
+    areas,
+  ]) as GeoService;
+  const response = await new GeoController(geo).route({
+    origin: pickup,
+    destination: dropoff,
+    airportTransfer: { direction },
+  } as ComputeGeoRouteCommand & {
+    airportTransfer: { direction: "pickup" | "dropoff" };
+  });
+  expect(response.data).toHaveProperty("serviceAreaEvaluation");
+  const result = response.data as typeof response.data & {
+    serviceAreaEvaluation: ServiceAreaEvaluationResult;
+  };
+  expect(result.provider).toBe("mock");
+  return result.serviceAreaEvaluation;
+}
+
+function airportRouteBookingCommand(
+  direction: "pickup" | "dropoff",
+  pickup: { lat: number; lng: number },
+  dropoff: { lat: number; lng: number },
+) {
+  return {
+    businessDispatchSubtype: "credit_card_airport_transfer" as const,
+    direction,
+    flightNo: "SIM-AIRPORT-123",
+    terminal: "SIM terminal",
+    reservationWindowStart: defaultReservationWindowStart(),
+    reservationWindowEnd: defaultReservationWindowEnd(),
+    pickup: { address: "SIM route pickup", ...pickup },
+    dropoff: { address: "SIM route dropoff", ...dropoff },
+    passenger: { name: "SIM route rider", phone: "0900000041" },
+  };
+}
+
+describe("normal airport booking uses the preview route authority", () => {
+  for (const scenario of [
+    {
+      name: "pickup airport-to-city",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_AIRPORT,
+      dropoff: AIRPORT_ROUTE_SIM_HOME,
+    },
+    {
+      name: "dropoff city-to-airport",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_AIRPORT,
+    },
+  ] as const) {
+    it(`creates and reads the same order for ${scenario.name}`, async () => {
+      const { areas } = await createAirportRouteAreas();
+      const preview = await readActualAirportPreview(
+        areas,
+        scenario.pickup,
+        scenario.dropoff,
+        scenario.direction,
+      );
+      expect(preview.decision).toBe("serviceable");
+      const { service } = createOwnedMobilityService({
+        serviceAreaService: areas,
+      });
+      const booking = await service.createTenantBooking(
+        airportRouteBookingCommand(
+          scenario.direction,
+          scenario.pickup,
+          scenario.dropoff,
+        ),
+        "tenant-demo-001",
+      );
+      const order = service.getOrder(booking.orderId);
+      const record = service.getTenantBooking(
+        "tenant-demo-001",
+        booking.bookingId,
+      );
+      expect(order).toMatchObject({
+        orderId: booking.orderId,
+        bookingId: booking.bookingId,
+        direction: scenario.direction,
+        pickup: scenario.pickup,
+        dropoff: scenario.dropoff,
+      });
+      expect(record).toMatchObject({
+        orderId: booking.orderId,
+        bookingId: booking.bookingId,
+        direction: scenario.direction,
+      });
+      expect(order.spatialAudit?.serviceAreaEvaluation).toMatchObject({
+        decision: "serviceable",
+        serviceProductType: "credit_card_airport_transfer",
+      });
+      expect(
+        order.spatialAudit?.serviceAreaEvaluation?.geometryVersionRefs,
+      ).toEqual(
+        expect.arrayContaining([
+          "service_area:UNIT_SIM_AIRPORT_CITY@1",
+          "service_area:UNIT_SIM_AIRPORT_IDENTITY@1",
+        ]),
+      );
+      expect(
+        order.complianceGates?.find((gate) => gate.gateType === "service_area")
+          ?.state,
+      ).toBe("clear");
+    });
+  }
+
+  for (const scenario of [
+    {
+      name: "pickup with airport only at destination",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_AIRPORT,
+      code: "AIRPORT_PICKUP_REQUIRED",
+    },
+    {
+      name: "dropoff with airport only at origin",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_AIRPORT,
+      dropoff: AIRPORT_ROUTE_SIM_HOME,
+      code: "AIRPORT_DROPOFF_REQUIRED",
+    },
+    {
+      name: "pickup between two city stops",
+      direction: "pickup",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_OTHER_CITY,
+      code: "AIRPORT_PICKUP_REQUIRED",
+    },
+    {
+      name: "dropoff between two city stops",
+      direction: "dropoff",
+      pickup: AIRPORT_ROUTE_SIM_HOME,
+      dropoff: AIRPORT_ROUTE_SIM_OTHER_CITY,
+      code: "AIRPORT_DROPOFF_REQUIRED",
+    },
+  ] as const) {
+    it(`rejects ${scenario.name} before publishing a booking`, async () => {
+      const { areas } = await createAirportRouteAreas();
+      const { service } = createOwnedMobilityService({
+        serviceAreaService: areas,
+      });
+      let failure: unknown;
+      try {
+        await service.createTenantBooking(
+          airportRouteBookingCommand(
+            scenario.direction,
+            scenario.pickup,
+            scenario.dropoff,
+          ),
+          "tenant-demo-001",
+        );
+      } catch (error) {
+        failure = error;
+      }
+      // On the old callable this is a real Assertion failure: creation wrongly succeeds.
+      expect(failure).toBeInstanceOf(ApiRequestError);
+      expect((failure as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: scenario.code },
+      });
+      expect(service.listOrders()).toEqual([]);
+    });
+  }
+
+  it("keeps a missing-coordinate airport request in the existing manual review path", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: areas,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        direction: "pickup",
+        flightNo: "SIM-AIRPORT-MANUAL",
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
+        pickup: { address: "SIM unresolved airport stop" },
+        dropoff: { address: "SIM unresolved home stop" },
+        passenger: { name: "SIM manual rider", phone: "0900000041" },
+      },
+      "tenant-demo-001",
+    );
+    const order = service.getOrder(booking.orderId);
+    expect(
+      order.complianceGates?.find((gate) => gate.gateType === "service_area"),
+    ).toMatchObject({ state: "review_required", evidenceState: "missing" });
+    expect(order.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(() =>
+      service.dispatchOrder(booking.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+});
+
+describe("travel selected places reach the existing dispatch task", () => {
+  it("rejects invalid places and projects the actual canonical pickup, repeated stops and dropoff in order", async () => {
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "travel_agency_transfer",
+        displayName: "SIM selected stops",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+    });
+    const stop = { address: "SIM actual stop", lat: 25.04, lng: 121.51 };
+    const command = {
+      businessDispatchSubtype: "travel_agency_transfer" as const,
+      pickup: { address: "SIM pickup", lat: 25.01, lng: 121.5 },
+      dropoff: { address: "SIM dropoff", lat: 25.06, lng: 121.55 },
+      passenger: { name: "SIM Rider", phone: "0900000000" },
+      reservationWindowStart: defaultReservationWindowStart(),
+      reservationWindowEnd: defaultReservationWindowEnd(),
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-ROUTE",
+        groupSize: 1,
+        itineraryLink: "https://travel.example.test/route",
+        rosterPassengers: ["SIM Rider"],
+        meetingPoint: "SIM pickup",
+        routeStops: [stop, { ...stop }],
+      },
+    };
+    await expect(async () =>
+      service.createTenantBooking(
+        {
+          ...command,
+          partnerBookingDetails: {
+            ...command.partnerBookingDetails,
+            routeStops: [{ ...stop, lat: 91 }],
+          },
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      code: "TRAVEL_ROUTE_STOPS_INVALID",
+      response: {
+        error: {
+          message:
+            "routeStops must contain selected places with valid coordinates",
+        },
+      },
+    });
+    await expect(async () =>
+      service.createTenantBooking(
+        {
+          ...command,
+          businessDispatchSubtype: "insurance_replacement_vehicle",
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      code: "TRAVEL_ROUTE_STOPS_INVALID",
+      response: {
+        error: { message: "routeStops are only available for travel bookings" },
+      },
+    });
+    const booking = await service.createTenantBooking(
+      command,
+      "tenant-demo-001",
+    );
+    const dispatched = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatched.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    const task = await service.getDriverTask(assignment.taskId);
+    expect(task.routeProvided).toBe(true);
+    expect(
+      task.waypoints.map(({ sequence, address, lat, lng }) => ({
+        sequence,
+        address,
+        lat,
+        lng,
+      })),
+    ).toEqual([
+      { sequence: 0, ...command.pickup },
+      { sequence: 1, ...stop },
+      { sequence: 2, ...stop },
+      { sequence: 3, ...command.dropoff },
+    ]);
+    expect(
+      task.waypoints.every(
+        (point) => point.arrivedAt === null && point.departedAt === null,
+      ),
+    ).toBe(true);
+    expect(task.sourcePlatform).toBeNull();
+  });
+});
+
+// Normal booking and public dispatch entry points use the real license-class
+// capability authority. Registry/runtime evaluation remain the existing unit ports;
+// these assertions do not claim physical vehicle, HTTP or PG verification.
+describe("travel booking load follows current dispatch vehicle capacity", () => {
+  function capacityFixture(
+    subtype:
+      | "travel_agency_transfer"
+      | "insurance_replacement_vehicle" = "travel_agency_transfer",
+    enableVehicleEligibility = true,
+  ) {
+    const fixture = createOwnedMobilityService({
+      enableVehicleEligibility,
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: subtype,
+        displayName: "SIM booking load",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+      runtimeEligibilityEvaluator: {
+        evaluate: vi.fn().mockResolvedValue({
+          serviceProductId: "SIM-travel-capacity",
+          serviceProductCode: subtype,
+          policyVersion: "SIM-existing-runtime-evaluation",
+          decision: "eligible",
+          hardReasonCodes: [],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "fresh",
+          evaluatedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    const controller = new OwnedMobilityController(
+      fixture.service,
+      {} as never,
+    );
+    const command = {
+      businessDispatchSubtype: subtype,
+      pickup: { address: "SIM load pickup", lat: 25.03, lng: 121.51 },
+      dropoff: { address: "SIM load dropoff", lat: 25.06, lng: 121.55 },
+      passenger: { name: "SIM load rider", phone: "0900000000" },
+      reservationWindowStart: defaultReservationWindowStart(),
+      reservationWindowEnd: defaultReservationWindowEnd(),
+      luggageCount: 4,
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-CAPACITY",
+        groupSize: 5,
+        itineraryLink: "https://travel.example.test/capacity",
+        rosterPassengers: ["SIM A", "SIM B", "SIM C", "SIM D", "SIM E"],
+        meetingPoint: "SIM load pickup",
+        // Tour declarations neither supply nor enlarge the actual candidate.
+        planGroupSize: 40,
+        planVehicleSeats: 50,
+      },
+    };
+    const setCapacity = (
+      patch: {
+        seatCount?: number;
+        luggageCapacity?: number;
+        conditionallyAllowed?: boolean;
+      } | null,
+    ) => {
+      const authority = fixture.vehicleEligibilityService;
+      if (!authority) throw new Error("Capacity authority is not enabled");
+      authority.updateMatrix(
+        {
+          items: authority
+            .listMatrix()
+            .flatMap((item) =>
+              item.licenseType !== "business_vehicle"
+                ? [item]
+                : patch === null
+                  ? []
+                  : [{ ...item, ...patch }],
+            ),
+        },
+        {
+          actorId: "SIM-capacity-operator",
+          actorType: "ops_user",
+          tenantId: null,
+        },
+      );
+    };
+    return { ...fixture, controller, command, setCapacity };
+  }
+
+  it.each([
+    {
+      name: "five riders and four bags",
+      riders: 5,
+      bags: 4,
+      capacity: 4,
+      allowed: true,
+    },
+    {
+      name: "too many riders",
+      riders: 6,
+      bags: 4,
+      capacity: 4,
+      allowed: false,
+    },
+    { name: "too many bags", riders: 5, bags: 5, capacity: 4, allowed: false },
+    {
+      name: "zero bags with zero luggage capacity",
+      riders: 5,
+      bags: 0,
+      capacity: 0,
+      allowed: true,
+    },
+  ])(
+    "$name is evaluated at initial dispatch and both candidate views",
+    async ({ riders, bags, capacity, allowed }) => {
+      const { service, controller, command, setCapacity } = capacityFixture();
+      setCapacity({ luggageCapacity: capacity, conditionallyAllowed: true });
+      const booking = await service.createTenantBooking(
+        {
+          ...command,
+          luggageCount: bags,
+          partnerBookingDetails: {
+            ...command.partnerBookingDetails,
+            groupSize: riders,
+            rosterPassengers: Array.from(
+              { length: riders },
+              (_, index) => `SIM capacity rider ${index + 1}`,
+            ),
+          },
+        },
+        "tenant-demo-001",
+      );
+      expect(service.getOrder(booking.orderId)).toMatchObject({
+        luggageCount: bags,
+        partnerBookingDetails: {
+          groupSize: riders,
+          planGroupSize: 40,
+          planVehicleSeats: 50,
+        },
+      });
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe(allowed ? "reserved" : "queued");
+      for (const includeIneligible of ["false", "true"]) {
+        const response = await controller.listDispatchCandidates(
+          dispatch.dispatchJobId,
+          includeIneligible,
+        );
+        expect(
+          response.data.items.map((candidate) => candidate.vehicleId),
+        ).toEqual(allowed ? ["veh-demo-004"] : []);
+      }
+      if (allowed) {
+        const assignment = await service.assignDispatch({
+          dispatchJobId: dispatch.dispatchJobId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        });
+        expect(await service.getDriverTask(assignment.taskId)).toMatchObject({
+          orderId: booking.orderId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        });
+      }
+    },
+  );
+
+  it.each([
+    { name: "seats", patch: { seatCount: 4 } },
+    { name: "luggage", patch: { luggageCapacity: 3 } },
+    { name: "removed canonical capability", patch: null },
+  ])(
+    "rechecks reduced $name capacity after candidate read before final assignment",
+    async ({ patch }) => {
+      const {
+        service,
+        controller,
+        command,
+        setCapacity,
+        vehicleEligibilityService,
+      } = capacityFixture();
+      const booking = await service.createTenantBooking(
+        command,
+        "tenant-demo-001",
+      );
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe("reserved");
+      expect(
+        (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+          .items,
+      ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+      setCapacity(patch);
+      if (patch === null) {
+        expect(
+          vehicleEligibilityService?.resolveRuntimeVehicleCapability(
+            "veh-demo-004",
+          ),
+        ).toBeNull();
+      }
+      // A caller can retain the earlier candidate, so assignment must re-read
+      // authority even before the next GET refresh has hidden that candidate.
+      await expect(async () =>
+        service.assignDispatch({
+          dispatchJobId: dispatch.dispatchJobId,
+          vehicleId: "veh-demo-004",
+          driverId: "drv-demo-004",
+        }),
+      ).rejects.toMatchObject({
+        code: "BOOKING_REQUIREMENTS_NOT_MET",
+        status: 409,
+      });
+      expect(service.getReportingSnapshot().dispatchAssignments).toEqual([]);
+      for (const includeIneligible of ["false", "true"]) {
+        expect(
+          (
+            await controller.listDispatchCandidates(
+              dispatch.dispatchJobId,
+              includeIneligible,
+            )
+          ).data.items,
+        ).toEqual([]);
+      }
+    },
+  );
+
+  it("does not treat a missing capacity authority as satisfying declared travel load", async () => {
+    const { service, controller, command } = capacityFixture(
+      "travel_agency_transfer",
+      false,
+    );
+    const booking = await service.createTenantBooking(
+      command,
+      "tenant-demo-001",
+    );
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("queued");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([]);
+    await expect(async () =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-004",
+        driverId: "drv-demo-004",
+      }),
+    ).rejects.toMatchObject({ code: "BOOKING_REQUIREMENTS_NOT_MET" });
+    expect(service.getReportingSnapshot().dispatchAssignments).toEqual([]);
+  });
+
+  it.each(["absent", "passengers only", "luggage only"] as const)(
+    "preserves legacy %s demand without inventing a missing count",
+    async (kind) => {
+      const { service, controller, command, setCapacity } = capacityFixture();
+      // Missing seats/demand are not inferred from any planned vehicle declaration.
+      setCapacity({
+        seatCount: kind === "luggage only" ? 1 : 5,
+        luggageCapacity: kind === "luggage only" ? 2 : 0,
+      });
+      const booking = await service.createTenantBooking(
+        {
+          ...command,
+          luggageCount: kind === "luggage only" ? 2 : undefined,
+          partnerBookingDetails:
+            kind === "passengers only"
+              ? command.partnerBookingDetails
+              : undefined,
+        },
+        "tenant-demo-001",
+      );
+      const dispatch = await service.dispatchOrder(booking.orderId, {
+        mode: "auto",
+      });
+      expect(dispatch.status).toBe("reserved");
+      expect(
+        (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+          .items,
+      ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+      const assignment = await service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-004",
+        driverId: "drv-demo-004",
+      });
+      expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+        booking.orderId,
+      );
+    },
+  );
+
+  it("preserves a legacy zero-bag booking without requiring a new capacity authority", async () => {
+    const { service, controller, command } = capacityFixture(
+      "travel_agency_transfer",
+      false,
+    );
+    const booking = await service.createTenantBooking(
+      { ...command, partnerBookingDetails: undefined, luggageCount: 0 },
+      "tenant-demo-001",
+    );
+    expect(service.getOrder(booking.orderId).luggageCount).toBe(0);
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("reserved");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+      booking.orderId,
+    );
+  });
+
+  it("keeps non-travel luggage outside the new travel capacity comparison", async () => {
+    const { service, controller, command } = capacityFixture(
+      "insurance_replacement_vehicle",
+    );
+    const booking = await service.createTenantBooking(
+      { ...command, partnerBookingDetails: undefined, luggageCount: 99 },
+      "tenant-demo-001",
+    );
+    const dispatch = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(dispatch.status).toBe("reserved");
+    expect(
+      (await controller.listDispatchCandidates(dispatch.dispatchJobId)).data
+        .items,
+    ).toEqual([expect.objectContaining({ vehicleId: "veh-demo-004" })]);
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    expect((await service.getDriverTask(assignment.taskId)).orderId).toBe(
+      booking.orderId,
+    );
+  });
+});
+
+describe("owned travel canonical waypoint visits", () => {
+  async function journey() {
+    const setup = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "travel_agency_transfer",
+        displayName: "SIM visits",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+    });
+    const stop = { address: "SIM repeated stop", lat: 25.04, lng: 121.51 };
+    const booking = await setup.service.createTenantBooking(
+      {
+        businessDispatchSubtype: "travel_agency_transfer",
+        pickup: { address: "SIM pickup", lat: 25.01, lng: 121.5 },
+        dropoff: { address: "SIM dropoff", lat: 25.06, lng: 121.55 },
+        passenger: { name: "SIM Rider", phone: "0900000000" },
+        reservationWindowStart: defaultReservationWindowStart(),
+        reservationWindowEnd: defaultReservationWindowEnd(),
+        partnerBookingDetails: {
+          subtype: "travel_agency_transfer",
+          groupCode: "SIM-VISITS",
+          groupSize: 1,
+          itineraryLink: "https://travel.example.test/visits",
+          rosterPassengers: ["SIM Rider"],
+          meetingPoint: "SIM pickup",
+          routeStops: [stop, { ...stop }],
+        },
+      },
+      "tenant-demo-001",
+    );
+    const dispatched = await setup.service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = await setup.service.assignDispatch({
+      dispatchJobId: dispatched.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    const taskId = assignment.taskId;
+    await setup.service.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-29T12:00:00.000Z",
+    });
+    await setup.service.departDriverTask(taskId, {
+      departedAt: "2026-04-29T12:01:00.000Z",
+    });
+    await setup.service.arrivedPickup(taskId, {
+      arrivedAt: "2026-04-29T12:02:00.000Z",
+    });
+    await setup.service.startDriverTask(taskId, {
+      startedAt: "2026-04-29T12:03:00.000Z",
+    });
+    return { ...setup, booking, assignment, taskId };
+  }
+  const arrive = (sequence: number, minute: number) => ({
+    waypointSequence: sequence,
+    arrivedAt: `2026-04-29T12:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+  const leave = (sequence: number, minute: number) => ({
+    waypointSequence: sequence,
+    departedAt: `2026-04-29T12:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+
+  it("records each repeated stop independently, preserves phase times on retries, and arrives at the destination before real completion", async () => {
+    const { service, taskId, booking } = await journey();
+    expect(service.getDriverTask(taskId).waypoints[0]).toMatchObject({
+      arrivedAt: "2026-04-29T12:02:00.000Z",
+      departedAt: "2026-04-29T12:03:00.000Z",
+    });
+    for (const sequence of [1, 2]) {
+      const arrival = arrive(sequence, 4 + (sequence - 1) * 2);
+      const departure = leave(sequence, 5 + (sequence - 1) * 2);
+      await service.arrivedPickup(taskId, arrival);
+      await service.arrivedPickup(taskId, arrive(sequence, 40));
+      expect(service.getDriverTask(taskId).waypoints[sequence]?.arrivedAt).toBe(
+        arrival.arrivedAt,
+      );
+      await service.departDriverTask(taskId, departure);
+      await service.departDriverTask(taskId, leave(sequence, 41));
+      expect(
+        service.getDriverTask(taskId).waypoints[sequence]?.departedAt,
+      ).toBe(departure.departedAt);
+      expect(service.getDriverTask(taskId).status).toBe("on_trip");
+    }
+    await service.arrivedPickup(taskId, arrive(3, 8));
+    const completed = await service.completeDriverTask(
+      taskId,
+      {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      },
+      "SIM-visit-complete",
+    );
+    expect(completed.status).toBe("completed");
+    expect(completed.waypoints[3]).toMatchObject({
+      arrivedAt: "2026-04-29T12:08:00.000Z",
+      departedAt: null,
+    });
+    expect(service.getOrder(booking.orderId).status).toBe("completed");
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((x) => x.eventType === "driver.waypoint_arrived"),
+    ).toHaveLength(3);
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((x) => x.eventType === "driver.waypoint_departed"),
+    ).toHaveLength(2);
+  });
+
+  it("rejects skipping, invalid indices, leaving before arrival and false completion without changing any canonical stop", async () => {
+    const { service, taskId } = await journey();
+    const before = structuredClone(service.getDriverTask(taskId));
+    for (const sequence of [-1, 0, 1.5, 2, 4, Number.NaN])
+      await expect(
+        service.arrivedPickup(taskId, arrive(sequence, 4)),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(1, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(3, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.completeDriverTask(taskId, {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      }),
+    ).rejects.toMatchObject({ code: "TRAVEL_WAYPOINTS_INCOMPLETE" });
+    expect(service.getDriverTask(taskId)).toEqual(before);
+  });
+
+  it("rejects invalid or backwards timestamps and keeps the same reported arrival after concurrent retries", async () => {
+    const { service, taskId } = await journey();
+    await expect(
+      service.arrivedPickup(taskId, {
+        waypointSequence: 1,
+        arrivedAt: "invalid",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.arrivedPickup(taskId, arrive(1, 2)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await Promise.all([
+      service.arrivedPickup(taskId, arrive(1, 4)),
+      service.arrivedPickup(taskId, arrive(1, 5)),
+    ]);
+    expect(service.getDriverTask(taskId).waypoints[1]?.arrivedAt).toBe(
+      arrive(1, 4).arrivedAt,
+    );
+    await expect(
+      service.departDriverTask(taskId, leave(1, 3)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(service.getDriverTask(taskId).waypoints[1]?.departedAt).toBeNull();
+  });
+
+  it("rejects local visit mutation for forwarded routes and preserves their source timestamps", async () => {
+    const { service, taskId } = await journey();
+    const task = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    task.sourcePlatform = "SIM-source-platform";
+    const before = structuredClone(task.waypoints);
+    await expect(
+      service.arrivedPickup(taskId, arrive(1, 4)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await expect(
+      service.departDriverTask(taskId, leave(1, 5)),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(service.getDriverTask(taskId).waypoints).toEqual(before);
+  });
+
+  async function databaseJourney() {
+    const setup = await journey();
+    const snapshot = setup.service.getReportingSnapshot();
+    let durable = structuredClone({
+      order: setup.service.getOrder(setup.booking.orderId),
+      task: setup.service.getDriverTask(setup.taskId),
+      assignment: snapshot.dispatchAssignments.find(
+        (x) => x.taskId === setup.taskId,
+      )!,
+      dispatchJob: snapshot.dispatchJobs.find(
+        (x) =>
+          x.dispatchJobId ===
+          setup.service.getDriverTask(setup.taskId).dispatchJobId,
+      )!,
+    });
+    const state = { failCommit: false, traces: [] as any[] };
+    const repository = {
+      isEnabled: () => true,
+      withTransaction: vi.fn(async (work: (tx: any) => Promise<any>) => {
+        const tx = { bundle: structuredClone(durable), traces: [] as any[] };
+        const result = await work(tx);
+        if (state.failCommit) throw new Error("SIM commit rejected");
+        durable = tx.bundle;
+        state.traces.push(...tx.traces);
+        return result;
+      }),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn(async (tx: any) =>
+        structuredClone(tx.bundle),
+      ),
+      persistOrderWorkflow: vi.fn(async (tx: any, changes: any) => {
+        if (changes.orders?.[0])
+          tx.bundle.order = structuredClone(changes.orders[0]);
+        if (changes.driverTasks?.[0])
+          tx.bundle.task = structuredClone(changes.driverTasks[0]);
+        tx.traces.push(...structuredClone(changes.dispatchTraceLogs ?? []));
+      }),
+      loadOrderActionContext: vi.fn(async () => ({
+        orders: [structuredClone(durable.order)],
+        driverTasks: [structuredClone(durable.task)],
+        dispatchAssignments: [structuredClone(durable.assignment)],
+        dispatchJobs: [structuredClone(durable.dispatchJob)],
+        dispatchTraceLogs: [],
+        dispatchAttempts: [],
+        passengerDisclosureSnapshots: [],
+      })),
+      reportPersistenceFailure: vi.fn(),
+    };
+    (setup.service as any).ownedMobilityRepository = repository;
+    return { ...setup, repository, state, durable: () => durable };
+  }
+
+  it("uses the locked durable visit for stale-cache retries and never repeats the trace", async () => {
+    const { service, taskId, repository, state, durable } =
+      await databaseJourney();
+    await service.arrivedPickup(taskId, arrive(1, 4));
+    const warm = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    warm.waypoints[1].arrivedAt = null;
+    const replay = await service.arrivedPickup(taskId, arrive(1, 5));
+    expect(replay.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
+    expect(durable().task.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
+    expect(repository.persistOrderWorkflow).toHaveBeenCalledTimes(1);
+    expect(state.traces).toHaveLength(1);
+  });
+
+  it("does not mutate warm route, order, trace or audit when the visit transaction rolls back", async () => {
+    const {
+      service,
+      taskId,
+      booking,
+      repository,
+      state,
+      durable,
+      auditNotificationService,
+    } = await databaseJourney();
+    const before = structuredClone({
+      task: service.getDriverTask(taskId),
+      order: service.getOrder(booking.orderId),
+      traces: service.listDispatchTrace(booking.orderId),
+    });
+    const auditCount =
+      auditNotificationService.recordAuditLog.mock.calls.length;
+    state.failCommit = true;
+    await expect(service.arrivedPickup(taskId, arrive(1, 4))).rejects.toThrow(
+      "SIM commit rejected",
+    );
+    expect(repository.persistOrderWorkflow).toHaveBeenCalledTimes(1);
+    expect({
+      task: service.getDriverTask(taskId),
+      order: service.getOrder(booking.orderId),
+      traces: service.listDispatchTrace(booking.orderId),
+    }).toEqual(before);
+    expect(durable().task.waypoints[1]?.arrivedAt).toBeNull();
+    expect(state.traces).toHaveLength(0);
+    expect(auditNotificationService.recordAuditLog.mock.calls.length).toBe(
+      auditCount,
+    );
+  });
+
+  it("rejects corrupt canonical places or assignment/order links within the locked bundle", async () => {
+    const { service, taskId, repository, durable } = await databaseJourney();
+    const original = structuredClone(durable());
+    for (const corrupt of [
+      () => {
+        durable().task.waypoints[1]!.address = "SIM different stop";
+      },
+      () => {
+        durable().task.waypoints[1]!.lat = 90;
+      },
+      () => {
+        durable().assignment.orderId = "SIM-other-order";
+      },
+      () => {
+        durable().assignment.driverId = "SIM-other-driver";
+      },
+      () => {
+        durable().dispatchJob.orderId = "SIM-other-order";
+      },
+    ]) {
+      Object.assign(durable(), structuredClone(original));
+      corrupt();
+      await expect(
+        service.arrivedPickup(taskId, arrive(1, 4)),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    }
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    expect(service.getDriverTask(taskId).waypoints[1]?.arrivedAt).toBeNull();
+  });
+
+  it("guards database completion before proof or settlement writes when required stops are missing", async () => {
+    const { service, taskId, repository } = await databaseJourney();
+    await expect(
+      service.completeDriverTask(taskId, {
+        completedAt: "2026-04-29T12:10:00.000Z",
+        actualDistanceKm: 5,
+        actualDurationSec: 420,
+        proof: { photos: [SAMPLE_PROOF_PHOTO] },
+      }),
+    ).rejects.toMatchObject({ code: "TRAVEL_WAYPOINTS_INCOMPLETE" });
+    expect(
+      repository.loadDriverTaskCompletionBundleForUpdate,
+    ).toHaveBeenCalledTimes(1);
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    expect(service.getDriverTask(taskId).status).toBe("on_trip");
+  });
+
+  it("keeps the normal controller refresh and driver ownership guard before local waypoint commands", async () => {
+    const { service, taskId, repository, durable } = await databaseJourney();
+    const controller = new OwnedMobilityController(service, {} as never);
+    const wrong = {
+      realm: "driver",
+      actorType: "driver_user",
+      actorId: "SIM-other-driver",
+    } as BootstrapRequestIdentity;
+    await expect(
+      controller.arrivePickup(taskId, arrive(1, 4), wrong),
+    ).rejects.toMatchObject({ code: "DRIVER_IDENTITY_MISMATCH" });
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+    const warm = (service as any).driverTasks.find(
+      (x: DriverTaskRecord) => x.taskId === taskId,
+    );
+    warm.waypoints = [];
+    const warmOrder = (service as any).orders.find(
+      (x: any) => x.orderId === durable().order.orderId,
+    );
+    warmOrder.partnerBookingDetails = undefined;
+    const actor = {
+      realm: "driver",
+      actorType: "driver_user",
+      actorId: durable().task.driverId,
+    } as BootstrapRequestIdentity;
+    const result = await controller.arrivePickup(taskId, arrive(1, 4), actor);
+    expect(repository.loadOrderActionContext).toHaveBeenCalledWith({ taskId });
+    expect(result.data.waypoints[1]?.arrivedAt).toBe(arrive(1, 4).arrivedAt);
   });
 });

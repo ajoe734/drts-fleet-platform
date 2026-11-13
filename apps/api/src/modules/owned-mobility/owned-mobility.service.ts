@@ -1,3 +1,7 @@
+import type {
+  PartnerOrderReadRecord,
+  PartnerOrderProgressRecord,
+} from "@drts/contracts";
 import type { TenantMasterDirectoryContext } from "../tenant-partner/tenant-partner.repository";
 import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
@@ -55,7 +59,10 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   ActualTripFareBreakdown,
+  PartnerOrderReceiptRecord,
   PassengerRideContactOption,
+  PassengerServiceSelection,
+  VehicleForm,
   PassengerContactUnavailableReason,
   DriverDeclaredSurnameSnapshot,
   DriverTaskStatus,
@@ -202,6 +209,7 @@ import {
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
   type OwnedOrderActionContext,
+  type PartnerBookingListScope,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
@@ -556,6 +564,10 @@ export class OwnedMobilityService
 
   private queueEntries: QueueEntryRecord[] = [];
   private readonly queueCommands = new Map<string, Promise<unknown>>();
+  private readonly waypointCommands = new Map<
+    string,
+    Promise<DriverTaskRecord>
+  >();
 
   // Per-observation route reads are shared by the existing 3-second SSE readers.
   // Bound both cached promises and outstanding provider work, including timeouts.
@@ -1188,6 +1200,7 @@ export class OwnedMobilityService
     requestId?: string,
     callContext?: MultiTaxiCallContext,
     commitCreation?: MultiTaxiCreationCommit,
+    serviceSelection?: PassengerServiceSelection,
   ): MaybePromise<OwnedOrderRecord> {
     const requestedPickupAt = this.validateMultiTaxiRideRequest(command);
     if (callContext && !callContext.callId?.trim()) {
@@ -1216,6 +1229,7 @@ export class OwnedMobilityService
             requestId,
             callContext,
             commitCreation,
+            serviceSelection,
           ),
         );
       }
@@ -1228,6 +1242,7 @@ export class OwnedMobilityService
         requestId,
         callContext,
         commitCreation,
+        serviceSelection,
       );
     };
     const preparing =
@@ -1246,6 +1261,7 @@ export class OwnedMobilityService
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
     commitCreation?: MultiTaxiCreationCommit,
+    serviceSelection?: PassengerServiceSelection,
   ): MaybePromise<OwnedOrderRecord> {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
@@ -1272,6 +1288,9 @@ export class OwnedMobilityService
         ).toISOString()
       : null;
     const order: OwnedOrderRecord = {
+      ...(serviceSelection
+        ? { serviceSelection: { ...serviceSelection } }
+        : {}),
       orderId: randomUUID(),
       orderNo: this.nextOrderNo(),
       orderSource: callContext ? "phone" : "app",
@@ -1954,6 +1973,43 @@ export class OwnedMobilityService
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
 
+    const routeStops =
+      command.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? command.partnerBookingDetails.routeStops
+        : undefined;
+    if (
+      routeStops !== undefined &&
+      command.businessDispatchSubtype !== "travel_agency_transfer"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops are only available for travel bookings",
+      );
+    }
+    if (
+      routeStops !== undefined &&
+      (!Array.isArray(routeStops) ||
+        routeStops.some(
+          (stop) =>
+            !stop ||
+            typeof stop.address !== "string" ||
+            !stop.address.trim() ||
+            typeof stop.lat !== "number" ||
+            !Number.isFinite(stop.lat) ||
+            Math.abs(stop.lat) > 90 ||
+            typeof stop.lng !== "number" ||
+            !Number.isFinite(stop.lng) ||
+            Math.abs(stop.lng) > 180,
+        ))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops must contain selected places with valid coordinates",
+      );
+    }
+
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
@@ -1999,6 +2055,16 @@ export class OwnedMobilityService
     );
     const reservationHoldId = randomUUID();
     const order: OwnedOrderRecord = {
+      ...(command.mapFallbackReview?.reasonCode
+        ? { mapFallbackReview: { ...command.mapFallbackReview } }
+        : {}),
+      ...(command.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(
+              command.partnerBookingDetails,
+            ),
+          }
+        : {}),
       orderId,
       orderNo: this.nextOrderNo(),
       orderSource: "portal",
@@ -2827,6 +2893,348 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
+  /** Fresh normal partner display. No supply preparation, lifecycle or payment write. */
+  async resolvePartnerOrderView(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<PartnerOrderReadRecord> {
+    // Original ownership is checked before aggregate, identity or telemetry reads.
+    let order = await this.resolvePersistedOrder(orderId, identity);
+    const progress: PartnerOrderProgressRecord = {
+      orderId,
+      orderStatus: order.status,
+      readAt: new Date().toISOString(),
+      availability: "unavailable",
+      reason: "source_unavailable",
+      currentTask: null,
+      driver: null,
+      vehicle: null,
+      location: {
+        status: "unavailable",
+        position: null,
+        recordedAt: null,
+        updatedAt: null,
+        accuracyM: null,
+      },
+    };
+    const repository = this.ownedMobilityRepository;
+    if (!repository?.isEnabled()) return { ...order, progress };
+    const context = await repository.loadOrderActionContext({ orderId });
+    const snapshot = context?.orders.find((item) => item.orderId === orderId);
+    if (!context || !snapshot)
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PARTNER_PROGRESS_CONTEXT_UNAVAILABLE",
+        "The persisted trip context is unavailable.",
+      );
+    await this.assertPartnerOrderIdentityAsync(identity, snapshot);
+    order = this.cloneOrder(snapshot);
+    progress.orderStatus = order.status;
+    progress.availability = "available";
+    progress.reason = null;
+    progress.location.status = "not_live";
+    const activeOrder = [
+      "preassigned",
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ].includes(order.status);
+    const activeTask = [
+      "pending_acceptance",
+      "accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ];
+    // Include every non-rejected/cancelled tuple, not only the first pair
+    // that happens to be complete. A valid A must not hide a broken B.
+    const relevantTasks = context.driverTasks.filter(
+      (task) =>
+        task.orderId === orderId &&
+        (activeTask.includes(task.status) || task.status === "completed"),
+    );
+    const relevantAssignments = context.dispatchAssignments.filter(
+      (assignment) =>
+        assignment.orderId === orderId &&
+        ["assigned", "accepted", "completed"].includes(assignment.status),
+    );
+    const matches = (
+      task: DriverTaskRecord,
+      assignment: DispatchAssignmentRecord,
+    ) =>
+      assignment.orderId === task.orderId &&
+      assignment.taskId === task.taskId &&
+      assignment.assignmentId === task.assignmentId &&
+      assignment.dispatchJobId === task.dispatchJobId &&
+      assignment.driverId === task.driverId &&
+      assignment.vehicleId === task.vehicleId &&
+      (task.status === "completed"
+        ? assignment.status === "completed"
+        : ["assigned", "accepted"].includes(assignment.status));
+    const oneJob = (dispatchJobId: string) =>
+      context.dispatchJobs.filter(
+        (job) => job.orderId === orderId && job.dispatchJobId === dispatchJobId,
+      ).length === 1;
+    const complete =
+      relevantTasks.length === relevantAssignments.length &&
+      relevantTasks.every(
+        (task) =>
+          oneJob(task.dispatchJobId) &&
+          relevantAssignments.filter((assignment) => matches(task, assignment))
+            .length === 1,
+      ) &&
+      relevantAssignments.every(
+        (assignment) =>
+          oneJob(assignment.dispatchJobId) &&
+          relevantTasks.filter((task) => matches(task, assignment)).length ===
+            1,
+      );
+    const task = relevantTasks[0];
+    const compatibleStage =
+      !task ||
+      (order.status === "completed" && task.status === "completed") ||
+      (activeOrder && activeTask.includes(task.status));
+    // A partial/orphan tuple or multiple candidates means unavailable display,
+    // never a new dispatch guard or an arbitrary choice by timestamp/array order.
+    if (!complete || relevantTasks.length > 1 || !compatibleStage) {
+      progress.availability = "unavailable";
+      progress.reason = "inconsistent_context";
+      progress.location.status = "unavailable";
+      return { ...order, progress };
+    }
+    if (!task) return { ...order, progress };
+    progress.currentTask = {
+      taskId: task.taskId,
+      assignmentId: task.assignmentId,
+      dispatchJobId: task.dispatchJobId,
+      driverId: task.driverId,
+      vehicleId: task.vehicleId,
+      status: task.status,
+      acceptedAt: task.acceptedAt,
+      departedAt: task.departedAt,
+      arrivedPickupAt: task.arrivedPickupAt,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+    };
+    const registry = this.receiptRegistryRepository;
+    progress.driver = {
+      driverId: task.driverId,
+      driverSurname: null,
+      driverSurnameSource: null,
+      driverSurnameProfileUpdatedAt: null,
+    };
+    progress.vehicle = { vehicleId: task.vehicleId, plateNo: null };
+    if (!registry?.isEnabled()) {
+      progress.location.status = "unavailable";
+      return { ...order, progress };
+    }
+    const [driver, vehicle] = await Promise.all([
+      registry.lockDriver(task.driverId),
+      registry.findVehicleById(task.vehicleId),
+    ]);
+    if (vehicle?.vehicleId === task.vehicleId)
+      progress.vehicle.plateNo = vehicle.plateNo?.trim() || null;
+    // The fresh reader clears a missing persisted profile; never split name or
+    // fall back to the older in-memory declared-surname helper.
+    if (
+      driver?.driverId === task.driverId &&
+      typeof this.regulatoryRegistryService
+        .getDriverCompletionReceiptIdentity === "function"
+    ) {
+      const { surname } =
+        await this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+          task.driverId,
+        );
+      if (surname) Object.assign(progress.driver, surname);
+    }
+    if (task.status === "completed" || order.status === "cancelled")
+      return { ...order, progress };
+    const location = await registry.findLatestDriverLocation(task.driverId);
+    if (!location) {
+      progress.location.status = "missing";
+      return { ...order, progress };
+    }
+    const event = await registry.findDriverHeartbeatEventByRecordedAt(
+      task.driverId,
+      location.recordedAt,
+      location.updatedAt,
+    );
+    if (
+      location.driverId !== task.driverId ||
+      !event ||
+      event.driverId !== task.driverId ||
+      event.vehicleId !== task.vehicleId ||
+      event.taskId !== task.taskId ||
+      event.recordedAt !== location.recordedAt ||
+      event.receivedAt !== location.updatedAt ||
+      event.lat !== location.lat ||
+      event.lng !== location.lng ||
+      event.accuracyM !== location.accuracyM ||
+      !Number.isFinite(Date.parse(location.recordedAt)) ||
+      !Number.isFinite(Date.parse(location.updatedAt)) ||
+      !Number.isFinite(location.lat) ||
+      Math.abs(location.lat) > 90 ||
+      !Number.isFinite(location.lng) ||
+      Math.abs(location.lng) > 180 ||
+      (location.accuracyM !== null &&
+        (!Number.isFinite(location.accuracyM) || location.accuracyM < 0))
+    ) {
+      progress.location.status = "context_mismatch";
+      return { ...order, progress };
+    }
+    // Same freshness semantics as the existing registry tracking display.
+    const status =
+      Date.now() - Date.parse(location.updatedAt) > 90_000
+        ? "stale"
+        : location.accuracyM !== null && location.accuracyM > 100
+          ? "low_accuracy"
+          : "fresh";
+    progress.location = {
+      status,
+      position:
+        status === "fresh" ? { lat: location.lat, lng: location.lng } : null,
+      recordedAt: location.recordedAt,
+      updatedAt: location.updatedAt,
+      accuracyM: location.accuracyM,
+    };
+    return { ...order, progress };
+  }
+
+  /**
+   * A read of existing authorities only: never prepares supply, completes a task,
+   * initializes payment or substitutes a quote for an actual/captured amount.
+   */
+  async getPartnerOrderReceipt(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<PartnerOrderReceiptRecord> {
+    // Preserve the original async owner check before task/payment authority reads.
+    let order = await this.resolvePersistedOrder(orderId, identity);
+    let completion: PartnerOrderReceiptRecord["completion"] = null;
+    const money = (
+      value: MoneyAmount | null | undefined,
+    ): MoneyAmount | null => {
+      if (
+        !value ||
+        !Number.isSafeInteger(value.amountMinor) ||
+        value.amountMinor < 0 ||
+        typeof value.currency !== "string" ||
+        !value.currency.trim()
+      )
+        return null;
+      return {
+        amountMinor: value.amountMinor,
+        currency: normalisePlatformCurrency(value.currency),
+      };
+    };
+    const nonnegative = (value: number | null | undefined) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : null;
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const context = await this.ownedMobilityRepository.loadOrderActionContext(
+        { orderId },
+      );
+      const snapshot = context?.orders.find(
+        (candidate) => candidate.orderId === orderId,
+      );
+      if (!context || !snapshot)
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PARTNER_RECEIPT_CONTEXT_UNAVAILABLE",
+          "The persisted receipt context is unavailable.",
+        );
+      // The aggregate can be fresher than the first read. Use its actual owner.
+      await this.assertPartnerOrderIdentityAsync(identity, snapshot);
+      order = snapshot;
+      if (order.status === "completed") {
+        const matchingTasks = context.driverTasks.filter(
+          (task) =>
+            task.status === "completed" &&
+            task.orderId === order.orderId &&
+            context.dispatchAssignments.some(
+              (assignment) =>
+                assignment.status === "completed" &&
+                assignment.orderId === order.orderId &&
+                assignment.taskId === task.taskId &&
+                assignment.assignmentId === task.assignmentId &&
+                assignment.dispatchJobId === task.dispatchJobId &&
+                assignment.driverId === task.driverId &&
+                assignment.vehicleId === task.vehicleId &&
+                context.dispatchJobs.some(
+                  (job) =>
+                    job.dispatchJobId === task.dispatchJobId &&
+                    job.orderId === order.orderId,
+                ),
+            ),
+        );
+        // An ambiguous/legacy completion remains missing instead of picking an
+        // arbitrary old task or deriving its amount from the quote.
+        const task = matchingTasks.length === 1 ? matchingTasks[0] : undefined;
+        if (task) {
+          const captured = task.actualFareBreakdown;
+          const breakdown =
+            captured &&
+            [
+              captured.startMinor,
+              captured.distanceMinor,
+              captured.delayMinor,
+              captured.nightMinor,
+            ].every((value) => Number.isSafeInteger(value) && value >= 0)
+              ? { ...captured }
+              : null;
+          completion = {
+            taskId: task.taskId,
+            assignmentId: task.assignmentId,
+            dispatchJobId: task.dispatchJobId,
+            driverId: task.driverId,
+            vehicleId: task.vehicleId,
+            completedAt:
+              task.completedAt && Number.isFinite(Date.parse(task.completedAt))
+                ? task.completedAt
+                : null,
+            actualFare: money(task.fare),
+            actualFareBreakdown: breakdown,
+            actualDistanceKm: nonnegative(task.actualDistanceKm),
+            actualDurationSec: nonnegative(task.actualDurationSec),
+          };
+        }
+      }
+    }
+
+    let payment: PartnerOrderReceiptRecord["payment"] = {
+      availability: "unavailable",
+      status: null,
+      amount: null,
+    };
+    if (this.multiTaxiRepository?.isEnabled()) {
+      // Errors intentionally propagate. A failed read is not an empty ledger.
+      const ledger =
+        await this.multiTaxiRepository.findPassengerPayment(orderId);
+      payment = ledger
+        ? {
+            availability: "available",
+            status: ledger.status,
+            amount: money(ledger.amount),
+          }
+        : { availability: "not_recorded", status: null, amount: null };
+    }
+    return {
+      orderId: order.orderId,
+      bookingId: order.bookingId,
+      orderNo: order.orderNo,
+      orderStatus: order.status,
+      quotedFare: money(order.quotedFare),
+      completion,
+      payment,
+    };
+  }
+
   getPassengerAssignmentDisclosure(orderId: string) {
     const snapshot = this.findPassengerAssignmentDisclosure(orderId);
     if (!snapshot) {
@@ -3393,6 +3801,40 @@ export class OwnedMobilityService
     };
   }
 
+  private partnerBookingListScope(
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): PartnerBookingListScope {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      !["partner_api_key", "referral_passenger"].includes(identity.actorType) ||
+      !identity.tenantId ||
+      !identity.partnerEntrySlug
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "A current partner entry identity is required to read partner bookings.",
+      );
+    }
+    return {
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId || null,
+      partnerProgramId: identity.partnerProgramId || null,
+      partnerEntrySlug: identity.partnerEntrySlug,
+      passengerId: (identity.drtsPassengerId ?? identity.actorId) || null,
+      comparePassenger: identity.actorType === "referral_passenger",
+    };
+  }
+
+  async listPartnerBookings(
+    query: TenantBookingListQuery | undefined,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): Promise<TenantBookingsPageRecord> {
+    const scope = this.partnerBookingListScope(identity);
+    return this.listTenantBookings(scope.tenantId, query, identity);
+  }
+
   listTenantBookings(
     tenantId: string,
     query?: TenantBookingListQuery,
@@ -3404,15 +3846,33 @@ export class OwnedMobilityService
     }
 
     const validated = this.validateTenantBookingListQuery(query);
+    const partnerScope =
+      identity?.realm === "partner"
+        ? this.partnerBookingListScope(identity)
+        : undefined;
 
     if (this.ownedMobilityRepository?.isEnabled()) {
       const executeDb = async (): Promise<TenantBookingsPageRecord> => {
-        const dbResult =
-          await this.ownedMobilityRepository!.queryTenantBookings(tenantId, {
-            ...query,
-            page: validated.page,
-            pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
-          });
+        const readQuery = {
+          ...query,
+          page: validated.page,
+          pageSize: validated.pageSize > 0 ? validated.pageSize : 100,
+        };
+        const dbResult = partnerScope
+          ? await this.ownedMobilityRepository!.queryTenantBookings(
+              tenantId,
+              readQuery,
+              partnerScope,
+            )
+          : await this.ownedMobilityRepository!.queryTenantBookings(
+              tenantId,
+              readQuery,
+            );
+        if (partnerScope) {
+          for (const order of dbResult.items) {
+            this.assertPartnerOrderIdentity(identity, order);
+          }
+        }
         const effectivePageSize =
           validated.pageSize > 0
             ? validated.pageSize
@@ -3449,6 +3909,21 @@ export class OwnedMobilityService
     let filtered = this.orders.filter(
       (order) => order.bookingId && order.tenantId === tenantId,
     );
+    if (partnerScope) {
+      filtered = filtered.filter((order) => {
+        try {
+          this.assertPartnerOrderIdentity(identity, order);
+          return true;
+        } catch (error) {
+          if (
+            error instanceof ApiRequestError &&
+            error.code === "PARTNER_SCOPE_MISMATCH"
+          )
+            return false;
+          throw error;
+        }
+      });
+    }
 
     if (validated.passengerId) {
       filtered = filtered.filter(
@@ -6637,7 +7112,11 @@ export class OwnedMobilityService
           }
           order = current.order;
           dispatchJob = currentJob;
-          await this.prepareDispatchEligibility(order, [vehicleId]);
+          const preparedVehicleForms = await this.prepareDispatchEligibility(
+            order,
+            [vehicleId],
+            tx,
+          );
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -6708,6 +7187,7 @@ export class OwnedMobilityService
             dispatchJob.dispatchJobId,
             vehicleId,
             driverId,
+            preparedVehicleForms,
           );
           await this.assertSandboxDispatchGate(
             bundle.order,
@@ -6818,7 +7298,7 @@ export class OwnedMobilityService
 
     const eligibilityRecheckResult = this.afterMaybePromise(
       this.prepareDispatchEligibility(order, [vehicleId]),
-      () =>
+      (preparedVehicleForms) =>
         this.afterMaybePromise(
           this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
             driverId,
@@ -6829,6 +7309,7 @@ export class OwnedMobilityService
               dispatchJob.dispatchJobId,
               vehicleId,
               driverId,
+              preparedVehicleForms,
             ),
         ),
     );
@@ -7733,6 +8214,9 @@ export class OwnedMobilityService
       dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
       dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
         ...assignment,
+        ...(assignment.serviceSelection
+          ? { serviceSelection: { ...assignment.serviceSelection } }
+          : {}),
         ...(assignment.bookingRequirements
           ? {
               bookingRequirements: structuredClone(
@@ -8164,6 +8648,15 @@ export class OwnedMobilityService
     command: DriverDepartTaskCommand,
     requestId?: string,
   ) {
+    if (command.waypointSequence !== undefined) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "depart",
+        command.waypointSequence,
+        command.departedAt,
+        requestId,
+      );
+    }
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
     this.assertDriverTaskTransition(task, "enroute_pickup");
@@ -8205,6 +8698,383 @@ export class OwnedMobilityService
     );
     await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
+  }
+
+  /** Only the existing owned travel route is locally writable; forwarded routes remain source-owned. */
+  private getOwnedTravelWaypoints(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+  ) {
+    const details = order.partnerBookingDetails;
+    if (
+      task.sourcePlatform != null ||
+      this.forwarderSourceMap.has(order.orderId) ||
+      order.orderDomain !== "owned" ||
+      order.businessDispatchSubtype !== "travel_agency_transfer" ||
+      details?.subtype !== "travel_agency_transfer" ||
+      details.routeStops == null
+    )
+      return null;
+    if (Array.isArray(details.routeStops) && details.routeStops.length === 0)
+      return null;
+    const fail = () => {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TRAVEL_WAYPOINTS_RECONCILIATION_REQUIRED",
+        "The canonical travel waypoint sequence requires reconciliation.",
+      );
+    };
+    if (!Array.isArray(details.routeStops) || !Array.isArray(task.waypoints))
+      return fail();
+    const places = [order.pickup, ...details.routeStops, order.dropoff];
+    if (
+      task.orderId !== order.orderId ||
+      !task.routeProvided ||
+      task.waypoints.length !== places.length ||
+      task.waypoints.some(
+        (point, index) =>
+          !point ||
+          point.sequence !== index ||
+          point.address !== places[index]?.address ||
+          point.lat !== places[index]?.lat ||
+          point.lng !== places[index]?.lng ||
+          typeof point.lat !== "number" ||
+          !Number.isFinite(point.lat) ||
+          Math.abs(point.lat) > 90 ||
+          typeof point.lng !== "number" ||
+          !Number.isFinite(point.lng) ||
+          Math.abs(point.lng) > 180,
+      )
+    )
+      return fail();
+    return task.waypoints;
+  }
+
+  private waypointTimestamp(value: string, minimum?: string | null) {
+    const instant = typeof value === "string" ? Date.parse(value) : Number.NaN;
+    if (
+      !Number.isFinite(instant) ||
+      !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ||
+      (minimum != null &&
+        (!Number.isFinite(Date.parse(minimum)) ||
+          instant < Date.parse(minimum)))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_WAYPOINT_TIMESTAMP_INVALID",
+        "A waypoint event must have a valid timestamp after its preceding event.",
+      );
+    }
+    return instant;
+  }
+
+  private assertOwnedTravelVisitsComplete(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+    completedAt: string,
+  ) {
+    const route = this.getOwnedTravelWaypoints(task, order);
+    if (!route) return;
+    let previous: string | null = null;
+    for (const [index, point] of route.entries()) {
+      if (!point.arrivedAt || (index < route.length - 1 && !point.departedAt)) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "TRAVEL_WAYPOINTS_INCOMPLETE",
+          "Report each travel stop arrival and intermediate departure before completing this task.",
+        );
+      }
+      this.waypointTimestamp(point.arrivedAt, previous);
+      previous = point.arrivedAt;
+      if (index < route.length - 1) {
+        this.waypointTimestamp(point.departedAt!, previous);
+        previous = point.departedAt;
+      }
+    }
+    this.waypointTimestamp(completedAt, previous);
+  }
+
+  private async recordOwnedWaypointVisit(
+    taskId: string,
+    phase: "pickup_arrive" | "pickup_depart" | "arrive" | "depart",
+    sequence: number,
+    timestamp: string,
+    requestId?: string,
+  ): Promise<DriverTaskRecord> {
+    const execute = async () => {
+      const prepare = (bundle: DriverTaskCompletionBundleRecord) => {
+        const task = {
+          ...this.cloneTask(bundle.task),
+          waypoints: bundle.task.waypoints.map((point) => ({ ...point })),
+        };
+        const order = this.cloneOrder(bundle.order);
+        const route = this.getOwnedTravelWaypoints(task, order);
+        if (!route)
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "TRAVEL_WAYPOINTS_UNAVAILABLE",
+            "Local waypoint commands are only available for this owned travel task.",
+          );
+        const last = route.length - 1;
+        const pickup = phase === "pickup_arrive" || phase === "pickup_depart";
+        const arriving = phase === "pickup_arrive" || phase === "arrive";
+        if (
+          !Number.isSafeInteger(sequence) ||
+          (pickup
+            ? sequence !== 0
+            : sequence < 1 ||
+              sequence > last ||
+              (!arriving && sequence === last))
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "TRAVEL_WAYPOINT_SEQUENCE_INVALID",
+            "The waypoint sequence is outside this command's canonical route.",
+          );
+        }
+        const assignment = bundle.assignment;
+        const reconciled = this.isReconciledAssignmentTask(assignment, task);
+        const completedPair =
+          task.status === "completed" &&
+          order.status === "completed" &&
+          assignment.status === "completed" &&
+          task.assignmentId === assignment.assignmentId &&
+          task.taskId === assignment.taskId &&
+          task.orderId === assignment.orderId &&
+          task.dispatchJobId === assignment.dispatchJobId &&
+          task.driverId === assignment.driverId &&
+          task.vehicleId === assignment.vehicleId;
+        if (
+          task.taskId !== taskId ||
+          (!reconciled && !completedPair) ||
+          bundle.dispatchJob.orderId !== order.orderId ||
+          bundle.dispatchJob.dispatchJobId !== task.dispatchJobId
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+            "Waypoint command assignment task requires reconciliation.",
+          );
+        }
+        const point = route[sequence]!;
+        const field = arriving ? "arrivedAt" : "departedAt";
+        // A retry returns its original reported phase even after later visits. Never rewrite it.
+        if (point[field] != null)
+          return {
+            bundle: { ...bundle, task, order },
+            replayed: true,
+            traceLog: null,
+            outbox: null,
+          };
+        const expectedStatus =
+          phase === "pickup_arrive"
+            ? "enroute_pickup"
+            : phase === "pickup_depart"
+              ? "arrived_pickup"
+              : "on_trip";
+        if (task.status !== expectedStatus || order.status !== expectedStatus) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "TRAVEL_WAYPOINT_TASK_NOT_ACTIVE",
+            "This waypoint action does not match the current task state.",
+          );
+        }
+        if (!pickup) {
+          const next = route.findIndex(
+            (stop, index) =>
+              index > 0 &&
+              (index === last
+                ? stop.arrivedAt == null
+                : stop.departedAt == null),
+          );
+          if (sequence !== next || (!arriving && point.arrivedAt == null)) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "TRAVEL_WAYPOINT_OUT_OF_ORDER",
+              "Arrive and depart each canonical stop in order.",
+            );
+          }
+        }
+        const previous = arriving
+          ? sequence === 0
+            ? task.departedAt
+            : (route[sequence - 1]?.departedAt ?? task.startedAt)
+          : point.arrivedAt;
+        if (!previous)
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "TRAVEL_WAYPOINT_OUT_OF_ORDER",
+            "The preceding travel event has not been reported.",
+          );
+        this.waypointTimestamp(timestamp, previous);
+        point[field] = timestamp;
+        if (phase === "pickup_arrive") {
+          task.status = "arrived_pickup";
+          task.arrivedPickupAt = timestamp;
+          order.status = "arrived_pickup";
+        }
+        if (phase === "pickup_depart") {
+          task.status = "on_trip";
+          task.startedAt = timestamp;
+          order.status = "on_trip";
+        }
+        const now = new Date().toISOString();
+        order.updatedAt = now;
+        const event =
+          phase === "pickup_arrive"
+            ? "driver.arrived_pickup"
+            : phase === "pickup_depart"
+              ? "driver.started_trip"
+              : arriving
+                ? "driver.waypoint_arrived"
+                : "driver.waypoint_departed";
+        const traceLog = this.buildTraceLog(order.orderId, event, {
+          taskId,
+          waypointSequence: sequence,
+          reportedAt: timestamp,
+          ...(requestId ? { requestId } : {}),
+        });
+        const outbox: ConsumerNotificationOutboxRecord | null =
+          phase === "pickup_arrive"
+            ? {
+                outboxId: randomUUID(),
+                orderId: order.orderId,
+                passengerSubjectRef: resolvePassengerSubjectRef(
+                  order.passenger,
+                ),
+                eventType: "driver_arrived",
+                assignmentVersion: null,
+                payload: { taskId },
+                status: "pending",
+                attemptCount: 0,
+                nextAttemptAt: now,
+                createdAt: now,
+                deliveredAt: null,
+              }
+            : null;
+        return {
+          bundle: { ...bundle, task, order },
+          replayed: false,
+          traceLog,
+          outbox,
+        };
+      };
+      const repository = this.ownedMobilityRepository;
+      const result = repository?.isEnabled()
+        ? await repository.withTransaction(async (tx) => {
+            const bundle =
+              await repository.loadDriverTaskCompletionBundleForUpdate(
+                tx,
+                taskId,
+              );
+            if (!bundle)
+              throw new ApiRequestError(
+                HttpStatus.NOT_FOUND,
+                "DRIVER_TASK_NOT_FOUND",
+                "Driver task was not found.",
+                { taskId },
+              );
+            const prepared = prepare(bundle);
+            if (!prepared.replayed)
+              await repository.persistOrderWorkflow(tx, {
+                orders: [prepared.bundle.order],
+                driverTasks: [prepared.bundle.task],
+                dispatchTraceLogs: [prepared.traceLog!],
+                ...(prepared.outbox
+                  ? { consumerNotificationOutbox: [prepared.outbox] }
+                  : {}),
+              });
+            return prepared;
+          })
+        : await (async () => {
+            const task = this.requireTask(taskId);
+            const prepared = prepare({
+              task,
+              order: this.requireOrder(task.orderId),
+              assignment: this.requireAssignment(task.assignmentId),
+              dispatchJob: this.requireDispatchJob(task.dispatchJobId),
+            });
+            if (!prepared.replayed)
+              await this.persistChangesRequired(
+                {
+                  orders: [prepared.bundle.order],
+                  driverTasks: [prepared.bundle.task],
+                  dispatchTraceLogs: [prepared.traceLog!],
+                  ...(prepared.outbox
+                    ? { consumerNotificationOutbox: [prepared.outbox] }
+                    : {}),
+                },
+                "record_waypoint_visit",
+              );
+            // An in-memory cancellation during the persistence await must not be resurrected.
+            if (
+              !prepared.replayed &&
+              !this.isReconciledAssignmentTask(
+                this.requireAssignment(task.assignmentId),
+                this.requireTask(taskId),
+              )
+            ) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+                "The waypoint task changed before commit.",
+              );
+            }
+            return prepared;
+          })();
+      this.applyReplayedDriverTaskCompletionBundle(result.bundle);
+      if (result.replayed) return this.cloneTask(result.bundle.task);
+      this.dispatchTraceLogs = [result.traceLog!, ...this.dispatchTraceLogs];
+      if (result.outbox)
+        this.consumerNotificationOutbox = [
+          result.outbox,
+          ...this.consumerNotificationOutbox,
+        ];
+      await this.recordAudit(
+        {
+          actorId: result.bundle.task.driverId,
+          actorType: "ops_user",
+          tenantId: result.bundle.order.tenantId,
+          moduleName: "driver-task",
+          actionName:
+            phase === "pickup_arrive"
+              ? "arrive_pickup"
+              : phase === "pickup_depart"
+                ? "start_trip"
+                : phase === "arrive"
+                  ? "arrive_waypoint"
+                  : "depart_waypoint",
+          resourceType: "driver_task",
+          resourceId: taskId,
+          newValuesSummary: {
+            status: result.bundle.task.status,
+            waypointSequence: sequence,
+            reportedAt: timestamp,
+          },
+        },
+        requestId,
+      );
+      await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+        result.bundle.task,
+        result.bundle.order,
+        requestId,
+      );
+      await this.publishLatestDispatchJobUpdate(
+        result.bundle.order.orderId,
+        requestId,
+      );
+      return this.cloneTask(result.bundle.task);
+    };
+    // The DB row locks serialize replicas. The same local ordering also keeps noDB retries deterministic.
+    const previous = this.waypointCommands.get(taskId) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(execute);
+    this.waypointCommands.set(taskId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.waypointCommands.get(taskId) === pending)
+        this.waypointCommands.delete(taskId);
+    }
   }
 
   async updateDriverTaskEta(
@@ -8306,6 +9176,24 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (command.waypointSequence !== undefined) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "arrive",
+        command.waypointSequence,
+        command.arrivedAt,
+        requestId,
+      );
+    }
+    if (this.getOwnedTravelWaypoints(task, this.requireOrder(task.orderId))) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "pickup_arrive",
+        0,
+        command.arrivedAt,
+        requestId,
+      );
+    }
     if (task.status === "arrived_pickup") {
       return this.cloneTask(task);
     }
@@ -8372,6 +9260,15 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (this.getOwnedTravelWaypoints(task, this.requireOrder(task.orderId))) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "pickup_depart",
+        0,
+        command.startedAt,
+        requestId,
+      );
+    }
     if (task.status !== "arrived_pickup") {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -8481,6 +9378,8 @@ export class OwnedMobilityService
         },
       );
     }
+
+    this.assertOwnedTravelVisitsComplete(task, order, command.completedAt);
 
     if (
       order.fixedPrice &&
@@ -8800,6 +9699,12 @@ export class OwnedMobilityService
         },
       );
     }
+
+    this.assertOwnedTravelVisitsComplete(
+      task,
+      order,
+      params.command.completedAt,
+    );
 
     if (
       order.fixedPrice &&
@@ -12010,12 +12915,25 @@ export class OwnedMobilityService
   private prepareDispatchEligibility(
     order: OwnedOrderRecord,
     vehicleIds?: string[],
-  ): MaybePromise<void> {
+    executor?: OwnedMobilityQueryExecutor,
+  ): MaybePromise<ReadonlyMap<string, VehicleForm | null> | undefined> {
     const matchingSuppressions =
       this.regulatoryRegistryService.prepareMatchingSuppressions();
     const operatorBinding = order.operatingAuthorizationId
       ? this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
           order.operatingAuthorizationId,
+        )
+      : undefined;
+    const vehicleForms = order.serviceSelection?.accessible
+      ? this.regulatoryRegistryService.prepareVehicleForms?.(
+          vehicleIds ??
+            this.regulatoryRegistryService
+              .listVehicles()
+              .filter((v) =>
+                v.supportedServiceBuckets.includes(order.serviceBucket),
+              )
+              .map((v) => v.vehicleId),
+          executor,
         )
       : undefined;
     const capabilities =
@@ -12029,13 +12947,20 @@ export class OwnedMobilityService
             order.serviceProductCode,
           )
         : undefined;
-    if (capabilities || product || matchingSuppressions || operatorBinding)
+    if (
+      capabilities ||
+      product ||
+      matchingSuppressions ||
+      operatorBinding ||
+      vehicleForms
+    )
       return Promise.all([
         capabilities,
+        vehicleForms,
         product,
         matchingSuppressions,
         operatorBinding,
-      ]).then(() => undefined);
+      ]).then(([, preparedVehicleForms]) => preparedVehicleForms);
   }
 
   private assertAssignmentEligibilityRecheck(
@@ -12043,9 +12968,14 @@ export class OwnedMobilityService
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): MaybePromise<void> {
     try {
-      this.assertBookingRequirementCandidate(order, vehicleId);
+      this.assertBookingRequirementCandidate(
+        order,
+        vehicleId,
+        preparedVehicleForms,
+      );
       this.assertQualifiedVoiceDispatch(
         order,
         dispatchJobId,
@@ -12387,6 +13317,9 @@ export class OwnedMobilityService
       );
     }
     const assignment: DispatchAssignmentRecord = {
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -12411,7 +13344,19 @@ export class OwnedMobilityService
       createdAt: now,
       updatedAt: now,
     };
+    const selectedStops =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? (order.partnerBookingDetails.routeStops ?? [])
+        : [];
+    const routePlaces =
+      !this.forwarderSourceMap.has(order.orderId) && selectedStops.length
+        ? [order.pickup, ...selectedStops, order.dropoff]
+        : [];
     const task: DriverTaskRecord = {
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -12426,8 +13371,31 @@ export class OwnedMobilityService
       driverId,
       vehicleId,
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
-      routeProvided: false,
-      waypoints: [],
+      routeProvided:
+        routePlaces.length > 0 &&
+        routePlaces.every(
+          (place) =>
+            typeof place.lat === "number" &&
+            Number.isFinite(place.lat) &&
+            Math.abs(place.lat) <= 90 &&
+            typeof place.lng === "number" &&
+            Number.isFinite(place.lng) &&
+            Math.abs(place.lng) <= 180,
+        ),
+      waypoints: routePlaces.map((place, sequence) => ({
+        sequence,
+        label:
+          sequence === 0
+            ? "上車點"
+            : sequence === routePlaces.length - 1
+              ? "下車點"
+              : `停靠點 ${sequence}`,
+        address: place.address,
+        lat: place.lat ?? null,
+        lng: place.lng ?? null,
+        arrivedAt: null,
+        departedAt: null,
+      })),
       status: "pending_acceptance",
       acceptedAt: null,
       departedAt: null,
@@ -13872,6 +14840,11 @@ export class OwnedMobilityService
 
     const complianceGates = this.listComplianceGatesForOrder(order);
     return {
+      ...(order.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(order.partnerBookingDetails),
+          }
+        : {}),
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
@@ -14039,25 +15012,84 @@ export class OwnedMobilityService
   }
 
   private bookingRequirementCandidateAllowed(
-    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): boolean {
-    if (!order.bookingRequirements) return true;
+    const travelDetails =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? order.partnerBookingDetails
+        : null;
+    const travelPassengers = travelDetails?.groupSize;
+    const travelLuggage =
+      order.businessDispatchSubtype === "travel_agency_transfer"
+        ? order.luggageCount
+        : null;
+    // Compare only this booking's declared load. Legacy absent demands stay
+    // absent; planned tour/vehicle metadata is not actual vehicle capacity.
+    const needsTravelLuggageCapacity =
+      travelLuggage != null && travelLuggage > 0;
+    const hasTravelLoad =
+      travelPassengers != null || needsTravelLuggageCapacity;
+    if (!order.bookingRequirements && !order.serviceSelection && !hasTravelLoad)
+      return true;
     const capability =
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       ) ?? null;
+    if (
+      hasTravelLoad &&
+      (!capability?.active ||
+        (travelPassengers != null &&
+          (!Number.isInteger(capability.seatCount) ||
+            capability.seatCount < travelPassengers)) ||
+        (needsTravelLuggageCapacity &&
+          (!Number.isInteger(capability.luggageCapacity) ||
+            capability.luggageCapacity < travelLuggage)))
+    )
+      return false;
+    const vehicleForm = preparedVehicleForms
+      ? (preparedVehicleForms.get(vehicleId) ?? null)
+      : capability?.vehicleForm;
+    if (
+      order.serviceSelection?.accessible &&
+      (!capability?.active || vehicleForm !== "accessible")
+    )
+      return false;
     return (
+      !order.bookingRequirements ||
       bookingRequirementFailures(order.bookingRequirements, capability)
         .length === 0
     );
   }
 
   private assertBookingRequirementCandidate(
-    order: Pick<OwnedOrderRecord, "bookingRequirements">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
+    preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ) {
-    if (!this.bookingRequirementCandidateAllowed(order, vehicleId)) {
+    if (
+      !this.bookingRequirementCandidateAllowed(
+        order,
+        vehicleId,
+        preparedVehicleForms,
+      )
+    ) {
       throw new ApiRequestError(
         409,
         "BOOKING_REQUIREMENTS_NOT_MET",
@@ -14116,6 +15148,9 @@ export class OwnedMobilityService
           ? {
               bookingQualification: structuredClone(order.bookingQualification),
             }
+          : {}),
+        ...(order.serviceSelection
+          ? { serviceSelection: { ...order.serviceSelection } }
           : {}),
         ...(order.bookingRequirements
           ? { bookingRequirements: structuredClone(order.bookingRequirements) }
@@ -14274,6 +15309,9 @@ export class OwnedMobilityService
 
           return {
             ...candidate,
+            ...(order.serviceSelection
+              ? { serviceSelection: { ...order.serviceSelection } }
+              : {}),
             ...(order.bookingRequirements
               ? {
                   bookingRequirements: structuredClone(
@@ -14305,7 +15343,7 @@ export class OwnedMobilityService
         }),
     );
 
-    if (order.bookingRequirements)
+    if (order.bookingRequirements || order.serviceSelection)
       return evaluatedCandidates.filter(
         (candidate) => candidate.eligibilityDecision === "eligible",
       );
@@ -14484,12 +15522,21 @@ export class OwnedMobilityService
       };
     }
 
-    const evaluation = this.serviceAreaService.evaluate({
-      serviceProductType,
-      pickup,
-      ...(dropoff ? { dropoff } : {}),
-      requestedAt: order.createdAt,
-    });
+    const evaluation =
+      serviceProductType === "credit_card_airport_transfer" && dropoff
+        ? this.serviceAreaService.evaluateAirportTransferRoute({
+            pickup,
+            dropoff,
+            // The shared evaluator validates direction at runtime as well.
+            direction: order.direction as "pickup" | "dropoff",
+            requestedAt: order.createdAt,
+          })
+        : this.serviceAreaService.evaluate({
+            serviceProductType,
+            pickup,
+            ...(dropoff ? { dropoff } : {}),
+            requestedAt: order.createdAt,
+          });
 
     return {
       serviceProductType,
@@ -17916,6 +18963,14 @@ export class OwnedMobilityService
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
+      ...(order.partnerBookingDetails
+        ? {
+            partnerBookingDetails: structuredClone(order.partnerBookingDetails),
+          }
+        : {}),
+      ...(order.serviceSelection
+        ? { serviceSelection: { ...order.serviceSelection } }
+        : {}),
       ...(order.bookingQualification
         ? { bookingQualification: structuredClone(order.bookingQualification) }
         : {}),
@@ -18107,6 +19162,9 @@ export class OwnedMobilityService
         : authoritativeOrder;
     return {
       ...this.cloneTaskWithDetachedActualFare(task),
+      ...(task.serviceSelection
+        ? { serviceSelection: { ...task.serviceSelection } }
+        : {}),
       ...(task.bookingQualification
         ? { bookingQualification: structuredClone(task.bookingQualification) }
         : {}),

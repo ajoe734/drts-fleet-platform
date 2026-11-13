@@ -1,333 +1,238 @@
-import type { CSSProperties } from "react";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import type { PartnerBrandTemplate } from "@drts/ui-tokens";
+import { PartnerAuthorityError } from "@/lib/api-client";
 import {
-  CanvasCard,
-  CanvasPageHeader,
-  CanvasPill,
-  buildCanvasTheme,
-  type CanvasTheme,
-  type CanvasTone,
-} from "@drts/ui-web";
+  loadPartnerBookingHistory,
+  type PartnerReadSearch,
+} from "@/lib/partner-booking-read-model";
+import { partnerBookingReadHref } from "@/lib/partner-booking-form";
 import {
-  PartnerAuthorityError,
-  getPartnerRouteContext,
-} from "@/lib/api-client";
+  PartnerBookingReadError,
+  PartnerPrincipalSummary,
+} from "@/components/partner-booking-record";
 import { getServerLocale } from "@/lib/server-locale";
-import { type Locale, t } from "@/lib/translations";
-
-const baseTheme = buildCanvasTheme({
-  surface: "partner",
-  density: "compact",
-});
-
-const pageBodyStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-  paddingTop: 16,
-};
-
-const progressCardStyle: CSSProperties = {
-  overflow: "hidden",
-};
-
-type TripRow = {
-  when: string;
-  route: string;
-  status: string;
-  tone: Extract<CanvasTone, "neutral" | "success">;
-  cost: string;
-  benefit: string;
-  complimentary: boolean;
-};
-
-function buildPartnerTheme(brand: PartnerBrandTemplate): CanvasTheme {
-  return {
-    ...baseTheme,
-    bg: "transparent",
-    bgRaised: brand.theme.panel,
-    surface: brand.theme.panel,
-    surfaceHi: "#FFFFFF",
-    surfaceLo: "#F4F6FB",
-    border: brand.theme.panelBorder,
-    borderStrong: brand.surface.border,
-    rowHover: "#F8FAFC",
-    rowSelect: brand.surface.bg,
-    text: brand.ink,
-    textMuted: brand.theme.pageMuted,
-    textDim: brand.theme.pageMuted,
-    accent: brand.accent,
-    accentHi: brand.primary,
-    accentBg: "#FAF3DF",
-    accentBorder: "#E5D58A",
-    shadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
-    shadowSm: "0 1px 2px rgba(15, 23, 42, 0.03)",
-  };
-}
-
-function buildTrips(locale: Locale): readonly TripRow[] {
-  if (locale === "en") {
-    return [
-      {
-        when: "Today 14:30",
-        route: "Taipei Xinyi -> Taoyuan T2",
-        status: "Assigned",
-        tone: "success",
-        cost: "Included",
-        benefit: "Benefit #4",
-        complimentary: true,
-      },
-      {
-        when: "Yesterday 09:12",
-        route: "Taipei Main Station -> Neihu Tech Park",
-        status: "Completed",
-        tone: "neutral",
-        cost: "NT$ 0",
-        benefit: "Benefit #3",
-        complimentary: true,
-      },
-      {
-        when: "5/2 18:45",
-        route: "Taipei 101 -> Songshan Airport",
-        status: "Completed",
-        tone: "neutral",
-        cost: "NT$ 0",
-        benefit: "Benefit #2",
-        complimentary: true,
-      },
-      {
-        when: "4/28 07:30",
-        route: "Yangmingshan -> Taoyuan T1",
-        status: "Completed",
-        tone: "neutral",
-        cost: "NT$ 240",
-        benefit: "20% off after quota",
-        complimentary: false,
-      },
-      {
-        when: "4/14 22:10",
-        route: "Nangang Exhibition Center -> Neihu",
-        status: "Completed",
-        tone: "neutral",
-        cost: "NT$ 0",
-        benefit: "Benefit #1",
-        complimentary: true,
-      },
-    ] as const;
-  }
-
-  return [
-    {
-      when: "今天 14:30",
-      route: "台北信義 → 桃園 T2",
-      status: "已派車",
-      tone: "success",
-      cost: "免費",
-      benefit: "禮遇 #4",
-      complimentary: true,
-    },
-    {
-      when: "昨天 09:12",
-      route: "台北車站 → 內湖科技園區",
-      status: "已完成",
-      tone: "neutral",
-      cost: "NT$ 0",
-      benefit: "禮遇 #3",
-      complimentary: true,
-    },
-    {
-      when: "5/2 18:45",
-      route: "101 大樓 → 松山機場",
-      status: "已完成",
-      tone: "neutral",
-      cost: "NT$ 0",
-      benefit: "禮遇 #2",
-      complimentary: true,
-    },
-    {
-      when: "4/28 07:30",
-      route: "陽明山 → 桃園 T1",
-      status: "已完成",
-      tone: "neutral",
-      cost: "NT$ 240",
-      benefit: "額度後 8 折",
-      complimentary: false,
-    },
-    {
-      when: "4/14 22:10",
-      route: "南港展覽館 → 內湖",
-      status: "已完成",
-      tone: "neutral",
-      cost: "NT$ 0",
-      benefit: "禮遇 #1",
-      complimentary: true,
-    },
-  ] as const;
-}
+import { t } from "@/lib/translations";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams?: Promise<PartnerReadSearch>;
 };
 
-export default async function PartnerTripsPage({ params }: PageProps) {
+export default async function PartnerTripsPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const query = (await searchParams) ?? {};
   const locale = await getServerLocale();
+  const tourCopy =
+    locale === "en"
+      ? {
+          heading: "Tour legs, batches and vehicles",
+          current:
+            "Current orders from all history pages; each order keeps its own status.",
+          partial:
+            "History could not be read completely. Refresh before checking the whole tour.",
+          completed: "All declared slots completed",
+          open: "Tour has outstanding or conflicting slots",
+          missing: "No active order for this slot",
+          duplicate: "Multiple active orders for this slot",
+          inconsistent:
+            "Plan counts or slot indices disagree; whole-tour completion is unconfirmed.",
+          missingLegs: "Legs without orders",
+          missingBatches:
+            "Additional batches without orders in the listed legs",
+          missingVehicles:
+            "Vehicle slots without active orders in the listed batches",
+          unknown:
+            "Bookings without a full source / revision / leg / batch / vehicle identity remain in ordinary history.",
+          source: "Source",
+        }
+      : {
+          heading: "團體分段、批次與車輛",
+          current: "彙整所有歷史分頁的目前訂單，各單保留自己的實際狀態。",
+          partial: "未能完整讀取歷史清單，請重新整理後再核對全團。",
+          completed: "所有已宣告車位均已完成",
+          open: "全團仍有未完成或衝突的車位",
+          missing: "此車位沒有有效訂單",
+          duplicate: "此車位有多張有效訂單",
+          inconsistent: "計畫數量或車位索引不一致，尚無法確認全團完成。",
+          missingLegs: "尚無訂單的段數",
+          missingBatches: "已列各段內尚無訂單的其他批次數",
+          missingVehicles: "已列各批次內尚無有效訂單的車位數",
+          unknown:
+            "未具完整來源、版本、段、批次與車位識別的訂單仍列在一般歷史中。",
+          source: "來源",
+        };
   try {
-    const { brand } = await getPartnerRouteContext(tenantSlug);
-    const theme = buildPartnerTheme(brand);
-    const trips = buildTrips(locale);
-    const remainingBenefits = 9;
-    const totalBenefits = 12;
-    const benefitYear = new Date().getUTCFullYear();
-    const complimentaryTrips = trips.filter(
-      (trip) => trip.complimentary,
-    ).length;
-
+    const model = await loadPartnerBookingHistory(tenantSlug, query);
+    const { items, pagination } = model.bookings;
+    const href = (page: number) =>
+      partnerBookingReadHref(
+        model.entry.entrySlug,
+        "trips",
+        model.partnerUserRef,
+        { page },
+      );
     return (
-      <div>
-        <CanvasPageHeader
-          theme={theme}
-          title={t("trips.title", undefined, locale)}
-          subtitle={t("trips.subtitle", { count: complimentaryTrips }, locale)}
-          sticky={false}
-          style={{
-            padding: "0 0 18px",
-            background: "transparent",
-          }}
-        />
-
-        <div style={pageBodyStyle}>
-          <CanvasCard theme={theme} padding={0} style={progressCardStyle}>
-            <div
-              style={{
-                padding: "14px 16px",
-                background: "linear-gradient(180deg, #FAF3DF, #FFFDF5)",
-                borderBottom: "1px solid #E5D58A",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  gap: 12,
-                }}
+      <section data-testid="partner-persisted-history">
+        <h1>{t("read.history", undefined, locale)}</h1>
+        <PartnerPrincipalSummary principal={model.principal} />
+        <p>{t("read.historyScope", undefined, locale)}</p>
+        {model.travel ? (
+          <section data-testid="partner-tour-booking-groups">
+            <h2>{tourCopy.heading}</h2>
+            <p>{tourCopy.current}</p>
+            {!model.travel.complete ? (
+              <p role="status">{tourCopy.partial}</p>
+            ) : null}
+            {model.travel.groups.map((group) => (
+              <article
+                key={group.key}
+                data-plan-source-id={group.sourceId}
+                data-plan-source-revision={group.sourceRevision}
               >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: theme.textMuted,
-                    fontWeight: 700,
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  {t("trips.year", { year: benefitYear }, locale)}
-                </span>
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: theme.text,
-                    fontFamily: theme.monoFamily,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <b style={{ fontSize: 22 }}>{remainingBenefits}</b> /{" "}
-                  {t("trips.remaining", { total: totalBenefits }, locale)}
-                </span>
-              </div>
-
-              <div
-                style={{
-                  height: 5,
-                  marginTop: 8,
-                  background: "#FFFFFF",
-                  borderRadius: 999,
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${(remainingBenefits / totalBenefits) * 100}%`,
-                    height: "100%",
-                    background: brand.accent,
-                  }}
-                />
-              </div>
-            </div>
-
-            {trips.map((trip, index) => (
-              <div
-                key={`${trip.when}-${trip.route}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "12px 16px",
-                  borderBottom:
-                    index < trips.length - 1 ? "1px solid #F1F3F8" : "none",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: theme.text,
-                      lineHeight: 1.35,
-                    }}
-                  >
-                    {trip.route}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 2,
-                      fontSize: 11,
-                      color: theme.textMuted,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {trip.when} · {trip.benefit}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-end",
-                    gap: 4,
-                    flexShrink: 0,
-                  }}
-                >
-                  <CanvasPill theme={theme} tone={trip.tone}>
-                    {trip.status}
-                  </CanvasPill>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: theme.text,
-                      fontFamily: theme.monoFamily,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {trip.cost}
-                  </div>
-                </div>
-              </div>
+                <h3>{group.groupCode}</h3>
+                <p>
+                  {tourCopy.source}: {group.sourceLabel} ({group.sourceKind} /{" "}
+                  {group.sourceId} / {group.sourceRevision})
+                </p>
+                <p>{group.completed ? tourCopy.completed : tourCopy.open}</p>
+                {!group.metadataConsistent ? (
+                  <p>{tourCopy.inconsistent}</p>
+                ) : null}
+                <p>
+                  {tourCopy.missingLegs}: {group.missingLegCount}
+                </p>
+                <p>
+                  {tourCopy.missingBatches}: {group.missingBatchCount}
+                </p>
+                <p>
+                  {tourCopy.missingVehicles}: {group.missingVehicleCount}
+                </p>
+                <ul>
+                  {group.slots.map((slot) => (
+                    <li
+                      key={slot.key}
+                      data-plan-leg-id={slot.legId}
+                      data-plan-batch-id={slot.batchId}
+                      data-plan-vehicle-id={slot.vehicleId}
+                    >
+                      <h4>
+                        {slot.legLabel} / {slot.batchLabel} /{" "}
+                        {slot.vehicleLabel}
+                      </h4>
+                      <p>
+                        {slot.legId} / {slot.batchId} / {slot.vehicleId}
+                      </p>
+                      {slot.missing ? <p>{tourCopy.missing}</p> : null}
+                      {slot.duplicate ? <p>{tourCopy.duplicate}</p> : null}
+                      <ul>
+                        {slot.bookings.map((booking) => (
+                          <li key={booking.bookingId}>
+                            <Link
+                              href={partnerBookingReadHref(
+                                model.entry.entrySlug,
+                                "confirmed",
+                                model.partnerUserRef,
+                                {
+                                  bookingId: booking.bookingId,
+                                  orderId: booking.orderId,
+                                },
+                              )}
+                              prefetch={false}
+                            >
+                              {booking.bookingId} / {booking.orderId}
+                            </Link>
+                            <p>
+                              {booking.status} / {booking.orderStatus} ·{" "}
+                              {booking.reservationWindowStart}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </article>
             ))}
-          </CanvasCard>
-        </div>
-      </div>
+            {model.travel.ungroupedTravelBookings > 0 ? (
+              <p>
+                {tourCopy.unknown} ({model.travel.ungroupedTravelBookings})
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+        {items.length === 0 ? (
+          <div>
+            <p>
+              {t(
+                pagination.totalItems === 0 ? "read.empty" : "read.emptyPage",
+                undefined,
+                locale,
+              )}
+            </p>
+            {pagination.totalItems > 0 ? (
+              <Link href={href(1)} prefetch={false}>
+                {t("read.first", undefined, locale)}
+              </Link>
+            ) : null}
+          </div>
+        ) : (
+          <ul>
+            {items.map((booking) => (
+              <li key={booking.bookingId} data-booking-id={booking.bookingId}>
+                <Link
+                  href={partnerBookingReadHref(
+                    model.entry.entrySlug,
+                    "confirmed",
+                    model.partnerUserRef,
+                    { bookingId: booking.bookingId, orderId: booking.orderId },
+                  )}
+                  prefetch={false}
+                >
+                  {booking.bookingId}
+                </Link>
+                <p>
+                  {booking.pickup.address} → {booking.dropoff.address}
+                </p>
+                <p>
+                  {booking.reservationWindowStart} · {booking.orderStatus}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {pagination.totalPages > 0 &&
+        pagination.page <= pagination.totalPages ? (
+          <p>
+            {t(
+              "read.page",
+              { page: pagination.page, total: pagination.totalPages },
+              locale,
+            )}
+          </p>
+        ) : null}
+        <nav aria-label={t("read.navigation", undefined, locale)}>
+          {pagination.page > 1 && items.length > 0 ? (
+            <Link href={href(pagination.page - 1)} prefetch={false}>
+              {t("read.previous", undefined, locale)}
+            </Link>
+          ) : null}{" "}
+          {pagination.page < pagination.totalPages ? (
+            <Link href={href(pagination.page + 1)} prefetch={false}>
+              {t("read.next", undefined, locale)}
+            </Link>
+          ) : null}
+        </nav>
+      </section>
     );
   } catch (error) {
     if (error instanceof PartnerAuthorityError) {
-      if (error.code === "PARTNER_ENTRY_NOT_FOUND") {
-        notFound();
-      }
-      if (error.code === "PARTNER_ENTRY_INACTIVE") {
-        redirect(`/${tenantSlug}/inactive`);
-      }
+      if (error.code === "PARTNER_ENTRY_NOT_FOUND") notFound();
+      if (error.code === "PARTNER_ENTRY_INACTIVE")
+        redirect("/" + encodeURIComponent(tenantSlug) + "/inactive");
+      return <PartnerBookingReadError locale={locale} code={error.code} />;
     }
     throw error;
   }

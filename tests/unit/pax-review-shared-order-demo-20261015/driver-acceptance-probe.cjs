@@ -19,7 +19,7 @@ const completionCase = scenario.startsWith("completion-");
 const homeCase = scenario.startsWith("completion-home");
 const forwardedHome = scenario === "completion-home-forwarded";
 const reloadCase =
-  /^(reload|empty|malformed|unreadable)-(web|native)-(jobs|trip)$/.exec(
+  /^(reload|empty|malformed|unreadable)-(web|native)-(jobs|trip|settings)$/.exec(
     scenario,
   );
 let route = "/jobs";
@@ -39,9 +39,13 @@ const native = Object.fromEntries(
     "Text",
     "TextInput",
     "Pressable",
+    "TouchableOpacity",
     "ScrollView",
     "KeyboardAvoidingView",
+    "SafeAreaView",
+    "StatusBar",
     "ActivityIndicator",
+    "Switch",
     "Image",
   ].map((name) => [name, name]),
 );
@@ -247,6 +251,19 @@ const order = {
     expenseProofRequired: false,
   },
 };
+const settingsProfile = {
+  driverId: task.driverId,
+  name: "SIM stored driver profile",
+  driverSurname: "自行提供",
+  phone: null,
+  email: null,
+  emergencyContact: null,
+  updatedAt: "2026-11-12T00:00:00.000Z",
+};
+const settingsReadPaths = [
+  `/api/driver-settings/${task.driverId}`,
+  "/api/driver/profile",
+];
 let replyListener = null;
 let renderer;
 const commands = [];
@@ -272,6 +289,22 @@ globalThis.fetch = async (url, init = {}) => {
     new Headers(init.headers).get("authorization"),
     "Bearer synthetic-device-token",
   );
+  if (
+    (reloadCase?.[3] === "settings" || scenario === "settings-spa") &&
+    pathname === settingsReadPaths[0]
+  )
+    return response({
+      driverId: task.driverId,
+      language: "zh-TW",
+      notificationsEnabled: true,
+      autoAcceptEnabled: false,
+      maxAcceptRadius: 12,
+    });
+  if (
+    (reloadCase?.[3] === "settings" || scenario === "settings-spa") &&
+    pathname === settingsReadPaths[1]
+  )
+    return response(settingsProfile);
   if (pathname.endsWith("/enabled")) return response({ enabled: true });
   if (pathname === "/api/driver/task-views") {
     if (scenario === "completion-home-fallback")
@@ -467,11 +500,47 @@ const step = async (name, operation) => {
     throw error;
   }
 };
+function assertSettingsProfileLoaded() {
+  const fields = renderer.root.findAll((node) => node.type === "TextInput");
+  const surname = fields.find(
+    (node) => node.props.accessibilityLabel === "姓氏（自行提供）",
+  );
+  assert.ok(
+    surname,
+    "The actual Settings screen must display its declared surname input after identity restoration",
+  );
+  assert.equal(surname.props.value, settingsProfile.driverSurname);
+  assert.equal(surname.props.editable, true);
+  for (const pathname of settingsReadPaths)
+    assert.ok(
+      reads.includes(pathname),
+      "Actual Settings and SDK must read the restored driver's normal profile and preferences",
+    );
+}
 async function run() {
   const apiPath = path.join(app, "lib/api-client.ts");
   let api = require(apiPath);
   if (!reloadCase || reloadCase[1] === "reload")
     await api.registerDriverDevice("synthetic-registration-code");
+  if (scenario === "settings-spa") {
+    try {
+      assert.equal(api.isDriverIdentityProvisioned(), true);
+      await open("settings");
+      assert.deepEqual(redirects, []);
+      assertSettingsProfileLoaded();
+      console.log(
+        JSON.stringify({
+          scenario,
+          actualScreens: true,
+          actualSDK: true,
+          upstreamHTTP: "fixture; no runtime acceptance credit",
+        }),
+      );
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+    }
+    return;
+  }
   if (homeCase) {
     const home = require(path.join(app, "app/index.tsx"));
     const result = await home.__testLoadWorkspaceData();
@@ -625,6 +694,14 @@ async function run() {
       await api.initializeDriverIdentity().catch(() => {});
     });
     const text = renderer.toJSON();
+    if (reloadCase[3] === "settings" && reloadCase[1] === "reload") {
+      assert.deepEqual(
+        redirects,
+        [],
+        "A persisted device session must hydrate before the actual screen redirects",
+      );
+      assertSettingsProfileLoaded();
+    }
     await act(async () => renderer.unmount());
     if (reloadCase[1] === "reload") {
       assert.deepEqual(
@@ -632,12 +709,14 @@ async function run() {
         [],
         "A persisted device session must hydrate before the actual screen redirects",
       );
-      assert.ok(
-        JSON.stringify(text).includes(
-          reloadCase[3] === "jobs" ? "開啟目前行程" : orderId,
-        ),
-        "The actual screen must reload its assigned task after hydration",
-      );
+      if (reloadCase[3] !== "settings") {
+        assert.ok(
+          JSON.stringify(text).includes(
+            reloadCase[3] === "jobs" ? "開啟目前行程" : orderId,
+          ),
+          "The actual screen must reload its assigned task after hydration",
+        );
+      }
     } else {
       assert.ok(
         redirects.length > 0,
@@ -651,6 +730,11 @@ async function run() {
       );
       assert.equal(api.isDriverIdentityProvisioned(), false);
       assert.equal(JSON.stringify(text).includes(orderId), false);
+      if (reloadCase[3] === "settings")
+        assert.ok(
+          settingsReadPaths.every((pathname) => !reads.includes(pathname)),
+          "An absent/invalid stored identity must not load protected Settings records",
+        );
     }
     console.log(
       JSON.stringify({

@@ -195,6 +195,81 @@ describe("Passenger Ride UI Acceptance", () => {
 
     expect(fetchCalls[0].body.category).toBe("service");
     expect(fetchCalls[0].body.contactConsent).toBe(false);
+    expect(screen.getByTestId("passenger-complaint-id").textContent).toBe(
+      "complaint-uuid",
+    );
+    expect(
+      screen
+        .getByTestId("passenger-complaint-ack")
+        .getAttribute("data-order-id"),
+    ).toBe("order-uuid");
+  });
+
+  it("keeps the actual fare complaint acknowledgment on its original ride and clears it on return", async () => {
+    const actualCaseId = "PAX-actual-fare-response";
+    fetchResponse = { complaintId: actualCaseId };
+    const { rerender } = render(
+      <ComplaintForm token="fare-order" authMode="id" orderNo="ORD-FARE" />,
+    );
+    fireEvent.click(screen.getByText("客訴與遺失物表單"));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "fare" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/請描述/), {
+      target: { value: "Please check this original fare." },
+    });
+    fireEvent.click(screen.getByText("確認送出"));
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-complaint-id").textContent).toBe(
+        actualCaseId,
+      );
+    });
+    expect(fetchCalls[0]?.body).toMatchObject({
+      rideId: "fare-order",
+      category: "fare",
+      content: "Please check this original fare.",
+      contactConsent: false,
+    });
+    expect(
+      screen
+        .getByTestId("passenger-complaint-ack")
+        .getAttribute("data-order-id"),
+    ).toBe("fare-order");
+    rerender(<ComplaintForm token="another-order" authMode="id" />);
+    expect(screen.queryByTestId("passenger-complaint-id")).toBeNull();
+    rerender(
+      <ComplaintForm token="fare-order" authMode="id" orderNo="ORD-FARE" />,
+    );
+    expect(screen.getByTestId("passenger-complaint-id").textContent).toBe(
+      actualCaseId,
+    );
+    fireEvent.click(screen.getByText("返回行程"));
+    expect(screen.queryByTestId("passenger-complaint-id")).toBeNull();
+    fireEvent.click(screen.getByText("客訴與遺失物表單"));
+    expect(screen.getByPlaceholderText(/請描述/)).toHaveProperty("value", "");
+  });
+
+  it("does not confirm a complaint without its actual acknowledgment ID and retains the draft", async () => {
+    fetchResponse = {};
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    try {
+      render(<ComplaintForm token="unconfirmed-order" authMode="id" />);
+      fireEvent.click(screen.getByText("客訴與遺失物表單"));
+      fireEvent.change(screen.getByPlaceholderText(/請描述/), {
+        target: { value: "Keep this complaint draft." },
+      });
+      fireEvent.click(screen.getByText("確認送出"));
+      await waitFor(() => expect(alert).toHaveBeenCalled());
+      expect(screen.queryByTestId("passenger-complaint-id")).toBeNull();
+      expect(screen.queryByText("表單已送出")).toBeNull();
+      expect(screen.getByPlaceholderText(/請描述/)).toHaveProperty(
+        "value",
+        "Keep this complaint draft.",
+      );
+      expect(fetchCalls).toHaveLength(1);
+    } finally {
+      alert.mockRestore();
+    }
   });
 
   it("CertificateCard offers the E-04 PDF download without embedding an iframe", async () => {
