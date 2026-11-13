@@ -104,6 +104,9 @@ export function PartnerBookingRecord({
     [label("field.dropoffAddress"), order.dropoff.address],
     [label("field.passengerName"), order.passenger.name],
     [label("field.passengerPhone"), order.passenger.phone],
+    ...(booking.luggageCount != null
+      ? [[label("field.luggageCount"), String(booking.luggageCount)]]
+      : []),
     ...(booking.flightNo ? [[label("field.flightNo"), booking.flightNo]] : []),
     ...(booking.terminal ? [[label("field.terminal"), booking.terminal]] : []),
     ...(booking.direction
