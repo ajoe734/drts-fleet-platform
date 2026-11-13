@@ -668,6 +668,11 @@ export function PartnerBookingForm({
                 label: t("field.terminal"),
               })}
               {renderField({
+                name: "luggageCount",
+                label: t("field.luggageCount"),
+                type: "number",
+              })}
+              {renderField({
                 name: "direction",
                 label: t("field.direction"),
                 options: [
