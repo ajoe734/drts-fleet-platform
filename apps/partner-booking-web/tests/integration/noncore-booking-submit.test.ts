@@ -97,6 +97,7 @@ function transport(
   let createFailures = 0;
   let eligibilityStatus = "eligible";
   let verificationCount = 0;
+  let canonicalReadFlight: string | undefined;
   const orderId = "386a8769-074b-44a0-94b0-3425301563bb";
   const bookingId = "booking-actual-authority-result";
   const envelope = (data: unknown) =>
@@ -113,6 +114,7 @@ function transport(
     reservationWindowEnd: commands.at(-1)?.reservationWindowEnd,
     eligibilityVerificationId: commands.at(-1)?.eligibilityVerificationId,
     partnerBookingDetails: commands.at(-1)?.partnerBookingDetails,
+    flightNo: commands.at(-1)?.flightNo ?? null,
   });
   vi.stubGlobal(
     "fetch",
@@ -180,7 +182,11 @@ function transport(
             },
             { status: 503 },
           );
-        return envelope(record());
+        return envelope(
+          canonicalReadFlight === undefined
+            ? record()
+            : { ...record(), flightNo: canonicalReadFlight },
+        );
       }
       throw new Error("Unexpected C032 transport " + path);
     }),
@@ -228,6 +234,9 @@ function transport(
     commands,
     bookingId,
     orderId,
+    readFlightAs: (flightNo: string) => {
+      canonicalReadFlight = flightNo;
+    },
     failRead: () => {
       readFailures = 1;
     },
@@ -287,6 +296,10 @@ describe("C032 normal partner create and readback", () => {
                 replacementStart: "2099-06-05T02:00:00.000Z",
               },
       });
+      expect(create.body).not.toHaveProperty("flightNo");
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error("Expected the real booking readback");
+      expect(result.confirmation).not.toHaveProperty("flightNo");
       expect(JSON.stringify(result)).not.toContain("SIM-server-only-bearer");
       expect(JSON.stringify(result)).not.toContain(
         "SIM-caller-owned-reference",
@@ -473,6 +486,7 @@ describe("actual PartnerBookingForm", () => {
     vi.stubGlobal("React", React);
     vi.stubEnv("TZ", "Asia/Taipei");
     const f = transport("travel_agency_transfer");
+    f.readFlightAs("SIM-JX802");
     f.failRead();
     const action = vi.fn(f.submit);
     const { container } = render(
@@ -489,6 +503,11 @@ describe("actual PartnerBookingForm", () => {
         (screen.getByLabelText(/預約開始時間/) as HTMLInputElement).value,
       ).toBe("2099-06-05T10:00"),
     );
+    const flight = screen.getByRole("textbox", {
+      name: "航班號碼",
+    }) as HTMLInputElement;
+    expect(flight.required).toBe(false);
+    fireEvent.change(flight, { target: { value: " sim-jx802 " } });
     await chooseActualMapLocations(container);
     const submit = screen.getByRole("button", {
       name: "建立預約",
@@ -506,6 +525,12 @@ describe("actual PartnerBookingForm", () => {
     );
     expect(screen.getByTestId("partner-order-id").textContent).toBe(f.orderId);
     expect(f.commands[1]).toEqual(f.commands[0]);
+    expect(f.commands[1]).toMatchObject({ flightNo: "sim-jx802" });
+    expect(
+      within(screen.getByTestId("partner-booking-confirmation")).getByText(
+        "SIM-JX802",
+      ),
+    ).toBeTruthy();
     const firstSubmission = action.mock.calls[0]?.[0];
     expect(firstSubmission).toBeDefined();
     if (!firstSubmission)

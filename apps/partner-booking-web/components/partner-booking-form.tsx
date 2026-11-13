@@ -952,6 +952,10 @@ export function PartnerBookingForm({
                 hint: t("hint.itineraryLink"),
               })}
               {renderField({
+                name: "flightNo",
+                label: t("field.flightNo"),
+              })}
+              {renderField({
                 name: "luggageCount",
                 label: t("field.luggageCount"),
                 type: "number",
@@ -1118,6 +1122,14 @@ export function PartnerBookingForm({
                       </dd>
                     </div>
                   ))}
+                {bookingResult.confirmation.partnerBookingDetails?.subtype ===
+                  "travel_agency_transfer" &&
+                bookingResult.confirmation.flightNo ? (
+                  <>
+                    <dt>{t("field.flightNo")}</dt>
+                    <dd>{bookingResult.confirmation.flightNo}</dd>
+                  </>
+                ) : null}
                 {bookingResult.confirmation.businessDispatchSubtype ===
                 "credit_card_airport_transfer" ? (
                   <>

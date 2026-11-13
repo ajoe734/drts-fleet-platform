@@ -287,7 +287,9 @@ export async function submitPartnerProgramBooking(
             flightNo: draft.flightNo.trim(),
             terminal: draft.terminal.trim(),
           }
-        : {}),
+        : subtype === "travel_agency_transfer" && draft.flightNo.trim()
+          ? { flightNo: draft.flightNo.trim() }
+          : {}),
     };
     const created = await dependencies.createPartnerBooking(session, command);
     // These normal GETs re-read the owned booking; a local prepared banner is not a receipt.
@@ -366,6 +368,9 @@ export async function submitPartnerProgramBooking(
               flightNo: booking.flightNo,
               terminal: booking.terminal,
             }),
+        ...(subtype === "travel_agency_transfer" && booking.flightNo
+          ? { flightNo: booking.flightNo }
+          : {}),
         eligibilityVerificationId: booking.eligibilityVerificationId,
       },
     };

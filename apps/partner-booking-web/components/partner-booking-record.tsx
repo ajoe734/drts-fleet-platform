@@ -110,7 +110,12 @@ export function PartnerBookingRecord({
     ...(booking.flightNo ? [[label("field.flightNo"), booking.flightNo]] : []),
     ...(booking.terminal ? [[label("field.terminal"), booking.terminal]] : []),
     ...(booking.direction
-      ? [[label("field.direction"), booking.direction]]
+      ? [
+          [
+            label("field.direction"),
+            label("field.direction." + booking.direction),
+          ],
+        ]
       : []),
   ];
   const progress =
