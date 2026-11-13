@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgencyTripExportScope } from "@drts/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { displayStatusCode } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
@@ -60,6 +60,10 @@ export function TripExportPanel({
   locale?: Locale;
 } = {}) {
   const { locale, t } = useTranslation(explicitLocale);
+  const [interactive, setInteractive] = useState(false);
+  useEffect(() => {
+    setInteractive(true);
+  }, []);
   const [month, setMonth] = useState(initialScope?.month ?? "");
   const [reservedFrom, setReservedFrom] = useState(
     initialScope?.reservedFrom ?? "",
@@ -97,7 +101,19 @@ export function TripExportPanel({
     );
 
   return (
-    <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>
+    <fieldset
+      disabled={!interactive}
+      aria-busy={!interactive}
+      style={{
+        display: "grid",
+        gap: 12,
+        maxWidth: 640,
+        minWidth: 0,
+        border: 0,
+        padding: 0,
+        margin: 0,
+      }}
+    >
       <label>
         {t("tripExports.month")}{" "}
         <input
@@ -255,6 +271,6 @@ export function TripExportPanel({
           {message}
         </p>
       ) : null}
-    </div>
+    </fieldset>
   );
 }

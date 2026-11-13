@@ -20,6 +20,16 @@ import {
   type ReadbackPlan,
 } from "./voice-confirmation.service";
 import type { VoiceDialogueSnapshotContent } from "@drts/contracts";
+import {
+  rankByFrequentPlaces,
+  type FrequentPickupPlace,
+} from "../callcenter-assist/frequent-places";
+
+/** CALLCENTER-AI-ASSIST-20261111: the caller's frequent pickups, used only
+ * to order the provider's candidates (never added or read out). */
+export type VoicePickupHints = (
+  voiceSessionId: string,
+) => Promise<FrequentPickupPlace[]>;
 
 /** Real domain continuation; the model proposes candidates, never coordinates,
  * contact authority, an order receipt or affirmative confirmation. */
@@ -38,6 +48,7 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       confirmation: VoiceConfirmationService;
       credential: string;
     },
+    private readonly pickupHints?: VoicePickupHints,
   ) {}
 
   async execute(
@@ -50,7 +61,11 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
     },
   ): Promise<unknown> {
     if (proposal.name === "resolve_location") {
-      return this.resolveLocation(proposal.args.query, context.signal);
+      return this.resolveLocation(
+        proposal.args.query,
+        context.signal,
+        context.claims.voiceSessionId,
+      );
     }
     if (proposal.name === "get_bound_booking_status") {
       return this.getBoundBookingStatus(context.boundOrderId, context.signal);
@@ -319,6 +334,7 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
   private async resolveLocation(
     query: string,
     signal: AbortSignal,
+    voiceSessionId?: string,
   ): Promise<{
     candidates: Array<{
       placeId: string;
@@ -356,22 +372,31 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       surface: "callcenter",
     });
     signal.throwIfAborted();
+    // A place this phone number was picked up at before goes first, so the
+    // AI offers it first. Best effort: no hint never blocks resolution.
+    const hints =
+      this.pickupHints && voiceSessionId
+        ? await this.pickupHints(voiceSessionId).catch(() => [])
+        : [];
+    signal.throwIfAborted();
     return {
-      candidates: result.candidates.slice(0, 3).map((candidate) => ({
-        // The tool result contract exposes `placeId`, not the provider's
-        // internal, session-scoped `candidateId` -- fall back to whichever
-        // stable provider identifier is actually present rather than a
-        // value this response never had.
-        placeId:
-          candidate.placeId ??
-          candidate.providerCandidateId ??
-          candidate.candidateId,
-        label: candidate.displayName || candidate.address,
-        region: candidate.district ?? candidate.locality ?? candidate.address,
-        ...(typeof candidate.metadata?.entranceId === "string"
-          ? { entranceId: candidate.metadata.entranceId }
-          : {}),
-      })),
+      candidates: rankByFrequentPlaces(result.candidates, hints)
+        .slice(0, 3)
+        .map((candidate) => ({
+          // The tool result contract exposes `placeId`, not the provider's
+          // internal, session-scoped `candidateId` -- fall back to whichever
+          // stable provider identifier is actually present rather than a
+          // value this response never had.
+          placeId:
+            candidate.placeId ??
+            candidate.providerCandidateId ??
+            candidate.candidateId,
+          label: candidate.displayName || candidate.address,
+          region: candidate.district ?? candidate.locality ?? candidate.address,
+          ...(typeof candidate.metadata?.entranceId === "string"
+            ? { entranceId: candidate.metadata.entranceId }
+            : {}),
+        })),
     };
   }
 

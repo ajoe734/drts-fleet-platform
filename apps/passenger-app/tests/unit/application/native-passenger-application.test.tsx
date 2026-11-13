@@ -900,4 +900,158 @@ describe("Native application composition through production components/SDK and o
     );
     expect(text(r, "app-support-success")).toContain("fixture-case");
   });
+  it("keeps the newer completed same-order manual refresh when an older read returns late without events", async () => {
+    const releaseOlder = deferred();
+    let manualReads = false;
+    let readCount = 0;
+    const f = fixture(async (url) => {
+      if (!manualReads || !url.endsWith("/rides/one")) return undefined;
+      const read = ++readCount;
+      if (read === 1) {
+        const captured = ride("one", "on_trip");
+        await releaseOlder.promise;
+        return success({ ride: captured });
+      }
+      if (read === 2) return success({ ride: ride("one", "completed") });
+      throw new Error("Unexpected extra manual ride read");
+    });
+    f.state.views = [ride("one", "on_trip")];
+    const { r, runtime } = await mount(f);
+    await press(r, "app-nav-history");
+    await press(r, "history-open-one");
+    expect(present(r, "app-events-skipped")).toBe(true);
+    expect(runtime.getSnapshot().ride?.order.status).toBe("on_trip");
+
+    manualReads = true;
+    let older!: Promise<void>;
+    await act(async () => {
+      older = r.root
+        .findByProps({ testID: "app-refresh-ride" })
+        .props.onPress();
+      await flush();
+    });
+    expect(readCount).toBe(1);
+    await press(r, "app-refresh-ride");
+    expect(runtime.getSnapshot().ride?.order.status).toBe("completed");
+    expect(runtime.getSnapshot().presentation?.fixture.screenId).toBe("P5-08");
+
+    await act(async () => {
+      releaseOlder.resolve();
+      await older;
+      await flush();
+    });
+    expect(readCount).toBe(2);
+    expect(runtime.getSnapshot().route).toEqual({
+      kind: "ride",
+      orderId: "one",
+    });
+    expect(runtime.getSnapshot().ride?.order.status).toBe("completed");
+    expect(runtime.getSnapshot().presentation?.fixture.screenId).toBe("P5-08");
+  });
+  it("keeps captured payment authority when a manual read returns after receipt setup hands over to streaming", async () => {
+    const releaseMetadata = deferred();
+    const releaseManual = deferred();
+    let manualReads = false;
+    let readCount = 0;
+    const initial = withReceipt();
+    initial.payment = {
+      status: "authorized",
+      amount: { currency: "TWD", amountMinor: 20000 },
+    };
+    const captured: PassengerRideAuthorityView = {
+      ...initial,
+      payment: {
+        status: "captured",
+        amount: { currency: "TWD", amountMinor: 20000 },
+      },
+    };
+    const f = fixture(async (url) => {
+      if (url.endsWith("/rides/one/receipt/downloads")) {
+        await releaseMetadata.promise;
+        return undefined;
+      }
+      if (manualReads && url.endsWith("/rides/one") && ++readCount === 1) {
+        const snapshot = structuredClone(initial);
+        await releaseManual.promise;
+        return success({ ride: snapshot });
+      }
+      return undefined;
+    });
+    f.state.views = [initial];
+    const requests: StreamRequest[] = [];
+    const { r, runtime } = await mount(f, {
+      events: {
+        createRequest: () => {
+          const request = new StreamRequest();
+          requests.push(request);
+          return request;
+        },
+        appState: { currentState: () => "active", subscribe: () => () => {} },
+      },
+    });
+    await press(r, "app-nav-history");
+    let opening!: Promise<void>;
+    await act(async () => {
+      opening = r.root
+        .findByProps({ testID: "history-open-one" })
+        .props.onPress();
+      await flush();
+    });
+    expect(requests).toHaveLength(0);
+    expect(runtime.getSnapshot().ride?.payment?.status).toBe("authorized");
+    manualReads = true;
+    let older!: Promise<void>;
+    await act(async () => {
+      older = r.root
+        .findByProps({ testID: "app-refresh-ride" })
+        .props.onPress();
+      await flush();
+    });
+    expect(readCount).toBe(1);
+    await act(async () => {
+      f.state.views = [captured];
+      releaseMetadata.resolve();
+      await opening;
+      await flush();
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${BASE}/api/passenger-app/rides/one/events`);
+    await act(async () => {
+      const request = requests[0]!;
+      request.readyState = 3;
+      request.status = 200;
+      request.responseText += `event: receipt_ready\ndata: ${JSON.stringify(
+        snake({
+          eventId: "captured-after-manual-read",
+          eventType: "receipt_ready",
+          eventVersion: 2,
+          assignmentVersion: null,
+          orderId: "one",
+          occurredAt: "2026-10-14T16:20:00Z",
+          data: captured,
+        }),
+      )}\n\n`;
+      request.onprogress?.();
+      await flush();
+    });
+    expect(runtime.getSnapshot().ride?.payment?.status).toBe("captured");
+    expect(runtime.getSnapshot().presentation?.fixture.payment?.label).toBe(
+      "付款完成",
+    );
+    await act(async () => {
+      releaseManual.resolve();
+      await older;
+      await flush();
+    });
+    expect(runtime.getSnapshot().route).toEqual({
+      kind: "ride",
+      orderId: "one",
+    });
+    expect(runtime.getSnapshot().ride?.order.status).toBe("completed");
+    expect(runtime.getSnapshot().ride?.payment?.status).toBe("captured");
+    expect(runtime.getSnapshot().presentation?.fixture.payment?.label).toBe(
+      "付款完成",
+    );
+    expect(requests[0]?.aborted).toBe(0);
+  });
 });

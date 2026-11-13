@@ -54,7 +54,11 @@ export async function ownedRejectionJourney(
       .getByRole("button")
       .filter({ has: driver.getByText(first.taskId, { exact: true }) })
       .click();
-    await expect(driver).toHaveURL(/\/trip$/);
+    await expect(driver).toHaveURL(
+      (url) =>
+        url.pathname === new URL(`${driverBase}/trip`).pathname &&
+        url.searchParams.get("taskId") === first.taskId,
+    );
     await expect(
       driver.getByText(orderId, { exact: false }).first(),
     ).toBeVisible();

@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   startTransition,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -18,7 +19,9 @@ import { loadPassengerRideFixture } from "@/lib/passenger-fixture-loader";
 import { resolvePassengerDataMode } from "@/lib/runtime-config";
 import type { PassengerRideFixture } from "@/lib/passenger-view-model";
 import {
+  fetchPassengerPublicFare,
   fetchPassengerRideAuthority,
+  type PassengerPublicFareVersion,
   fetchPassengerReceipt,
   mapPassengerCertificate,
   mapPassengerRideAuthorityToFixture,
@@ -38,13 +41,21 @@ const starTone = passengerChrome.driverRealm.fg;
 function Shell({
   token,
   sourceMode,
+  publicInfo = false,
   children,
 }: {
   token: string;
   sourceMode: "fixture" | "live";
+  publicInfo?: boolean;
   children: ReactNode;
 }) {
-  const source = getPassengerSourceCallout(sourceMode);
+  const source = publicInfo
+    ? {
+        tone: passengerChrome.info,
+        title: "公開費率資訊",
+        detail: "本頁提供目前公布的計費方式與生效版本。",
+      }
+    : getPassengerSourceCallout(sourceMode);
 
   return (
     <main
@@ -71,9 +82,11 @@ function Shell({
           <div style={{ marginTop: 4, fontSize: 12.5, lineHeight: 1.55 }}>
             {source.detail}
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, opacity: 0.92 }}>
-            token `{token}` · {getPassengerFixtureSourceLabel(sourceMode)}
-          </div>
+          {!publicInfo ? (
+            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.92 }}>
+              token `{token}` · {getPassengerFixtureSourceLabel(sourceMode)}
+            </div>
+          ) : null}
         </div>
         <div
           style={{
@@ -750,6 +763,158 @@ function VehicleCard({
   );
 }
 
+function publicFareMoney(amount: number) {
+  return "NT$ " + amount.toLocaleString("zh-TW");
+}
+
+function PublicFareCard() {
+  const [fare, setFare] = useState<PassengerPublicFareVersion | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setFare(null);
+    setFailed(false);
+    void fetchPassengerPublicFare()
+      .then((current) => {
+        if (active) setFare(current);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+  if (!fare) {
+    return (
+      <Card title="現行計費表">
+        <div
+          role={failed ? "alert" : "status"}
+          style={{ fontSize: 12.5, color: passengerChrome.muted }}
+        >
+          {failed
+            ? "目前無法取得公開費率，請稍後重試。"
+            : "正在取得公開費率..."}
+        </div>
+        {failed ? (
+          <button
+            type="button"
+            style={{ ...buttonStyle("secondary"), marginTop: 12 }}
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            重試
+          </button>
+        ) : null}
+      </Card>
+    );
+  }
+  const rows = [
+    [
+      "起程運價（" + fare.baseDistanceMeters / 1000 + " 公里）",
+      publicFareMoney(fare.baseFare),
+    ],
+    [
+      "續程運價（每 " + fare.distanceIncrementMeters + " 公尺）",
+      publicFareMoney(fare.distanceRate),
+    ],
+    [
+      "延滯計時（每 " + fare.delayIncrementSeconds + " 秒）",
+      publicFareMoney(fare.delayRate),
+    ],
+    [
+      "夜間加成（" +
+        fare.nightSurchargeWindowStart +
+        "–" +
+        fare.nightSurchargeWindowEnd +
+        "）",
+      "每趟加 " + publicFareMoney(fare.nightSurcharge),
+    ],
+    ...Object.entries(fare.additionalFees).map(([label, amount]) => [
+      label,
+      publicFareMoney(amount),
+    ]),
+  ];
+  return (
+    <>
+      <Card title="現行計費表">
+        <div
+          style={{
+            fontSize: 11,
+            color: passengerChrome.muted,
+            marginBottom: 6,
+          }}
+        >
+          版本 {fare.version} · 生效日{" "}
+          <time dateTime={fare.effectiveAt}>
+            {new Date(fare.effectiveAt).toLocaleDateString("zh-TW", {
+              timeZone: "Asia/Taipei",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            })}
+          </time>
+        </div>
+        {rows.map(([label, value], index) => (
+          <div
+            key={index + ":" + label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "8px 0",
+              fontSize: 12.5,
+              borderBottom:
+                index < rows.length - 1
+                  ? "1px solid " + passengerChrome.border
+                  : undefined,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{label}</span>
+            <b style={{ fontFamily: monoFont }}>{value}</b>
+          </div>
+        ))}
+        <div
+          style={{ fontSize: 11, color: passengerChrome.muted, marginTop: 8 }}
+        >
+          {fare.nightApplication === "pickup"
+            ? "夜間時段以上車時間為準"
+            : "行程與夜間時段重疊時適用"}
+        </div>
+      </Card>
+      <Card title="車資變更規則">
+        <div
+          style={{
+            fontSize: 12,
+            color: passengerChrome.muted,
+            lineHeight: 1.65,
+          }}
+        >
+          若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function PublicFarePage({ token }: { token: string }) {
+  return (
+    <Shell token={token} sourceMode="live" publicInfo>
+      <TopChrome token={token} status="計費說明" order="公開資訊" />
+      <div style={{ flex: 1, paddingTop: 12 }}>
+        <PublicFareCard />
+        <ActionGroup>
+          <Link
+            href={"/ride/" + encodeURIComponent(token)}
+            style={buttonStyle("secondary")}
+          >
+            返回行程
+          </Link>
+        </ActionGroup>
+      </div>
+    </Shell>
+  );
+}
+
 function FareCard({
   fixture,
   publicMode,
@@ -757,73 +922,7 @@ function FareCard({
   fixture: PassengerRideFixture;
   publicMode?: boolean;
 }) {
-  if (publicMode && fixture.fareVersion) {
-    return (
-      <>
-        <Card
-          title="現行計費表"
-          tag={
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: passengerChrome.success.fg,
-                background: passengerChrome.success.bg,
-                border: `1px solid ${passengerChrome.success.border}`,
-                padding: "2px 8px",
-                borderRadius: 999,
-              }}
-            >
-              已生效
-            </span>
-          }
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: passengerChrome.muted,
-              marginBottom: 6,
-            }}
-          >
-            版本 F-2026-03 · 生效日 2026/07/01 · 備查{" "}
-            {fixture.fareVersion.authorityFilingRef}
-          </div>
-          {[
-            ["起程運價（1.25 公里）", "NT$ 85"],
-            ["續程運價（每 200 公尺）", "NT$ 5"],
-            ["延滯計時（每 80 秒）", "NT$ 5"],
-            ["夜間加成（23:00–06:00）", "+20%"],
-          ].map(([label, value], index) => (
-            <div
-              key={label}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom:
-                  index < 3 ? `1px solid ${passengerChrome.border}` : undefined,
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ color: passengerChrome.muted }}>{label}</span>
-              <b style={{ fontFamily: monoFont }}>{value}</b>
-            </div>
-          ))}
-        </Card>
-        <Card title="車資變更規則">
-          <div
-            style={{
-              fontSize: 12,
-              color: passengerChrome.muted,
-              lineHeight: 1.65,
-            }}
-          >
-            若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。
-          </div>
-        </Card>
-      </>
-    );
-  }
+  if (publicMode) return <PublicFareCard />;
 
   const isAnomaly = fixture.routeFareMode === "anomaly";
   return (
@@ -995,22 +1094,31 @@ function CertificateCard({
 }) {
   const [certificate, setCertificate] = useState(fixture.certificate);
   const [retrying, setRetrying] = useState(false);
+  const receiptReadGeneration = useRef(0);
 
   useEffect(() => {
+    ++receiptReadGeneration.current;
     setCertificate(fixture.certificate);
-  }, [fixture.certificate]);
+    setRetrying(false);
+    return () => {
+      ++receiptReadGeneration.current;
+    };
+  }, [fixture.certificate, token]);
 
   if (!certificate) return null;
 
   const retryRead = () => {
     if (fixture.canReadReceipt !== true || retrying) return;
+    const requestGeneration = ++receiptReadGeneration.current;
     setRetrying(true);
     void fetchPassengerReceipt(token)
       .then((receipt) => {
+        if (requestGeneration !== receiptReadGeneration.current) return;
         setCertificate(mapPassengerCertificate(receipt, true));
         setRetrying(false);
       })
       .catch((error: unknown) => {
+        if (requestGeneration !== receiptReadGeneration.current) return;
         if (
           error instanceof PassengerAuthorityError &&
           error.code === "PASSENGER_RECEIPT_NOT_READY"
@@ -1724,10 +1832,40 @@ function Actions({
 function RideContent({
   fixture,
   token,
+  kind,
 }: {
   fixture: PassengerRideFixture;
   token: string;
+  kind: "ride" | "fares" | "receipt";
 }) {
+  if (
+    kind === "ride" &&
+    fixture.status === "行程已取消" &&
+    fixture.screenId !== "A03"
+  ) {
+    return (
+      <>
+        <Card title="取消資訊">
+          <div role="status" style={{ fontSize: 14, fontWeight: 700 }}>
+            本趟行程已取消，無需等候車輛。
+          </div>
+          <p
+            style={{
+              color: passengerChrome.muted,
+              fontSize: 12.5,
+              lineHeight: 1.55,
+              marginBottom: 0,
+            }}
+          >
+            如需再次用車或查詢取消情形，請透過原預約管道提供訂單編號。
+          </p>
+        </Card>
+        <PaymentCard fixture={fixture} />
+        <CertificateCard fixture={fixture} token={token} />
+      </>
+    );
+  }
+
   if (fixture.screenId === "P5-11") {
     return (
       <>
@@ -1774,7 +1912,7 @@ function RideContent({
             textAlign: "center",
           }}
         >
-          本頁依主管機關備查之現行版本公告
+          公開費率依本頁載入的版本顯示。
         </div>
       </>
     );
@@ -1929,9 +2067,11 @@ function RideContent({
 function PassengerScreen({
   fixture,
   token,
+  kind,
 }: {
   fixture: PassengerRideFixture;
   token: string;
+  kind: "ride" | "fares" | "receipt";
 }) {
   return (
     <>
@@ -1953,14 +2093,14 @@ function PassengerScreen({
           flexDirection: "column",
         }}
       >
-        <RideContent fixture={fixture} token={token} />
+        <RideContent fixture={fixture} token={token} kind={kind} />
         <FooterNotice />
       </div>
     </>
   );
 }
 
-export function PassengerRidePage({
+function PassengerRideAuthorityPage({
   token,
   searchParams,
   kind,
@@ -2062,8 +2202,21 @@ export function PassengerRidePage({
   }
 
   return (
-    <Shell token={token} sourceMode={sourceMode}>
-      <PassengerScreen fixture={fixture} token={token} />
+    <Shell
+      token={token}
+      sourceMode={sourceMode}
+      publicInfo={fixture.screenId === "A03"}
+    >
+      <PassengerScreen fixture={fixture} token={token} kind={kind} />
     </Shell>
   );
+}
+
+export function PassengerRidePage(props: {
+  token: string;
+  searchParams: Record<string, string | string[] | undefined>;
+  kind: "ride" | "fares" | "receipt";
+}) {
+  if (props.kind === "fares") return <PublicFarePage token={props.token} />;
+  return <PassengerRideAuthorityPage {...props} />;
 }

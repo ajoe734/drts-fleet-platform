@@ -12,10 +12,12 @@ import {
 import { normalizeBankUserKeys } from "./users-data";
 import {
   deriveBookingPeriods,
+  BOOKING_STATE_PRESENTATION,
   type BookingDetailRecord,
   type BookingProgram,
-  type BookingState,
 } from "./bookings";
+
+import { t } from "./translations";
 
 // Only this read projection crosses into the Bank UI. Raw orders, passenger
 // identities and financial amounts are never returned to a mounted component.
@@ -180,24 +182,12 @@ function segmented(value: string | null) {
   const parts = value?.split("-") ?? [];
   return parts.length >= 3 ? `${parts[0]}-••••-${parts.at(-1)}` : mask(value);
 }
-function state(status: BankOrder["status"]): BookingState {
-  if (status === "completed" || status === "cancelled") return status;
-  return [
-    "driver_accepted",
-    "enroute_pickup",
-    "arrived_pickup",
-    "on_trip",
-    "proof_pending",
-  ].includes(status)
-    ? "en_route"
-    : "assigned";
-}
 function project(
   row: BankOrder,
   names: Map<string, string>,
 ): BookingDetailRecord {
   const program = row.partnerProgramId ?? "unknown-program";
-  const current = state(row.status);
+  const current = row.status;
   return {
     orderId: row.orderId,
     orderNo: row.orderNo,
@@ -232,30 +222,12 @@ function project(
         actorRealm: "system",
         detail: "訂單已建立並進入發卡行唯讀視角。",
       },
-      ...(["approved", "not_required"].includes(row.approvalState)
-        ? [
-            {
-              occurredAt: row.updatedAt,
-              title: "資格審批通過",
-              actor: "system.eligibility",
-              actorRealm: "system" as const,
-              detail: "資格與配額檢查已完成。",
-            },
-          ]
-        : []),
       {
         occurredAt: row.updatedAt,
-        title:
-          current === "completed"
-            ? "已完成"
-            : current === "cancelled"
-              ? "已取消"
-              : current === "en_route"
-                ? "行程進行中"
-                : "已指派",
+        title: `目前狀態：${t(BOOKING_STATE_PRESENTATION[current].labelKey, "zh")}`,
         actor: "dispatch.runtime",
         actorRealm: "ops",
-        detail: `目前狀態：${row.status}`,
+        detail: `目前狀態：${row.status}。時間為訂單最後更新，非狀態轉換時間。`,
         current: true,
       },
     ],

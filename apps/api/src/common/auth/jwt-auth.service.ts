@@ -1147,9 +1147,17 @@ export class JwtAuthService {
       }
 
       try {
-        const entry = this.tenantPartnerService.getPartnerEntry(
-          payload.partnerEntrySlug,
-        );
+        // Bootstrap issuance fingerprints the persisted entry. Compare against
+        // the same source: this instance's in-memory copy can lack an entry
+        // created on another Cloud Run instance, or hold a stale updatedAt.
+        const entry =
+          typeof this.tenantPartnerService.resolvePartnerEntry === "function"
+            ? await this.tenantPartnerService.resolvePartnerEntry(
+                payload.partnerEntrySlug,
+              )
+            : this.tenantPartnerService.getPartnerEntry(
+                payload.partnerEntrySlug,
+              );
         return Date.parse(entry.updatedAt) === payload.tokenVersion;
       } catch {
         return false;

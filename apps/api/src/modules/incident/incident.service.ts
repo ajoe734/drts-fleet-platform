@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -22,6 +22,11 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   IncidentRepository,
+  assertSameFleetIncidentReply,
+  cloneFleetIncidentReply,
+  isFleetIncidentReplyEntry,
+  type FleetIncidentReplyData,
+  type FleetIncidentReplyTimelineEntry,
   type PersistIncidentOptions,
 } from "./incident.repository";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
@@ -1359,6 +1364,74 @@ export class IncidentService implements OnModuleInit {
     };
   }
 
+  /** A Fleet reply is an additive note on this Incident, not a lifecycle change. */
+  async addFleetReplyForCommit(
+    incidentId: string,
+    command: FleetIncidentReplyData & { actorId: string; note: string },
+  ) {
+    const incident = await this.getIncidentForReadback(incidentId);
+    if (incident.status === "closed")
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "CASE_CLOSED_NO_REPLY",
+        "Closed incidents are read-only.",
+      );
+    const entry: FleetIncidentReplyTimelineEntry = {
+      entryId: `inc-fleet-reply-${createHash("sha256")
+        .update(
+          JSON.stringify([
+            incidentId,
+            command.fleetPartnerId,
+            command.idempotencyKey,
+          ]),
+        )
+        .digest("hex")}`,
+      incidentId,
+      action: "fleet_case_reply",
+      note: command.note,
+      actor: command.actorId,
+      createdAt: new Date().toISOString(),
+      fleetReply: {
+        fleetPartnerId: command.fleetPartnerId,
+        idempotencyKey: command.idempotencyKey,
+        bodyHash: command.bodyHash,
+        content: command.content,
+        attachments: command.attachments.map((item) => ({ ...item })),
+      },
+    };
+    let receipt: {
+      entry: FleetIncidentReplyTimelineEntry;
+      deduplicated: boolean;
+    };
+    if (this.incidentRepository?.isEnabled()) {
+      receipt = await this.incidentRepository.commitFleetReply(entry);
+    } else {
+      const existing = (this.timelines.get(incidentId) ?? []).find(
+        (item) => item.entryId === entry.entryId,
+      );
+      if (existing) {
+        if (!isFleetIncidentReplyEntry(existing))
+          throw new Error("Stored incident reply receipt is invalid.");
+        assertSameFleetIncidentReply(existing, entry);
+        receipt = {
+          entry: cloneFleetIncidentReply(existing),
+          deduplicated: true,
+        };
+      } else receipt = { entry, deduplicated: false };
+    }
+    // Canonical commit/readback succeeded before this instance exposes a note.
+    const current = this.timelines.get(incidentId) ?? [];
+    if (!current.some((item) => item.entryId === receipt.entry.entryId))
+      this.timelines.set(incidentId, [
+        ...current,
+        cloneFleetIncidentReply(receipt.entry),
+      ]);
+    return {
+      entry: cloneFleetIncidentReply(receipt.entry),
+      deduplicated: receipt.deduplicated,
+    };
+  }
+
   getTimeline(incidentId: string) {
     this.require(incidentId);
     return (this.timelines.get(incidentId) ?? []).map((entry) => ({
@@ -1536,6 +1609,103 @@ export class IncidentService implements OnModuleInit {
     return { ...action };
   }
 
+  recordServiceRecoveryActionForCommit(
+    incidentId: string,
+    command: RecordServiceRecoveryActionCommand,
+    requestId?: string,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.recordServiceRecoveryAction(incidentId, command, requestId);
+
+    this.assertNonBlank(command.actionType, "actionType");
+    this.assertNonBlank(command.note, "note");
+    this.assertNonBlank(command.actor, "actor");
+    if (!SERVICE_RECOVERY_ACTION_TYPES.includes(command.actionType as any)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Invalid service recovery action type.",
+        { actionType: command.actionType },
+      );
+    }
+
+    return this.incidentRepository.commitLifecycle(
+      incidentId,
+      null,
+      (current) => {
+        if (!current)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Incident not found.",
+            { incidentId },
+          );
+        const now = new Date().toISOString();
+        const action: ServiceRecoveryActionRecord = {
+          actionId: `sra-${randomUUID()}`,
+          incidentId,
+          actionType: command.actionType,
+          note: command.note,
+          actor: command.actor,
+          createdAt: now,
+        };
+        // The locked canonical row owns prior actions and all other incident
+        // fields. decorateIncident would prefer this replica's older action map.
+        const updated = this.cloneIncident({
+          ...current,
+          serviceRecoveryActions: [...current.serviceRecoveryActions, action],
+          updatedAt: now,
+        });
+        const timelineEntry = this.createTimelineEntry(
+          incidentId,
+          TIMELINE_ACTIONS.serviceRecoveryAction,
+          `Service recovery: ${command.actionType} - ${command.note}`,
+          command.actor,
+          now,
+        );
+        return {
+          changes: { incidents: [updated], timelines: [timelineEntry] },
+          publish: (actual?: IncidentRecord) => {
+            const committed = this.discoverPersistedIncident(
+              actual ?? updated,
+              null,
+            );
+            this.recoveryActions.set(
+              incidentId,
+              committed.serviceRecoveryActions.map((entry) => ({ ...entry })),
+            );
+            this.replace(committed);
+            this.timelines.set(incidentId, [
+              ...(this.timelines.get(incidentId) ?? []),
+              timelineEntry,
+            ]);
+            this.recordAudit(
+              {
+                actorId: command.actor,
+                actorType: "ops_user",
+                tenantId: null,
+                moduleName: "incident",
+                actionName: "record_service_recovery_action",
+                resourceType: "incident",
+                resourceId: incidentId,
+                newValuesSummary: {
+                  actionType: command.actionType,
+                  note: command.note,
+                },
+              },
+              requestId,
+            );
+            this.opsDispatchEventsService?.publishIncidentUpdated(
+              committed,
+              requestId,
+            );
+            return { ...action };
+          },
+        };
+      },
+    );
+  }
+
   extendMatchingSuppression(
     incidentId: string,
     command: ExtendDriverMatchingSuppressionCommand,
@@ -1691,6 +1861,15 @@ export class IncidentService implements OnModuleInit {
     return (this.recoveryActions.get(incidentId) ?? []).map((action) => ({
       ...action,
     }));
+  }
+
+  getServiceRecoveryActionsForReadback(incidentId: string) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getServiceRecoveryActions(incidentId);
+    return Promise.resolve(this.getIncidentForReadback(incidentId)).then(
+      (incident) =>
+        incident.serviceRecoveryActions.map((action) => ({ ...action })),
+    );
   }
 
   allocateIncidentId() {

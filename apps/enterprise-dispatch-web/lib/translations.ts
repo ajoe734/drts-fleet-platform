@@ -190,6 +190,8 @@ const en = {
   "new.saved.passengers": "Passenger shortcuts",
   "new.saved.addresses": "Frequent addresses",
   "new.saved.costCenters": "Cost centers",
+  "new.directoryUnavailable":
+    "Saved passengers, addresses and cost centers are unavailable. Check your enterprise session and refresh.",
   "new.card.next": "Next steps",
   "new.next.review": "Continue to review",
   "new.next.back": "Back to my bookings",
@@ -648,6 +650,7 @@ const en = {
   "new.next.cancel": "Cancel",
   "new.check.title": "Live check",
   "new.check.valid": "Valid",
+  "new.check.pending": "Required",
   "new.check.exempt": "No approval",
   "new.check.quota": "Available amount",
   "new.check.fare": "Estimated fare",
@@ -889,6 +892,8 @@ const zh: Record<TranslationKey, string> = {
   "new.saved.passengers": "乘客捷徑",
   "new.saved.addresses": "常用地址",
   "new.saved.costCenters": "成本中心",
+  "new.directoryUnavailable":
+    "目前無法讀取已儲存的乘客、地址與成本中心，請確認企業登入狀態後重新整理。",
   "new.card.next": "下一步",
   "new.next.review": "繼續到 review",
   "new.next.back": "返回我的預約",
@@ -1297,6 +1302,7 @@ const zh: Record<TranslationKey, string> = {
   "new.next.cancel": "取消",
   "new.check.title": "即時檢核",
   "new.check.valid": "有效",
+  "new.check.pending": "待填",
   "new.check.exempt": "免審批",
   "new.check.quota": "可用額度",
   "new.check.fare": "預估車資",

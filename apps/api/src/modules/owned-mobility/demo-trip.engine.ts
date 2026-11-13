@@ -634,6 +634,59 @@ export abstract class DemoTripEngine<
       );
   }
 
+  /**
+   * Take every test pair that serves no open demo trip offline.
+   *
+   * Test pairs are ordinary supply on their authorization, so while one is
+   * `available` it is a dispatch candidate for any order there. Only `assign`
+   * and a completed trip take a pair offline: a demo trip the passenger
+   * cancelled after assignment, or a failed offline write, leaves its pair
+   * `available` indefinitely. Callers that need the authorization's supply to
+   * be exactly what they control (the review rehearsal's no-supply branch) run
+   * this first. Abandoned open trips are released the same way `assign` does.
+   */
+  async releaseIdleSupply(requestId?: string): Promise<{
+    releasedDriverIds: string[];
+    busyDriverIds: string[];
+    failedDriverIds: string[];
+  }> {
+    const summary = {
+      releasedDriverIds: [] as string[],
+      busyDriverIds: [] as string[],
+      failedDriverIds: [] as string[],
+    };
+    if (!this.database.isEnabled()) return summary;
+    await this.releaseStaleDemoTrips(requestId);
+    const busy = await this.busyDemoDrivers();
+    summary.busyDriverIds = [...busy].sort();
+    const idle = this.supply
+      .map((pair) => pair.driverId)
+      .filter((driverId) => !busy.has(driverId));
+    if (idle.length === 0) return summary;
+    // Pairs are created lazily; only touch the ones that exist and are not
+    // already offline.
+    const online = await this.database.query<{ driver_id: string }>(
+      `SELECT driver_id FROM reg.phase1_registry_drivers
+        WHERE driver_id = ANY($1::text[])
+          AND work_state IS DISTINCT FROM 'offline'`,
+      [idle],
+    );
+    for (const { driver_id: driverId } of online.rows) {
+      try {
+        await this.registry.updateDriverWorkStateFromPersistence(driverId, {
+          workState: "offline",
+        });
+        summary.releasedDriverIds.push(driverId);
+      } catch (error) {
+        summary.failedDriverIds.push(driverId);
+        this.logger.warn(
+          `${this.label}: could not take idle ${driverId} offline: ${String(error)}`,
+        );
+      }
+    }
+    return summary;
+  }
+
   /** Complete demo trips nobody finished, so their test pair can be reused. */
   private async releaseStaleDemoTrips(requestId?: string) {
     const rows = await this.database.query<{ record: DriverTaskRecord }>(

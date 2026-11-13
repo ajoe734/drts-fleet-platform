@@ -241,7 +241,7 @@ const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<
   readonly [RegExp, PartnerProgramKind]
 > = [
   [/insur|claim|tailspin|理賠|代步/i, "insurance"],
-  [/travel|tour|group|adventureworks|探索|團體|旅行/i, "travel"],
+  [/travel|tour|group|adventure-?works|探索|團體|旅行/i, "travel"],
   [/card|credit|ride|acme|信用卡|機場|禮賓/i, "card"],
 ];
 

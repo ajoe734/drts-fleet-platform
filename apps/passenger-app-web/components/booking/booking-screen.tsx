@@ -9,13 +9,15 @@ import type {
   PassengerBookingSettingsResponse,
 } from "@drts/contracts";
 import {
+  BOOKING_PROPOSAL_REFRESH_MS,
   PassengerBookingClient,
   PassengerApiError,
-  earliestBookingTime,
   fromLocalDateTime,
   isBookingTimeAllowed,
   PASSENGER_APP_CONFIRMATION_ROWS,
   PASSENGER_SUPPORT_PHONE,
+  proposedBookingTime,
+  withBookableTime,
 } from "@drts/passenger-client";
 import { AuthAlert, P5Btn, P5 } from "../auth/ui";
 import { P5Icon, P5Map, P5RouteFare } from "../p5-ui";
@@ -135,17 +137,19 @@ export function BookingScreen({
       recoveryAccount.current = me.account.drtsPassengerId;
       if (restored) {
         pending.current = restored.pending;
-        setDraft(restored.draft);
+        // A pending command is immutable; an unsent draft needs a bookable time.
+        setDraft(
+          restored.pending
+            ? restored.draft
+            : withBookableTime(restored.draft, configuration),
+        );
         setQuote(restored.quote);
         setChecked(!!restored.pending);
         setMode(restored.pending ? "unavailable" : "form");
         if (restored.pending) setError(T.unknownCreate);
         return;
       }
-      setDraft((current) => ({
-        ...current,
-        localTime: current.localTime || earliestBookingTime(configuration),
-      }));
+      setDraft((current) => withBookableTime(current, configuration));
       setMode("form");
     } catch (reason) {
       if (mounted.current) report(reason, T.settingsError);
@@ -174,6 +178,22 @@ export function BookingScreen({
         quote,
       });
   }, [account, draft, quote]);
+
+  useEffect(() => {
+    // Only on the form: the confirmation sheet's quote is bound to its time.
+    if (mode !== "form" || busy || !settings || !draft.localTimeAuto) return;
+    const refresh = () => {
+      const localTime = proposedBookingTime(settings);
+      setDraft((current) =>
+        current.localTimeAuto && current.localTime !== localTime
+          ? { ...current, localTime }
+          : current,
+      );
+    };
+    refresh();
+    const timer = setInterval(refresh, BOOKING_PROPOSAL_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [mode, busy, settings, draft.localTimeAuto]);
 
   useEffect(() => {
     if (mode !== "confirm" || !quote || pending.current) return;
@@ -254,9 +274,9 @@ export function BookingScreen({
       setBusy(false);
     }
   }
-  function scheduledAt() {
+  function scheduledAt(localTime = draft.localTime) {
     if (!settings) throw new Error("booking_settings_unavailable");
-    const iso = fromLocalDateTime(draft.localTime);
+    const iso = fromLocalDateTime(localTime);
     if (!isBookingTimeAllowed(iso, settings))
       throw new Error("booking_lead_invalid");
     return iso;
@@ -276,7 +296,12 @@ export function BookingScreen({
     setChecked(false);
     try {
       if (!(await currentAccount())) return;
-      const time = scheduledAt();
+      // Fresh at the click: a sleeping tab can miss the refresh timer.
+      const localTime = draft.localTimeAuto
+        ? proposedBookingTime(settings)
+        : draft.localTime;
+      const time = scheduledAt(localTime);
+      setDraft((current) => ({ ...current, localTime }));
       setMode("quoting");
       const result = await client.getFareQuote({
         originLat: draft.origin.lat!,
@@ -443,11 +468,15 @@ export function BookingScreen({
         setMode("form");
         setError(T.expired);
       } else if (
-        ["booking_lead_invalid", "invalid_booking_time"].includes(code)
+        [
+          "booking_lead_invalid",
+          "invalid_booking_time",
+          "too_soon_to_book",
+        ].includes(code)
       ) {
         pending.current = null;
         setMode("form");
-        setError(T.shortLead);
+        setError(draft.localTimeAuto ? T.timeRefreshed : T.shortLead);
       } else if (
         reason instanceof PassengerApiError &&
         reason.status >= 400 &&

@@ -2194,6 +2194,14 @@ ${inner}
     },
     {
       caseName:
+        "empty rebuilt preview nonzero totalItems with empty first page must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
         "cancelled null row with adjacent days occupied selects the nearest genuinely empty day",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -2923,21 +2931,32 @@ ${inner}
                     { "content-type": "application/json" },
                     failureCase === "rebuilt-preview-wrong-data"
                       ? wireBytes("not-a-list")
-                      : wireBytes(
-                          toApiListData(
-                            realRetry && r1208Fault === "retry-foreign-row"
-                              ? [siblingRow("ord_foreign_unowned_998")]
-                              : realRetry && r1208Fault === "retry-row-identity"
-                                ? [
-                                    previewSiblingRow,
-                                    // Same orderId, another contract identity.
-                                    { ...ownRow, orderNo: "DRT-20261026-0099" },
-                                  ]
-                                : dateFromVal === emptyDay
-                                  ? []
-                                  : [previewSiblingRow, ownRow],
+                      : dateFromVal === emptyDay &&
+                          failureCase.startsWith(
+                            "empty rebuilt preview nonzero totalItems",
+                          )
+                        ? wireBytes(
+                            toApiListData([], { totalItems: 1, totalPages: 1 }),
+                          )
+                        : wireBytes(
+                            toApiListData(
+                              realRetry && r1208Fault === "retry-foreign-row"
+                                ? [siblingRow("ord_foreign_unowned_998")]
+                                : realRetry &&
+                                    r1208Fault === "retry-row-identity"
+                                  ? [
+                                      previewSiblingRow,
+                                      // Same orderId, another contract identity.
+                                      {
+                                        ...ownRow,
+                                        orderNo: "DRT-20261026-0099",
+                                      },
+                                    ]
+                                  : dateFromVal === emptyDay
+                                    ? []
+                                    : [previewSiblingRow, ownRow],
+                            ),
                           ),
-                        ),
                   );
                 },
               });
@@ -3684,6 +3703,20 @@ ${inner}
         if (failureCase.startsWith("empty preview nonzero totalItems")) {
           await expect(run).rejects.toMatchObject({
             stage: "daily-report-empty-preview-total-items-zero-required",
+          });
+          expect(sourceReads).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          expect(
+            createdJobs.filter((job) => job.jobId.includes("_empty_")),
+          ).toHaveLength(0);
+          return;
+        }
+        if (
+          failureCase.startsWith("empty rebuilt preview nonzero totalItems")
+        ) {
+          await expect(run).rejects.toMatchObject({
+            stage:
+              "daily-report-empty-rebuilt-preview-total-items-zero-required",
           });
           expect(sourceReads).toBe(1);
           expect(unrouteCalled).toBe(true);
