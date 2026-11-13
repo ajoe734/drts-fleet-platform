@@ -705,3 +705,209 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
     ).toBe(true);
   });
 });
+
+describe("canonical card-benefit program classification", () => {
+  // External program facts are SIM. Actual billing methods and their original
+  // in-memory artifact adapter run here; this is not a PostgreSQL or PSP test.
+  function completedTrip(
+    tenantId: string,
+    suffix: string,
+    subtype: OwnedMobilityTripCompletedEvent["businessDispatchSubtype"],
+  ): OwnedMobilityTripCompletedEvent {
+    return {
+      tenantId,
+      driverId: `SIM-driver-${suffix}`,
+      orderId: `SIM-order-${suffix}`,
+      bookingId: `SIM-booking-${suffix}`,
+      completedAt: "2026-05-12T09:30:00.000Z",
+      grossEarning: { currency: "TWD", amountMinor: 150000 },
+      orderSource: "portal",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: subtype,
+      costCenterCode: null,
+      riderId: `SIM-rider-${suffix}`,
+      partnerId: `SIM-partner-${suffix}`,
+      partnerProgramId: `SIM-program-${suffix}`,
+      partnerEntrySlug: `SIM-entry-${suffix}`,
+      eligibilityVerificationId: `SIM-eligibility-${suffix}`,
+      issuerAuthorizationRef: `issuer-ref-SIM-${suffix}`,
+      benefitReference: `benefit-SIM-${suffix}`,
+      serviceProduct: subtype,
+      tenantServiceProgramId: null,
+      sourcePlatform: "portal",
+    };
+  }
+
+  it.each(["travel_agency_transfer", "insurance_replacement_vehicle"] as const)(
+    "keeps %s references out of card months, issuer payable and reimbursements while retaining invoice fare",
+    async (subtype) => {
+      const service = createService();
+      const tenantId = `SIM-noncard-${subtype}`;
+      const trip = completedTrip(tenantId, subtype, subtype);
+      await service.handleOwnedMobilityTripCompleted(trip);
+
+      expect(await service.listTenantSettlementStatements(tenantId)).toEqual(
+        [],
+      );
+      const issuerStatement = await service.getTenantSettlementStatement(
+        tenantId,
+        "2026-05",
+      );
+      expect(issuerStatement.lines).toEqual([]);
+      expect(issuerStatement.totals.tripCount).toBe(0);
+      expect(issuerStatement.totals.fareTotal.amountMinor).toBe(0);
+      expect(issuerStatement.totals.subsidisedTotal.amountMinor).toBe(0);
+      expect(issuerStatement.totals.issuerPayable.amountMinor).toBe(0);
+
+      const invoice = await service.generateTenantInvoice(tenantId, {
+        tenantId,
+        periodStart: "2026-05-01T00:00:00.000Z",
+        periodEnd: "2026-05-31T23:59:59.999Z",
+      });
+      expect(invoice.lines).toHaveLength(1);
+      expect(invoice.lines[0]).toMatchObject({
+        orderId: trip.orderId,
+        businessDispatchSubtype: subtype,
+        partnerId: trip.partnerId,
+        partnerProgramId: trip.partnerProgramId,
+        benefitReference: trip.benefitReference,
+        issuerAuthorizationRef: trip.issuerAuthorizationRef,
+        amount: trip.grossEarning,
+        // The coarse channel classifier is unchanged; it is not card proof.
+        channelKey: "partner_airport",
+      });
+      expect(invoice.amount).toEqual(trip.grossEarning);
+
+      await service.publishDriverFeePlan({
+        planName: "SIM non-card settlement plan",
+        version: "2026-05",
+        serviceFeeBps: 1000,
+        reimbursementMode: "platform_funded",
+      });
+      const generated = await service.generateDriverStatements({
+        periodMonth: "2026-05",
+        driverId: trip.driverId,
+      });
+      expect(generated.items).toHaveLength(1);
+      expect(generated.items[0]!.lines).toEqual([
+        expect.objectContaining({
+          orderId: trip.orderId,
+          grossEarning: trip.grossEarning,
+          subsidy: { currency: "TWD", amountMinor: 0 },
+          serviceFee: { currency: "TWD", amountMinor: 15000 },
+          netAmount: { currency: "TWD", amountMinor: 135000 },
+          reimbursementRequired: false,
+        }),
+      ]);
+      expect(generated.reimbursementBatchIds).toEqual([]);
+      expect(
+        service
+          .listReimbursementBatches()
+          .filter((batch) => batch.driverId === trip.driverId),
+      ).toEqual([]);
+    },
+  );
+
+  it("keeps actual card subsidy and reimbursement separate from same-period travel and insurance invoices", async () => {
+    const service = createService();
+    const tenantId = "SIM-mixed-program-settlement";
+    const card = completedTrip(
+      tenantId,
+      "mixed-card",
+      "credit_card_airport_transfer",
+    );
+    const travel = completedTrip(
+      tenantId,
+      "mixed-travel",
+      "travel_agency_transfer",
+    );
+    const insurance = completedTrip(
+      tenantId,
+      "mixed-insurance",
+      "insurance_replacement_vehicle",
+    );
+    for (const trip of [card, travel, insurance])
+      await service.handleOwnedMobilityTripCompleted(trip);
+
+    const statements = await service.listTenantSettlementStatements(tenantId);
+    expect(statements.map((statement) => statement.period)).toEqual([
+      "2026-05",
+    ]);
+    const statement = await service.getTenantSettlementStatement(
+      tenantId,
+      "2026-05",
+    );
+    expect(statement.lines).toEqual([
+      expect.objectContaining({
+        tripId: card.orderId,
+        fare: card.grossEarning,
+        subsidisedAmount: card.grossEarning,
+        paidAmount: { currency: "TWD", amountMinor: 0 },
+        benefitReference: card.benefitReference,
+        issuerAuthorizationRef: card.issuerAuthorizationRef,
+      }),
+    ]);
+    expect(statement.direction).toBe("issuer_pays_drts");
+    expect(statement.totals.tripCount).toBe(1);
+    expect(statement.totals.fareTotal).toEqual(card.grossEarning);
+    expect(statement.totals.subsidisedTotal).toEqual(card.grossEarning);
+    expect(statement.totals.issuerPayable).toEqual(card.grossEarning);
+
+    const invoice = await service.generateTenantInvoice(tenantId, {
+      tenantId,
+      periodStart: "2026-05-01T00:00:00.000Z",
+      periodEnd: "2026-05-31T23:59:59.999Z",
+    });
+    expect(invoice.lines).toHaveLength(3);
+    for (const trip of [card, travel, insurance])
+      expect(
+        invoice.lines.find((line) => line.orderId === trip.orderId),
+      ).toMatchObject({
+        businessDispatchSubtype: trip.businessDispatchSubtype,
+        amount: trip.grossEarning,
+        benefitReference: trip.benefitReference,
+        issuerAuthorizationRef: trip.issuerAuthorizationRef,
+      });
+    expect(invoice.amount).toEqual({ currency: "TWD", amountMinor: 450000 });
+
+    await service.publishDriverFeePlan({
+      planName: "SIM mixed program settlement plan",
+      version: "2026-05",
+      serviceFeeBps: 1000,
+      reimbursementMode: "platform_funded",
+    });
+    const generated = await service.generateDriverStatements({
+      periodMonth: "2026-05",
+    });
+    const generatedLines = generated.items.flatMap((item) => item.lines);
+    expect(
+      generatedLines.filter((line) => line.orderId === card.orderId),
+    ).toEqual([
+      expect.objectContaining({
+        reimbursementRequired: true,
+        grossEarning: card.grossEarning,
+      }),
+    ]);
+    for (const trip of [travel, insurance])
+      expect(
+        generatedLines.filter((line) => line.orderId === trip.orderId),
+      ).toEqual([
+        expect.objectContaining({
+          reimbursementRequired: false,
+          grossEarning: trip.grossEarning,
+        }),
+      ]);
+    const reimbursements = service
+      .listReimbursementBatches()
+      .flatMap((batch) => batch.items);
+    const ownReimbursements = reimbursements.filter((item) =>
+      [card.orderId, travel.orderId, insurance.orderId].includes(item.orderId),
+    );
+    expect(ownReimbursements).toEqual([
+      expect.objectContaining({
+        orderId: card.orderId,
+        amount: card.grossEarning,
+      }),
+    ]);
+  });
+});

@@ -6,7 +6,7 @@ import {
 } from "../../../../tests/unit/helpers/fleet-document-fixture";
 import type { IncomingMessage } from "node:http";
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
@@ -1240,5 +1240,266 @@ describe("FleetPartnerController portal routes", () => {
         },
       },
     });
+  });
+});
+
+describe("Fleet supply mutation responses during another request's refresh", () => {
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+
+  function driverDraft(
+    controller: FleetPartnerController,
+    suffix: string,
+    fleetPartnerId = "fleet-demo-001",
+  ) {
+    return controller.createDriverSupplySubmission(
+      fleetPartnerId,
+      "fleet-user-1",
+      {
+        name: `SIM concurrent driver ${suffix}`,
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: `PDL-CONCURRENT-${suffix}`,
+        professionalDriverLicenseExpiry: "2099-12-31",
+        taxiDriverRegistrationNo: `REG-CONCURRENT-${suffix}`,
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2099-12-31",
+        supportedServiceProductCodes: [
+          "enterprise_dispatch",
+          "travel_agency_transfer",
+        ],
+        preferredVehicleSubmissionId: null,
+      },
+      `req-concurrent-driver-${suffix}`,
+      { ...fleetIdentity, partnerId: fleetPartnerId, actorId: "fleet-user-1" },
+    );
+  }
+
+  it.each(["driver", "vehicle"] as const)(
+    "returns the committed own %s draft after a different request reloads older state",
+    async (kind) => {
+      const { controller, supplySubmissionRepository: repository } =
+        createFixture();
+      const other = await driverDraft(
+        controller,
+        `other-${kind}`,
+        "fleet-demo-002",
+      );
+      const entered = deferred();
+      const release = deferred();
+      const persist = repository.persistChanges.bind(repository);
+      let submissionId: string | undefined;
+      const spy = vi
+        .spyOn(repository, "persistChanges")
+        .mockImplementationOnce(async (changes) => {
+          submissionId = changes.submissions?.[0]?.submissionId;
+          entered.resolve();
+          await release.promise;
+          await persist(changes);
+        });
+      const pending =
+        kind === "driver"
+          ? driverDraft(controller, "own")
+          : controller.createVehicleSupplySubmission(
+              "fleet-demo-001",
+              "fleet-user-1",
+              {
+                plateNo: "SIM-CONCURRENT",
+                licenseType: "business_vehicle",
+                brand: "SIM",
+                model: "SIM concurrent vehicle",
+                modelYear: 2026,
+                seatCount: 5,
+                luggageCapacity: 4,
+                businessArea: "TPE",
+                supportedServiceProductCodes: [
+                  "enterprise_dispatch",
+                  "travel_agency_transfer",
+                ],
+                airportTransferEligible: true,
+                fixedFareAllowed: true,
+                currentDriverSubmissionId: null,
+                doorCount: 4,
+                color: "white",
+              },
+              "req-concurrent-vehicle",
+              { ...fleetIdentity, actorId: "fleet-user-1" },
+            );
+      void pending.catch(() => undefined);
+      let settled = false;
+      void pending.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      try {
+        await Promise.race([entered.promise, pending]);
+        if (!submissionId)
+          throw new Error("The normal draft did not reach persistence");
+        const ownId = submissionId;
+        const refreshed = await controller.listSupplySubmissions(
+          "fleet-demo-002",
+          {},
+          "req-other-refresh",
+        );
+        expect(
+          refreshed.data.items.map((item) => item.submission.submissionId),
+        ).toEqual([other.data.submission.submissionId]);
+        expect(settled).toBe(false);
+        release.resolve();
+        const created = await pending;
+        expect(created.data.submission).toMatchObject({
+          submissionId: ownId,
+          fleetPartnerId: "fleet-demo-001",
+          status: "draft",
+          revisionNo: 1,
+        });
+        expect(
+          kind === "driver"
+            ? created.data.driverDraft?.submissionId
+            : created.data.vehicleDraft?.submissionId,
+        ).toBe(ownId);
+        const fresh = await controller.getSupplySubmissionDetail(
+          "fleet-demo-001",
+          ownId,
+          "req-own-after-commit",
+        );
+        expect(fresh.data).toEqual(created.data);
+        const durable = await repository.loadState();
+        expect(
+          durable.submissions.map((item) => item.submissionId).sort(),
+        ).toEqual([ownId, other.data.submission.submissionId].sort());
+        expect(
+          (kind === "driver"
+            ? durable.driverDrafts
+            : durable.vehicleDrafts
+          ).some((draft) => draft.submissionId === ownId),
+        ).toBe(true);
+        const otherFresh = await controller.getSupplySubmissionDetail(
+          "fleet-demo-002",
+          other.data.submission.submissionId,
+          "req-other-after-commit",
+        );
+        expect(otherFresh.data).toEqual(other.data);
+      } finally {
+        release.resolve();
+        await Promise.allSettled([pending]);
+        spy.mockRestore();
+      }
+    },
+  );
+
+  it("returns the persisted submitted revision and event after a concurrent draft read", async () => {
+    const { controller, supplySubmissionRepository: repository } =
+      createFixture();
+    const created = await driverDraft(controller, "submit");
+    const id = created.data.submission.submissionId;
+    await uploadDocument(
+      controller,
+      id,
+      1,
+      "professional_driver_license",
+      "concurrent-license.pdf",
+      VALID_CHECKSUM_A,
+    );
+    await uploadDocument(
+      controller,
+      id,
+      2,
+      "taxi_driver_registration",
+      "concurrent-registration.pdf",
+      VALID_CHECKSUM_B,
+    );
+    const before = await controller.getSupplySubmissionDetail(
+      "fleet-demo-001",
+      id,
+      "req-before-submit",
+    );
+    expect(before.data.submission).toMatchObject({
+      status: "draft",
+      revisionNo: 3,
+    });
+    expect(before.data.documents).toHaveLength(2);
+    const entered = deferred();
+    const release = deferred();
+    const persist = repository.persistChanges.bind(repository);
+    const spy = vi
+      .spyOn(repository, "persistChanges")
+      .mockImplementationOnce(async (changes) => {
+        entered.resolve();
+        await release.promise;
+        await persist(changes);
+      });
+    const pending = controller.submitSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      id,
+      { expectedRevisionNo: 3 },
+      "req-concurrent-submit",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
+    );
+    void pending.catch(() => undefined);
+    try {
+      await Promise.race([entered.promise, pending]);
+      const concurrentRead = await controller.getSupplySubmissionDetail(
+        "fleet-demo-001",
+        id,
+        "req-concurrent-draft-read",
+      );
+      expect(concurrentRead.data.submission).toMatchObject({
+        status: "draft",
+        revisionNo: 3,
+      });
+      release.resolve();
+      const submitted = await pending;
+      expect(submitted.data.submission).toMatchObject({
+        submissionId: id,
+        status: "submitted",
+        revisionNo: 4,
+        submittedBy: "fleet-user-1",
+      });
+      expect(submitted.data.reviewEvents).toEqual([
+        expect.objectContaining({
+          submissionId: id,
+          eventType: "submitted",
+          revisionNo: 4,
+        }),
+      ]);
+      expect(submitted.data.documents).toHaveLength(2);
+      const fresh = await controller.getSupplySubmissionDetail(
+        "fleet-demo-001",
+        id,
+        "req-submitted-after-commit",
+      );
+      expect(fresh.data).toEqual(submitted.data);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([pending]);
+      spy.mockRestore();
+    }
+  });
+
+  it("does not return a captured draft when persistence rejects", async () => {
+    const { controller, supplySubmissionRepository: repository } =
+      createFixture();
+    const failure = new Error("SIM persistence failure");
+    const spy = vi
+      .spyOn(repository, "persistChanges")
+      .mockRejectedValueOnce(failure);
+    try {
+      await expect(driverDraft(controller, "failed-write")).rejects.toBe(
+        failure,
+      );
+      expect((await repository.loadState()).submissions).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

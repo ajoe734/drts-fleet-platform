@@ -35,6 +35,7 @@ import {
   NONCORE_API,
   camel,
   required,
+  type FleetSupplyPhase,
 } from "./pax-review-shared-order/noncore-travel-fixture";
 
 const OPS = "http://127.0.0.1:3202";
@@ -106,13 +107,15 @@ async function establishNormalPlatformSession() {
 
 async function address(
   page: Page,
-  index: number,
+  title: "Pickup address" | "Drop-off address" | `Route stops ${number}`,
   query: string,
   label: string,
 ) {
-  const pickers = page.locator("[data-address-map-picker]");
-  await expect(pickers).toHaveCount(2);
-  const picker = pickers.nth(index);
+  const picker = page.locator("[data-address-map-picker]").filter({
+    has: page.getByText(title, { exact: true }),
+  });
+  await expect(picker).toHaveCount(1);
+  await expect(picker.getByText(title, { exact: true })).toBeVisible();
   await picker
     .getByRole("textbox", { name: "Search address", exact: true })
     .fill(query);
@@ -134,6 +137,58 @@ type NormalPartnerJourneyResult = {
   details: PartnerBookingDetails | undefined;
 };
 
+type TravelJourneyPhase = {
+  step: string;
+  subphase?: string;
+  supply?: FleetSupplyPhase;
+};
+
+function createTravelGroupRunControl() {
+  const contexts = new Set<BrowserContext>();
+  const closing: Promise<void>[] = [];
+  let firstFailure:
+    | { reason: unknown; slotNumber: number | null; phase: TravelJourneyPhase }
+    | undefined;
+  const close = (context: BrowserContext) => {
+    closing.push(
+      Promise.resolve()
+        .then(() => context.close())
+        .catch(() => undefined),
+    );
+  };
+  return {
+    get firstFailure() {
+      return firstFailure;
+    },
+    check() {
+      if (firstFailure) throw firstFailure.reason;
+    },
+    register(context: BrowserContext) {
+      contexts.add(context);
+      if (firstFailure) close(context);
+    },
+    fail(
+      reason: unknown,
+      slotNumber: number | null,
+      phase: TravelJourneyPhase,
+    ) {
+      if (firstFailure) return;
+      firstFailure = { reason, slotNumber, phase };
+      for (const context of contexts) close(context);
+    },
+    async settle<T>(runs: Promise<T>[]) {
+      // A closed page releases pending UI operations. In-flight fixture HTTP
+      // still settles normally before the shared fixture may be cleaned up.
+      const outcomes = await Promise.allSettled(runs);
+      await Promise.allSettled(closing);
+      if (firstFailure) throw firstFailure.reason;
+      const failed = outcomes.find((outcome) => outcome.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+      return outcomes;
+    },
+  };
+}
+
 type TravelGroupJourneyContext = {
   fixture: NoncoreTravelFixture;
   scope: Awaited<ReturnType<NoncoreTravelFixture["entry"]>>;
@@ -145,6 +200,8 @@ type TravelGroupJourneyContext = {
   vehicleId: string;
   slotNumber: number;
   invoicePeriodStart: string;
+  control: ReturnType<typeof createTravelGroupRunControl>;
+  onFailure: (error: unknown, phase: TravelJourneyPhase) => void;
   onBooked: (
     booking: Pick<
       NormalPartnerJourneyResult,
@@ -210,13 +267,29 @@ export async function runNormalPartnerJourney(
         : "noncore-safe-progress.json",
     ),
   );
-  const step = progress.step;
+  let phase: TravelJourneyPhase = { step: "Create normal browser sessions" };
+  const step: typeof progress.step = (name, operation) => {
+    phase = { step: name };
+    group?.control.check();
+    return progress.step(name, async () => {
+      const result = await operation();
+      group?.control.check();
+      return result;
+    });
+  };
+  const subphase = (name: string) => {
+    phase = { step: phase.step, subphase: name };
+    group?.control.check();
+  };
   const newPage = async () => {
+    group?.control.check();
     const context = await browser.newContext({
       viewport: { width: 1440, height: 1000 },
       timezoneId: "Asia/Taipei",
     });
     contexts.push(context);
+    group?.control.register(context);
+    group?.control.check();
     return context.newPage();
   };
   let orderId: string | null = null;
@@ -253,7 +326,17 @@ export async function runNormalPartnerJourney(
           ? fixture.fleetSupply("credit_card_airport_transfer")
           : insurance
             ? fixture.fleetSupply("insurance_replacement_vehicle")
-            : fixture.fleetSupply(),
+            : fixture.fleetSupply(
+                "travel_agency_transfer",
+                group
+                  ? {
+                      check: () => group.control.check(),
+                      phase: (supply) => {
+                        phase = { step: phase.step, supply };
+                      },
+                    }
+                  : undefined,
+              ),
     );
     const scope =
       group?.scope ??
@@ -579,6 +662,7 @@ export async function runNormalPartnerJourney(
           ? "Submit normal insurance form through the real ServerAction"
           : "Submit normal travel form through the real ServerAction",
       async () => {
+        subphase("Open the normal booking form");
         const opened = airportEligibility
           ? airportEligibility.opened
           : await partner.goto(
@@ -651,6 +735,7 @@ export async function runNormalPartnerJourney(
             .fill(details.signage);
           if (group) {
             const { leg, batch, vehicle } = selectedGroupAllocation(group);
+            subphase("Import the declared tour plan");
             await partner
               .locator("summary")
               .filter({
@@ -664,12 +749,15 @@ export async function runNormalPartnerJourney(
             await partner
               .getByRole("button", { name: "Use tour plan", exact: true })
               .click();
+            subphase("Select the declared transfer leg");
             await partner
               .getByLabel("Selected transfer leg", { exact: true })
               .selectOption(leg.id);
+            subphase("Select the declared departure batch");
             await partner
               .getByLabel("Selected departure batch", { exact: true })
               .selectOption(batch.id);
+            subphase("Select the declared planned vehicle allocation");
             await partner
               .getByLabel("Selected planned vehicle allocation", {
                 exact: true,
@@ -822,19 +910,24 @@ export async function runNormalPartnerJourney(
           ).toBeVisible();
           await address(
             partner,
-            0,
+            "Pickup address",
             airportFacts.pickup.query,
             airportFacts.pickup.label,
           );
           await address(
             partner,
-            1,
+            "Drop-off address",
             airportFacts.dropoff.query,
             airportFacts.dropoff.label,
           );
         } else {
-          await address(partner, 0, "taipei 101", "Taipei 101");
-          await address(partner, 1, "taipei main", "Taipei Main Station");
+          await address(partner, "Pickup address", "taipei 101", "Taipei 101");
+          await address(
+            partner,
+            "Drop-off address",
+            "taipei main",
+            "Taipei Main Station",
+          );
         }
         if (details?.subtype === "travel_agency_transfer") {
           // Normal selected place controls; planned prose is never geocoded by the test.
@@ -859,7 +952,12 @@ export async function runNormalPartnerJourney(
             await partner
               .getByRole("button", { name: "Add stop", exact: true })
               .click();
-            await address(partner, index + 2, stop.query, stop.name);
+            await address(
+              partner,
+              `Route stops ${index + 1}`,
+              stop.query,
+              stop.name,
+            );
           }
           details.routeStops = stops.map(({ address, lat, lng }) => ({
             address,
@@ -904,12 +1002,14 @@ export async function runNormalPartnerJourney(
         await partner
           .getByLabel("Reservation window end", { exact: true })
           .fill(dates.end);
+        subphase("Submit the normal booking form");
         const submit = partner.getByRole("button", {
           name: "Create booking",
           exact: true,
         });
         await expect(submit).toBeEnabled();
         await submit.click();
+        subphase("Read the normal booking confirmation");
         await expect(
           partner.getByTestId("partner-booking-confirmation"),
         ).toContainText("Booking created and read back");
@@ -2322,18 +2422,51 @@ export async function runNormalPartnerJourney(
     );
     expect(fresh.receipt.completion).toEqual(completed.receipt.completion);
 
-    // NOTE: a "keep non-card travel_agency_transfer/insurance_replacement_vehicle
-    // orders out of the issuer-pays-drts settlement statement" assertion was
-    // adopted here from the fee-capacity-card packet without its matching
-    // backend fix (settlementChannelKeyForTrip in
-    // apps/api/src/modules/billing-settlement/settlement-matrix.ts currently
-    // classifies any partner-sourced trip as channel "partner_airport" purely
-    // from a truthy partnerId, not businessDispatchSubtype, so these orders
-    // are still misclassified as card-benefit settlement trips). That file is
-    // outside this task's write_scopes (billing-settlement is private Main
-    // scope per Root-tour-fee-capacity-card-qualified-and-PG-source-Main39779).
-    // Removed the premature assertion rather than leave a failing regression;
-    // tracked for the Main-side billing-settlement integration.
+    if (
+      completed.booking.businessDispatchSubtype === "travel_agency_transfer" ||
+      completed.booking.businessDispatchSubtype ===
+        "insurance_replacement_vehicle"
+    ) {
+      await step(
+        "Keep the completed non-card order outside issuer settlement",
+        async () => {
+          // These reference-program facts were returned by ordinary booking, not
+          // added to the statement request. References alone are not card proof.
+          expect(completed.order.benefitReference).toBeTruthy();
+          expect(completed.order.issuerAuthorizationRef).toBeTruthy();
+          const period = new Date(task.completedAt).toISOString().slice(0, 7);
+          const statement = await fixture.fixture.call<any>(
+            `tenant/settlement-statements/${encodeURIComponent(period)}`,
+            fixture.tenantToken,
+            "GET",
+            undefined,
+            fixture.tenantId,
+          );
+          expect(statement.period).toBe(period);
+          expect(statement.direction).toBe("issuer_pays_drts");
+          expect(Array.isArray(statement.lines)).toBe(true);
+          expect(
+            statement.lines.map((line: { tripId: string }) => line.tripId),
+          ).not.toContain(exactOrderId);
+          // The normal list also reads repository periods. Other genuine card
+          // trips/months may exist; do not declare the whole tenant statement empty.
+          const periods = await fixture.fixture.call<any>(
+            "tenant/settlement-statements",
+            fixture.tenantToken,
+            "GET",
+            undefined,
+            fixture.tenantId,
+          );
+          expect(Array.isArray(periods.items)).toBe(true);
+          for (const listed of periods.items) {
+            expect(Array.isArray(listed.lines)).toBe(true);
+            expect(
+              listed.lines.map((line: { tripId: string }) => line.tripId),
+            ).not.toContain(exactOrderId);
+          }
+        },
+      );
+    }
 
     const invoice = await step(
       "Generate normal tenant invoice for the actual completed order",
@@ -2684,6 +2817,10 @@ export async function runNormalPartnerJourney(
     };
     if (group) await group.onCompleted(result);
     return result;
+  } catch (error) {
+    // Notify before per-allocation cleanup can delay the first real failure.
+    group?.onFailure(error, phase);
+    throw error;
   } finally {
     stopGpsObservation?.();
     // Snapshot route locations before closing contexts. No query/fragment,
@@ -2746,9 +2883,34 @@ export async function runNormalPartnerTravelGroupJourney(
   await establishNormalPlatformSession();
   await renewActualFixtureSessions();
   const fixture = new NoncoreTravelFixture();
+  const control = createTravelGroupRunControl();
+  let groupError: { reason: unknown } | undefined;
   let historyContext: BrowserContext | null = null;
+  const closeGroupFixture = async () => {
+    const cleanupErrors: unknown[] = [];
+    for (const cleanup of [
+      () => historyContext?.close(),
+      () => fixture.close(),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length) {
+      if (groupError)
+        throw new AggregateError(
+          [groupError.reason, ...cleanupErrors],
+          "Normal group journey failed before fixture cleanup",
+          { cause: groupError.reason },
+        );
+      throw cleanupErrors[0];
+    }
+  };
   try {
     historyContext = await browser.newContext({ timezoneId: "Asia/Taipei" });
+    control.register(historyContext);
     const historyPage = await historyContext.newPage();
     await historyContext.addCookies([
       { name: PARTNER_LOCALE_COOKIE, value: "en", url: PARTNER_ORIGIN },
@@ -2863,7 +3025,7 @@ export async function runNormalPartnerTravelGroupJourney(
       Pick<NormalPartnerJourneyResult, "bookingId" | "orderId" | "details">
     >();
     const completed = new Map<string, NormalPartnerJourneyResult>();
-    const deferred = () => {
+    const deferred = (name: string) => {
       let resolve!: () => void;
       let reject!: (reason: unknown) => void;
       const promise = new Promise<void>((yes, no) => {
@@ -2873,12 +3035,13 @@ export async function runNormalPartnerTravelGroupJourney(
       // Release peers on failure within the existing test deadline, leaving
       // cleanup time. This never raises the original test timeout or retries.
       const timer = setTimeout(
-        () =>
-          reject(
-            new Error(
-              "Group barrier exceeded the existing hosted test cleanup budget",
-            ),
-          ),
+        () => {
+          const error = new Error(
+            "Group barrier exceeded the existing hosted test cleanup budget",
+          );
+          control.fail(error, null, { step: name });
+          reject(error);
+        },
         Math.max(1, info.timeout - (Date.now() - startedAt) - 30_000),
       );
       // Observe rejection even if setup fails before another allocation awaits.
@@ -2895,8 +3058,12 @@ export async function runNormalPartnerTravelGroupJourney(
         },
       };
     };
-    const allBooked = deferred();
-    const otherVehiclesCompleted = deferred();
+    const allBooked = deferred(
+      "Wait for all declared allocations to be booked",
+    );
+    const otherVehiclesCompleted = deferred(
+      "Wait for the other real Driver tasks to complete",
+    );
     let historyQueue = Promise.resolve();
     const readGroup = (expectCompleted: boolean, stage: string) => {
       const current = historyQueue.then(async () => {
@@ -3026,6 +3193,12 @@ export async function runNormalPartnerTravelGroupJourney(
         ...selection,
         slotNumber: index + 1,
         invoicePeriodStart: invoicePeriodStart.toISOString(),
+        control,
+        onFailure: (error, phase) => {
+          control.fail(error, index + 1, phase);
+          allBooked.reject(error);
+          otherVehiclesCompleted.reject(error);
+        },
         onBooked: async (booking) => {
           const key = slotKey(selection);
           expect(booked.has(key)).toBe(false);
@@ -3080,14 +3253,15 @@ export async function runNormalPartnerTravelGroupJourney(
           }
         },
       }).catch((error: unknown) => {
+        control.fail(error, index + 1, {
+          step: "Finish normal allocation setup or cleanup",
+        });
         allBooked.reject(error);
         otherVehiclesCompleted.reject(error);
         throw error;
       }),
     );
-    const outcomes = await Promise.allSettled(runs);
-    const failed = outcomes.find((outcome) => outcome.status === "rejected");
-    if (failed?.status === "rejected") throw failed.reason;
+    const outcomes = await control.settle(runs);
     const actual = outcomes.map((outcome) => {
       if (outcome.status !== "fulfilled")
         throw new Error("Unfinished normal group allocation");
@@ -3200,8 +3374,21 @@ export async function runNormalPartnerTravelGroupJourney(
         ],
       }),
     });
+  } catch (error) {
+    groupError = { reason: error };
+    const first = control.firstFailure;
+    if (first)
+      await info
+        .attach("normal-travel-group-first-failure", {
+          contentType: "application/json",
+          body: JSON.stringify({
+            slotNumber: first.slotNumber,
+            ...first.phase,
+          }),
+        })
+        .catch(() => undefined);
+    throw error;
   } finally {
-    await historyContext?.close();
-    await fixture.close();
+    await closeGroupFixture();
   }
 }

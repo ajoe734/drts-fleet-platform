@@ -4024,10 +4024,7 @@ export class BillingSettlementService implements OnModuleInit {
     for (const trip of this.liveSettlementTrips.values()) {
       if (
         trip.tenantId === tenantId &&
-        settlementChannelKeyForTrip(trip) ===
-          SETTLEMENT_STATEMENT_CHANNEL_KEY &&
-        Boolean(trip.benefitReference) &&
-        Boolean(trip.issuerAuthorizationRef)
+        this.isCardBenefitSettlementTrip(trip)
       ) {
         months.add(this.toPeriodMonth(trip.completedAt));
       }
@@ -4062,9 +4059,19 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
-  private isCardBenefitSettlementTrip(trip: BillingSettlementTripRecord) {
+  private isCardBenefitSettlementTrip(
+    trip: Pick<
+      LiveSettlementTripRecord,
+      | "businessDispatchSubtype"
+      | "orderSource"
+      | "partnerId"
+      | "benefitReference"
+      | "issuerAuthorizationRef"
+    >,
+  ) {
     return (
-      this.getSettlementChannelKey(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+      trip.businessDispatchSubtype === "credit_card_airport_transfer" &&
+      settlementChannelKeyForTrip(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
       Boolean(trip.benefitReference) &&
       Boolean(trip.issuerAuthorizationRef)
     );
@@ -4780,10 +4787,7 @@ export class BillingSettlementService implements OnModuleInit {
     // so the full delivered fare is the platform-funded (sponsor-reimbursed)
     // portion. Without this, statements collapse subsidisedAmount to 0 and
     // understate issuerPayable. Non-card-benefit live trips carry no subsidy.
-    const isCardBenefitTrip =
-      settlementChannelKeyForTrip(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
-      Boolean(trip.benefitReference) &&
-      Boolean(trip.issuerAuthorizationRef);
+    const isCardBenefitTrip = this.isCardBenefitSettlementTrip(trip);
     const platformFundedDiscount = isCardBenefitTrip
       ? { ...trip.grossEarning }
       : this.money(0);
