@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -9,10 +10,17 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { resolveRouteAuthPolicy } from "../../src/common/auth/auth.policy";
 import { recordsToCsv } from "../../src/common/csv";
+import {
+  DocumentArtifactRebuildRegistry,
+  InMemoryDocumentArtifactStore,
+} from "../../src/common/document-artifacts";
+import { createControlledDownloadMetadata } from "../../src/common/controlled-download";
+import { ControlledDownloadController } from "../../src/modules/controlled-download/controlled-download.controller";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import type {
-  ReportingFilingState,
-  StoredReportJobRecord,
+import {
+  ReportingFilingRepository,
+  type ReportingFilingState,
+  type StoredReportJobRecord,
 } from "../../src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 
@@ -364,7 +372,11 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
         service.getReportJob(accepted.jobId, undefined, genericIdentity),
       );
       expectReportJobNotFound(() =>
-        service.renderReportArtifact(accepted.jobId, undefined, genericIdentity),
+        service.renderReportArtifact(
+          accepted.jobId,
+          undefined,
+          genericIdentity,
+        ),
       );
     }
   });
@@ -476,5 +488,276 @@ describe("P5-EXPORT-001 controlled multi-taxi export", () => {
     expect(csvContent).toContain("captured");
     expect(csvContent).toContain("4000");
     expect(csvContent).toContain("driver_proof");
+  });
+});
+
+// Real captured export rows -> shared CSV writer -> artifact store -> signed
+// controller stream. Only persistence/object-storage ports are finite unit SIM.
+describe("R11 materialized same-record controlled CSV", () => {
+  const agency: BootstrapRequestIdentity = {
+    ...createIdentity(["agency:trip_records:export"]),
+    actorType: "agency_user",
+    actorId: "SIM-agency-exporter",
+    realm: "agency",
+    agencyId: "SIM-agency",
+    roles: ["agency_exporter"],
+  };
+
+  async function completed(rows = [createExportRow()]) {
+    vi.stubEnv("CONTROLLED_DOWNLOAD_SIGNING_SECRET", "SIM-csv-signing-secret");
+    const { repository, state } = createPersistingRepository();
+    const store = new InMemoryDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new ReportingFilingService(
+      new AuditNotificationService(),
+      repository as never,
+      store,
+      registry,
+    );
+    const accepted = await service.createMultiTaxiTripExportJobDurably(
+      {
+        purpose: "SIM unit retained record export",
+        idempotencyKey: "SIM-csv-unit",
+      },
+      rows,
+      agency,
+    );
+    await flushBackgroundWork();
+    const job = state.reportJobs.find((row) => row.jobId === accepted.jobId)!;
+    expect(job.status).toBe("completed");
+    return { service, store, registry, job, state, accepted };
+  }
+
+  function resolveLink(controller: ControlledDownloadController, link: string) {
+    const url = new URL(link, "https://agency.example.test");
+    const parts = url.pathname.split("/").filter(Boolean);
+    const q = url.searchParams;
+    return controller.resolve(
+      decodeURIComponent(parts[1]!),
+      decodeURIComponent(parts[2]!),
+      q.get("signed_at") ?? undefined,
+      q.get("expires_at") ?? undefined,
+      q.get("key_id") ?? undefined,
+      q.get("manifest_hash") ?? undefined,
+      q.get("sig") ?? undefined,
+      q.get("sig_v") ?? undefined,
+    );
+  }
+
+  async function drain(
+    file: Awaited<ReturnType<ControlledDownloadController["resolve"]>>,
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.getStream()) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
+
+  it("issues the original artifact ID with the real CSV SHA and streams the same retained IDs as an attachment", async () => {
+    const f = await completed();
+    const logicalManifest = f.job.artifact!.manifestHash;
+    const issued = await f.service.issueMultiTaxiTripExportDownloadForRead(
+      f.accepted.jobId,
+      agency,
+    );
+    const file = await resolveLink(
+      new ControlledDownloadController(f.store, f.registry),
+      issued.download.downloadUrl,
+    );
+    const bytes = await drain(file);
+    const expected = Buffer.from(recordsToCsv([createExportRow()]), "utf8");
+    expect(bytes).toEqual(expected);
+    expect(file.getHeaders()).toMatchObject({
+      type: "text/csv; charset=utf-8",
+      disposition: 'attachment; filename="multi-taxi-trip-records.csv"',
+    });
+    expect(issued.download.kind).toBe("multi-taxi-trip-records");
+    expect(issued.download.subjectId).toBe(f.job.artifact!.artifactId);
+    expect(issued.manifestHash).toBe(
+      createHash("sha256").update(bytes).digest("hex"),
+    );
+    expect(issued.download.manifestHash).toBe(issued.manifestHash);
+    expect(f.state.reportJobs[0]!.artifact!.manifestHash).toBe(logicalManifest);
+    expect(bytes.toString("utf8")).toContain(
+      '"mtr-order-001","order-001","trip-001"',
+    );
+  });
+
+  it("recovers a lost object on a cold replica from one committed artifact lookup despite JSONB key reordering", async () => {
+    const f = await completed();
+    const issued = await f.service.issueMultiTaxiTripExportDownloadForRead(
+      f.accepted.jobId,
+      agency,
+    );
+    const committed = structuredClone(f.state.reportJobs[0]!);
+    committed.rows = committed.rows.map(
+      (row) =>
+        Object.fromEntries(
+          Object.entries(row).reverse(),
+        ) as unknown as typeof row,
+    );
+    const query = vi
+      .fn<
+        (
+          sql: string,
+          parameters: readonly unknown[],
+        ) => Promise<{ rows: { record: typeof committed }[] }>
+      >()
+      .mockResolvedValue({ rows: [{ record: committed }] });
+    const repository = new ReportingFilingRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    const coldStore = new InMemoryDocumentArtifactStore();
+    const coldRegistry = new DocumentArtifactRebuildRegistry();
+    // No loadState/onModuleInit or warm process map can supply this file.
+    new ReportingFilingService(
+      new AuditNotificationService(),
+      repository,
+      coldStore,
+      coldRegistry,
+    );
+    const file = await resolveLink(
+      new ControlledDownloadController(coldStore, coldRegistry),
+      issued.download.downloadUrl,
+    );
+    const bytes = await drain(file);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "job_type = 'multi_taxi_trip_records' AND status = 'completed'",
+    );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "record->'artifact'->>'artifactId' = $1",
+    );
+    expect(query.mock.calls[0]?.[1]).toEqual([issued.download.subjectId]);
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      issued.manifestHash,
+    );
+    expect(bytes).toEqual(
+      Buffer.from(recordsToCsv([createExportRow()]), "utf8"),
+    );
+    expect(
+      (
+        await coldStore.get(
+          "multi-taxi-trip-records",
+          issued.download.subjectId,
+        )
+      )?.record.sha256,
+    ).toBe(issued.manifestHash);
+  });
+
+  it("does not serve different committed row bytes behind an earlier valid link", async () => {
+    const f = await completed();
+    const issued = await f.service.issueMultiTaxiTripExportDownloadForRead(
+      f.accepted.jobId,
+      agency,
+    );
+    const changed = structuredClone(f.state.reportJobs[0]!);
+    changed.rows = [createExportRow({ recordId: "SIM-other-record" })];
+    const repository = new ReportingFilingRepository({
+      isEnabled: () => true,
+      query: vi.fn(async () => ({ rows: [{ record: changed }] })),
+    } as never);
+    const registry = new DocumentArtifactRebuildRegistry();
+    const store = new InMemoryDocumentArtifactStore();
+    new ReportingFilingService(
+      new AuditNotificationService(),
+      repository,
+      store,
+      registry,
+    );
+    await expect(
+      resolveLink(
+        new ControlledDownloadController(store, registry),
+        issued.download.downloadUrl,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH" } },
+    });
+  });
+
+  const refused: [string, BootstrapRequestIdentity, string][] = [
+    [
+      "other actor",
+      { ...agency, actorId: "SIM-other-actor" },
+      "MULTI_TAXI_EXPORT_JOB_NOT_FOUND",
+    ],
+    [
+      "other agency",
+      { ...agency, agencyId: "SIM-other-agency" },
+      "MULTI_TAXI_EXPORT_JOB_NOT_FOUND",
+    ],
+    ["missing scope", { ...agency, scopes: [] }, "MULTI_TAXI_EXPORT_FORBIDDEN"],
+  ];
+  it.each(refused)(
+    "keeps %s rejection before materializing any file",
+    async (_label, identity, code) => {
+      const f = await completed();
+      const put = vi.spyOn(f.store, "putIfAbsent");
+      await expect(
+        f.service.issueMultiTaxiTripExportDownloadForRead(
+          f.accepted.jobId,
+          identity,
+        ),
+      ).rejects.toMatchObject({ response: { error: { code } } });
+      expect(put).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders a zero-record export as the declared header only, without a fake data row", async () => {
+    const f = await completed([]);
+    const issued = await f.service.issueMultiTaxiTripExportDownloadForRead(
+      f.accepted.jobId,
+      agency,
+    );
+    const file = await resolveLink(
+      new ControlledDownloadController(f.store, f.registry),
+      issued.download.downloadUrl,
+    );
+    const bytes = await drain(file);
+    expect(issued.recordCount).toBe(0);
+    expect(bytes.toString("utf8")).toContain('"recordId","orderId","tripId"');
+    expect(bytes.toString("utf8")).not.toContain("\r\n");
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      issued.manifestHash,
+    );
+  });
+
+  it("keeps signed-link tamper/expiry and absent-artifact errors on the original controller path", async () => {
+    const f = await completed();
+    const issued = await f.service.issueMultiTaxiTripExportDownloadForRead(
+      f.accepted.jobId,
+      agency,
+    );
+    const controller = new ControlledDownloadController(f.store, f.registry);
+    const tampered = new URL(
+      issued.download.downloadUrl,
+      "https://agency.example.test",
+    );
+    tampered.searchParams.set("manifest_hash", "0".repeat(64));
+    await expect(resolveLink(controller, tampered.href)).rejects.toMatchObject({
+      response: { error: { code: "CONTROLLED_DOWNLOAD_SIGNATURE_INVALID" } },
+    });
+    const expired = createControlledDownloadMetadata({
+      kind: "multi-taxi-trip-records",
+      subjectId: issued.download.subjectId,
+      manifestHash: issued.manifestHash,
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+      ttlMinutes: 1,
+    });
+    await expect(
+      resolveLink(controller, expired.downloadUrl),
+    ).rejects.toMatchObject({
+      response: { error: { code: "CONTROLLED_DOWNLOAD_EXPIRED" } },
+    });
+    const absent = createControlledDownloadMetadata({
+      kind: "multi-taxi-trip-records",
+      subjectId: "SIM-absent-artifact",
+      manifestHash: "a".repeat(64),
+    });
+    await expect(
+      resolveLink(controller, absent.downloadUrl),
+    ).rejects.toMatchObject({
+      response: { error: { code: "ARTIFACT_NOT_MATERIALISED" } },
+    });
   });
 });

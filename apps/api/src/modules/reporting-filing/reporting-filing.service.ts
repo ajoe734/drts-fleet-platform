@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   HttpStatus,
+  Inject,
   Injectable,
   OnModuleInit,
   OnApplicationBootstrap,
@@ -68,7 +69,15 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
-import { recordsToCsv } from "../../common/csv";
+import { recordsToCsv, toCsv } from "../../common/csv";
+import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
+  DOCUMENT_ARTIFACT_STORE,
+  InMemoryDocumentArtifactStore,
+  type DocumentArtifactRecord,
+  type DocumentArtifactRebuildRegistry,
+  type DocumentArtifactStore,
+} from "../../common/document-artifacts";
 import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
@@ -388,7 +397,19 @@ export class ReportingFilingService
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly reportingFilingRepository?: ReportingFilingRepository,
-  ) {}
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_STORE)
+    private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
+  ) {
+    documentArtifactRebuildRegistry?.register(
+      "multi-taxi-trip-records",
+      (artifactId, expectedSha256) =>
+        this.rebuildMultiTaxiTripExportArtifact(artifactId, expectedSha256),
+    );
+  }
 
   async onModuleInit() {
     if (!this.reportingFilingRepository) {
@@ -831,6 +852,20 @@ export class ReportingFilingService
     const job = this.requireMultiTaxiTripExportRecord(
       await this.readCommittedReportRecord(jobId),
     );
+    // The original actor/agency ownership check precedes any file production.
+    this.assertMultiTaxiTripExportOwnership(job, access);
+    const bytes = this.multiTaxiTripExportCsv(job);
+    const manifestHash = createHash("sha256").update(bytes).digest("hex");
+    const record = await this.materializeMultiTaxiTripExportArtifact(
+      job,
+      bytes,
+    );
+    if (record.sha256 !== manifestHash)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH",
+        "The stored export does not match this completed job.",
+      );
     return this.issueMultiTaxiTripExportDownloadFrom(
       job,
       access,
@@ -878,10 +913,15 @@ export class ReportingFilingService
       );
     }
 
+    // The existing job artifact hash describes its logical payload. A file
+    // link must instead name the SHA256 of the actual CSV bytes it will serve.
+    const manifestHash = createHash("sha256")
+      .update(this.multiTaxiTripExportCsv(job))
+      .digest("hex");
     const download = createControlledDownloadMetadata({
       kind: "multi-taxi-trip-records",
       subjectId: job.artifact.artifactId,
-      manifestHash: job.artifact.manifestHash,
+      manifestHash,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
       signingSecret: this.downloadSigningSecret,
@@ -896,7 +936,7 @@ export class ReportingFilingService
         newValuesSummary: buildEvidenceAccessAuditSummary(policy, "download", {
           jobId,
           recordCount: metadata.recordCount,
-          manifestHash: job.artifact.manifestHash,
+          manifestHash,
           expiresAt: download.expiresAt,
           ttlMinutes: download.ttlMinutes,
         }),
@@ -909,9 +949,107 @@ export class ReportingFilingService
     return {
       jobId,
       recordCount: metadata.recordCount,
-      manifestHash: job.artifact.manifestHash,
+      manifestHash,
       download,
     };
+  }
+
+  /** Render only the rows captured for this completed export, never live trips. */
+  private multiTaxiTripExportCsv(job: StoredReportJob): Buffer {
+    this.requireMultiTaxiTripExportRecord(job);
+    if (job.status !== "completed" || !job.artifact)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MULTI_TAXI_EXPORT_NOT_READY",
+        "The export is not ready for download.",
+        { jobId: job.jobId, status: job.status },
+      );
+    // JSONB may reorder object keys. Both issuance and a cold replica project
+    // the existing ExportRow schema in the same order before the shared writer.
+    const columns = [
+      "recordId",
+      "orderId",
+      "tripId",
+      "orderNoMasked",
+      "plateNo",
+      "plateNoMasked",
+      "reservedAt",
+      "pickupAt",
+      "dropoffAt",
+      "routeSummary",
+      "routeSource",
+      "distanceMeters",
+      "durationSeconds",
+      "payableFareMinor",
+      "actualFareMinor",
+      "collectedFareMinor",
+      "paymentStatus",
+      "tollMinor",
+      "tollSource",
+      "currency",
+      "farePolicyVersion",
+      "chargingMode",
+      "generatedAt",
+      "retainUntil",
+    ] satisfies readonly (keyof MultiTaxiTripOperationalExportRow)[];
+    const records = job.rows.map((row) => {
+      const source = row as unknown as Record<string, unknown>;
+      return Object.fromEntries(columns.map((key) => [key, source[key]]));
+    });
+    // A zero-record export still has the declared CSV schema, with no fake row.
+    const csv = records.length ? recordsToCsv(records) : toCsv([columns]);
+    return Buffer.from(csv, "utf8");
+  }
+
+  private async materializeMultiTaxiTripExportArtifact(
+    job: StoredReportJob,
+    bytes: Buffer,
+  ): Promise<DocumentArtifactRecord> {
+    const { record } = await this.documentArtifactStore.putIfAbsent({
+      kind: "multi-taxi-trip-records",
+      subjectId: job.artifact!.artifactId,
+      mimeType: "text/csv; charset=utf-8",
+      bytes,
+    });
+    return record;
+  }
+
+  /** Existing controlled-download recovery: exact completed snapshot, no auth bypass. */
+  private async rebuildMultiTaxiTripExportArtifact(
+    artifactId: string,
+    expectedSha256?: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    const stored = this.hasDurableReports()
+      ? await this.reportingFilingRepository!.loadMultiTaxiTripExportJobByArtifactId(
+          artifactId,
+        )
+      : this.reportJobs.find(
+          (job) =>
+            job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
+            job.status === "completed" &&
+            job.artifact?.artifactId === artifactId,
+        );
+    if (
+      !stored ||
+      stored.jobType !== MULTI_TAXI_TRIP_EXPORT_JOB_TYPE ||
+      stored.status !== "completed" ||
+      !stored.multiTaxiTripExport ||
+      stored.artifact?.artifactId !== artifactId
+    )
+      return null;
+    const job = this.cloneStoredReportJob({
+      ...stored,
+      partnerRevenueRows: stored.partnerRevenueRows ?? [],
+      settlementMatrix: stored.settlementMatrix ?? [],
+    });
+    const bytes = this.multiTaxiTripExportCsv(job);
+    // A verified old link must not be restored from different current bytes.
+    if (
+      expectedSha256 &&
+      createHash("sha256").update(bytes).digest("hex") !== expectedSha256
+    )
+      return null;
+    return this.materializeMultiTaxiTripExportArtifact(job, bytes);
   }
 
   /**

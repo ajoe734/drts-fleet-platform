@@ -237,3 +237,44 @@ This spec is not enough to claim "production launched". That claim requires:
 - `support/sidecars/WF-PROD-001-LIVE-EXEC/PH1GC-PROD-001-CLOSEOUT-20260522.md`
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 - `docs/ops/branch-strategy.md` §7
+
+## Agency portal release wiring (candidate; not deployed)
+
+The existing directory-based production rail includes `agency-portal-web` on
+port 3012 through its existing Dockerfile, image matrix and revision/digest
+verification. Staging currently uses a separate inline workflow; this change
+does not add Agency to staging or claim staging inheritance.
+
+Required non-secret configuration references are
+`PROD_GCP_AGENCY_PORTAL_SERVICE` and `PROD_AGENCY_PORTAL_ORIGIN`. Use the actual
+operator-controlled HTTPS origin; no default hostname is prescribed. Include
+that origin in the existing `PROD_AUTH_ALLOWED_ORIGINS`. The API derives
+`AGENCY_INVITATION_ACCEPT_URL_BASE=<agency-origin>/invite`. Register
+`<agency-origin>/api/auth/agency/callback` with the existing OIDC provider used by
+`PROD_OIDC_*`; the ordinary Agency PKCE/callback/session/membership paths are
+unchanged. If the operator enables the Cloud Run `status.url` run.app fallback
+from BUREAU-R13, also include that actual origin in `PROD_AUTH_ALLOWED_ORIGINS`
+and register its `/api/auth/agency/callback` with the same provider; the workflow
+does not provision DNS or provider redirects. The Agency BFF uses the existing
+JWT and BFF state secret references,
+`DRTS_API_URL` and `DRTS_API_AUTH_AUDIENCE`, rather than a new auth mechanism.
+
+BUREAU-R13 gives external agency users a separate non-IAP host. Its existing
+exposure convention is preserved: `PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED`
+defaults to `false`; the operator explicitly sets `true` when publishing the
+agency HTTPS host. A private Agency probe uses the actual Cloud Run `status.url` audience,
+not a staff IAP client. None of the other ten service exposure/ingress or public
+entry policy checks change.
+
+Add `agency-portal-web` to the existing release-smoke config and headers secret:
+probe `/api/auth/session`, with a normal API-issued agency session in the
+`drts_agency_session` cookie. Use actual non-secret session readback expectations
+for `data.active`, `data.identity.realm`, `data.identity.actor_type` and
+`data.identity.agency_id`; do not fabricate a token. Release verification also
+checks same-SHA `/login` and `/invite` pages and the existing anonymous/invalid
+session denial. These are release smoke checks, not a real Google login,
+invitation-mail delivery or full Agency report/export acceptance.
+
+All new operator values, provider redirect registration, real smoke sessions,
+cloud deployment and hosted checks remain pending. This source candidate adds
+no provider values, credentials, endpoint, approval gate or workflow.

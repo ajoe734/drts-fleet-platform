@@ -606,7 +606,7 @@ export class AgencyPortalService {
         // The accepted R09 preview is the only source of closed/overdue
         // counts and also carries the same-batch monthly read model rows.
         const previews =
-          await this.reportingService.previewSixMonthOperationsSummary({
+          await this.reportingService.previewComplaintMonthlyStatistics({
             periodMonthFrom: window.from,
             periodMonthTo: window.to,
           });
