@@ -722,6 +722,7 @@ export function PartnerBookingForm({
                   <label style={fieldStyle}>
                     <span>{t("book.travel.plan.leg")}</span>
                     <select
+                      aria-label={t("book.travel.plan.leg")}
                       value={travelSelection.leg.id}
                       onChange={(event) =>
                         loadTravelPlan(draft.travelPlanDocument, {
@@ -740,6 +741,7 @@ export function PartnerBookingForm({
                   <label style={fieldStyle}>
                     <span>{t("book.travel.plan.batch")}</span>
                     <select
+                      aria-label={t("book.travel.plan.batch")}
                       value={travelSelection.batch.id}
                       onChange={(event) =>
                         loadTravelPlan(draft.travelPlanDocument, {
@@ -759,6 +761,7 @@ export function PartnerBookingForm({
                   <label style={fieldStyle}>
                     <span>{t("book.travel.plan.vehicle")}</span>
                     <select
+                      aria-label={t("book.travel.plan.vehicle")}
                       value={travelSelection.vehicle.id}
                       onChange={(event) =>
                         loadTravelPlan(draft.travelPlanDocument, {
