@@ -74,7 +74,11 @@ function completedReceipt(): ReceiptWire {
   };
 }
 
-function transport(subtype = "travel_agency_transfer", uniqueSessions = false) {
+function transport(
+  subtype = "travel_agency_transfer",
+  uniqueSessions = false,
+  withTourPlan = false,
+) {
   let handoffNumber = 0;
   let principalReadNumber = 0;
   let principalMode: "active" | "inactive" | "error" | "mismatch" = "active";
@@ -121,6 +125,37 @@ function transport(subtype = "travel_agency_transfer", uniqueSessions = false) {
           itineraryLink: "https://travel.example.test/SIM",
           rosterPassengers: ["SIM Alice", "SIM Bob"],
           meetingPoint: "SIM Meeting",
+          ...(withTourPlan
+            ? {
+                guideName: "SIM Actual Guide",
+                guidePhone: "0900000088",
+                viaStops: ["SIM Stop One", "SIM Stop Two"],
+                signage: "SIM tour sign",
+                planSourceKind: "sim",
+                planSourceId: "SIM-persisted-plan",
+                planSourceRevision: "4",
+                planSourceLabel: "SIM imported tour",
+                planGroupSize: 10,
+                planLegId: "SIM-leg-3",
+                planLegLabel: "SIM third leg",
+                planLegIndex: 3,
+                planLegCount: 5,
+                planBatchId: "SIM-batch-2",
+                planBatchLabel: "SIM second batch",
+                planBatchIndex: 2,
+                planBatchCount: 3,
+                planPickupAddress: "SIM declared pickup",
+                planDropoffAddress: "SIM declared dropoff",
+                planWindowStart: "2099-01-01T10:00:00.000Z",
+                planWindowEnd: "2099-01-01T11:00:00.000Z",
+                planVehicleId: "SIM-slot-2",
+                planVehicleLabel: "SIM planned coach",
+                planVehicleSeats: 8,
+                planVehicleCount: 2,
+                planVehicleLabels: ["SIM planned coach", "SIM planned van"],
+                planFareBasis: "included_in_tour",
+              }
+            : {}),
         }
       : subtype === "insurance_replacement_vehicle"
         ? {
@@ -1120,3 +1155,75 @@ describe("normal Partner own coordinate snapshots", () => {
     expect(mismatch).not.toContain("data-position-lat=");
   });
 });
+
+describe("persisted declared tour plan", () => {
+  it.each(["confirmed", "receipt"] as const)(
+    "reads the same source-bound plan in %s without claiming actual fleet allocation",
+    async (screen) => {
+      const api = transport("travel_agency_transfer", false, true);
+      const html = renderToStaticMarkup(
+        await (screen === "confirmed" ? ConfirmedPage : ReceiptPage)(
+          args(
+            screen === "confirmed"
+              ? { bookingId: "booking-SIM-persisted" }
+              : { orderId: "SIM-persisted-order" },
+          ),
+        ),
+      );
+      for (const fact of [
+        "SIM external tour plan",
+        "SIM imported tour",
+        "SIM Actual Guide",
+        "0900000088",
+        "SIM third leg",
+        "SIM second batch",
+        "SIM planned coach",
+        "SIM Stop One",
+        "SIM Stop Two",
+        "SIM tour sign",
+        "SIM Alice",
+        "SIM Bob",
+      ])
+        expect(html).toContain(fact);
+      expect(html).toContain(
+        "This booking covers the selected vehicle service.",
+      );
+      expect(html).toContain("Confirm the driving route with the driver.");
+      expect(html).not.toContain("[object Object]");
+      expect(html).toContain('data-order-id="SIM-persisted-order"');
+      expect(html).toContain("Update trip");
+      expect(api.calls).toContain(
+        "/api/partner/bookings/booking-SIM-persisted",
+      );
+      expect(api.calls).toContain("/api/partner/orders/SIM-persisted-order");
+    },
+  );
+});
+
+it.each(["confirmed", "receipt"] as const)(
+  "shows the manual tour fee arrangement in the actual %s page while retaining real money facts",
+  async (screen) => {
+    const api = transport("travel_agency_transfer");
+    const page =
+      screen === "confirmed"
+        ? await ConfirmedPage(args({ bookingId: "booking-SIM-persisted" }))
+        : await ReceiptPage(args({ orderId: "SIM-persisted-order" }));
+    const html = renderToStaticMarkup(page);
+    expect(html).toContain('data-testid="partner-record-tour-fee"');
+    expect(html).toContain("Included in the tour fee");
+    expect(html).toContain("See the payment record for payment status.");
+    expect(html).toContain("booking-SIM-persisted");
+    expect(html).toContain("SIM-persisted-order");
+    expect(html).toContain("<h2>Quotation</h2><p>NT$45.00</p>");
+    expect(html).toContain("not confirmation of payment");
+    expect(html).not.toContain("SIM imported tour");
+    if (screen === "receipt") {
+      expect(html).toContain(
+        "No passenger electronic payment record was found.",
+      );
+      expect(html).not.toContain("Passenger electronic payment captured");
+    }
+    expect(api.calls).toContain("/api/partner/bookings/booking-SIM-persisted");
+    expect(api.calls).toContain("/api/partner/orders/SIM-persisted-order");
+  },
+);

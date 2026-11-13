@@ -788,7 +788,12 @@ it.each([
         itineraryLink: "https://itinerary.example.invalid/SIM-GROUP-17",
         rosterPassengers: ["SIM團員甲", "SIM團員乙"],
         meetingPoint: "SIM南側集合處",
+        guideName: "SIM metadata-only guide",
+        guidePhone: "SIM metadata-only phone",
+        viaStops: ["SIM規劃博物館", "SIM規劃飯店"],
+        signage: "SIM舉牌文字",
       },
+      onsiteContact: { name: "SIM實際導遊聯絡人", phone: "0900000077" },
     },
     expected: [
       "SIM-GROUP-17",
@@ -796,6 +801,10 @@ it.each([
       "SIM南側集合處",
       "https://itinerary.example.invalid/SIM-GROUP-17",
       "SIM團員甲、SIM團員乙",
+      "領隊／導遊聯絡人 SIM實際導遊聯絡人",
+      "領隊／導遊電話 0900000077",
+      "規劃停靠點（非導航路線） SIM規劃博物館 → SIM規劃飯店",
+      "舉牌文字 SIM舉牌文字",
     ],
   },
   {
@@ -893,6 +902,33 @@ it("normal Driver Trip clears the previous program details when selecting a diff
       (node) => node.props.testID === "driver-partner-fulfillment",
     ),
   ).toHaveLength(0);
+  expect(h.completionRequests).toEqual([]);
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Driver Trip leaves legacy guide contact unavailable instead of using passenger or metadata as a substitute", async () => {
+  const h = programFulfillmentHarness("travel_agency_transfer");
+  Object.assign(h.owned, {
+    onsiteContact: null,
+    partnerBookingDetails: {
+      subtype: "travel_agency_transfer",
+      groupCode: "SIM-LEGACY-GROUP",
+      groupSize: 1,
+      itineraryLink: "https://travel.example.test/SIM-legacy",
+      meetingPoint: "SIM legacy meeting",
+      rosterPassengers: ["SIM Legacy Traveller"],
+      guideName: "SIM metadata-only guide",
+      guidePhone: "0900000099",
+    },
+  });
+  const mounted = await h.mount();
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("SIM-LEGACY-GROUP"),
+  );
+  const panel = text(fulfillmentPanel(mounted));
+  expect(panel).toContain("領隊／導遊聯絡人 未提供");
+  expect(panel).toContain("領隊／導遊電話 未提供");
+  expect(panel).not.toContain("SIM metadata-only guide");
   expect(h.completionRequests).toEqual([]);
   expect(h.unexpected).toEqual([]);
 });

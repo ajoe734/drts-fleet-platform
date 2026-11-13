@@ -3375,6 +3375,36 @@ export type PartnerBookingDetails =
       itineraryLink: string;
       rosterPassengers: string[];
       meetingPoint: string;
+      /** Declared tour facts; optional for existing bookings. Not actual dispatch. */
+      guideName?: string;
+      guidePhone?: string;
+      viaStops?: string[];
+      /** Ordered places selected for this trip, separate from planned text. */
+      routeStops?: AddressPayload[];
+      signage?: string;
+      planSourceKind?: "sim" | "operator_declared";
+      planSourceId?: string;
+      planSourceRevision?: string;
+      planSourceLabel?: string;
+      planGroupSize?: number;
+      planLegId?: string;
+      planLegLabel?: string;
+      planPickupAddress?: string;
+      planDropoffAddress?: string;
+      planLegIndex?: number;
+      planLegCount?: number;
+      planBatchId?: string;
+      planBatchLabel?: string;
+      planWindowStart?: string;
+      planWindowEnd?: string;
+      planBatchIndex?: number;
+      planBatchCount?: number;
+      planVehicleId?: string;
+      planVehicleLabel?: string;
+      planVehicleSeats?: number;
+      planVehicleCount?: number;
+      planVehicleLabels?: string[];
+      planFareBasis?: "included_in_tour";
     }
   | {
       subtype: "insurance_replacement_vehicle";

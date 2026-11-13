@@ -3,9 +3,13 @@ import {
   type AddressPayload,
   type DriverTaskRecord,
   type OwnedOrderRecord,
+  type WaypointRecord,
 } from "@drts/contracts";
 
-export type DriverNavigationTarget = "pickup" | "dropoff";
+export type DriverNavigationTarget =
+  | "pickup"
+  | "dropoff"
+  | `waypoint-${number}`;
 export type DriverNavigationProvider = "apple" | "google" | "system";
 export type DriverNavigationPlatform = "ios" | "android" | "web" | string;
 
@@ -16,6 +20,7 @@ export type DriverNavigationCoordinate = {
 
 export type DriverNavigationStop = {
   target: DriverNavigationTarget;
+  sequence: number | null;
   label: string;
   address: string;
   coordinate: DriverNavigationCoordinate | null;
@@ -37,7 +42,8 @@ export type DriverRouteAuthorityCopy = {
 };
 
 export type DriverTripNavigationModel = {
-  stops: Record<DriverNavigationTarget, DriverNavigationStop>;
+  stops: Record<"pickup" | "dropoff", DriverNavigationStop>;
+  orderedStops: DriverNavigationStop[];
   authority: DriverRouteAuthorityCopy;
   hasPickupCoordinate: boolean;
   hasDropoffCoordinate: boolean;
@@ -363,13 +369,14 @@ export async function openDriverNavigation({
 }
 
 function buildStop(
-  target: DriverNavigationTarget,
+  target: "pickup" | "dropoff",
   address: AddressPayload | null | undefined,
 ): DriverNavigationStop {
   const coordinate = readDriverNavigationCoordinate(address);
 
   return {
     target,
+    sequence: null,
     label: target === "pickup" ? "上車點" : "下車點",
     address:
       address?.address?.trim() ||
@@ -379,6 +386,33 @@ function buildStop(
     geocodeProvider: address?.geocodeProvider ?? null,
     coordinateSource: address?.coordinateSource ?? null,
     coordinateAccuracyM: address?.coordinateAccuracyM ?? null,
+  };
+}
+
+function buildWaypointStop(
+  waypoint: WaypointRecord,
+  index: number,
+  orderPlace?: AddressPayload,
+): DriverNavigationStop {
+  const coordinate = readDriverNavigationCoordinate(waypoint);
+  const matchingPlace =
+    coordinate &&
+    orderPlace?.address === waypoint.address &&
+    orderPlace.lat === waypoint.lat &&
+    orderPlace.lng === waypoint.lng
+      ? orderPlace
+      : null;
+
+  return {
+    target: `waypoint-${index}`,
+    sequence: waypoint.sequence,
+    label: waypoint.label?.trim() || `停靠點 ${index + 1}`,
+    address: waypoint.address?.trim() || "待確認停靠地址",
+    coordinate,
+    coordinateLabel: formatDriverCoordinate(coordinate),
+    geocodeProvider: matchingPlace?.geocodeProvider ?? null,
+    coordinateSource: matchingPlace?.coordinateSource ?? null,
+    coordinateAccuracyM: matchingPlace?.coordinateAccuracyM ?? null,
   };
 }
 
@@ -399,7 +433,7 @@ export function getDriverRouteAuthorityCopy(
       title: "DRTS-owned route",
       badge: "DRTS 可派遣調整",
       description:
-        "DRTS owns this route. Pickup/dropoff coordinates come from the DRTS order snapshot, and dispatch may update the route under DRTS rules.",
+        "DRTS owns this route. Stop coordinates come from the synced DRTS task or order snapshot, and dispatch may update the route under DRTS rules.",
       locked: false,
       degradedHint: null,
     };
@@ -421,11 +455,11 @@ export function getDriverRouteAuthorityCopy(
     badge: routeLocked ? "來源平台路線鎖定" : "來源平台路線",
     description: routeIntent
       ? `DRTS forwards this route from ${task.sourcePlatform}; source platform route intent: ${routeIntent}. Do not imply local route edit authority.`
-      : `DRTS forwards this route from ${task.sourcePlatform}. The source platform owns route authority; DRTS displays the last synced pickup/dropoff coordinates only.`,
+      : `DRTS forwards this route from ${task.sourcePlatform}. The source platform owns route authority; DRTS displays the last synced stop coordinates in source order only.`,
     locked: routeLocked,
     degradedHint:
       routeProvided === false
-        ? "來源平台未提供完整路線 polyline；司機端只顯示最後同步的上下車座標，改路線需聯絡派車台或來源平台。"
+        ? "來源平台未提供完整路線 polyline；司機端只顯示最後同步的停靠座標，改路線需聯絡派車台或來源平台。"
         : null,
   };
 }
@@ -437,19 +471,56 @@ export function buildDriverTripNavigationModel({
   task: DriverTaskRecord | null;
   order: OwnedOrderRecord | null;
 }): DriverTripNavigationModel {
-  const pickup = buildStop("pickup", order?.pickup);
-  const dropoff = buildStop("dropoff", order?.dropoff);
+  const waypoints = task?.waypoints ?? [];
+  const canonicalOrder =
+    task &&
+    !task.sourcePlatform &&
+    order?.orderDomain === "owned" &&
+    order.orderId === task.orderId
+      ? order
+      : null;
+  const routeStops =
+    canonicalOrder?.businessDispatchSubtype === "travel_agency_transfer" &&
+    canonicalOrder.partnerBookingDetails?.subtype === "travel_agency_transfer"
+      ? canonicalOrder.partnerBookingDetails.routeStops
+      : undefined;
+  const sortedWaypoints = task?.sourcePlatform
+    ? waypoints
+    : [...waypoints].sort((left, right) => left.sequence - right.sequence);
+  // A task waypoint list already contains the complete route. Do not append
+  // order endpoints or deduplicate repeated visits to the same place.
+  const orderedStops = waypoints.length
+    ? sortedWaypoints.map((waypoint, index) => {
+        const orderPlace =
+          index === 0
+            ? canonicalOrder?.pickup
+            : index === sortedWaypoints.length - 1
+              ? canonicalOrder?.dropoff
+              : waypoint.sequence === index &&
+                  routeStops?.length === sortedWaypoints.length - 2
+                ? routeStops[index - 1]
+                : undefined;
+        return buildWaypointStop(waypoint, index, orderPlace);
+      })
+    : [
+        buildStop("pickup", order?.pickup),
+        buildStop("dropoff", order?.dropoff),
+      ];
+  const pickup = orderedStops[0] ?? buildStop("pickup", order?.pickup);
+  const dropoff =
+    orderedStops[orderedStops.length - 1] ??
+    buildStop("dropoff", order?.dropoff);
 
   return {
     stops: {
       pickup,
       dropoff,
     },
+    orderedStops,
     authority: getDriverRouteAuthorityCopy(task),
     hasPickupCoordinate: pickup.coordinate !== null,
     hasDropoffCoordinate: dropoff.coordinate !== null,
-    hasNavigableRoute:
-      pickup.coordinate !== null && dropoff.coordinate !== null,
+    hasNavigableRoute: orderedStops.every((stop) => stop.coordinate !== null),
   };
 }
 

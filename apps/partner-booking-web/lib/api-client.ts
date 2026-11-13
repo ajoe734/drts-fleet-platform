@@ -719,6 +719,76 @@ export async function listPartnerBookings(
   );
 }
 
+export type PartnerBookingCollection = {
+  items: BookingRecord[];
+  totalItems: number;
+  pagesRead: number;
+  complete: boolean;
+  issues: Array<
+    "pagination_changed" | "duplicate_booking" | "item_count_mismatch"
+  >;
+};
+
+/** Read every original scoped page; pagination drift keeps the summary partial. */
+export async function listAllPartnerBookings(
+  session: PartnerSessionRecord,
+  currentPage?: TenantBookingsPageRecord,
+): Promise<PartnerBookingCollection> {
+  const pageSize = 20;
+  const first =
+    currentPage?.pagination.page === 1 &&
+    currentPage.pagination.pageSize === pageSize
+      ? currentPage
+      : await listPartnerBookings(session, { page: 1, pageSize });
+  const { totalItems, totalPages } = first.pagination;
+  const items = new Map<string, BookingRecord>();
+  const orderBookings = new Map<string, string>();
+  const issues = new Set<PartnerBookingCollection["issues"][number]>();
+  let pagesRead = 0;
+  const append = (result: TenantBookingsPageRecord, page: number) => {
+    pagesRead += 1;
+    const info = result.pagination;
+    if (
+      info.page !== page ||
+      info.pageSize !== pageSize ||
+      info.totalItems !== totalItems ||
+      info.totalPages !== totalPages ||
+      !Number.isSafeInteger(totalItems) ||
+      totalItems < 0 ||
+      totalPages !== Math.ceil(totalItems / pageSize)
+    ) {
+      issues.add("pagination_changed");
+    }
+    for (const booking of result.items) {
+      if (items.has(booking.bookingId)) issues.add("duplicate_booking");
+      else items.set(booking.bookingId, booking);
+      const previousBooking = orderBookings.get(booking.orderId);
+      if (previousBooking && previousBooking !== booking.bookingId)
+        issues.add("duplicate_booking");
+      orderBookings.set(booking.orderId, booking.bookingId);
+    }
+    const expectedItems = Math.min(
+      pageSize,
+      Math.max(0, totalItems - (page - 1) * pageSize),
+    );
+    if (result.items.length !== expectedItems)
+      issues.add("item_count_mismatch");
+  };
+  append(first, 1);
+  // Freeze the initial page range rather than following an ever-growing list.
+  for (let page = 2; page <= totalPages && issues.size === 0; page += 1) {
+    append(await listPartnerBookings(session, { page, pageSize }), page);
+  }
+  if (items.size !== totalItems) issues.add("item_count_mismatch");
+  return {
+    items: [...items.values()],
+    totalItems,
+    pagesRead,
+    complete: issues.size === 0,
+    issues: [...issues],
+  };
+}
+
 export async function getPartnerConfirmation(
   session: PartnerSessionRecord,
   bookingId: string,

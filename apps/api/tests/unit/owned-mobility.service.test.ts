@@ -7715,6 +7715,9 @@ describe("C032 noncore booking detail persistence", () => {
       details: {
         subtype: "travel_agency_transfer" as const,
         groupCode: "SIM-TOUR-20261111",
+        routeStops: [
+          { address: "SIM persisted stop", lat: 25.04, lng: 121.51 },
+        ],
         groupSize: 2,
         itineraryLink: "https://travel.example.test/itinerary/SIM-TOUR",
         rosterPassengers: ["SIM Tour Leader", "SIM Passenger"],
@@ -8864,5 +8867,115 @@ describe("normal airport booking uses the preview route authority", () => {
     expect(() =>
       service.dispatchOrder(booking.orderId, { mode: "auto" }),
     ).toThrowError(ApiRequestError);
+  });
+});
+
+describe("travel selected places reach the existing dispatch task", () => {
+  it("rejects invalid places and projects the actual canonical pickup, repeated stops and dropoff in order", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-004",
+          vehicleId: "veh-demo-004",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      serviceProductOverrides: {
+        serviceProductType: "travel_agency_transfer",
+        displayName: "SIM selected stops",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        defaultBillingMode: "partner_settlement",
+        defaultProofRequirements: ["photo"],
+      },
+    });
+    const stop = { address: "SIM actual stop", lat: 25.04, lng: 121.51 };
+    const command = {
+      businessDispatchSubtype: "travel_agency_transfer" as const,
+      pickup: { address: "SIM pickup", lat: 25.01, lng: 121.5 },
+      dropoff: { address: "SIM dropoff", lat: 25.06, lng: 121.55 },
+      passenger: { name: "SIM Rider", phone: "0900000000" },
+      reservationWindowStart: defaultReservationWindowStart(),
+      reservationWindowEnd: defaultReservationWindowEnd(),
+      partnerBookingDetails: {
+        subtype: "travel_agency_transfer" as const,
+        groupCode: "SIM-ROUTE",
+        groupSize: 1,
+        itineraryLink: "https://travel.example.test/route",
+        rosterPassengers: ["SIM Rider"],
+        meetingPoint: "SIM pickup",
+        routeStops: [stop, { ...stop }],
+      },
+    };
+    await expect(async () =>
+      service.createTenantBooking(
+        {
+          ...command,
+          partnerBookingDetails: {
+            ...command.partnerBookingDetails,
+            routeStops: [{ ...stop, lat: 91 }],
+          },
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      code: "TRAVEL_ROUTE_STOPS_INVALID",
+      response: {
+        error: {
+          message:
+            "routeStops must contain selected places with valid coordinates",
+        },
+      },
+    });
+    await expect(async () =>
+      service.createTenantBooking(
+        {
+          ...command,
+          businessDispatchSubtype: "insurance_replacement_vehicle",
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      code: "TRAVEL_ROUTE_STOPS_INVALID",
+      response: {
+        error: { message: "routeStops are only available for travel bookings" },
+      },
+    });
+    const booking = await service.createTenantBooking(
+      command,
+      "tenant-demo-001",
+    );
+    const dispatched = await service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatched.dispatchJobId,
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+    });
+    const task = await service.getDriverTask(assignment.taskId);
+    expect(task.routeProvided).toBe(true);
+    expect(
+      task.waypoints.map(({ sequence, address, lat, lng }) => ({
+        sequence,
+        address,
+        lat,
+        lng,
+      })),
+    ).toEqual([
+      { sequence: 0, ...command.pickup },
+      { sequence: 1, ...stop },
+      { sequence: 2, ...stop },
+      { sequence: 3, ...command.dropoff },
+    ]);
+    expect(
+      task.waypoints.every(
+        (point) => point.arrivedAt === null && point.departedAt === null,
+      ),
+    ).toBe(true);
+    expect(task.sourcePlatform).toBeNull();
   });
 });
