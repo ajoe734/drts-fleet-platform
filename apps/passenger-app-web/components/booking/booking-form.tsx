@@ -39,6 +39,8 @@ export interface BookingDraft {
   reviewAddressMode?: "fixed" | "standard";
   /** Always datetime-local, never a UTC ISO value passed into that control. */
   localTime: string;
+  /** The app proposed localTime and keeps it current until the passenger picks one. */
+  localTimeAuto?: boolean;
 }
 const realm = REALM_COLORS.passenger.light;
 const theme = {
@@ -249,7 +251,9 @@ export function BookingForm({
           value={draft.localTime}
           min={earliestBookingTime(settings)}
           disabled={busy}
-          onChange={(event) => patchDraft({ localTime: event.target.value })}
+          onChange={(event) =>
+            patchDraft({ localTime: event.target.value, localTimeAuto: false })
+          }
         />
         <p style={PLAN.muted}>{T.lead(settings.minLeadTimeMinutes)}</p>
       </P5Card>

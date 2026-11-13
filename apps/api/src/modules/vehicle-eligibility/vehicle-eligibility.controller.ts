@@ -24,14 +24,14 @@ export class VehicleEligibilityController {
   }
 
   @Put()
-  updateMatrix(
+  async updateMatrix(
     @Body() command: UpdateVehicleEligibilityMatrixCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.vehicleEligibilityService.updateMatrix(
+        items: await this.vehicleEligibilityService.updateMatrixFromPersistence(
           command,
           {
             actorId: identity?.actorId ?? null,

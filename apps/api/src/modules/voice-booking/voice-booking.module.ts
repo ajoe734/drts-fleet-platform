@@ -37,7 +37,7 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceSessionService } from "./voice-session.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
-import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
+import { CallcenterAssistModule } from "../callcenter-assist/callcenter-assist.module";
 import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
 import { VoiceContactService } from "./voice-contact.service";
 import { VoiceCallbackService } from "./voice-callback.service";
@@ -69,6 +69,7 @@ import {
     IdempotencyModule,
     forwardRef(() => OwnedMobilityModule),
     AuditNotificationModule,
+    CallcenterAssistModule,
   ],
   controllers: [VoiceBookingController, VoiceCallbackController],
   providers: [
@@ -135,7 +136,6 @@ import {
     VoiceDispatchProjectionService,
     VoiceSessionRepository,
     VoiceSessionService,
-    VoiceHandoffQueueService,
     VoiceHandoffService,
     VoiceOperationPolicyService,
     VoiceContactService,
@@ -157,7 +157,7 @@ import {
     VoiceDispatchProjectionService,
     VoiceSessionRepository,
     VoiceSessionService,
-    VoiceHandoffQueueService,
+    CallcenterAssistModule,
     VoiceHandoffService,
     VoiceOperationPolicyService,
     VoiceContactService,

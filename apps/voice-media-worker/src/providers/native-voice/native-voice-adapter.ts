@@ -1,4 +1,5 @@
 import {
+  VOICE_SPOKEN_REPLY_RULES,
   voiceDialogueOutputSchema,
   type VoiceDialogueOutput,
   type VoiceToolProposal,
@@ -125,6 +126,9 @@ export class OpenAiRealtimeFixtureAdapter implements VoiceDialogueProvider {
       output_audio_format: this.profile.outputAudioFormat,
       turn_detection: this.profile.turnDetection,
       tools: DRTS_REALTIME_TOOLS,
+      // CALLCENTER-AI-ASSIST-20261111: same spoken-reply rules as the text
+      // dialogue model, so the comparison candidates behave alike.
+      instructions: VOICE_SPOKEN_REPLY_RULES.join("\n"),
     };
 
     const sessionCreated: RealtimeSessionCreatedEvent = {

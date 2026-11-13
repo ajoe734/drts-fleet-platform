@@ -889,7 +889,9 @@ export default async function DashboardPage() {
     ),
   ]);
 
-  const orders = ordersResponse.data.items;
+  const orders = ordersResponse.data.items.filter(
+    (order) => order.status !== "completed" && order.status !== "cancelled",
+  );
   const dispatchJobs = dispatchJobsResponse.data.items;
   const driverTasks = driverTasksResponse.data.items;
   const vehicles = vehiclesResponse.data.items;

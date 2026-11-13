@@ -301,6 +301,9 @@ function getVisibleStateCode(
   job?: DispatchJobRecord,
   locale: Locale = "zh",
 ) {
+  if (OWNED_TERMINAL_STATUSES.has(order.status)) {
+    return order.status;
+  }
   const queueSemantics = resolveQueueSemantics(order, locale);
   if (queueSemantics.isStatutoryRefusal) {
     return "statutory_refusal";
@@ -355,11 +358,8 @@ const OWNED_TERMINAL_STATUSES = new Set([
   "settled",
 ]);
 
-function isOwnedTerminal(
-  order: OwnedOrderRecord,
-  task: DriverTaskRecord | null,
-) {
-  return OWNED_TERMINAL_STATUSES.has(order.status) || task?.completedAt != null;
+function isOwnedTerminal(order: OwnedOrderRecord) {
+  return OWNED_TERMINAL_STATUSES.has(order.status);
 }
 
 function isForwardedTerminal(order: ForwardedOrderRecord) {
@@ -514,7 +514,7 @@ function getWorkflowStepIndex(
   job: DispatchJobRecord | undefined,
   task: DriverTaskRecord | null,
 ) {
-  if (task?.completedAt || order.status === "completed") {
+  if (order.status === "completed") {
     return 5;
   }
 
@@ -1300,7 +1300,7 @@ function synthesizeOwnedActions(
   candidateCount: number,
   locale: Locale = "zh",
 ): ResourceActionDescriptor[] {
-  if (isOwnedTerminal(order, task)) {
+  if (isOwnedTerminal(order)) {
     // Terminal state — read-only, no dead CTAs (§5.3 state variants).
     return [];
   }
@@ -2144,7 +2144,7 @@ async function renderOwnedWorkspace({
     candidateRows.length,
     locale,
   );
-  const terminal = isOwnedTerminal(order, currentTask);
+  const terminal = isOwnedTerminal(order);
 
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
     { h: "RANK", k: "rankCell", w: 52 },
@@ -2155,13 +2155,19 @@ async function renderOwnedWorkspace({
     { h: tr(locale, "dispatch.detail.score"), k: "score", w: 68, mono: true },
   ];
 
+  // Cancelled or rejected task history is still visible below, but its
+  // timestamps do not describe the current order's delivery progress.
+  const presentationTask =
+    currentTask && !["cancelled", "rejected"].includes(currentTask.status)
+      ? currentTask
+      : null;
   const stepperTimestamps: (string | null)[] = [
     order.createdAt,
     order.createdAt,
     dispatchJob?.status === "matching" ? dispatchJob.updatedAt : null,
-    currentTask?.acceptedAt ?? dispatchJob?.updatedAt ?? null,
-    currentTask?.startedAt ?? null,
-    currentTask?.completedAt ?? null,
+    presentationTask?.acceptedAt ?? dispatchJob?.updatedAt ?? null,
+    presentationTask?.startedAt ?? null,
+    presentationTask?.completedAt ?? null,
   ];
 
   const queueSemantics = resolveQueueSemantics(order, locale);
@@ -2431,7 +2437,7 @@ async function renderOwnedWorkspace({
           <Card theme={theme} title={getSequenceTitle(locale)}>
             {renderSequenceRail(
               locale,
-              getWorkflowStepIndex(order, dispatchJob, currentTask),
+              getWorkflowStepIndex(order, dispatchJob, presentationTask),
               stepperTimestamps,
             )}
           </Card>

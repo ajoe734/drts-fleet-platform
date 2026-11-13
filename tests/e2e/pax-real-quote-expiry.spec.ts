@@ -13,6 +13,7 @@ import {
 } from "./pax-review-shared-order/additional-journey";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { signInOnReviewPage } from "./pax-review-shared-order/rehearsal-passenger";
 import {
   createPlaywrightRideListFetcher,
   readAuthoritativeLinkedOrders,
@@ -254,26 +255,8 @@ test("a real fifteen-minute quote expires without booking, then requotes and can
         expect(response.ok(), await opsPrepareDiagnostic(response)).toBe(true);
       },
     );
-    await step(
-      "Expiry Passenger logs in through actual OTP endpoints",
-      async () => {
-        await pax.goto(`${PAX}/review`);
-        const suffix = (Number(process.env.GITHUB_RUN_ID ?? 1) + 77) % 100;
-        await pax
-          .getByLabel("演練手機", { exact: true })
-          .fill(`09000000${String(suffix).padStart(2, "0")}`);
-        await pax.getByRole("checkbox").check();
-        const requested = pax.waitForResponse(
-          (response) =>
-            new URL(response.url()).pathname ===
-              "/api/passenger-app/review-demo/otp" &&
-            response.request().method() === "POST",
-        );
-        await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
-        expect((await requested).ok()).toBe(true);
-        await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-        await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
-      },
+    await step("Expiry Passenger logs in through actual OTP endpoints", () =>
+      signInOnReviewPage(pax, 77),
     );
     const paymentMethodId = await step(
       "Bind simulated external PSP through the original payment UI",

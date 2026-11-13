@@ -315,6 +315,24 @@ export class ReviewSupplyService {
         tenantId: null,
       },
     );
+    // A rehearsal that stops between its "pause supply" and "restore supply"
+    // steps leaves these drivers offline, and the eligibility assertion below
+    // then refuses every later prepare with DRIVER_NOT_ELIGIBLE_FOR_SERVICE_
+    // PRODUCT (shared dev, 2026-11-13). A prepared rehearsal starts from
+    // available supply, so bring back drivers that are offline; any other work
+    // state (assigned, en route, suspended, ...) is left untouched.
+    const restoredDriverIds: string[] = [];
+    for (const fixture of REVIEW_SUPPLY) {
+      const driver = this.registry
+        .listDrivers()
+        .find((candidate) => candidate.driverId === fixture.driverId);
+      if (driver?.workState !== "offline") continue;
+      await this.registry.updateDriverWorkStateFromPersistence(
+        fixture.driverId,
+        { workState: "available" },
+      );
+      restoredDriverIds.push(fixture.driverId);
+    }
     for (const fixture of REVIEW_SUPPLY)
       this.eligibility.assertDispatchAssignmentEligible(
         {
@@ -342,6 +360,7 @@ export class ReviewSupplyService {
       receiptSource: "合成演練資料・非正式憑證",
       authorizationId: AUTHORIZATION_ID,
       supply: REVIEW_SUPPLY,
+      restoredDriverIds,
     };
   }
 }

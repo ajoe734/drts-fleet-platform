@@ -649,13 +649,17 @@ export function EnterpriseBookingDetail({
   const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
+    let active = true;
     setBooking(null);
     setState(null);
     setNotFound(false);
     getEnterpriseDispatchTenantClient(tenantId ?? enterpriseTenant.id)
       .getBooking(bookingId)
-      .then(setBooking)
+      .then((record) => {
+        if (active) setBooking(record);
+      })
       .catch((error: unknown) => {
+        if (!active) return;
         const classified = classifyEnterpriseBookingFetchError(error);
         if (classified === "not-found") {
           setNotFound(true);
@@ -663,6 +667,9 @@ export function EnterpriseBookingDetail({
         }
         setState(classified);
       });
+    return () => {
+      active = false;
+    };
   }, [bookingId, tenantId]);
 
   const editHref = useMemo(

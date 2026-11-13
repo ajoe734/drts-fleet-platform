@@ -112,11 +112,11 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "65eeeaee7fcac40e5b11ed297fcce4840d2a7ff9618e2dc5e36a9da6c298b60c",
+      "df25090525fb6a8dc3994f2faa4da29aa9bad2f13be8e1a4eb7abb21a1590bda",
     ],
     [
       "run.cjs",
-      "0eb35598d1a03e85d9852c9513da16ada767c84cce263a153b45218e62f5f276",
+      "0066f0089089aeae8be1f514d35ac5eaab9990b92d8ae2e5419eb882929d142a",
     ],
   ]) {
     if (
@@ -191,7 +191,7 @@ function trafficIdentity(data) {
     fail("INSUFFICIENT_OBSERVATION", "TRAFFIC");
 }
 const imageType = str(
-  /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
+  /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|agency-portal-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
 );
 const groupType = str(
   /^https:\/\/www\.googleapis\.com\/compute\/v1\/projects\/drts-prod-devcc-20260825\/regions\/us-central1\/networkEndpointGroups\/[a-z][a-z0-9-]{0,62}$/,
@@ -1124,6 +1124,9 @@ async function collect(env, head, transport) {
   }
   // Keep only LB/NEG observations joined to fixed, configured product services.
   for (const service of plan.services) {
+    // Agency owns a separate non-IAP host; its Run service, revision and IAM
+    // metadata above remain required. Preserve the original ten LB/IAP joins.
+    if (service.id === "agency-portal-web") continue;
     const negs =
       rawLists.negs?.filter(
         (n) =>
@@ -1369,14 +1372,14 @@ function serialize(report) {
     for (const [kind, count] of Object.entries({
       project: 1,
       sql: 1,
-      service: 10,
-      revision: 10,
+      service: TOPOLOGY.length,
+      revision: TOPOLOGY.length,
       job: 1,
       repository: 1,
       images: 1,
       versions: 19,
       account: 2,
-      policy: 10,
+      policy: TOPOLOGY.length,
       iap: 10,
     }))
       if (report.records.filter((r) => r.kind === kind).length < count)

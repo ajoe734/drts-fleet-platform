@@ -20,9 +20,49 @@ const wire = (data: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("Fleet production GET OIDC wire boundary (serializer, no local server)", () => {
+  // Deploy — Dev 2026-11-13: NEXT_PUBLIC_API_URL=/control-plane-proxy is the
+  // browser base; on the server it made every login a 500 "Invalid URL".
+  it("calls the server API URL with the Cloud Run invoker proof, not the browser base", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "/control-plane-proxy");
+    vi.stubEnv("DRTS_API_URL", "https://drts-dev-api-xyz.a.run.app");
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        if (String(url).startsWith("http://metadata.google.internal/"))
+          return new Response("invoker-token");
+        return wire({
+          authorizationUrl: "https://issuer.example.test/authorize",
+          stateToken: "opaque-state",
+        });
+      }),
+    );
+    const login = await GET(request("login"), context("login"));
+    expect(login.status).toBe(307);
+    const metadata = new URL(calls[0]!.url);
+    expect(metadata.searchParams.get("audience")).toBe(
+      "https://drts-dev-api-xyz.a.run.app",
+    );
+    const api = new URL(calls[1]!.url);
+    expect(`${api.origin}${api.pathname}`).toBe(
+      "https://drts-dev-api-xyz.a.run.app/api/auth/partner/login",
+    );
+    expect(api.searchParams.get("redirect_uri")).toBe(
+      `${origin}/api/auth/callback`,
+    );
+    expect(calls[1]!.init?.headers).toMatchObject({
+      "x-serverless-authorization": "Bearer invoker-token",
+    });
+  });
+
   it("keeps opaque state in HttpOnly cookie and exchanges snake_case session for secure cookies and current session", async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(
@@ -101,6 +141,52 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
       context("logout"),
     );
     expect(logout.cookies.get("drts_session")?.value).toBe("");
+  });
+
+  // Deploy — Dev 2026-11-13: behind runtime/web/control-plane-web-proxy.mjs the
+  // child's own URL is http://127.0.0.1:3107. The wrapper supplies the browser
+  // origin, as this app's control-plane-proxy already reads it.
+  it("builds the callback and final redirect from the wrapper's browser origin", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return String(url).includes("partner/login")
+          ? wire({
+              authorizationUrl: "https://issuer.example.test/authorize",
+              stateToken: "opaque-state",
+            })
+          : wire({ accessToken: "signed-session-token" });
+      }),
+    );
+    const loopback = (path: string, cookie?: string) =>
+      new NextRequest(`http://127.0.0.1:3107/api/auth/${path}`, {
+        headers: {
+          "x-drts-runtime-origin": origin,
+          ...(cookie ? { cookie } : {}),
+        },
+      });
+
+    const login = await GET(
+      loopback("login?redirect_uri=%2Ffleet"),
+      context("login"),
+    );
+    expect(new URL(calls[0]!.url).searchParams.get("redirect_uri")).toBe(
+      `${origin}/api/auth/callback`,
+    );
+    const state = login.cookies.get("drts_oidc_state")!;
+    const callback = await GET(
+      loopback(
+        "callback?code=real-code&state=oidc-state",
+        `drts_oidc_state=${encodeURIComponent(state.value)}`,
+      ),
+      context("callback"),
+    );
+    expect(JSON.parse(String(calls[1]!.init?.body))).toMatchObject({
+      callbackUrl: `${origin}/api/auth/callback`,
+    });
+    expect(callback.headers.get("location")).toBe(`${origin}/fleet`);
   });
 
   it("accepts a serialized callback exchange independently of the login reader", async () => {

@@ -317,13 +317,13 @@ export function NativePaymentMethodsScreen({
     try {
       const result = await browser.port.openAction(current.actionUrl);
       if (!live(ticket)) return;
+      await readBack(ticket);
+      if (!live(ticket) || !outstandingRef.current) return;
       if (result.type === "cancelled") {
         setError("已取消驗證，付款結果尚未確認；可重新驗證或查詢。");
         return;
       }
-      await readBack(ticket);
-      if (live(ticket) && outstandingRef.current)
-        setError("驗證已返回，付款結果仍待確認，請重新查詢。");
+      setError("驗證已返回，付款結果仍待確認，請重新查詢。");
     } catch {
       if (live(ticket)) setError("外部驗證未完成，請重新驗證或查詢付款結果。");
     } finally {
@@ -485,17 +485,15 @@ export function NativePaymentMethodsScreen({
         </>
       ) : (
         <>
-          {fields.status === "ready" &&
-            fields.port.kind === "hosted" &&
-            hostedFieldsView !== undefined && (
-              <View testID="payment-hosted-fields">{hostedFieldsView}</View>
-            )}
+          {hostedFieldsView !== undefined && (
+            <View testID="payment-hosted-fields">{hostedFieldsView}</View>
+          )}
           {fields.status === "ready" && fields.port.kind === "synthetic" && (
             <Text style={styles.note}>
               示意資料由模擬介面提供，沒有真實卡片輸入。
             </Text>
           )}
-          {!fieldsReady && (
+          {!fieldsReady && hostedFieldsView === undefined && (
             <Text testID="payment-fields-unavailable" style={styles.note}>
               付款資料收集尚未提供，此步驟略過。
             </Text>

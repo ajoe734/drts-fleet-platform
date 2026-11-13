@@ -146,9 +146,7 @@ function buildBoundaryHarness(options: {
   const reportingRepository = {
     isEnabled: vi.fn(() => true),
     listDailyDispatchRecords: vi.fn(async () => []),
-    listDispatchableSupplySnapshots: vi.fn(
-      async () => options.snapshots ?? [],
-    ),
+    listDispatchableSupplySnapshots: vi.fn(async () => options.snapshots ?? []),
     listMonthlyOperationsSummaries: vi.fn(
       async () => persistedMonthly as never,
     ),
@@ -183,7 +181,10 @@ function buildBoundaryHarness(options: {
 
   const reportingService = new ReportingService(
     { getReportingSnapshot: vi.fn() } as never,
-    { listComplaintCases: vi.fn(() => []), getComplaintTimeline: vi.fn(() => []) } as never,
+    {
+      listComplaintCases: vi.fn(() => []),
+      getComplaintTimeline: vi.fn(() => []),
+    } as never,
     regulatoryRegistryService as never,
     undefined,
     reportingRepository as never,
@@ -343,7 +344,8 @@ describe("BUREAU-R10 Taipei calendar month boundaries, zero vs unknown snapshots
     ).toBeNull();
 
     // Persisted DB read-model record keeps numeric 0 so NOT NULL schema is preserved
-    const persisted = await reportingRepository.listMonthlyOperationsSummaries();
+    const persisted =
+      await reportingRepository.listMonthlyOperationsSummaries();
     expect(persisted[0]).toMatchObject({
       periodMonth: "2026-09",
       validSnapshotCount: 0,
@@ -351,10 +353,12 @@ describe("BUREAU-R10 Taipei calendar month boundaries, zero vs unknown snapshots
     });
 
     // Window spanning 2026-09..2026-10: 2026-09 monthly row is null, 2026-10 monthly row is numeric 0, summary is numeric 0
-    const [twoMonths] = await reportingService.previewSixMonthOperationsSummary({
-      periodMonthFrom: "2026-09",
-      periodMonthTo: "2026-10",
-    });
+    const [twoMonths] = await reportingService.previewSixMonthOperationsSummary(
+      {
+        periodMonthFrom: "2026-09",
+        periodMonthTo: "2026-10",
+      },
+    );
     const sepMonthly = twoMonths!.monthlySummaries!.find(
       (m) => m.periodMonth === "2026-09",
     )!;
@@ -417,5 +421,145 @@ describe("BUREAU-R10 Taipei calendar month boundaries, zero vs unknown snapshots
       from: "2026-10-01",
       to: "2026-11-30",
     });
+  });
+
+  it("loads the default twelve R09 Taipei calendar months in one canonical batch, including an oldest-month complaint", async () => {
+    vi.useFakeTimers();
+    try {
+      // UTC is still October, but the accepted report calendar is November.
+      const now = "2026-10-31T16:30:00.000Z";
+      vi.setSystemTime(new Date(now));
+      const { agencyPortalService, agencyIdentity, reportingRepository } =
+        buildBoundaryHarness({
+          orderCreatedAt: "2025-12-05T02:00:00.000Z",
+          complaintCreatedAt: "2025-12-06T02:00:00.000Z",
+        });
+      const response = await agencyPortalService.listComplaintMonthlyStatistics(
+        agencyIdentity,
+        {},
+        {},
+      );
+      expect(response.items.map((row) => row.periodMonth)).toEqual([
+        "2026-11",
+        "2026-10",
+        "2026-09",
+        "2026-08",
+        "2026-07",
+        "2026-06",
+        "2026-05",
+        "2026-04",
+        "2026-03",
+        "2026-02",
+        "2026-01",
+        "2025-12",
+      ]);
+      expect(
+        response.items.find((row) => row.periodMonth === "2025-12"),
+      ).toMatchObject({
+        complaintCount: 1,
+        complaintsByCategory: { late_arrival: 1 },
+        manual: { createdCount: 1, closedCount: 0, overdueCount: 0 },
+      });
+      expect(
+        response.items.find((row) => row.periodMonth === "2026-11"),
+      ).toMatchObject({
+        complaintCount: 0,
+        manual: { createdCount: 0, closedCount: 0, overdueCount: 0 },
+      });
+      expect(response.statisticsAsOf).toBe(now);
+      expect(response.unavailableMetrics).toEqual([
+        "resolvedCount",
+        "slaBreachCount",
+      ]);
+      expect(
+        reportingRepository.loadDailyDispatchRecordSource,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        reportingRepository.loadComplaintStatisticsSource,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        reportingRepository.replaceMonthlyOperationsSummaries,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        reportingRepository.listMonthlyOperationsSummaries,
+      ).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an explicit twelve-month R09 window and its newest-month complaint instead of trimming it to six months", async () => {
+    const { agencyPortalService, agencyIdentity } = buildBoundaryHarness({});
+    const response = await agencyPortalService.listComplaintMonthlyStatistics(
+      agencyIdentity,
+      { periodMonthFrom: "2025-12", periodMonthTo: "2026-11" },
+      {},
+    );
+    expect(response.items).toHaveLength(12);
+    expect(response.items[0]?.periodMonth).toBe("2026-11");
+    expect(response.items.at(-1)?.periodMonth).toBe("2025-12");
+    expect(
+      response.items.find((row) => row.periodMonth === "2026-11"),
+    ).toMatchObject({
+      complaintCount: 1,
+      complaintsByCategory: { late_arrival: 1 },
+      manual: { createdCount: 1 },
+    });
+    expect(
+      response.items.find((row) => row.periodMonth === "2025-12"),
+    ).toMatchObject({
+      complaintCount: 0,
+      manual: { createdCount: 0 },
+    });
+  });
+
+  it("continues to reject a thirteen-month R09 request before reading or rebuilding the report", async () => {
+    const { agencyPortalService, agencyIdentity, reportingRepository } =
+      buildBoundaryHarness({});
+    await expect(
+      agencyPortalService.listComplaintMonthlyStatistics(
+        agencyIdentity,
+        { periodMonthFrom: "2025-11", periodMonthTo: "2026-11" },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AGENCY_REPORT_WINDOW_TOO_LARGE" });
+    expect(
+      reportingRepository.loadDailyDispatchRecordSource,
+    ).not.toHaveBeenCalled();
+    expect(
+      reportingRepository.replaceMonthlyOperationsSummaries,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("preserves R10 six-month reads and rejects seven-month R10 windows through both existing services", async () => {
+    const { reportingService, agencyPortalService, agencyIdentity } =
+      buildBoundaryHarness({});
+    const summaries = await reportingService.previewSixMonthOperationsSummary({
+      periodMonthFrom: "2026-06",
+      periodMonthTo: "2026-11",
+    });
+    expect(
+      summaries[0]?.monthlySummaries?.map((row) => row.periodMonth),
+    ).toEqual([
+      "2026-06",
+      "2026-07",
+      "2026-08",
+      "2026-09",
+      "2026-10",
+      "2026-11",
+    ]);
+    await expect(
+      reportingService.previewSixMonthOperationsSummary({
+        periodMonthFrom: "2026-05",
+        periodMonthTo: "2026-11",
+      }),
+    ).rejects.toMatchObject({ code: "REPORT_WINDOW_TOO_LARGE" });
+    await expect(
+      agencyPortalService.previewOperationsSummary(
+        agencyIdentity,
+        { periodMonthFrom: "2026-05", periodMonthTo: "2026-11" },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AGENCY_REPORT_WINDOW_TOO_LARGE" });
   });
 });

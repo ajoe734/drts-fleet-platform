@@ -661,3 +661,75 @@ describe("VoiceHandoffOnlyToolPorts", () => {
     expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
   });
 });
+
+describe("VoiceBookingController.recordControlEvent: press 0 for a human (CALLCENTER-AI-ASSIST-20261111)", () => {
+  const keypress = (digit: string) => ({
+    source: "media_worker",
+    sourceEventId: `evt-${digit}`,
+    occurredAt: "2026-07-24T09:00:00.000Z",
+    sequence: 2,
+    mediaEpoch: 1,
+    eventType: "dtmf",
+    payload: { digit },
+  });
+
+  it("hands an AI-owned call to a human when 0 is pressed", async () => {
+    const recordControlEvent = vi.fn(async () => ({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 2,
+      session: session({ controlOwner: "ai" }),
+    }));
+    const initiateHandoff = vi.fn(async () => ({}));
+    const { controller } = buildController({
+      guardAuthenticate: vi.fn(async () => claims({ leaseEpoch: 1 })),
+      recordControlEvent,
+      initiateHandoff,
+      getSession: vi.fn(async () => session({ controlOwner: "coordinator" })),
+    });
+    const result = await controller.recordControlEvent(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      keypress("0"),
+    );
+    expect(initiateHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        voiceSessionId: session().voiceSessionId,
+        reason: "customer_requested",
+      }),
+    );
+    expect(result.data).toMatchObject({
+      humanHandoffRequested: true,
+      session: expect.objectContaining({ controlOwner: "coordinator" }),
+    });
+  });
+
+  it("ignores other digits, replays and calls a human already holds", async () => {
+    for (const [digit, deduped, owner] of [
+      ["1", false, "ai"],
+      ["0", true, "ai"],
+      ["0", false, "human"],
+    ] as const) {
+      const initiateHandoff = vi.fn(async () => ({}));
+      const { controller } = buildController({
+        guardAuthenticate: vi.fn(async () => claims({ leaseEpoch: 1 })),
+        recordControlEvent: vi.fn(async () => ({
+          deduped,
+          applied: !deduped,
+          gap: false,
+          appliedThroughSequence: 2,
+          session: session({ controlOwner: owner }),
+        })),
+        initiateHandoff,
+      });
+      const result = await controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        keypress(digit),
+      );
+      expect(initiateHandoff).not.toHaveBeenCalled();
+      expect(result.data).not.toHaveProperty("humanHandoffRequested");
+    }
+  });
+});

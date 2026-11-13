@@ -279,6 +279,20 @@ describe("operational browser journeys manifest guard", () => {
       tokenEnv: "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
       templateVariable: "tenantSessionToken",
     });
+    // The shared-dev acceptance tenant has no active cost center, so since
+    // 2026-11-13 /bookings/new hides that field and the review link is enabled
+    // without it. Filling `#enterprise-booking-cost-center` there would wait
+    // for a control that is not rendered.
+    for (const operation of enterpriseJourney.operations) {
+      const steps: Array<{ kind: string; control?: string }> =
+        operation.before ?? [];
+      expect(
+        steps.some(
+          (step) => step.control === "#enterprise-booking-cost-center",
+        ),
+        `${operation.name} must not wait for the hidden cost-center field`,
+      ).toBe(false);
+    }
 
     const referralJourney = manifest.journeys.find(
       (journey: { id: string }) =>

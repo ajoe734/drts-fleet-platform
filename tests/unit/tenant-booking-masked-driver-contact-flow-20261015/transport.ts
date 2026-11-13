@@ -95,6 +95,16 @@ export async function signedTransport(
             headers.get("x-tenant-id") ?? "",
           ),
         );
+      if (method === "GET" && url.pathname === "/api/tenant/bookings") {
+        return Response.json(
+          await x.controller.listTenantBookings(
+            Object.fromEntries(url.searchParams),
+            request.identity ?? null,
+            headers.get("x-tenant-id") ?? undefined,
+            headers.get("x-request-id") ?? undefined,
+          ),
+        );
+      }
       if (url.pathname === "/api/tenant/dashboard") {
         const b = x.service.getTenantBooking(tenantId, "contact-booking");
         return Response.json({
