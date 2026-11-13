@@ -147,6 +147,144 @@ function buildCanonicalMetadataFixture() {
 }
 
 describe("driver navigation model", () => {
+  it("advances each canonical repeated-place visit only from persisted arrival/departure timestamps", () => {
+    const { task, order } = buildCanonicalMetadataFixture();
+    task.status = "on_trip";
+    task.waypoints.sort((left, right) => left.sequence - right.sequence);
+    task.waypoints[0]!.arrivedAt = "2026-11-13T00:00:00.000Z";
+    task.waypoints[0]!.departedAt = "2026-11-13T00:01:00.000Z";
+    for (const [sequence, action] of [
+      [1, "arrived"],
+      [1, "depart"],
+      [2, "arrived"],
+      [2, "depart"],
+      [3, "arrived"],
+    ] as const) {
+      const before = JSON.stringify({ task, order });
+      const progress = buildDriverTripNavigationModel({
+        task,
+        order,
+      }).waypointProgress;
+      expect(progress).toMatchObject({
+        required: true,
+        complete: false,
+        unavailable: false,
+        next: { sequence, action },
+      });
+      expect(progress.next?.stop.address).toBe(
+        task.waypoints[sequence]!.address,
+      );
+      expect(JSON.stringify({ task, order })).toBe(before);
+      task.waypoints[sequence]![
+        action === "arrived" ? "arrivedAt" : "departedAt"
+      ] = "2026-11-13T00:02:00.000Z";
+    }
+    expect(
+      buildDriverTripNavigationModel({ task, order }).waypointProgress,
+    ).toEqual({
+      required: true,
+      complete: true,
+      unavailable: false,
+      next: null,
+    });
+    expect(task.waypoints[1]!.lat).toBe(task.waypoints[2]!.lat);
+    expect(task.waypoints[1]!.lng).toBe(task.waypoints[2]!.lng);
+    expect(task.waypoints[3]!.departedAt).toBeNull();
+  });
+
+  it("does not issue local waypoint actions for forwarded, unrelated, nontravel or stopless orders", () => {
+    const { task, order } = buildCanonicalMetadataFixture();
+    task.status = "on_trip";
+    for (const [candidateTask, candidateOrder] of [
+      [{ ...task, sourcePlatform: "SIM-platform" }, order],
+      [{ ...task, sourcePlatform: "" }, order],
+      [task, { ...order, orderId: "different-order" }],
+      [
+        task,
+        { ...order, businessDispatchSubtype: "insurance_replacement_vehicle" },
+      ],
+      [
+        task,
+        {
+          ...order,
+          partnerBookingDetails: {
+            ...order.partnerBookingDetails!,
+            subtype: "insurance_replacement_vehicle",
+          },
+        },
+      ],
+      [
+        task,
+        {
+          ...order,
+          partnerBookingDetails: {
+            ...order.partnerBookingDetails!,
+            routeStops: [],
+          },
+        },
+      ],
+    ] as Array<[DriverTaskRecord, OwnedOrderRecord]>) {
+      expect(
+        buildDriverTripNavigationModel({
+          task: candidateTask,
+          order: candidateOrder,
+        }).waypointProgress,
+      ).toEqual({
+        required: false,
+        complete: true,
+        unavailable: false,
+        next: null,
+      });
+    }
+  });
+
+  it("blocks guessed completion and future-stop actions when canonical waypoint readback is incomplete or inconsistent", () => {
+    for (const issue of [
+      "missing",
+      "duplicate-sequence",
+      "pickup-not-started",
+      "future-arrival",
+    ] as const) {
+      const { task, order } = buildCanonicalMetadataFixture();
+      task.status = "on_trip";
+      task.waypoints.sort((left, right) => left.sequence - right.sequence);
+      task.waypoints[0]!.arrivedAt = "2026-11-13T00:00:00.000Z";
+      task.waypoints[0]!.departedAt = "2026-11-13T00:01:00.000Z";
+      if (issue === "missing") task.waypoints.splice(1, 1);
+      if (issue === "duplicate-sequence") task.waypoints[2]!.sequence = 1;
+      if (issue === "pickup-not-started") task.waypoints[0]!.departedAt = null;
+      if (issue === "future-arrival")
+        task.waypoints[2]!.arrivedAt = "2026-11-13T00:02:00.000Z";
+      expect(
+        buildDriverTripNavigationModel({ task, order }).waypointProgress,
+      ).toEqual({
+        required: true,
+        complete: false,
+        unavailable: true,
+        next: null,
+      });
+    }
+  });
+
+  it("keeps pickup lifecycle distinct from on-trip waypoint controls", () => {
+    const { task, order } = buildCanonicalMetadataFixture();
+    for (const status of [
+      "accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+    ] as const) {
+      task.status = status;
+      expect(
+        buildDriverTripNavigationModel({ task, order }).waypointProgress,
+      ).toEqual({
+        required: true,
+        complete: false,
+        unavailable: false,
+        next: null,
+      });
+    }
+  });
+
   it("preserves matching owned order coordinate metadata at each canonical position, including repeated visits", () => {
     const { task, order } = buildCanonicalMetadataFixture();
     const before = JSON.stringify({ task, order });

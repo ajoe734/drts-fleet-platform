@@ -3595,6 +3595,8 @@ export interface DriverRejectTaskCommand {
 
 export interface DriverDepartTaskCommand {
   departedAt: string;
+  /** Owned travel intermediate visit; absent retains the pickup-bound departure. */
+  waypointSequence?: number;
   currentLocation?: {
     lat: number;
     lng: number;
@@ -3603,6 +3605,8 @@ export interface DriverDepartTaskCommand {
 
 export interface DriverArrivedPickupCommand {
   arrivedAt: string;
+  /** Owned travel intermediate/destination visit; absent retains pickup arrival. */
+  waypointSequence?: number;
 }
 
 export interface DriverStartTaskCommand {

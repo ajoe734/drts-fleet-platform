@@ -48,6 +48,16 @@ export type DriverTripNavigationModel = {
   hasPickupCoordinate: boolean;
   hasDropoffCoordinate: boolean;
   hasNavigableRoute: boolean;
+  waypointProgress: {
+    required: boolean;
+    complete: boolean;
+    unavailable: boolean;
+    next: {
+      sequence: number;
+      action: "arrived" | "depart";
+      stop: DriverNavigationStop;
+    } | null;
+  };
 };
 
 export type DriverNavigationUrlCandidate = {
@@ -474,7 +484,7 @@ export function buildDriverTripNavigationModel({
   const waypoints = task?.waypoints ?? [];
   const canonicalOrder =
     task &&
-    !task.sourcePlatform &&
+    task.sourcePlatform == null &&
     order?.orderDomain === "owned" &&
     order.orderId === task.orderId
       ? order
@@ -511,6 +521,85 @@ export function buildDriverTripNavigationModel({
     orderedStops[orderedStops.length - 1] ??
     buildStop("dropoff", order?.dropoff);
 
+  const waypointProgress: DriverTripNavigationModel["waypointProgress"] = {
+    required: Boolean(routeStops?.length),
+    complete: !routeStops?.length,
+    unavailable: false,
+    next: null,
+  };
+  if (waypointProgress.required) {
+    const places = [
+      canonicalOrder?.pickup,
+      ...(routeStops ?? []),
+      canonicalOrder?.dropoff,
+    ];
+    const routeMatches =
+      sortedWaypoints.length === places.length &&
+      sortedWaypoints.every((waypoint, index) => {
+        const place = places[index];
+        return (
+          waypoint.sequence === index &&
+          place != null &&
+          waypoint.address === place.address &&
+          waypoint.lat === place.lat &&
+          waypoint.lng === place.lng
+        );
+      });
+    waypointProgress.unavailable = !routeMatches;
+    if (routeMatches && task?.status === "on_trip") {
+      const pickupWaypoint = sortedWaypoints[0];
+      if (!pickupWaypoint?.arrivedAt || !pickupWaypoint.departedAt) {
+        waypointProgress.unavailable = true;
+      } else {
+        for (let index = 1; index < sortedWaypoints.length; index += 1) {
+          const waypoint = sortedWaypoints[index]!;
+          const last = index === sortedWaypoints.length - 1;
+          if (
+            (!waypoint.arrivedAt && waypoint.departedAt) ||
+            (last && waypoint.departedAt)
+          ) {
+            waypointProgress.unavailable = true;
+            break;
+          }
+          const action = !waypoint.arrivedAt
+            ? "arrived"
+            : !last && !waypoint.departedAt
+              ? "depart"
+              : null;
+          if (action) {
+            if (
+              sortedWaypoints
+                .slice(index + 1)
+                .some((later) => later.arrivedAt || later.departedAt)
+            ) {
+              waypointProgress.unavailable = true;
+            } else {
+              waypointProgress.next = {
+                sequence: waypoint.sequence,
+                action,
+                stop: orderedStops[index]!,
+              };
+            }
+            break;
+          }
+          if (last) waypointProgress.complete = true;
+        }
+      }
+    } else if (
+      routeMatches &&
+      (task?.status === "proof_pending" || task?.status === "completed")
+    ) {
+      waypointProgress.complete = sortedWaypoints.every(
+        (waypoint, index) =>
+          Boolean(waypoint.arrivedAt) &&
+          (index === sortedWaypoints.length - 1
+            ? waypoint.departedAt == null
+            : Boolean(waypoint.departedAt)),
+      );
+      waypointProgress.unavailable = !waypointProgress.complete;
+    }
+  }
+
   return {
     stops: {
       pickup,
@@ -521,6 +610,7 @@ export function buildDriverTripNavigationModel({
     hasPickupCoordinate: pickup.coordinate !== null,
     hasDropoffCoordinate: dropoff.coordinate !== null,
     hasNavigableRoute: orderedStops.every((stop) => stop.coordinate !== null),
+    waypointProgress,
   };
 }
 

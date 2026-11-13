@@ -185,6 +185,14 @@ export const driverStrings = {
     title: "行程作業台",
     subtitle: "同步目前指派的行程與狀態",
     routeLocked: "路線鎖定",
+    waypointVisits: {
+      title: "停靠站進度",
+      arrive: "抵達",
+      depart: "離開",
+      hint: "依路線順序回報每站抵達與離站，最後抵達下車點後才能完成行程。",
+      unavailable: "停靠站資料尚未完整同步，請重新整理後再回報。",
+      completionBlocked: "請先依序完成所有停靠站的抵達與離站回報。",
+    },
     fulfillment: {
       title: "服務行程資訊",
       notProvided: "未提供",
