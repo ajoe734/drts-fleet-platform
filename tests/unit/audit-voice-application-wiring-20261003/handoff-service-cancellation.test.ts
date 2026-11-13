@@ -85,7 +85,7 @@ describe("R7 actual handoff service mutation boundary", () => {
     expect(result).toEqual([{ status: "queued", handoffId: expect.any(String) }]);
     expect(h.repository.casUpdateSessionControl).toHaveBeenCalledTimes(1);
     expect(h.row()).toMatchObject({ controlOwner: "coordinator", leaseEpoch: 3, sessionVersion: 5 });
-    expect(h.queue.listQueuedItems()).toHaveLength(1);
+    expect(await h.queue.listQueuedItems()).toHaveLength(1);
   });
 
   it("pre-aborted turn starts no service read or mutation", async () => {
@@ -93,7 +93,7 @@ describe("R7 actual handoff service mutation boundary", () => {
     await expect(h.gateway.execute(output)).rejects.toThrow("voice_aborted");
     expect(h.repository.findSessionById).not.toHaveBeenCalled();
     expect(h.repository.casUpdateSessionControl).not.toHaveBeenCalled();
-    expect(h.queue.listQueuedItems()).toEqual([]);
+    expect(await h.queue.listQueuedItems()).toEqual([]);
   });
 
   it.each(["caller", "deadline"] as const)("%s abort during the INNER service read cannot initiate a later CAS", async (kind) => {
@@ -109,7 +109,7 @@ describe("R7 actual handoff service mutation boundary", () => {
     h.release.resolve();
     await expect(settled).rejects.toBeDefined();
     expect(h.repository.casUpdateSessionControl).not.toHaveBeenCalled();
-    expect(h.queue.listQueuedItems()).toEqual([]);
+    expect(await h.queue.listQueuedItems()).toEqual([]);
     expect(h.row()).toMatchObject({ controlOwner: "ai", leaseEpoch: 2, sessionVersion: 4 });
   });
 
@@ -125,7 +125,7 @@ describe("R7 actual handoff service mutation boundary", () => {
     h.mutate(changed); h.release.resolve();
     await rejected;
     expect(h.repository.casUpdateSessionControl).not.toHaveBeenCalled();
-    expect(h.queue.listQueuedItems()).toEqual([]);
+    expect(await h.queue.listQueuedItems()).toEqual([]);
   });
 
   it("does not pretend cancellation rolls back a CAS already accepted by storage", async () => {
@@ -139,6 +139,6 @@ describe("R7 actual handoff service mutation boundary", () => {
     h.release.resolve();
     await expect(settled).resolves.toMatchObject({ session: { sessionVersion: 5 }, queueItem: { status: "queued" } });
     expect(h.repository.casUpdateSessionControl).toHaveBeenCalledTimes(1);
-    expect(h.queue.listQueuedItems()).toHaveLength(1);
+    expect(await h.queue.listQueuedItems()).toHaveLength(1);
   });
 });

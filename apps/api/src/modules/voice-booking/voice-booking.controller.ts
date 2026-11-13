@@ -47,6 +47,10 @@ import {
 } from "./voice-session.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
+import {
+  handOffOnKeypress,
+  isHumanHandoffKeypress,
+} from "./voice-dtmf-handoff";
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceToolGatewayService } from "./voice-tool-gateway.service";
 import { VoiceHandoffOnlyToolPorts } from "./voice-handoff-tool-ports";
@@ -54,7 +58,11 @@ import { VoiceBookingDraftService } from "./voice-booking-draft.service";
 import { VoiceConfirmationService } from "./voice-confirmation.service";
 import { VoiceContactService } from "./voice-contact.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
-import { VoiceDomainToolPorts } from "./voice-domain-tool-ports";
+import {
+  VoiceDomainToolPorts,
+  type VoicePickupHints,
+} from "./voice-domain-tool-ports";
+import { CallcenterFrequentPlacesService } from "../callcenter-assist/frequent-places.service";
 import { GeoService } from "../geo/geo.service";
 import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 
@@ -93,7 +101,21 @@ export class VoiceBookingController {
     private readonly voiceBookingDraftService?: VoiceBookingDraftService,
     @Optional()
     private readonly voiceConfirmationService?: VoiceConfirmationService,
+    @Optional()
+    private readonly frequentPlaces?: CallcenterFrequentPlacesService,
   ) {}
+
+  /** CALLCENTER-AI-ASSIST-20261111: frequent pickups of the call's asserted
+   * caller ID, used only to order address candidates. */
+  private pickupHints(): VoicePickupHints | undefined {
+    const places = this.frequentPlaces;
+    const sessions = this.voiceSessionRepository;
+    if (!places || !sessions) return undefined;
+    return async (voiceSessionId) =>
+      places.forPhoneBestEffort(
+        await sessions.findAssertedCallerPhone(voiceSessionId),
+      );
+  }
 
   /**
    * `voiceCapabilityService`/`voiceCapabilityGuard`/`voiceSessionService`/
@@ -596,13 +618,41 @@ export class VoiceBookingController {
       payload: body.payload,
       payloadRef: body.payloadRef ?? null,
     });
+    // CALLCENTER-AI-ASSIST-20261111: pressing 0 asks for a human at any
+    // point of an AI-handled call. A replayed (deduped) key press does not
+    // transfer twice.
+    let session = result.session;
+    let humanHandoffRequested = false;
+    if (
+      !result.deduped &&
+      this.voiceHandoffService &&
+      isHumanHandoffKeypress(body.eventType, body.payload)
+    ) {
+      humanHandoffRequested = await handOffOnKeypress(
+        this.voiceHandoffService,
+        result.session,
+        (id) => voiceSessionService.getSession(id).catch(() => null),
+        (error) =>
+          console.warn(
+            `[voice-booking] key-press handoff failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+      );
+      if (humanHandoffRequested) {
+        session = await voiceSessionService
+          .getSession(sessionId)
+          .catch(() => result.session);
+      }
+    }
     return toApiSuccessEnvelope(
       {
         deduped: result.deduped,
         applied: result.applied,
         gap: result.gap,
         appliedThroughSequence: result.appliedThroughSequence,
-        session: result.session,
+        session,
+        // Present only when this key press transferred the call, so the
+        // acknowledgement keeps its existing shape otherwise.
+        ...(humanHandoffRequested ? { humanHandoffRequested: true } : {}),
       },
       requestId,
     );
@@ -690,6 +740,7 @@ export class VoiceBookingController {
               credential: String(headers.authorization ?? ""),
             }
           : undefined,
+        this.pickupHints(),
       ),
       {
         headers,

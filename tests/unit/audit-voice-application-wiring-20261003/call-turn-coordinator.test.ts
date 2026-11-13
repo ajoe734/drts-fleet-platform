@@ -148,7 +148,7 @@ const EMPTY_FINAL_OUTPUT = {
 };
 
 describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", () => {
-  it("runs a real turn for a plain greeting with no tools and speaks the real collection prompt", async () => {
+  it("runs a real turn for a plain greeting with no tools and speaks the model's checked reply", async () => {
     const coordinator = new VoiceCallTurnCoordinator(
       () => new OpenAiRealtimeFixtureAdapter(),
     );
@@ -156,18 +156,15 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     const attachment = coordinator.attach("sess-1");
 
     // An empty transcript matches none of the fixture's intent branches, so
-    // it proposes no tools (terminal: "turn_complete") and the engine falls
-    // through to VoiceDialogueState's own collection prompt for a fresh,
-    // slot-less session -- asking for the pickup location, not a generic
-    // menu prompt (that only fires for intent "unknown", which this
-    // fixture never produces).
+    // it proposes no tools (terminal: "turn_complete"). Since
+    // CALLCENTER-AI-ASSIST-20261111 the model's own reply is spoken when it
+    // passes the reply guard (it asks for the pickup and states no facts);
+    // the fixed collection prompt is only the fallback.
     coordinator.handle(attachment, finalSegment(""), speaker);
     await flush();
 
     expect(speaker.calls).toHaveLength(1);
-    expect(speaker.calls[0]!.text).toBe(
-      "請說明上車地點的縣市、道路與門牌或入口。",
-    );
+    expect(speaker.calls[0]!.text).toBe("您好，請問您今天想從哪裡出發？");
     expect(speaker.calls[0]!.languageCode).toBe("cmn-TW");
   });
 
@@ -186,7 +183,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     await flush();
 
     expect(speaker.calls).toHaveLength(1);
-    expect(speaker.calls[0]!.text).toBe("已停止叫車資料蒐集。");
+    expect(speaker.calls[0]!.text).toBe("好的，現在幫您轉接客服人員，請稍候。");
 
     // Handoff is terminal: a second final for the same session must not
     // re-run collection or re-propose tools -- VoiceDialogueEngine.turn
@@ -248,7 +245,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     );
     await flush();
     expect(speaker.calls).toHaveLength(1);
-    expect(speaker.calls[0]!.text).toBe("已停止叫車資料蒐集。");
+    expect(speaker.calls[0]!.text).toBe("好的，現在幫您轉接客服人員，請稍候。");
 
     coordinator.release(firstAttachment);
 
@@ -259,9 +256,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     coordinator.handle(secondAttachment, finalSegment(""), speaker);
     await flush();
     expect(speaker.calls).toHaveLength(2);
-    expect(speaker.calls[1]!.text).toBe(
-      "請說明上車地點的縣市、道路與門牌或入口。",
-    );
+    expect(speaker.calls[1]!.text).toBe("您好，請問您今天想從哪裡出發？");
   });
 
   /**
@@ -395,9 +390,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     coordinator.handle(replacementAttachment, finalSegment(""), speaker);
     await flush();
     expect(speaker.calls).toHaveLength(1);
-    expect(speaker.calls[0]!.text).toBe(
-      "請說明上車地點的縣市、道路與門牌或入口。",
-    );
+    expect(speaker.calls[0]!.text).toBe("您好，請問您今天想從哪裡出發？");
   });
 
   /**

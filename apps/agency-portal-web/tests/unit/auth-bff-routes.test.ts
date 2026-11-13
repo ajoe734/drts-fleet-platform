@@ -106,6 +106,84 @@ describe("Agency auth BFF route handlers", () => {
     });
   });
 
+  it("keeps the hosted localhost invitation callback on the browser origin", async () => {
+    const browserOrigin = "http://localhost:3212";
+    const apiOrigin = "http://127.0.0.1:3141";
+    process.env.DRTS_API_URL = apiOrigin;
+    const request = new NextRequest(
+      `${browserOrigin}/api/auth/agency/login?token=ai_hosted_invitation`,
+    );
+    expect(request.nextUrl.origin).toBe(browserOrigin);
+    const callbackUrl = `${browserOrigin}/api/auth/agency/callback`;
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          authorization_url: `https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=${encodeURIComponent(callbackUrl)}`,
+          state: "hosted-state",
+          state_token: "hosted-state-token",
+        },
+      }),
+    );
+    global.fetch = fetchMock;
+
+    const response = await authGet(request, authContext("agency", "login"));
+
+    expect(response.status).toBe(307);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${apiOrigin}/api/auth/agency/invitation-login`,
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      invitationToken: "ai_hosted_invitation",
+      redirectUri: callbackUrl,
+    });
+    const authorization = new URL(response.headers.get("location")!);
+    expect(
+      new URL(authorization.searchParams.get("redirect_uri")!).origin,
+    ).toBe(browserOrigin);
+    expect(setCookies(response)).toContain(`${AGENCY_OIDC_STATE_COOKIE_NAME}=`);
+  });
+
+  it("exposes an API rejection when a numeric-loopback browser origin normalizes to localhost", async () => {
+    const browserOrigin = "http://127.0.0.1:3212";
+    const apiOrigin = "http://127.0.0.1:3141";
+    process.env.DRTS_API_URL = apiOrigin;
+    const request = new NextRequest(
+      `${browserOrigin}/api/auth/agency/login?token=ai_hosted_invitation`,
+    );
+    expect(request.nextUrl.origin).toBe("http://localhost:3212");
+    expect(request.nextUrl.origin).not.toBe(browserOrigin);
+    // Only the API HTTP boundary is stubbed. Its existing exact-origin rule
+    // is inspected separately; this case verifies Next normalization and the
+    // real BFF's propagation of that API denial, not a new allowlist rule.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ error: { code: "AUTH_SESSION_EXCHANGE_DENIED" } }, 400),
+      );
+    global.fetch = fetchMock;
+
+    const response = await authGet(request, authContext("agency", "login"));
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${apiOrigin}/api/auth/agency/invitation-login`,
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      invitationToken: "ai_hosted_invitation",
+      redirectUri: "http://localhost:3212/api/auth/agency/callback",
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "AUTH_SESSION_EXCHANGE_DENIED",
+    });
+    expect(response.headers.get("location")).toBeNull();
+    expect(setCookies(response)).not.toContain(
+      `${AGENCY_OIDC_STATE_COOKIE_NAME}=`,
+    );
+  });
+
   it("fails closed when the API omits the state token", async () => {
     global.fetch = vi
       .fn()

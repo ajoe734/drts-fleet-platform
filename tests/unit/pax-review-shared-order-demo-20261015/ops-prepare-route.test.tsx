@@ -76,6 +76,13 @@ async function exerciseOpsReviewConfiguration({
   const supply = {
     prepare: vi.fn(async () => ({ simulated: true, supply: [] })),
   };
+  // The trial's idle-pair release is its own unit; here only its call order.
+  const trial = {
+    releaseIdleSupply: vi.fn(async () => {
+      expect(supply.prepare).toHaveBeenCalled();
+      return { releasedDriverIds: [], busyDriverIds: [], failedDriverIds: [] };
+    }),
+  };
   const review = Reflect.construct(controllers.ReviewDemoController, [
     null,
     null,
@@ -129,7 +136,7 @@ async function exerciseOpsReviewConfiguration({
           ? controllers.ReviewDemoOpsController
           : controllers.ReviewDemoController;
         const instance = path.startsWith("/api/ops/")
-          ? Reflect.construct(Controller, [supply])
+          ? Reflect.construct(Controller, [supply, trial])
           : review;
         const handler = instance[isPrepare ? "prepare" : "config"];
         try {
@@ -164,6 +171,7 @@ async function exerciseOpsReviewConfiguration({
   ]);
   await screen.findByText(copy.prepared);
   expect(supply.prepare).toHaveBeenCalledOnce();
+  expect(trial.releaseIdleSupply).toHaveBeenCalledOnce();
   expect(admitted?.identity).toMatchObject({ realm: "ops" });
 
   const account = await accounts.findOrCreateByIdentity(
@@ -191,12 +199,13 @@ async function exerciseOpsReviewConfiguration({
   }
   expect(supply.prepare).toHaveBeenCalledOnce();
   vi.stubEnv("PAX_REVIEW_DEMO_ENABLED", "false");
-  await expect(new Controller(supply as never).prepare()).rejects.toMatchObject(
-    {
-      code: "not_found",
-    },
-  );
+  await expect(
+    new Controller(supply as never, trial as never).prepare(),
+  ).rejects.toMatchObject({
+    code: "not_found",
+  });
   expect(supply.prepare).toHaveBeenCalledOnce();
+  expect(trial.releaseIdleSupply).toHaveBeenCalledOnce();
 }
 
 it.each([

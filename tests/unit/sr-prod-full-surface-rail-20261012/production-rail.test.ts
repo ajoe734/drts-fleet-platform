@@ -28,6 +28,7 @@ const {
   migrate,
   assertRevision,
   assertProbe,
+  verifyAgencyEntry,
   verify,
 } = require("../../../operations/verification/production-release-rail/run.cjs");
 const { fixture, SHA, TAG, DEPLOYER } = require("./fixture.cjs");
@@ -59,6 +60,7 @@ const ids = [
   "enterprise-dispatch-web",
   "channel-partner-portal-web",
   "passenger-app-web",
+  "agency-portal-web",
 ];
 const imagesFor = (plan: any) =>
   Object.fromEntries(
@@ -685,13 +687,13 @@ describe("production complete topology and strict startup rail", () => {
       ]),
     );
   });
-  it("executes the real preflight, deploy and migration builders with all ten ports and immutable source", () => {
+  it("executes the real preflight, deploy and migration builders with all eleven ports and immutable source", () => {
     const { plan } = candidate();
     expect(plan.services.map((s: any) => s.id)).toEqual(ids);
     expect(plan.services.map((s: any) => s.port)).toEqual([
-      3001, 3002, 3003, 3007, 3004, 3008, 3014, 3010, 3013, 3009,
+      3001, 3002, 3003, 3007, 3004, 3008, 3014, 3010, 3013, 3009, 3012,
     ]);
-    expect(plan.builds).toHaveLength(11);
+    expect(plan.builds).toHaveLength(12);
     const commands: string[][] = [];
     const cloud = (args: string[]) => {
       commands.push(args);
@@ -699,8 +701,10 @@ describe("production complete topology and strict startup rail", () => {
     };
     deploy(plan, imagesFor(plan), cloud);
     const deployments = commands.filter((args) => args[1] === "deploy");
-    expect(deployments).toHaveLength(10);
-    for (const args of deployments) {
+    expect(deployments).toHaveLength(11);
+    for (const args of deployments.filter(
+      (args) => args[2] !== "drts-prod-agency-portal-web",
+    )) {
       expect(args).toContain("--no-allow-unauthenticated");
       expect(args[args.indexOf("--ingress") + 1]).toBe(
         "internal-and-cloud-load-balancing",
@@ -968,6 +972,8 @@ describe("exact release evidence and protected smoke", () => {
         imageDigest: image,
       },
     };
+    if (service.id === "agency-portal-web")
+      Object.assign(status, { url: "https://agency-cloud-run.drts.invalid" });
     return { description: { status }, revision };
   }
   it("rejects old, unhealthy, mixed-traffic or different-image revisions despite a healthy process", () => {
@@ -1021,7 +1027,7 @@ describe("exact release evidence and protected smoke", () => {
             digest: `sha256:${"a".repeat(64)}`,
           }),
         );
-      expect(Object.keys(imageManifest(plan, dir))).toHaveLength(11);
+      expect(Object.keys(imageManifest(plan, dir))).toHaveLength(12);
       writeFileSync(
         path.join(dir, "api.json"),
         JSON.stringify({
@@ -1108,6 +1114,12 @@ describe("exact release evidence and protected smoke", () => {
         (s: any) => new URL(url).origin === s.origin,
       );
       if (
+        service.id === "agency-portal-web" &&
+        options.headers.cookie !== headers[service.id].cookie
+      ) {
+        return agencyEntryResponse(service, url);
+      }
+      if (
         service.publicEntry &&
         options.headers.cookie !== headers[service.id].cookie
       ) {
@@ -1121,14 +1133,16 @@ describe("exact release evidence and protected smoke", () => {
           service.id === "bank-console-web"
             ? "Period,StatementNo,TripID,OrderNo,\n2026-10,fixture-001,trip,order"
             : JSON.stringify(
-                service.probe.path.endsWith("identity/context")
-                  ? {
-                      data: {
-                        principalId: "principal-fixture",
-                        authMode: "jwt_bearer",
-                      },
-                    }
-                  : { data: { fixture: true } },
+                service.id === "agency-portal-web"
+                  ? agencySessionBody()
+                  : service.probe.path.endsWith("identity/context")
+                    ? {
+                        data: {
+                          principalId: "principal-fixture",
+                          authMode: "jwt_bearer",
+                        },
+                      }
+                    : { data: { fixture: true } },
               ),
       };
     };
@@ -1139,16 +1153,25 @@ describe("exact release evidence and protected smoke", () => {
     });
     expect(evidence.services.map((s: any) => s.service)).toEqual(ids);
     expect(
-      probes.every(
-        (p) =>
-          p.options.redirect === "manual" &&
-          (plan.services.find((s: any) => s.id === p.id).publicEntry
-            ? !p.options.headers.Authorization
-            : p.options.headers.Authorization ===
-              "Bearer opaque-transport-token"),
-      ),
+      probes
+        .filter((p) => p.id !== "agency-portal-web")
+        .every(
+          (p) =>
+            p.options.redirect === "manual" &&
+            (plan.services.find((s: any) => s.id === p.id).publicEntry
+              ? !p.options.headers.Authorization
+              : p.options.headers.Authorization ===
+                "Bearer opaque-transport-token"),
+        ),
     ).toBe(true);
     expect(reads.filter((r) => r[0] === "auth")).toHaveLength(8);
+    expect(
+      probes.find((p) => p.id === "agency-portal-web").options.headers,
+    ).toEqual(headers["agency-portal-web"]);
+    expect(
+      evidence.services.find((s: any) => s.service === "agency-portal-web")
+        .agencyEntry,
+    ).toHaveLength(4);
     expect(evidence.publicEntryPolicies).toHaveLength(2);
     expect(
       evidence.services
@@ -1158,6 +1181,102 @@ describe("exact release evidence and protected smoke", () => {
     expect(JSON.stringify(evidence)).not.toContain("opaque-transport-token");
     expect(JSON.stringify(evidence)).not.toContain("fixture-signed-session");
     expect(evidence.sourceSha).toBe(SHA);
+  });
+  it("verifies the complete private Agency release using the actual Run audience and its own app session", async () => {
+    const f = fixture();
+    delete f.vars.PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED;
+    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+    const images = imagesFor(plan);
+    const reads: string[][] = [];
+    const agencyProbes: any[] = [];
+    let currentService = plan.services[0];
+    const cloud = (args: string[]) => {
+      reads.push(args);
+      if (
+        ["projects", "compute", "iap"].includes(args[0]!) ||
+        args[2] === "get-iam-policy"
+      )
+        return f.policyRead(args);
+      if (args[0] === "secrets") return JSON.stringify(f.headers);
+      if (args[0] === "auth") return "fixture-private-invoker";
+      const service =
+        plan.services.find((s: any) => s.name === args[3]) || plan.services[0];
+      if (args[1] === "services") currentService = service;
+      const m = metadata(plan, service, images[service.id]);
+      return JSON.stringify(
+        args[1] === "services"
+          ? {
+              ...m.description,
+              metadata: {
+                annotations: {
+                  "run.googleapis.com/ingress":
+                    service.id === "agency-portal-web"
+                      ? "all"
+                      : "internal-and-cloud-load-balancing",
+                },
+              },
+            }
+          : metadata(plan, currentService, images[currentService.id]).revision,
+      );
+    };
+    const request = async (url: string, options: any) => {
+      const service = plan.services.find(
+        (s: any) => new URL(url).origin === s.origin,
+      );
+      if (service.id === "agency-portal-web") {
+        agencyProbes.push(options);
+        if (options.headers.cookie !== f.headers[service.id].cookie)
+          return agencyEntryResponse(service, url);
+        return Response.json(agencySessionBody());
+      }
+      if (
+        service.publicEntry &&
+        options.headers.cookie !== f.headers[service.id].cookie
+      ) {
+        const response = publicResponse(service, new URL(url).pathname);
+        return new Response(response.body, { status: response.status });
+      }
+      if (service.id === "bank-console-web")
+        return new Response(
+          "Period,StatementNo,TripID,OrderNo,\n2026-10,fixture-001,trip,order",
+        );
+      return Response.json(
+        service.probe.path.endsWith("identity/context")
+          ? {
+              data: {
+                principalId: "principal-fixture",
+                authMode: "jwt_bearer",
+              },
+            }
+          : { data: { fixture: true } },
+      );
+    };
+    const result = await verify(plan, images, {
+      cloud,
+      request,
+      sleep: async () => {},
+    });
+    expect(result.services.map((s: any) => s.service)).toEqual(ids);
+    expect(reads.filter((args) => args[0] === "auth")).toHaveLength(9);
+    expect(
+      reads
+        .filter((args) => args[0] === "auth")
+        .some((args) =>
+          args.includes("--audiences=https://agency-cloud-run.drts.invalid"),
+        ),
+    ).toBe(true);
+    expect(agencyProbes).toHaveLength(5);
+    expect(
+      agencyProbes.every(
+        (options) =>
+          options.headers.Authorization === "Bearer fixture-private-invoker",
+      ),
+    ).toBe(true);
+    expect(agencyProbes.at(-1).headers.cookie).toBe(
+      f.headers["agency-portal-web"].cookie,
+    );
+    expect(JSON.stringify(result)).not.toContain("fixture-private-invoker");
+    expect(JSON.stringify(result)).not.toContain("fixture-agency-session");
   });
   it("keeps every workflow/helper checkout pinned and all mutation jobs environment protected", () => {
     const workflow = JSON.parse(
@@ -1191,5 +1310,171 @@ describe("exact release evidence and protected smoke", () => {
     expect(workflow.jobs.deploy.if).toContain(
       "needs.migrate.result == 'success'",
     );
+  });
+});
+
+function agencySessionBody() {
+  return {
+    data: {
+      active: true,
+      identity: {
+        realm: "agency",
+        actor_type: "agency_user",
+        agency_id: "agency-fixture",
+      },
+    },
+  };
+}
+function agencyEntryResponse(service: any, url: string) {
+  const pathname = new URL(url).pathname;
+  if (["/login", "/invite"].includes(pathname))
+    return new Response(
+      pathname === "/login"
+        ? '<a href="/api/auth/agency/login">登入機關網站</a>'
+        : "<h1>接受機關帳號邀請</h1>",
+      {
+        status: 200,
+        headers: { "x-drts-candidate-sha": service.env.DRTS_CANDIDATE_SHA },
+      },
+    );
+  return Response.json(
+    { active: false, error: "AUTHENTICATION_REQUIRED" },
+    { status: 401 },
+  );
+}
+
+describe("Agency portal existing production release wiring", () => {
+  it("builds the real Agency Dockerfile and connects normal BFF, OIDC and invitation origins", () => {
+    const { plan, vars } = candidate();
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    expect(agency).toMatchObject({
+      id: "agency-portal-web",
+      port: 3012,
+      origin: vars.PROD_AGENCY_PORTAL_ORIGIN,
+      transportAudience: null,
+      dockerfile: "apps/agency-portal-web/Dockerfile",
+      probe: { path: "/api/auth/session" },
+      secrets: {
+        JWT_SECRET: "drts-prod-jwt-secret:7",
+        BFF_STATE_SECRET: "drts-prod-bff-state-secret:7",
+      },
+      env: {
+        DRTS_API_URL: vars.PROD_CONTROL_PLANE_API_ORIGIN,
+        DRTS_API_AUTH_AUDIENCE: vars.PROD_IAP_CLIENT_ID,
+        JWT_ISSUER: vars.PROD_JWT_ISSUER,
+        JWT_AUDIENCE: vars.PROD_JWT_AUDIENCE,
+      },
+    });
+    expect(agency.env).not.toHaveProperty("NEXT_PUBLIC_API_URL");
+    expect(plan.builds).toContainEqual({
+      id: "agency-portal-web",
+      dockerfile: "apps/agency-portal-web/Dockerfile",
+    });
+    expect(plan.services[0].env.AUTH_ALLOWED_ORIGINS.split(";")).toContain(
+      vars.PROD_AGENCY_PORTAL_ORIGIN,
+    );
+    expect(plan.services[0].env.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(
+      `${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    );
+    expect(vars).not.toHaveProperty("PROD_AGENCY_PORTAL_IAP_CLIENT_ID");
+  });
+
+  it("keeps Agency exposure private by default and uses only its existing explicit public-host setting", () => {
+    const f = fixture();
+    delete f.vars.PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED;
+    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    const args = deployArgs(plan, agency, imagesFor(plan)[agency.id]);
+    expect(args).toContain("--no-allow-unauthenticated");
+    expect(args[args.indexOf("--ingress") + 1]).toBe("all");
+    const published = candidate().plan;
+    const publicAgency = published.services.find(
+      (s: any) => s.id === "agency-portal-web",
+    );
+    expect(
+      deployArgs(
+        published,
+        publicAgency,
+        imagesFor(published)[publicAgency.id],
+      ),
+    ).toContain("--allow-unauthenticated");
+  });
+
+  it("uses an origin-bound Cloud Run credential for private Agency probes without requiring staff IAP", async () => {
+    const { plan } = candidate();
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    const calls: any[] = [];
+    await verifyAgencyEntry(
+      agency,
+      async (url: string, options: any) => {
+        calls.push(options);
+        return agencyEntryResponse(agency, url);
+      },
+      "fixture-cloud-invoker",
+    );
+    expect(calls).toHaveLength(4);
+    expect(
+      calls.every(
+        (options) =>
+          options.headers.Authorization === "Bearer fixture-cloud-invoker",
+      ),
+    ).toBe(true);
+  });
+
+  it.each(["/login", "/invite"])(
+    "does not claim a redirected or wrong-version %s entry is ready",
+    async (path) => {
+      const { plan } = candidate();
+      const agency = plan.services.find(
+        (s: any) => s.id === "agency-portal-web",
+      );
+      for (const fault of ["redirect", "version"]) {
+        await expect(
+          verifyAgencyEntry(
+            agency,
+            async (url: string) => {
+              if (new URL(url).pathname === path)
+                return new Response("not the app", {
+                  status: fault === "redirect" ? 302 : 200,
+                  headers: { "x-drts-candidate-sha": "old" },
+                });
+              return agencyEntryResponse(agency, url);
+            },
+            null,
+          ),
+        ).rejects.toThrow(`agency-portal-web ${path}`);
+      }
+    },
+  );
+
+  it("verifies real Agency application denial and its authenticated agency session contract", async () => {
+    const { plan } = candidate();
+    const agency = plan.services.find((s: any) => s.id === "agency-portal-web");
+    const records = await verifyAgencyEntry(
+      agency,
+      async (url: string) => agencyEntryResponse(agency, url),
+      null,
+    );
+    expect(records).toHaveLength(4);
+    expect(() =>
+      assertProbe(agency, { status: 200 }, JSON.stringify(agencySessionBody())),
+    ).not.toThrow();
+    await expect(
+      verifyAgencyEntry(
+        agency,
+        async (url: string) =>
+          new URL(url).pathname === "/api/auth/session"
+            ? Response.json({ data: { active: true } })
+            : agencyEntryResponse(agency, url),
+        null,
+      ),
+    ).rejects.toThrow("session denial");
+    expect(() =>
+      assertProbe(
+        agency,
+        { status: 200 },
+        JSON.stringify({ data: { active: false } }),
+      ),
+    ).toThrow("response contract");
   });
 });

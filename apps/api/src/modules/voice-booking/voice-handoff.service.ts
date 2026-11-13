@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { Injectable, Optional } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { AssistFieldMap } from "../callcenter-assist/assist-fields";
+import {
+  buildAssistFieldsFromDialogue,
+  summarizeDialogueSlots,
+} from "../callcenter-assist/assist-voice-draft";
+import { CallcenterAssistService } from "../callcenter-assist/callcenter-assist.service";
 import {
   VoiceHandoffQueueService,
   type HandoffQueueItem,
@@ -174,13 +180,41 @@ export interface PostBridgeDropResult {
  */
 @Injectable()
 export class VoiceHandoffService {
+  private readonly logger = new Logger(VoiceHandoffService.name);
+
   constructor(
     private readonly sessionRepository: VoiceSessionRepository,
     private readonly sessionService: VoiceSessionService,
     private readonly bookingRepository: VoiceBookingRepository,
     private readonly handoffQueueService: VoiceHandoffQueueService,
     @Optional() private readonly auditService?: AuditNotificationService,
+    @Optional() private readonly assistService?: CallcenterAssistService,
   ) {}
+
+  /**
+   * CALLCENTER-AI-ASSIST-20261111: what the AI had already collected, read
+   * from its own persisted dialogue snapshot. The handoff tool call carries
+   * only a reason, so without this the human agent started from an empty
+   * form. Best effort: a missing key or snapshot never blocks the handoff.
+   */
+  private async collectedFields(
+    voiceSessionId: string,
+  ): Promise<AssistFieldMap> {
+    try {
+      const restoration =
+        await this.sessionService.getDialogueSnapshotRestoration(
+          voiceSessionId,
+        );
+      return buildAssistFieldsFromDialogue(
+        restoration?.snapshot?.content ?? null,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Handoff ${voiceSessionId}: dialogue snapshot unavailable for the agent draft: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {};
+    }
+  }
 
   /**
    * SD §5.4 / §12.5: Atomically transition control from AI to Handoff Coordinator.
@@ -317,8 +351,16 @@ export class VoiceHandoffService {
       }
     }
 
-    const handoffId = randomUUID();
+    // One open handoff per session (voice.handoff index): a repeated request
+    // refreshes the waiting item instead of queueing the caller twice.
+    const existingHandoff =
+      await this.handoffQueueService.findActiveForSession(
+        session.voiceSessionId,
+      );
+    const handoffId = existingHandoff?.handoffId ?? randomUUID();
     const nextResponsibleParty = command.nextResponsibleParty ?? "human_agent";
+    const collected = await this.collectedFields(session.voiceSessionId);
+    const collectedEntries = Object.entries(collected);
 
     // Assemble comprehensive handoff summary (SD §12.5)
     const summary: HandoffSummary = {
@@ -330,19 +372,35 @@ export class VoiceHandoffService {
       nextResponsibleParty,
       draft: {
         draftVersion: command.draft?.draftVersion ?? 1,
-        slots: command.draft?.slots ?? {},
+        slots: command.draft?.slots ?? summarizeDialogueSlots(collected),
         validationErrors: command.draft?.validationErrors ?? [],
       },
       proof,
       realOrder,
       unknownReceipt,
-      rawUtterances: command.rawUtterances ?? [],
-      candidates: command.candidates ?? [],
+      rawUtterances:
+        command.rawUtterances ??
+        collectedEntries.flatMap(([, value]) =>
+          value.rawText ? [value.rawText] : [],
+        ),
+      candidates:
+        command.candidates ??
+        collectedEntries
+          .filter(
+            ([, value]) =>
+              value.status === "uncertain" || value.candidates.length,
+          )
+          .map(([field, value]) => ({
+            field,
+            rawText: value.rawText ?? value.value,
+            candidate: value.value,
+            candidates: value.candidates,
+          })),
       createdAt: new Date().toISOString(),
     };
 
     // Enqueue into human handoff queue
-    const queueItem = this.handoffQueueService.enqueue({
+    const queueItem = await this.handoffQueueService.enqueue({
       handoffId,
       voiceSessionId: session.voiceSessionId,
       callId: session.callId,
@@ -351,6 +409,21 @@ export class VoiceHandoffService {
       reason: command.reason,
       summary,
     });
+
+    if (this.assistService) {
+      await this.assistService
+        .seedFromVoiceHandoff({
+          callId: session.callId,
+          handoffId,
+          voiceSessionId: session.voiceSessionId,
+          fields: collected,
+        })
+        .catch((error) => {
+          this.logger.warn(
+            `Handoff ${handoffId}: agent draft could not be prefilled: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+    }
 
     // Minimal coordinator capability scopes (SD §5.4/§12.5)
     // Coordinator can query receipts, request handoff, execute session interactions,
@@ -605,7 +678,7 @@ export class VoiceHandoffService {
     }
 
     // Confirm bridge in queue service
-    this.handoffQueueService.confirmBridge(command.handoffId);
+    await this.handoffQueueService.confirmBridge(command.handoffId);
 
     return updated;
   }
@@ -629,7 +702,7 @@ export class VoiceHandoffService {
       );
     }
 
-    this.handoffQueueService.handleCallDrop(
+    await this.handoffQueueService.handleCallDrop(
       command.handoffId,
       command.hangupReason,
       command.callerStillConnected,
@@ -668,7 +741,7 @@ export class VoiceHandoffService {
       );
     }
 
-    this.handoffQueueService.redispatch(command.handoffId);
+    await this.handoffQueueService.redispatch(command.handoffId);
 
     return {
       callerStillConnected: true,
