@@ -318,20 +318,22 @@ export default function DriverTripMap({
         ) : (
           <View style={styles.pinRow}>
             {model.orderedStops.map((stop, index) => (
-              <View
-                key={stop.target}
-                accessibilityLabel={`${index + 1}. ${stop.label}: ${stop.coordinateLabel}`}
-                style={[
-                  styles.pin,
-                  !stop.coordinate
-                    ? styles.missingPin
-                    : index === 0
-                      ? styles.pickupPin
-                      : index === model.orderedStops.length - 1
-                        ? styles.dropoffPin
-                        : styles.waypointPin,
-                ]}
-              />
+              <React.Fragment key={stop.target}>
+                {index > 0 ? <View style={styles.pinConnector} /> : null}
+                <View
+                  accessibilityLabel={`${index + 1}. ${stop.label}: ${stop.coordinateLabel}`}
+                  style={[
+                    styles.pin,
+                    !stop.coordinate
+                      ? styles.missingPin
+                      : index === 0
+                        ? styles.pickupPin
+                        : index === model.orderedStops.length - 1
+                          ? styles.dropoffPin
+                          : styles.waypointPin,
+                  ]}
+                />
+              </React.Fragment>
             ))}
           </View>
         )}
@@ -546,6 +548,14 @@ const styles = StyleSheet.create({
   },
   missingPin: {
     backgroundColor: driverCanvasTheme.textMuted,
+  },
+  pinConnector: {
+    flex: 1,
+    maxWidth: 128,
+    height: 2,
+    borderTopWidth: 2,
+    borderStyle: "dashed",
+    borderColor: driverCanvasTheme.borderStrong,
   },
   previewMeta: {
     fontSize: 11.5,
