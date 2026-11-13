@@ -92,9 +92,12 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
         .slice(start, end)
         .replace(
           /\$\{\{ needs\.prepare\.outputs\.([a-z_]+) \}\}/g,
-          (_match, name: string) => {
-            expect(Object.keys(outputs)).toContain(name);
-            return outputs[name];
+          (_match: string, name: string): string => {
+            const value = outputs[name];
+            if (value === undefined) {
+              throw new Error(`unexpected prepare output: ${name}`);
+            }
+            return value;
           },
         );
       const script = `set -euo pipefail\ntenant_console_cloud_run_origin=https://drts-dev-tenant-console-web-xyz.a.run.app\nenterprise_dispatch_cloud_run_origin=\nagency_portal_configured_origin=\nagency_portal_cloud_run_origin=https://drts-dev-agency-portal-web-xyz.a.run.app\n${assembly}\nprintf '%s' "$auth_allowed_origins"\n`;
