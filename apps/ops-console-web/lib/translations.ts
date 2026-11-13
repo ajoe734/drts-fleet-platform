@@ -1,6 +1,11 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "dispatch.detail.fulfillment.guideName": "Tour guide contact",
+  "dispatch.detail.fulfillment.guidePhone": "Tour guide phone",
+  "dispatch.detail.fulfillment.plannedStops":
+    "Planned stops (not a navigation route)",
+  "dispatch.detail.fulfillment.signage": "Pickup signage",
   "nav.billing": "Invoice review",
   "billing.title": "Invoice review",
   "billing.description":
@@ -4705,6 +4710,10 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "dispatch.detail.fulfillment.guideName": "領隊／導遊聯絡人",
+  "dispatch.detail.fulfillment.guidePhone": "領隊／導遊電話",
+  "dispatch.detail.fulfillment.plannedStops": "規劃停靠點（非導航路線）",
+  "dispatch.detail.fulfillment.signage": "舉牌文字",
   "nav.billing": "帳單核對",
   "billing.title": "帳單核對",
   "billing.description":

@@ -1969,6 +1969,43 @@ export class OwnedMobilityService
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
 
+    const routeStops =
+      command.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? command.partnerBookingDetails.routeStops
+        : undefined;
+    if (
+      routeStops !== undefined &&
+      command.businessDispatchSubtype !== "travel_agency_transfer"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops are only available for travel bookings",
+      );
+    }
+    if (
+      routeStops !== undefined &&
+      (!Array.isArray(routeStops) ||
+        routeStops.some(
+          (stop) =>
+            !stop ||
+            typeof stop.address !== "string" ||
+            !stop.address.trim() ||
+            typeof stop.lat !== "number" ||
+            !Number.isFinite(stop.lat) ||
+            Math.abs(stop.lat) > 90 ||
+            typeof stop.lng !== "number" ||
+            !Number.isFinite(stop.lng) ||
+            Math.abs(stop.lng) > 180,
+        ))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops must contain selected places with valid coordinates",
+      );
+    }
+
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
@@ -12882,6 +12919,15 @@ export class OwnedMobilityService
       createdAt: now,
       updatedAt: now,
     };
+    const selectedStops =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? (order.partnerBookingDetails.routeStops ?? [])
+        : [];
+    const routePlaces =
+      !this.forwarderSourceMap.has(order.orderId) && selectedStops.length
+        ? [order.pickup, ...selectedStops, order.dropoff]
+        : [];
     const task: DriverTaskRecord = {
       ...(order.serviceSelection
         ? { serviceSelection: { ...order.serviceSelection } }
@@ -12900,8 +12946,31 @@ export class OwnedMobilityService
       driverId,
       vehicleId,
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
-      routeProvided: false,
-      waypoints: [],
+      routeProvided:
+        routePlaces.length > 0 &&
+        routePlaces.every(
+          (place) =>
+            typeof place.lat === "number" &&
+            Number.isFinite(place.lat) &&
+            Math.abs(place.lat) <= 90 &&
+            typeof place.lng === "number" &&
+            Number.isFinite(place.lng) &&
+            Math.abs(place.lng) <= 180,
+        ),
+      waypoints: routePlaces.map((place, sequence) => ({
+        sequence,
+        label:
+          sequence === 0
+            ? "上車點"
+            : sequence === routePlaces.length - 1
+              ? "下車點"
+              : `停靠點 ${sequence}`,
+        address: place.address,
+        lat: place.lat ?? null,
+        lng: place.lng ?? null,
+        arrivedAt: null,
+        departedAt: null,
+      })),
       status: "pending_acceptance",
       acceptedAt: null,
       departedAt: null,

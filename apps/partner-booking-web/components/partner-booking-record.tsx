@@ -297,19 +297,64 @@ export function PartnerBookingRecord({
       {booking.partnerBookingDetails ? (
         <section aria-label={label("read.details")}>
           <h2>{label("read.details")}</h2>
+          {booking.partnerBookingDetails.subtype === "travel_agency_transfer" &&
+          booking.partnerBookingDetails.planSourceKind ? (
+            <aside aria-label={label("book.travel.plan.selection")}>
+              <strong>
+                {label(
+                  "book.travel.plan.source." +
+                    booking.partnerBookingDetails.planSourceKind,
+                )}
+              </strong>
+              <p>{label("book.travel.plan.recordScope")}</p>
+              <p>{label("book.travel.plan.stopsScope")}</p>
+            </aside>
+          ) : null}
           <dl>
             {Object.entries(booking.partnerBookingDetails)
-              .filter(([key]) => key !== "subtype")
+              .filter(
+                ([key]) =>
+                  key !== "subtype" &&
+                  ![
+                    "planSourceId",
+                    "planLegId",
+                    "planBatchId",
+                    "planVehicleId",
+                  ].includes(key),
+              )
               .map(([key, value]) => (
                 <div key={key}>
                   <dt>{label("field." + key)}</dt>
                   <dd>
-                    {Array.isArray(value) ? value.join(" · ") : String(value)}
+                    {key === "planSourceKind"
+                      ? label("book.travel.plan.source." + value)
+                      : key === "planFareBasis"
+                        ? label("book.travel.plan.included")
+                        : key === "routeStops" && Array.isArray(value)
+                          ? value
+                              .map((stop) =>
+                                typeof stop === "object" && stop
+                                  ? stop.address
+                                  : "",
+                              )
+                              .join(" → ")
+                          : Array.isArray(value)
+                            ? value.join(" · ")
+                            : String(value)}
                   </dd>
                 </div>
               ))}
           </dl>
         </section>
+      ) : null}
+      {booking.businessDispatchSubtype === "travel_agency_transfer" ? (
+        <aside
+          data-testid="partner-record-tour-fee"
+          aria-label={label("book.travel.fee.title")}
+        >
+          <strong>{label("book.travel.plan.included")}</strong>
+          <p>{label("book.travel.fee.scope")}</p>
+        </aside>
       ) : null}
       <h2>{label("read.quotation")}</h2>
       <p>{money}</p>

@@ -18,6 +18,7 @@ import {
   verifyPartnerEligibility,
 } from "./api-client";
 import {
+  buildPartnerTravelBookingDetails,
   getPartnerBookingFieldErrors,
   getPartnerMapSubmitGate,
   type PartnerAirportMapRequest,
@@ -224,15 +225,14 @@ export async function submitPartnerProgramBooking(
         ? undefined
         : subtype === "travel_agency_transfer"
           ? {
-              subtype,
-              groupCode: draft.groupCode.trim(),
-              groupSize: Number(draft.groupSize),
-              itineraryLink: draft.itineraryLink.trim(),
-              rosterPassengers: draft.rosterPassengers
-                .split(/\r?\n/)
-                .map((name) => name.trim())
-                .filter(Boolean),
-              meetingPoint: draft.meetingPoint.trim(),
+              ...buildPartnerTravelBookingDetails(draft),
+              ...(input.submission.routeStops?.length
+                ? {
+                    routeStops: input.submission.routeStops.filter(
+                      (stop): stop is NonNullable<typeof stop> => stop !== null,
+                    ),
+                  }
+                : {}),
             }
           : {
               subtype,
@@ -245,6 +245,10 @@ export async function submitPartnerProgramBooking(
               replacementVehicleClass: draft.replacementVehicleClass.trim(),
               caseHandler: draft.caseHandler.trim(),
             };
+    const guideContact =
+      subtype === "travel_agency_transfer"
+        ? { name: draft.guideName.trim(), phone: draft.guidePhone.trim() }
+        : null;
     const command: CreateTenantBookingCommand = {
       businessDispatchSubtype: subtype,
       partnerEntrySlug: entry.entrySlug,
@@ -266,6 +270,7 @@ export async function submitPartnerProgramBooking(
         name: draft.passengerName.trim(),
         phone: draft.passengerPhone.trim(),
       },
+      ...(guideContact ? { onsiteContact: guideContact } : {}),
       ...(draft.luggageCount.trim()
         ? { luggageCount: Number(draft.luggageCount) }
         : {}),
@@ -324,22 +329,46 @@ export async function submitPartnerProgramBooking(
         "Booking readback did not match the created order.",
       );
     }
+    if (
+      guideContact &&
+      (booking.onsiteContact?.name !== guideContact.name ||
+        booking.onsiteContact?.phone !== guideContact.phone ||
+        order.onsiteContact?.name !== guideContact.name ||
+        order.onsiteContact?.phone !== guideContact.phone)
+    ) {
+      throw new PartnerAuthorityError(
+        502,
+        "PARTNER_BOOKING_READBACK_MISMATCH",
+        "Guide contact did not match the created booking.",
+      );
+    }
     if (partnerBookingDetails) {
       const expected = partnerBookingDetails as unknown as Record<
         string,
         unknown
       >;
+      const sameValue = (value: unknown, actual: unknown): boolean => {
+        if (Array.isArray(value))
+          return (
+            Array.isArray(actual) &&
+            value.length === actual.length &&
+            value.every((item, index) => sameValue(item, actual[index]))
+          );
+        if (value && typeof value === "object")
+          return (
+            !!actual &&
+            typeof actual === "object" &&
+            Object.entries(value).every(([key, item]) =>
+              sameValue(item, (actual as Record<string, unknown>)[key]),
+            )
+          );
+        return value === actual;
+      };
       const sameDetails = (actual: unknown) => {
         if (!actual || typeof actual !== "object") return false;
         const record = actual as Record<string, unknown>;
         return Object.entries(expected).every(([field, value]) =>
-          Array.isArray(value)
-            ? Array.isArray(record[field]) &&
-              value.length === (record[field] as unknown[]).length &&
-              value.every(
-                (item, index) => item === (record[field] as unknown[])[index],
-              )
-            : record[field] === value,
+          sameValue(value, record[field]),
         );
       };
       if (

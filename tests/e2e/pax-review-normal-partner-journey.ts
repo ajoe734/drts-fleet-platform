@@ -24,6 +24,7 @@ import {
 import { PARTNER_LOCALE_COOKIE } from "../../apps/partner-booking-web/lib/locale-config";
 import { TENANT_SESSION_COOKIE_NAME } from "../../packages/tenant-auth/src/constants";
 import { TENANT_LOCALE_COOKIE } from "../../apps/tenant-console-web/lib/locale-config";
+import type { PartnerTravelPlan } from "../../apps/partner-booking-web/lib/partner-booking-form";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { createDispatchInOrdinaryWorkspace } from "./pax-review-shared-order/ordinary-ops-dispatch";
 import { readAssignedTripAndAccept } from "./pax-review-shared-order/additional-journey";
@@ -118,6 +119,50 @@ async function address(
   await picker.getByRole("button", { name: new RegExp(label) }).click();
 }
 
+type NormalPartnerJourneyResult = {
+  bookingId: string;
+  orderId: string;
+  dispatchJobId: string;
+  assignmentId: string;
+  taskId: string;
+  driverId: string;
+  vehicleId: string;
+  completedAt: string;
+  invoiceId: string;
+  actualFare: { currency: string; amountMinor: number };
+  details: PartnerBookingDetails | undefined;
+};
+
+type TravelGroupJourneyContext = {
+  fixture: NoncoreTravelFixture;
+  scope: Awaited<ReturnType<NoncoreTravelFixture["entry"]>>;
+  partnerUserRef: string;
+  referenceToken: string;
+  plan: PartnerTravelPlan;
+  legId: string;
+  batchId: string;
+  vehicleId: string;
+  slotNumber: number;
+  invoicePeriodStart: string;
+  onBooked: (
+    booking: Pick<
+      NormalPartnerJourneyResult,
+      "bookingId" | "orderId" | "details"
+    >,
+  ) => Promise<void>;
+  beforeComplete: () => Promise<void>;
+  onCompleted: (result: NormalPartnerJourneyResult) => Promise<void>;
+};
+
+function selectedGroupAllocation(group: TravelGroupJourneyContext) {
+  const leg = group.plan.legs.find((item) => item.id === group.legId);
+  const batch = leg?.batches.find((item) => item.id === group.batchId);
+  const vehicle = batch?.vehicles.find((item) => item.id === group.vehicleId);
+  if (!leg || !batch || !vehicle)
+    throw new Error("Missing declared group allocation");
+  return { leg, batch, vehicle };
+}
+
 /** Both wrappers run this same normal booking/lifecycle/invoice journey.
  * Only external program facts and the corresponding normal product vary. */
 export async function runNormalPartnerJourney(
@@ -128,7 +173,10 @@ export async function runNormalPartnerJourney(
     | "insurance_replacement_vehicle"
     | "airport_pickup"
     | "airport_dropoff",
+  group?: TravelGroupJourneyContext,
 ) {
+  if (group && scenario !== "travel_agency_transfer")
+    throw new Error("Group context is travel-only");
   const subtype =
     scenario === "airport_pickup" || scenario === "airport_dropoff"
       ? "credit_card_airport_transfer"
@@ -148,12 +196,18 @@ export async function runNormalPartnerJourney(
   // The parent's system setup token has a normal fifteen-minute TTL. Exchange
   // normal live workforce authority first; do not feed an expired parent setup
   // token into renewal or weaken the existing durable verification step.
-  await establishNormalPlatformSession();
-  await renewActualFixtureSessions();
-  const fixture = new NoncoreTravelFixture();
+  if (!group) {
+    await establishNormalPlatformSession();
+    await renewActualFixtureSessions();
+  }
+  const fixture = group?.fixture ?? new NoncoreTravelFixture();
   const contexts: BrowserContext[] = [];
   const progress = createJourneyProgress(
-    info.outputPath("noncore-safe-progress.json"),
+    info.outputPath(
+      group
+        ? `group-slot-${group.slotNumber}-noncore-safe-progress.json`
+        : "noncore-safe-progress.json",
+    ),
   );
   const step = progress.step;
   const newPage = async () => {
@@ -171,19 +225,20 @@ export async function runNormalPartnerJourney(
     const partner = await newPage(),
       ops = await newPage(),
       driver = await newPage();
-    await step(
-      airport
-        ? "Activate normal airport product"
-        : insurance
-          ? "Activate normal insurance product"
-          : "Activate normal travel product",
-      () =>
+    if (!group)
+      await step(
         airport
-          ? fixture.activateAirport()
+          ? "Activate normal airport product"
           : insurance
-            ? fixture.activateInsurance()
-            : fixture.activateTravel(),
-    );
+            ? "Activate normal insurance product"
+            : "Activate normal travel product",
+        () =>
+          airport
+            ? fixture.activateAirport()
+            : insurance
+              ? fixture.activateInsurance()
+              : fixture.activateTravel(),
+      );
     const airportAreas = airport
       ? await step(
           "Publish same-service SIM city and airport boundaries through normal governance",
@@ -199,29 +254,35 @@ export async function runNormalPartnerJourney(
             ? fixture.fleetSupply("insurance_replacement_vehicle")
             : fixture.fleetSupply(),
     );
-    const scope = await step(
-      airport
-        ? "Create own normal bank airport entry and credential"
+    const scope =
+      group?.scope ??
+      (await step(
+        airport
+          ? "Create own normal bank airport entry and credential"
+          : insurance
+            ? "Create own normal insurance entry and credential"
+            : "Create own normal travel entry and credential",
+        () =>
+          fixture.entry(
+            airport
+              ? "bank_partner"
+              : insurance
+                ? "insurance_company"
+                : "travel_agency",
+          ),
+      ));
+    const partnerUserRef =
+      group?.partnerUserRef ??
+      (airport
+        ? `SIM-airport-rider-${randomUUID()}`
         : insurance
-          ? "Create own normal insurance entry and credential"
-          : "Create own normal travel entry and credential",
-      () =>
-        fixture.entry(
-          airport
-            ? "bank_partner"
-            : insurance
-              ? "insurance_company"
-              : "travel_agency",
-        ),
-    );
-    const partnerUserRef = airport
-      ? `SIM-airport-rider-${randomUUID()}`
-      : insurance
-        ? `SIM-insurance-rider-${randomUUID()}`
-        : `SIM-travel-rider-${randomUUID()}`;
-    const referenceToken = insurance
-      ? `SIM-claim-reference-${randomUUID()}`
-      : `SIM-roster-reference-${randomUUID()}`;
+          ? `SIM-insurance-rider-${randomUUID()}`
+          : `SIM-travel-rider-${randomUUID()}`);
+    const referenceToken =
+      group?.referenceToken ??
+      (insurance
+        ? `SIM-claim-reference-${randomUUID()}`
+        : `SIM-roster-reference-${randomUUID()}`);
 
     await step(
       "Issue real device invitation and register it in Driver UI",
@@ -505,6 +566,10 @@ export async function runNormalPartnerJourney(
             itineraryLink: `https://travel.example.test/${fixture.marker}`,
             rosterPassengers: ["SIM Traveller One", "SIM Traveller Two"],
             meetingPoint: "SIM Taipei 101 meeting point",
+            guideName: "SIM Separate Tour Guide",
+            guidePhone: "0900000077",
+            viaStops: ["SIM planned museum stop", "SIM planned hotel stop"],
+            signage: "SIM tour group welcome sign",
           };
     const dates = await step(
       airport
@@ -562,6 +627,162 @@ export async function runNormalPartnerJourney(
             .getByLabel("Meeting point", { exact: true })
             .fill(details.meetingPoint);
           await partner.getByLabel("Luggage count", { exact: true }).fill("2");
+          if (
+            !details.guideName ||
+            !details.guidePhone ||
+            !details.viaStops ||
+            !details.signage
+          )
+            throw new Error(
+              "Expected declared SIM guide and tour instructions",
+            );
+          await partner
+            .getByLabel("Tour guide contact name", { exact: true })
+            .fill(details.guideName);
+          await partner
+            .getByLabel("Tour guide contact phone", { exact: true })
+            .fill(details.guidePhone);
+          await partner
+            .getByLabel("Planned intermediate stops", { exact: true })
+            .fill(details.viaStops.join("\n"));
+          await partner
+            .getByLabel("Pickup signage", { exact: true })
+            .fill(details.signage);
+          if (group) {
+            const { leg, batch, vehicle } = selectedGroupAllocation(group);
+            await partner
+              .locator("summary")
+              .filter({
+                hasText:
+                  "Import a tour plan supplied by your operator (optional)",
+              })
+              .click();
+            await partner
+              .getByLabel("Tour-plan document (JSON)", { exact: true })
+              .fill(JSON.stringify(group.plan));
+            await partner
+              .getByRole("button", { name: "Use tour plan", exact: true })
+              .click();
+            await partner
+              .getByLabel("Selected transfer leg", { exact: true })
+              .selectOption(leg.id);
+            await partner
+              .getByLabel("Selected departure batch", { exact: true })
+              .selectOption(batch.id);
+            await partner
+              .getByLabel("Selected planned vehicle allocation", {
+                exact: true,
+              })
+              .selectOption(vehicle.id);
+            await expect(
+              partner.getByLabel("Selected transfer leg", { exact: true }),
+            ).toHaveValue(leg.id);
+            await expect(
+              partner.getByLabel("Selected departure batch", { exact: true }),
+            ).toHaveValue(batch.id);
+            await expect(
+              partner.getByLabel("Selected planned vehicle allocation", {
+                exact: true,
+              }),
+            ).toHaveValue(vehicle.id);
+            await expect(
+              partner.getByLabel("Group seats", { exact: true }),
+            ).toHaveValue(String(vehicle.rosterPassengers.length));
+            Object.assign(details, {
+              groupCode: group.plan.groupCode,
+              groupSize: vehicle.rosterPassengers.length,
+              itineraryLink: group.plan.itineraryLink,
+              rosterPassengers: [...vehicle.rosterPassengers],
+              meetingPoint: batch.meetingPoint,
+              guideName: group.plan.guideName,
+              guidePhone: group.plan.guidePhone,
+              viaStops: [...leg.viaStops],
+              signage: leg.signage,
+              planSourceKind: group.plan.source.kind,
+              planSourceId: group.plan.source.id,
+              planSourceRevision: group.plan.source.revision,
+              planSourceLabel: group.plan.source.label,
+              planGroupSize: group.plan.groupSize,
+              planLegId: leg.id,
+              planLegLabel: leg.label,
+              planLegIndex: group.plan.legs.indexOf(leg) + 1,
+              planLegCount: group.plan.legs.length,
+              planPickupAddress: leg.pickupAddress,
+              planDropoffAddress: leg.dropoffAddress,
+              planBatchId: batch.id,
+              planBatchLabel: batch.label,
+              planBatchIndex: leg.batches.indexOf(batch) + 1,
+              planBatchCount: leg.batches.length,
+              planWindowStart: batch.windowStart,
+              planWindowEnd: batch.windowEnd,
+              planVehicleId: vehicle.id,
+              planVehicleLabel: vehicle.label,
+              planVehicleSeats: vehicle.seats,
+              planVehicleCount: batch.vehicles.length,
+              planVehicleLabels: batch.vehicles.map((item) => item.label),
+              planFareBasis: group.plan.fareBasis,
+            });
+          } else {
+            const sourceWindow = {
+              start: await partner
+                .getByLabel("Reservation window start", { exact: true })
+                .inputValue(),
+              end: await partner
+                .getByLabel("Reservation window end", { exact: true })
+                .inputValue(),
+            };
+            // This browser has an explicit Asia/Taipei context. Read, never inject, its input.
+            const sourceISO = (value: string) =>
+              new Date(value + "+08:00").toISOString();
+            await partner
+              .getByRole("button", {
+                name: "Load simulated tour plan",
+                exact: true,
+              })
+              .click();
+            await expect(
+              partner.getByLabel("Selected transfer leg", { exact: true }),
+            ).toHaveValue("SIM-leg-out");
+            await expect(
+              partner.getByLabel("Selected departure batch", { exact: true }),
+            ).toHaveValue("SIM-batch-A");
+            await expect(
+              partner.getByLabel("Selected planned vehicle allocation", {
+                exact: true,
+              }),
+            ).toHaveValue("SIM-slot-A");
+            await expect(
+              partner.getByText("SIM external tour plan", { exact: true }),
+            ).toBeVisible();
+            Object.assign(details, {
+              planSourceKind: "sim",
+              planSourceId: "SIM-tour-plan",
+              planSourceRevision: "1",
+              planSourceLabel: "SIM tour-plan example",
+              planGroupSize: 4,
+              planLegId: "SIM-leg-out",
+              planLegLabel: "SIM outbound transfer",
+              planLegIndex: 1,
+              planLegCount: 2,
+              planPickupAddress: "SIM meeting point",
+              planDropoffAddress: "SIM tour destination",
+              planBatchId: "SIM-batch-A",
+              planBatchLabel: "SIM first departure",
+              planBatchIndex: 1,
+              planBatchCount: 1,
+              planWindowStart: sourceISO(sourceWindow.start),
+              planWindowEnd: sourceISO(sourceWindow.end),
+              planVehicleId: "SIM-slot-A",
+              planVehicleLabel: "SIM planned minibus A",
+              planVehicleSeats: 8,
+              planVehicleCount: 2,
+              planVehicleLabels: [
+                "SIM planned minibus A",
+                "SIM planned minibus B",
+              ],
+              planFareBasis: "included_in_tour",
+            });
+          }
         } else if (details?.subtype === "insurance_replacement_vehicle") {
           await partner
             .getByLabel("Claim number", { exact: true })
@@ -613,6 +834,37 @@ export async function runNormalPartnerJourney(
         } else {
           await address(partner, 0, "taipei 101", "Taipei 101");
           await address(partner, 1, "taipei main", "Taipei Main Station");
+        }
+        if (details?.subtype === "travel_agency_transfer") {
+          // Normal selected place controls; planned prose is never geocoded by the test.
+          const stops = [
+            {
+              query: "banqiao",
+              name: "Banqiao District Office",
+              address:
+                "No. 161, Section 1, Zhongshan Road, Banqiao District, New Taipei",
+              lat: 25.011,
+              lng: 121.4636,
+            },
+            {
+              query: "taipei 101",
+              name: "Taipei 101",
+              address: "No. 7, Section 5, Xinyi Road, Xinyi District, Taipei",
+              lat: 25.033964,
+              lng: 121.564468,
+            },
+          ];
+          for (const [index, stop] of stops.entries()) {
+            await partner
+              .getByRole("button", { name: "Add stop", exact: true })
+              .click();
+            await address(partner, index + 2, stop.query, stop.name);
+          }
+          details.routeStops = stops.map(({ address, lat, lng }) => ({
+            address,
+            lat,
+            lng,
+          }));
         }
         await expect(
           partner.getByText("Inside the service area", { exact: true }),
@@ -696,6 +948,13 @@ export async function runNormalPartnerJourney(
         partnerBookingDetails: details,
         reservationWindowStart: dates.startISO,
       });
+    }
+    if (details?.subtype === "travel_agency_transfer") {
+      const contact = { name: details.guideName, phone: details.guidePhone };
+      expect(contact.name).toBeTruthy();
+      expect(contact.phone).toBeTruthy();
+      expect(before.booking.onsiteContact).toEqual(contact);
+      expect(before.order.onsiteContact).toEqual(contact);
     }
     if (airportFacts && airportEligibility) {
       const expectedAirport = {
@@ -824,6 +1083,9 @@ export async function runNormalPartnerJourney(
       });
     }
 
+    if (group)
+      await group.onBooked({ bookingId, orderId: exactOrderId, details });
+
     const confirmationPath = `/${encodeURIComponent(scope.entry.entrySlug)}/confirmed`;
     await step(
       "Partner opens the created booking's normal confirmation link",
@@ -879,6 +1141,10 @@ export async function runNormalPartnerJourney(
         details.groupCode,
         details.meetingPoint,
         ...details.rosterPassengers,
+        details.guideName ?? "",
+        details.guidePhone ?? "",
+        ...(details.viaStops ?? []),
+        details.signage ?? "",
       ])
         await expect(opsFulfillment).toContainText(value);
     } else if (details?.subtype === "insurance_replacement_vehicle") {
@@ -1237,8 +1503,23 @@ export async function runNormalPartnerJourney(
         details.groupCode,
         details.meetingPoint,
         ...details.rosterPassengers,
+        details.guideName ?? "",
+        details.guidePhone ?? "",
+        ...(details.viaStops ?? []),
+        details.signage ?? "",
       ])
         await expect(driverFulfillment).toContainText(value);
+      for (const [index, stop] of (details.routeStops ?? []).entries()) {
+        await expect(
+          driver.getByRole("button", {
+            name: `Google navigation to waypoint-${index + 1}`,
+            exact: true,
+          }),
+        ).toBeEnabled();
+        await expect(
+          driver.getByText(stop.address, { exact: true }).first(),
+        ).toBeVisible();
+      }
     } else if (details?.subtype === "insurance_replacement_vehicle") {
       for (const value of [
         details.claimNumber,
@@ -1630,6 +1911,7 @@ export async function runNormalPartnerJourney(
       },
     );
     await step("Driver normally completes the exact task", async () => {
+      if (group) await group.beforeComplete();
       const complete = driver.getByRole("button", {
         name: "完成行程",
         exact: true,
@@ -1666,6 +1948,34 @@ export async function runNormalPartnerJourney(
     expect(pg.rows).toHaveLength(1);
     const row = pg.rows[0]!;
     const task = row.task_record;
+    if (details?.subtype === "travel_agency_transfer") {
+      expect(row.order_record.onsiteContact).toEqual({
+        name: details.guideName,
+        phone: details.guidePhone,
+      });
+      const places = [
+        before.order.pickup,
+        ...(details.routeStops ?? []),
+        before.order.dropoff,
+      ];
+      expect(task.routeProvided).toBe(true);
+      expect(task.waypoints).toEqual(
+        places.map((place, sequence) => ({
+          sequence,
+          label:
+            sequence === 0
+              ? "上車點"
+              : sequence === places.length - 1
+                ? "下車點"
+                : `停靠點 ${sequence}`,
+          address: place.address,
+          lat: place.lat,
+          lng: place.lng,
+          arrivedAt: null,
+          departedAt: null,
+        })),
+      );
+    }
     if (details) {
       expect(row.order_record).toMatchObject({
         orderId: exactOrderId,
@@ -1741,6 +2051,26 @@ export async function runNormalPartnerJourney(
     expect(completed.receipt.payment.availability).toBe("not_recorded");
     const receiptUrl = `${PARTNER_ORIGIN}/${scope.entry.entrySlug}/receipt?${new URLSearchParams({ partnerUserRef, bookingId, orderId: exactOrderId })}`;
     const assertReceiptUi = async () => {
+      if (details?.subtype === "travel_agency_transfer") {
+        const selectedPlan = partner.getByRole("region", {
+          name: "Program details",
+          exact: true,
+        });
+        await expect(selectedPlan).toContainText("SIM external tour plan");
+        await expect(selectedPlan).toContainText("SIM Separate Tour Guide");
+        if (group) {
+          await expect(selectedPlan).toContainText(group.plan.source.label);
+          await expect(selectedPlan).toContainText(
+            selectedGroupAllocation(group).vehicle.label,
+          );
+        } else {
+          await expect(selectedPlan).toContainText("SIM tour-plan example");
+          await expect(selectedPlan).toContainText("SIM planned minibus A");
+        }
+        await expect(selectedPlan).toContainText(
+          "This booking covers the selected vehicle service.",
+        );
+      }
       const receipt = partner.getByTestId("partner-payment-receipt");
       await expect(receipt).toHaveAttribute("data-order-id", exactOrderId);
       await expect(receipt).toHaveAttribute("data-booking-id", bookingId);
@@ -1780,7 +2110,7 @@ export async function runNormalPartnerJourney(
     const invoice = await step(
       "Generate normal tenant invoice for the actual completed order",
       async () => {
-        const start = new Date(task.completedAt);
+        const start = new Date(group?.invoicePeriodStart ?? task.completedAt);
         start.setUTCHours(0, 0, 0, 0);
         const periodEnd = new Date(Date.now() - 1).toISOString();
         expect(Date.parse(periodEnd)).toBeGreaterThan(
@@ -2111,6 +2441,21 @@ export async function runNormalPartnerJourney(
         ),
       },
     );
+    const result: NormalPartnerJourneyResult = {
+      bookingId,
+      orderId: exactOrderId,
+      dispatchJobId: created.dispatchJobId,
+      assignmentId: assigned.assignmentId,
+      taskId: assigned.taskId,
+      driverId: supply.driverId,
+      vehicleId: supply.vehicleId,
+      completedAt: task.completedAt,
+      details,
+      invoiceId: invoice.invoiceId,
+      actualFare: task.fare,
+    };
+    if (group) await group.onCompleted(result);
+    return result;
   } finally {
     stopGpsObservation?.();
     // Snapshot route locations before closing contexts. No query/fragment,
@@ -2157,6 +2502,478 @@ export async function runNormalPartnerJourney(
     );
     await Promise.allSettled(contexts.map((context) => context.close()));
     await pendingGpsObservation;
+    if (!group) await fixture.close();
+  }
+}
+
+/** The original hosted lifecycle is reused for every declared allocation. */
+export async function runNormalPartnerTravelGroupJourney(
+  browser: Browser,
+  info: TestInfo,
+) {
+  const startedAt = Date.now();
+  expect(process.env.GITHUB_ACTIONS).toBe("true");
+  expect(required("DRTS_UAT_ENV")).toBe("sandbox");
+  expect(required("DRTS_UAT_API_URL")).toBe(NONCORE_API);
+  await establishNormalPlatformSession();
+  await renewActualFixtureSessions();
+  const fixture = new NoncoreTravelFixture();
+  let historyContext: BrowserContext | null = null;
+  try {
+    historyContext = await browser.newContext({ timezoneId: "Asia/Taipei" });
+    const historyPage = await historyContext.newPage();
+    await historyContext.addCookies([
+      { name: PARTNER_LOCALE_COOKIE, value: "en", url: PARTNER_ORIGIN },
+    ]);
+    await fixture.activateTravel();
+    const scope = await fixture.entry("travel_agency");
+    const partnerUserRef = `SIM-group-rider-${fixture.marker}`;
+    const referenceToken = `SIM-group-roster-${fixture.marker}`;
+    const invoicePeriodStart = new Date(startedAt);
+    invoicePeriodStart.setUTCHours(0, 0, 0, 0);
+    // These are declared external SIM facts, not actual fleet IDs or completion
+    // records. The ordinary form/parser must accept every real allocation.
+    const windowStart = new Date(Date.now() + 60 * 60_000).toISOString();
+    const windowEnd = new Date(Date.now() + 120 * 60_000).toISOString();
+    const vehicle = (
+      id: string,
+      label: string,
+      rosterPassengers: string[],
+    ) => ({
+      id,
+      label,
+      seats: 5,
+      luggageCount: 2,
+      rosterPassengers,
+    });
+    const first = ["SIM Traveller One", "SIM Traveller Two"];
+    const second = ["SIM Traveller Three", "SIM Traveller Four"];
+    const plan: PartnerTravelPlan = {
+      source: {
+        kind: "sim",
+        id: `SIM-complete-group-${fixture.marker}`,
+        revision: "1",
+        label: "SIM whole-group allocation plan",
+      },
+      groupCode: `SIM-GROUP-${fixture.marker}`,
+      groupSize: 4,
+      itineraryLink: `https://travel.example.test/${fixture.marker}`,
+      guideName: "SIM Separate Tour Guide",
+      guidePhone: "0900000099",
+      fareBasis: "included_in_tour",
+      legs: [
+        {
+          id: "SIM-leg-out",
+          label: "SIM outbound transfer",
+          pickupAddress: "SIM group meeting point",
+          dropoffAddress: "SIM group destination",
+          viaStops: ["SIM outbound planned stop"],
+          signage: "SIM outbound group sign",
+          batches: [
+            {
+              id: "SIM-batch-A",
+              label: "SIM first departure",
+              windowStart,
+              windowEnd,
+              meetingPoint: "SIM first group meeting",
+              vehicles: [
+                vehicle("SIM-slot-A", "SIM outbound vehicle A", first),
+                vehicle("SIM-slot-B", "SIM outbound vehicle B", second),
+              ],
+            },
+            {
+              id: "SIM-batch-C",
+              label: "SIM later departure",
+              windowStart,
+              windowEnd,
+              meetingPoint: "SIM later group meeting",
+              vehicles: [
+                vehicle("SIM-slot-C", "SIM later vehicle C", first),
+                vehicle("SIM-slot-D", "SIM later vehicle D", second),
+              ],
+            },
+          ],
+        },
+        {
+          id: "SIM-leg-return",
+          label: "SIM return transfer",
+          pickupAddress: "SIM group destination",
+          dropoffAddress: "SIM group meeting point",
+          viaStops: ["SIM return planned stop"],
+          signage: "SIM return group sign",
+          batches: [
+            {
+              id: "SIM-batch-B",
+              label: "SIM return departure",
+              windowStart,
+              windowEnd,
+              meetingPoint: "SIM return group meeting",
+              vehicles: [
+                vehicle("SIM-slot-A", "SIM return vehicle A", first),
+                vehicle("SIM-slot-B", "SIM return vehicle B", second),
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const selections = plan.legs.flatMap((leg) =>
+      leg.batches.flatMap((batch) =>
+        batch.vehicles.map((slot) => ({
+          legId: leg.id,
+          batchId: batch.id,
+          vehicleId: slot.id,
+        })),
+      ),
+    );
+    const slotKey = (selection: (typeof selections)[number]) =>
+      JSON.stringify([selection.legId, selection.batchId, selection.vehicleId]);
+    expect(selections).toHaveLength(6);
+    expect(new Set(selections.map(slotKey)).size).toBe(selections.length);
+    const booked = new Map<
+      string,
+      Pick<NormalPartnerJourneyResult, "bookingId" | "orderId" | "details">
+    >();
+    const completed = new Map<string, NormalPartnerJourneyResult>();
+    const deferred = () => {
+      let resolve!: () => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<void>((yes, no) => {
+        resolve = yes;
+        reject = no;
+      });
+      // Release peers on failure within the existing test deadline, leaving
+      // cleanup time. This never raises the original test timeout or retries.
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Group barrier exceeded the existing hosted test cleanup budget",
+            ),
+          ),
+        Math.max(1, info.timeout - (Date.now() - startedAt) - 30_000),
+      );
+      // Observe rejection even if setup fails before another allocation awaits.
+      void promise.catch(() => undefined);
+      return {
+        promise,
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (reason: unknown) => {
+          clearTimeout(timer);
+          reject(reason);
+        },
+      };
+    };
+    const allBooked = deferred();
+    const otherVehiclesCompleted = deferred();
+    let historyQueue = Promise.resolve();
+    const readGroup = (expectCompleted: boolean, stage: string) => {
+      const current = historyQueue.then(async () => {
+        await test.step(stage, async () => {
+          const history = await fixture.history(scope, partnerUserRef);
+          expect(history.items).toHaveLength(selections.length);
+          expect(booked.size).toBe(selections.length);
+          for (const selection of selections) {
+            const owned = booked.get(slotKey(selection));
+            if (!owned)
+              throw new Error(
+                "A required allocation has no actual booking response",
+              );
+            const matches = history.items.filter(
+              (booking) =>
+                booking.bookingId === owned.bookingId &&
+                booking.orderId === owned.orderId,
+            );
+            expect(matches).toHaveLength(1);
+            const booking = matches[0]!;
+            expect(booking.partnerBookingDetails).toMatchObject({
+              subtype: "travel_agency_transfer",
+              planSourceKind: plan.source.kind,
+              planSourceId: plan.source.id,
+              planSourceRevision: plan.source.revision,
+              planLegId: selection.legId,
+              planBatchId: selection.batchId,
+              planVehicleId: selection.vehicleId,
+            });
+            if (expectCompleted || completed.has(slotKey(selection)))
+              expect(booking.orderStatus).toBe("completed");
+          }
+          expect(
+            history.items.every(
+              (booking) => booking.orderStatus === "completed",
+            ),
+          ).toBe(expectCompleted);
+          const url = `${PARTNER_ORIGIN}/${scope.entry.entrySlug}/trips?${new URLSearchParams({ partnerUserRef })}`;
+          const opened = await historyPage.goto(url);
+          expect(opened?.status()).toBe(200);
+          const summary = historyPage.getByTestId(
+            "partner-tour-booking-groups",
+          );
+          const group = summary.locator(
+            `article[data-plan-source-id="${plan.source.id}"][data-plan-source-revision="${plan.source.revision}"]`,
+          );
+          await expect(group).toHaveCount(1);
+          await expect(group).toContainText(plan.groupCode);
+          await expect(group).toContainText(
+            expectCompleted
+              ? "All declared slots completed"
+              : "Tour has outstanding or conflicting slots",
+          );
+          await expect(group).not.toContainText(
+            expectCompleted
+              ? "Tour has outstanding or conflicting slots"
+              : "All declared slots completed",
+          );
+          await expect(group.locator("li[data-plan-vehicle-id]")).toHaveCount(
+            selections.length,
+          );
+          for (const selection of selections) {
+            const owned = booked.get(slotKey(selection))!;
+            const row = group.locator(
+              `li[data-plan-leg-id="${selection.legId}"][data-plan-batch-id="${selection.batchId}"][data-plan-vehicle-id="${selection.vehicleId}"]`,
+            );
+            await expect(row).toHaveCount(1);
+            const link = row.getByRole("link", {
+              name: `${owned.bookingId} / ${owned.orderId}`,
+              exact: true,
+            });
+            await expect(link).toHaveCount(1);
+            const target = new URL(
+              (await link.getAttribute("href")) ?? "",
+              PARTNER_ORIGIN,
+            );
+            expect(target.pathname).toBe(`/${scope.entry.entrySlug}/confirmed`);
+            expect(target.searchParams.get("bookingId")).toBe(owned.bookingId);
+            expect(target.searchParams.get("orderId")).toBe(owned.orderId);
+            expect(target.searchParams.get("partnerUserRef")).toBe(
+              partnerUserRef,
+            );
+          }
+          await info.attach(`normal-travel-group-${stage}`, {
+            contentType: "application/json",
+            body: JSON.stringify({
+              candidate_sha: required("CANDIDATE_SHA"),
+              source: plan.source,
+              tenantId: fixture.tenantId,
+              partnerId: scope.entry.partnerId,
+              programId: scope.entry.programId,
+              entrySlug: scope.entry.entrySlug,
+              allPagesRead: history.pagesRead,
+              actualBookings: history.items.map(
+                ({
+                  bookingId,
+                  orderId,
+                  orderStatus,
+                  partnerBookingDetails,
+                }) => ({
+                  bookingId,
+                  orderId,
+                  orderStatus,
+                  partnerBookingDetails,
+                }),
+              ),
+              wholeGroupCompleted: expectCompleted,
+              noSyntheticBookingOrCompletedStatus: true,
+            }),
+          });
+        });
+      });
+      historyQueue = current.catch(() => undefined);
+      return current;
+    };
+    // Distinct real supply and browser sessions permit ordinary allocations to
+    // run together under the existing 720-second hosted test budget. A final
+    // real Driver task is deliberately held before its normal completion click.
+    const lastSlot = selections.length - 1;
+    const runs = selections.map((selection, index) =>
+      runNormalPartnerJourney(browser, info, "travel_agency_transfer", {
+        fixture,
+        scope,
+        partnerUserRef,
+        referenceToken,
+        plan,
+        ...selection,
+        slotNumber: index + 1,
+        invoicePeriodStart: invoicePeriodStart.toISOString(),
+        onBooked: async (booking) => {
+          const key = slotKey(selection);
+          expect(booked.has(key)).toBe(false);
+          expect(booking.details).toMatchObject({
+            planSourceId: plan.source.id,
+            planSourceRevision: plan.source.revision,
+            planLegId: selection.legId,
+            planBatchId: selection.batchId,
+            planVehicleId: selection.vehicleId,
+          });
+          booked.set(key, booking);
+          if (booked.size === selections.length) {
+            await readGroup(
+              false,
+              "all-required-slots-normally-booked-before-dispatch",
+            );
+            allBooked.resolve();
+          }
+          await allBooked.promise;
+        },
+        beforeComplete: async () => {
+          if (index === lastSlot) {
+            await otherVehiclesCompleted.promise;
+            await readGroup(
+              false,
+              "other-vehicles-completed-last-real-task-still-on-trip",
+            );
+          }
+        },
+        onCompleted: async (result) => {
+          const key = slotKey(selection);
+          expect(result.details).toMatchObject({
+            planSourceId: plan.source.id,
+            planSourceRevision: plan.source.revision,
+            planLegId: selection.legId,
+            planBatchId: selection.batchId,
+            planVehicleId: selection.vehicleId,
+          });
+          completed.set(key, result);
+          if (index === lastSlot)
+            await readGroup(
+              true,
+              "every-required-vehicle-really-driver-completed",
+            );
+          else {
+            await readGroup(
+              false,
+              `vehicle-${index + 1}-completed-whole-group-still-open`,
+            );
+            if (completed.size === selections.length - 1)
+              otherVehiclesCompleted.resolve();
+          }
+        },
+      }).catch((error: unknown) => {
+        allBooked.reject(error);
+        otherVehiclesCompleted.reject(error);
+        throw error;
+      }),
+    );
+    const outcomes = await Promise.allSettled(runs);
+    const failed = outcomes.find((outcome) => outcome.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
+    const actual = outcomes.map((outcome) => {
+      if (outcome.status !== "fulfilled")
+        throw new Error("Unfinished normal group allocation");
+      return outcome.value;
+    });
+    for (const field of [
+      "bookingId",
+      "orderId",
+      "dispatchJobId",
+      "assignmentId",
+      "taskId",
+      "driverId",
+      "vehicleId",
+    ] as const)
+      expect(
+        new Set(actual.map((result) => result[field])).size,
+        `distinct actual ${field} per declared allocation`,
+      ).toBe(selections.length);
+    expect(completed.size).toBe(selections.length);
+    await readGroup(true, "whole-group-fresh-final-readback");
+    await test.step("The final ordinary invoice contains every actual group order and its exact line fare", async () => {
+      const final = actual[lastSlot]!;
+      const invoice = await fixture.fixture.call<any>(
+        `tenant/invoices/${encodeURIComponent(final.invoiceId)}`,
+        fixture.tenantToken,
+        "GET",
+        undefined,
+        fixture.tenantId,
+      );
+      const persisted = await fixture.fixture.db.query(
+        "SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id=$1 AND invoice_id=$2",
+        [fixture.tenantId, final.invoiceId],
+      );
+      expect(persisted.rows).toHaveLength(1);
+      for (const record of [invoice, persisted.rows[0]!.record]) {
+        expect(record).toMatchObject({
+          invoiceId: final.invoiceId,
+          tenantId: fixture.tenantId,
+          periodStart: invoicePeriodStart.toISOString(),
+        });
+        for (const result of actual) {
+          const lines = record.lines.filter(
+            (line: any) => line.orderId === result.orderId,
+          );
+          expect(lines).toHaveLength(1);
+          expect(lines[0]).toMatchObject({
+            orderId: result.orderId,
+            businessDispatchSubtype: "travel_agency_transfer",
+            partnerId: scope.entry.partnerId,
+            partnerProgramId: scope.entry.programId,
+            partnerEntrySlug: scope.entry.entrySlug,
+            amount: result.actualFare,
+          });
+        }
+        for (const line of record.lines)
+          expect(normalisePlatformCurrency(line.amount.currency)).toBe(
+            normalisePlatformCurrency(record.amount.currency),
+          );
+        expect(record.amount.amountMinor).toBe(
+          record.lines.reduce(
+            (sum: number, line: any) => sum + line.amount.amountMinor,
+            0,
+          ),
+        );
+      }
+      await info.attach(
+        "normal-travel-whole-group-final-invoice-six-exact-own-lines",
+        {
+          contentType: "application/json",
+          body: JSON.stringify({
+            invoiceId: invoice.invoiceId,
+            amount: invoice.amount,
+            groupLines: invoice.lines.filter((line: any) =>
+              actual.some((result) => result.orderId === line.orderId),
+            ),
+            allInvoiceLinesSummed: true,
+            noAssumedSingleOrderHeaderTotal: true,
+          }),
+        },
+      );
+    });
+    await info.attach("normal-travel-whole-group-actual-lifecycle-identities", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        candidate_sha: required("CANDIDATE_SHA"),
+        source: plan.source,
+        requiredSlots: selections,
+        actual: actual.map(({ details, ...result }) => ({
+          ...result,
+          planLegId:
+            details?.subtype === "travel_agency_transfer"
+              ? details.planLegId
+              : null,
+          planBatchId:
+            details?.subtype === "travel_agency_transfer"
+              ? details.planBatchId
+              : null,
+          planVehicleId:
+            details?.subtype === "travel_agency_transfer"
+              ? details.planVehicleId
+              : null,
+        })),
+        noDirectSQLMutation: true,
+        notClaimed: [
+          "physical-rides",
+          "real-external-tour-system",
+          "real-PSP",
+          "production",
+          "full-R14-or-UC16",
+        ],
+      }),
+    });
+  } finally {
+    await historyContext?.close();
     await fixture.close();
   }
 }

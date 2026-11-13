@@ -404,6 +404,10 @@ function getPartnerFulfillmentRows(
         row(copy.groupSize, count(details?.groupSize)),
         row(copy.meetingPoint, text(details?.meetingPoint)),
         row(copy.itineraryLink, text(details?.itineraryLink)),
+        row(copy.guideName, text(order.onsiteContact?.name)),
+        row(copy.guidePhone, text(order.onsiteContact?.phone)),
+        row(copy.plannedStops, text((details?.viaStops ?? []).join(" → "))),
+        row(copy.signage, text(details?.signage)),
         row(
           copy.rosterPassengers,
           text((details?.rosterPassengers ?? []).join("、")),

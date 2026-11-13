@@ -15,6 +15,7 @@ import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
   AddressMapPairPicker,
+  AddressMapPicker,
   buildAddressPickerLabels,
   CanvasBanner,
   CanvasCard,
@@ -26,8 +27,12 @@ import {
   type AddressMapPairChange,
   type AddressProviderMode,
   type AddressProviderHealth,
+  type AddressPayload,
 } from "@drts/ui-web";
 import {
+  applyPartnerTravelPlanSelection,
+  createPartnerTravelPlanExample,
+  getPartnerTravelPlanSelection,
   createPartnerAirportMapProvider,
   type PartnerAirportMapAction,
   formatDateTimeLocalInputValue,
@@ -188,6 +193,15 @@ export function PartnerBookingForm({
   const fieldIdPrefix = useId();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(initialDraft);
+  const [travelPlanInput, setTravelPlanInput] = useState(
+    initialDraft.travelPlanDocument,
+  );
+  const [travelPlanError, setTravelPlanError] = useState(false);
+  const [travelPlanRevision, setTravelPlanRevision] = useState(0);
+  const travelSelection =
+    entry.businessDispatchSubtype === "travel_agency_transfer"
+      ? getPartnerTravelPlanSelection(draft)
+      : null;
   // The BFF sends offset-bearing defaults. Localize only those on hydration;
   // an already edited datetime-local value must retain the browser's local time.
   useEffect(() => {
@@ -224,6 +238,10 @@ export function PartnerBookingForm({
     },
     bothDispatchReady: false,
   });
+  const [routeStops, setRouteStops] = useState<
+    Array<{ id: number; address: AddressPayload | null }>
+  >([]);
+  const nextRouteStopId = useRef(0);
   const mapProviderMode =
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
@@ -285,6 +303,7 @@ export function PartnerBookingForm({
     dropoff: mapSelection.dropoff,
     serviceability: mapSelection.serviceability,
     providerState: mapSelection.providerState,
+    routeStops: routeStops.map((stop) => stop.address),
   });
   const airportPreviewPending =
     canonicalAirportMap &&
@@ -312,6 +331,46 @@ export function PartnerBookingForm({
     }));
   }
 
+  const sourceMappedFields = new Set([
+    "groupCode",
+    "groupSize",
+    "itineraryLink",
+    "guideName",
+    "guidePhone",
+    "meetingPoint",
+    "rosterPassengers",
+    "luggageCount",
+    "viaStops",
+    "signage",
+  ]);
+  function loadTravelPlan(
+    document: string,
+    selection?: {
+      legId: string;
+      batchId?: string;
+      vehicleId?: string;
+    },
+  ) {
+    const selectedDraft = applyPartnerTravelPlanSelection(
+      draft,
+      document,
+      selection,
+    );
+    setTravelPlanError(!selectedDraft);
+    if (!selectedDraft) return;
+    setBookingResult(null);
+    setDraft(selectedDraft);
+    setRouteStops([]);
+    setTravelPlanRevision((current) => current + 1);
+    setMapSelection((current) => ({
+      ...current,
+      pickup: null,
+      dropoff: null,
+      serviceability: null,
+      bothDispatchReady: false,
+    }));
+  }
+
   function renderField(params: {
     name: keyof typeof draft;
     label: string;
@@ -322,6 +381,7 @@ export function PartnerBookingForm({
     textarea?: boolean;
     fullSpan?: boolean;
   }) {
+    const readOnly = !!travelSelection && sourceMappedFields.has(params.name);
     const error = errors[params.name];
     const fieldId = `${fieldIdPrefix}-${params.name}`;
     const labelId = `${fieldId}-label`;
@@ -358,6 +418,7 @@ export function PartnerBookingForm({
           </select>
         ) : params.textarea ? (
           <textarea
+            readOnly={readOnly}
             id={fieldId}
             aria-labelledby={labelId}
             aria-describedby={descriptionIds}
@@ -372,6 +433,10 @@ export function PartnerBookingForm({
             aria-labelledby={labelId}
             aria-describedby={descriptionIds}
             type={params.type ?? "text"}
+            readOnly={readOnly}
+            {...(travelSelection && params.type === "datetime-local"
+              ? { step: "0.001" }
+              : {})}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
             style={inputStyle(theme)}
@@ -419,6 +484,9 @@ export function PartnerBookingForm({
       },
       pickup: mapSelection.pickup,
       dropoff: mapSelection.dropoff,
+      ...(entry.businessDispatchSubtype === "travel_agency_transfer"
+        ? { routeStops: routeStops.map((stop) => stop.address) }
+        : {}),
       serviceability: mapSelection.serviceability,
       providerState: mapSelection.providerState,
     };
@@ -428,6 +496,7 @@ export function PartnerBookingForm({
       draft: payload.draft,
       pickup: payload.pickup,
       dropoff: payload.dropoff,
+      routeStops: payload.routeStops,
       mapFallbackReview:
         mapGate.code === "dispatch_manual_review_required"
           ? {
@@ -484,44 +553,8 @@ export function PartnerBookingForm({
   const travelRosterPreview = draft.rosterPassengers
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 4);
+    .filter(Boolean);
   const travelSeatCount = draft.groupSize || "—";
-  const travelBatchPreview =
-    entry.businessDispatchSubtype === "travel_agency_transfer"
-      ? [
-          {
-            title: t("book.travel.batch.primary"),
-            time: draft.reservationWindowStart || "—",
-            vehicle:
-              Number.parseInt(draft.groupSize, 10) > 8
-                ? t("book.travel.vehicle.mediumBus", { count: 1 })
-                : t("book.travel.vehicle.businessCar", { count: 2 }),
-            seats: t("book.travel.seats.fraction", {
-              used: travelSeatCount,
-              total: travelSeatCount,
-            }),
-            stop: `${
-              draft.meetingPoint ||
-              draft.pickupAddress ||
-              t("book.travel.stop.meetingPending")
-            } → ${draft.dropoffAddress || t("book.travel.stop.dropoffPending")}`,
-          },
-          {
-            title: t("book.travel.batch.secondary"),
-            time: draft.reservationWindowEnd || "—",
-            vehicle: draft.luggageCount
-              ? t("book.travel.vehicle.businessCar", {
-                  count: draft.luggageCount,
-                })
-              : t("book.travel.vehicle.businessCar", { count: 2 }),
-            seats: t("book.travel.seats.total", { count: travelSeatCount }),
-            stop: `${draft.dropoffAddress || t("book.travel.stop.hotelPending")} → ${
-              draft.notes || t("book.travel.stop.followupShuttle")
-            }`,
-          },
-        ]
-      : [];
 
   return (
     <form style={pageStyle} onSubmit={handleSubmit}>
@@ -616,131 +649,194 @@ export function PartnerBookingForm({
       {entry.businessDispatchSubtype === "travel_agency_transfer" ? (
         <CanvasCard theme={theme} title={t("book.travel.cardTitle")}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div
-              style={{
-                display: "grid",
-                gap: 10,
-                padding: 14,
-                borderRadius: 16,
-                background: theme.accentBg,
-                border: `1px solid ${theme.accentBorder}`,
-              }}
+            <p>{t("book.travel.plan.scope")}</p>
+            <aside
+              data-testid="partner-tour-fee-arrangement"
+              aria-label={t("book.travel.fee.title")}
             >
-              <div style={actionRowStyle}>
-                <CanvasPill theme={theme} tone="accent">
-                  {t("book.travel.badge")}
-                </CanvasPill>
-                <strong style={{ color: theme.text }}>
-                  {t("book.travel.seats.total", { count: travelSeatCount })}
-                </strong>
-              </div>
-              <div style={fieldStyle}>
-                <span style={{ ...labelStyle, color: theme.textMuted }}>
-                  {t("book.travel.summary.groupCode")}
-                </span>
-                <strong style={{ color: theme.text }}>
-                  {draft.groupCode || "—"}
-                </strong>
-              </div>
-              <div style={fieldStyle}>
-                <span style={{ ...labelStyle, color: theme.textMuted }}>
-                  {t("book.travel.summary.itinerary")}
-                </span>
-                <strong style={{ color: theme.text }}>
-                  {draft.itineraryLink || "—"}
-                </strong>
-              </div>
-              <div style={fieldStyle}>
-                <span style={{ ...labelStyle, color: theme.textMuted }}>
-                  {t("book.travel.summary.transferLegs")}
-                </span>
-                <strong style={{ color: theme.text }}>
-                  {t("book.travel.summary.transferLegsValue")}
-                </strong>
-              </div>
+              <strong>{t("book.travel.plan.included")}</strong>
+              <p>{t("book.travel.fee.scope")}</p>
+            </aside>
+            <div style={actionRowStyle}>
+              <button
+                type="button"
+                onClick={() => {
+                  const document = createPartnerTravelPlanExample(draft);
+                  setTravelPlanInput(document);
+                  loadTravelPlan(document);
+                }}
+              >
+                {t("book.travel.plan.example")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBookingResult(null);
+                  setTravelPlanError(false);
+                  setRouteStops([]);
+                  setDraft((current) => ({
+                    ...current,
+                    travelPlanDocument: "",
+                    travelPlanLegId: "",
+                    travelPlanBatchId: "",
+                    travelPlanVehicleId: "",
+                  }));
+                }}
+              >
+                {t("book.travel.plan.clear")}
+              </button>
             </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <strong style={{ color: theme.text }}>
-                {t("book.travel.roster.title")}
-              </strong>
-              {travelRosterPreview.length > 0 ? (
-                travelRosterPreview.map((item) => (
-                  <div
-                    key={item}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      padding: "10px 12px",
-                      borderRadius: 14,
-                      border: `1px solid ${theme.border}`,
-                      background: theme.surface,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: 8,
-                        background: theme.accentBg,
-                        color: theme.accentHi,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
+            <details>
+              <summary>{t("book.travel.plan.import")}</summary>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>{t("book.travel.plan.document")}</span>
+                <textarea
+                  value={travelPlanInput}
+                  onChange={(event) => setTravelPlanInput(event.target.value)}
+                  style={textareaStyle(theme)}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => loadTravelPlan(travelPlanInput)}
+              >
+                {t("book.travel.plan.apply")}
+              </button>
+            </details>
+            {travelPlanError ? (
+              <p role="alert">{t("book.travel.plan.invalid")}</p>
+            ) : null}
+            {travelSelection ? (
+              <section aria-label={t("book.travel.plan.selection")}>
+                <strong>
+                  {t(
+                    "book.travel.plan.source." +
+                      travelSelection.plan.source.kind,
+                  )}
+                </strong>
+                <p>
+                  {travelSelection.plan.source.label} ·{" "}
+                  {travelSelection.plan.source.revision}
+                </p>
+                <div style={gridStyle}>
+                  <label style={fieldStyle}>
+                    <span>{t("book.travel.plan.leg")}</span>
+                    <select
+                      value={travelSelection.leg.id}
+                      onChange={(event) =>
+                        loadTravelPlan(draft.travelPlanDocument, {
+                          legId: event.target.value,
+                        })
+                      }
                     >
-                      {item.slice(0, 1)}
-                    </div>
-                    <span style={{ color: theme.text, flex: 1 }}>{item}</span>
-                    <CanvasPill theme={theme} tone="neutral">
-                      {t("book.travel.roster.tag")}
-                    </CanvasPill>
-                  </div>
-                ))
-              ) : (
-                <span style={{ color: theme.textMuted }}>
-                  {t("book.travel.roster.empty")}
-                </span>
-              )}
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <strong style={{ color: theme.text }}>
-                {t("book.travel.batch.title")}
-              </strong>
-              {travelBatchPreview.map((batch) => (
-                <div
-                  key={batch.title}
-                  style={{
-                    display: "grid",
-                    gap: 6,
-                    padding: "12px 14px",
-                    borderRadius: 14,
-                    border: `1px solid ${theme.border}`,
-                    background: theme.surface,
-                  }}
-                >
-                  <div style={actionRowStyle}>
-                    <strong style={{ color: theme.text, flex: 1 }}>
-                      {batch.title}
-                    </strong>
-                    <CanvasPill theme={theme} tone="accent">
-                      {batch.time}
-                    </CanvasPill>
-                  </div>
-                  <span style={{ color: theme.textMuted }}>
-                    {t("book.travel.batch.vehicle")} · {batch.vehicle}
-                  </span>
-                  <span style={{ color: theme.textMuted }}>
-                    {t("book.travel.batch.seats")} · {batch.seats}
-                  </span>
-                  <span style={{ color: theme.text }}>{batch.stop}</span>
+                      {travelSelection.plan.legs.map((leg, index) => (
+                        <option key={leg.id} value={leg.id}>
+                          {index + 1} / {travelSelection.plan.legs.length} ·{" "}
+                          {leg.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span>{t("book.travel.plan.batch")}</span>
+                    <select
+                      value={travelSelection.batch.id}
+                      onChange={(event) =>
+                        loadTravelPlan(draft.travelPlanDocument, {
+                          legId: travelSelection.leg.id,
+                          batchId: event.target.value,
+                        })
+                      }
+                    >
+                      {travelSelection.leg.batches.map((batch, index) => (
+                        <option key={batch.id} value={batch.id}>
+                          {index + 1} / {travelSelection.leg.batches.length} ·{" "}
+                          {batch.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span>{t("book.travel.plan.vehicle")}</span>
+                    <select
+                      value={travelSelection.vehicle.id}
+                      onChange={(event) =>
+                        loadTravelPlan(draft.travelPlanDocument, {
+                          legId: travelSelection.leg.id,
+                          batchId: travelSelection.batch.id,
+                          vehicleId: event.target.value,
+                        })
+                      }
+                    >
+                      {travelSelection.batch.vehicles.map((vehicle) => (
+                        <option key={vehicle.id} value={vehicle.id}>
+                          {vehicle.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-              ))}
-            </div>
+                <dl>
+                  <div>
+                    <dt>{t("book.travel.summary.groupCode")}</dt>
+                    <dd>{draft.groupCode}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.summary.itinerary")}</dt>
+                    <dd>{draft.itineraryLink}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.plan.route")}</dt>
+                    <dd>
+                      {travelSelection.leg.pickupAddress} →{" "}
+                      {travelSelection.leg.dropoffAddress}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.plan.window")}</dt>
+                    <dd>
+                      {travelSelection.batch.windowStart} →{" "}
+                      {travelSelection.batch.windowEnd}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.plan.seats")}</dt>
+                    <dd>
+                      {travelSelection.vehicle.rosterPassengers.length} /{" "}
+                      {travelSelection.vehicle.seats}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.plan.vehicles")}</dt>
+                    <dd>
+                      {travelSelection.batch.vehicles
+                        .map((vehicle) => vehicle.label)
+                        .join(" · ")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("book.travel.plan.fare")}</dt>
+                    <dd>{t("book.travel.plan.included")}</dd>
+                  </div>
+                </dl>
+                <p>{t("book.travel.plan.singleOrder")}</p>
+              </section>
+            ) : (
+              <p>{t("book.travel.plan.absent")}</p>
+            )}
+            <strong>
+              {t("book.travel.roster.title")} ·{" "}
+              {t("book.travel.seats.total", { count: travelSeatCount })}
+            </strong>
+            {travelRosterPreview.length ? (
+              <ul>
+                {travelRosterPreview.map((name, index) => (
+                  <li key={index}>{name}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>{t("book.travel.roster.empty")}</p>
+            )}
           </div>
         </CanvasCard>
       ) : null}
@@ -759,6 +855,7 @@ export function PartnerBookingForm({
               />
             ) : null}
             <AddressMapPairPicker
+              key={travelSelection ? `plan-${travelPlanRevision}` : "manual"}
               actorId={entry.entrySlug}
               requireCompleteRoute={canonicalAirportMap}
               {...(canonicalAirportMap
@@ -951,6 +1048,86 @@ export function PartnerBookingForm({
                 type: "url",
                 hint: t("hint.itineraryLink"),
               })}
+              {renderField({ name: "guideName", label: t("field.guideName") })}
+              {renderField({
+                name: "guidePhone",
+                label: t("field.guidePhone"),
+                type: "tel",
+              })}
+              {renderField({
+                name: "viaStops",
+                label: t("field.viaStops"),
+                textarea: true,
+                fullSpan: true,
+                hint: t("book.travel.plan.stopsScope"),
+              })}
+              {renderField({
+                name: "signage",
+                label: t("field.signage"),
+                fullSpan: true,
+              })}
+              <div style={{ ...fieldStyle, ...fullSpanStyle }}>
+                <strong>{t("field.routeStops")}</strong>
+                <p style={hintStyle}>{t("book.travel.stops.hint")}</p>
+                {routeStops.map((stop, index) => (
+                  <section
+                    key={stop.id}
+                    aria-label={`${t("field.routeStops")} ${index + 1}`}
+                  >
+                    <AddressMapPicker
+                      provider={mapProvider}
+                      surface="partner_booking"
+                      theme={theme}
+                      title={`${t("field.routeStops")} ${index + 1}`}
+                      enableServiceabilityPreview={false}
+                      {...(mapLabels ? { labels: mapLabels } : {})}
+                      onChange={(change) => {
+                        setBookingResult(null);
+                        const address = change.dispatchReady
+                          ? change.address
+                          : null;
+                        setRouteStops((current) =>
+                          JSON.stringify(
+                            current.find((item) => item.id === stop.id)
+                              ?.address,
+                          ) === JSON.stringify(address)
+                            ? current
+                            : current.map((item) =>
+                                item.id === stop.id
+                                  ? { ...item, address }
+                                  : item,
+                              ),
+                        );
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={`${t("book.travel.stops.remove")} ${index + 1}`}
+                      onClick={() => {
+                        setBookingResult(null);
+                        setRouteStops((current) =>
+                          current.filter((item) => item.id !== stop.id),
+                        );
+                      }}
+                    >
+                      {t("book.travel.stops.remove")}
+                    </button>
+                  </section>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = nextRouteStopId.current++;
+                    setBookingResult(null);
+                    setRouteStops((current) => [
+                      ...current,
+                      { id, address: null },
+                    ]);
+                  }}
+                >
+                  {t("book.travel.stops.add")}
+                </button>
+              </div>
               {renderField({
                 name: "flightNo",
                 label: t("field.flightNo"),
@@ -1059,6 +1236,22 @@ export function PartnerBookingForm({
               style={fieldStyle}
             >
               <strong>{t("book.create.success")}</strong>
+              {bookingResult.confirmation.partnerBookingDetails?.subtype ===
+              "travel_agency_transfer" ? (
+                <aside
+                  data-testid="partner-confirmed-tour-fee"
+                  aria-label={t("book.travel.fee.title")}
+                >
+                  <strong>{t("book.travel.plan.included")}</strong>
+                  <p>{t("book.travel.fee.scope")}</p>
+                </aside>
+              ) : null}
+              {bookingResult.confirmation.partnerBookingDetails?.subtype ===
+                "travel_agency_transfer" &&
+              bookingResult.confirmation.partnerBookingDetails
+                .planSourceKind ? (
+                <p>{t("book.travel.plan.recordScope")}</p>
+              ) : null}
               {partnerUserRef ? (
                 <nav aria-label={t("read.navigation")}>
                   <Link
@@ -1111,14 +1304,35 @@ export function PartnerBookingForm({
                 {Object.entries(
                   bookingResult.confirmation.partnerBookingDetails ?? {},
                 )
-                  .filter(([field]) => field !== "subtype")
+                  .filter(
+                    ([field]) =>
+                      field !== "subtype" &&
+                      ![
+                        "planSourceId",
+                        "planLegId",
+                        "planBatchId",
+                        "planVehicleId",
+                      ].includes(field),
+                  )
                   .map(([field, value]) => (
                     <div key={field}>
                       <dt>{t("field." + field)}</dt>
                       <dd>
-                        {Array.isArray(value)
-                          ? value.join(" · ")
-                          : String(value)}
+                        {field === "planSourceKind"
+                          ? t("book.travel.plan.source." + value)
+                          : field === "planFareBasis"
+                            ? t("book.travel.plan.included")
+                            : field === "routeStops" && Array.isArray(value)
+                              ? value
+                                  .map((stop) =>
+                                    typeof stop === "object" && stop
+                                      ? stop.address
+                                      : "",
+                                  )
+                                  .join(" → ")
+                              : Array.isArray(value)
+                                ? value.join(" · ")
+                                : String(value)}
                       </dd>
                     </div>
                   ))}

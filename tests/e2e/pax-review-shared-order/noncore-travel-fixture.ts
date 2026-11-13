@@ -5,6 +5,8 @@ import type {
   PartnerChannelEntryRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressHandoffSession,
+  BookingRecord,
+  TenantBookingsPageRecord,
   ServiceAreaAdminMutationResponse,
   ServiceAreaBoundaryRecord,
 } from "@drts/contracts";
@@ -41,9 +43,13 @@ export class NoncoreTravelFixture {
     keyId: string | null;
   }[] = [];
   private readonly airportAreas: ServiceAreaBoundaryRecord[] = [];
-  readonly platform = required("DRTS_UAT_TOKEN_PLATFORM");
+  get platform() {
+    return required("DRTS_UAT_TOKEN_PLATFORM");
+  }
   readonly tenantId = required("DRTS_UAT_TENANT_A");
-  readonly tenantToken = required("DRTS_UAT_TOKEN_A");
+  get tenantToken() {
+    return required("DRTS_UAT_TOKEN_A");
+  }
 
   async entry(
     partnerType:
@@ -123,14 +129,18 @@ export class NoncoreTravelFixture {
       | "insurance_replacement_vehicle"
       | "credit_card_airport_transfer" = "travel_agency_transfer",
   ) {
+    // Several real allocations may share one tour fixture. Every normal
+    // supply application still needs its own registry identities.
+    const supplyMarker = randomUUID();
+    const supplyMobile = `09${(Number.parseInt(supplyMarker.slice(0, 8), 16) % 100_000_000).toString().padStart(8, "0")}`;
     const fleet = await this.fixture.call<FleetPartnerRecord>(
       "admin/fleet-partners",
       this.platform,
       "POST",
       {
-        legalName: `SIM synthetic travel fleet ${this.marker}`,
+        legalName: `SIM synthetic travel fleet ${supplyMarker}`,
         displayName: "SIM hosted travel fleet",
-        businessRegistrationNo: `SIM-${this.marker}`,
+        businessRegistrationNo: `SIM-${supplyMarker}`,
         contactName: "SIM Fleet Contact",
         contactPhone: "0900000034",
         active: true,
@@ -277,10 +287,10 @@ export class NoncoreTravelFixture {
       "POST",
       {
         name: "SIM hosted travel driver",
-        mobile: "0900000035",
-        professionalDriverLicenseNo: `SIM-DL-${this.marker}`,
+        mobile: supplyMobile,
+        professionalDriverLicenseNo: `SIM-DL-${supplyMarker}`,
         professionalDriverLicenseExpiry: until,
-        taxiDriverRegistrationNo: `SIM-REG-${this.marker}`,
+        taxiDriverRegistrationNo: `SIM-REG-${supplyMarker}`,
         taxiDriverRegistrationArea: "TPE",
         taxiDriverRegistrationExpiry: until,
         supportedServiceProductCodes,
@@ -308,7 +318,7 @@ export class NoncoreTravelFixture {
       "fleet-partner/supply-submissions/vehicles",
       "POST",
       {
-        plateNo: `SIM-${this.marker.slice(0, 8).toUpperCase()}`,
+        plateNo: `SIM-${supplyMarker.slice(0, 8).toUpperCase()}`,
         licenseType: "business_vehicle",
         brand: "SIM",
         model: "synthetic travel vehicle",
@@ -581,6 +591,73 @@ export class NoncoreTravelFixture {
     expect(booking).toMatchObject({ orderId, bookingId });
     expect(receipt).toMatchObject({ orderId, bookingId });
     return { order, booking, receipt };
+  }
+
+  /** Read the existing scoped history, without manufacturing a group result. */
+  async history(
+    scope: Awaited<ReturnType<NoncoreTravelFixture["entry"]>>,
+    partnerUserRef: string,
+  ) {
+    const session = await this.fixture.call<PartnerIngressHandoffSession>(
+      "partner/ingress/handoff",
+      null,
+      "POST",
+      {
+        entrySlug: scope.entry.entrySlug,
+        apiKey: scope.apiKey,
+        partnerUserRef,
+      },
+    );
+    expect(session.identity).toMatchObject({
+      realm: "partner",
+      actorType: "referral_passenger",
+      tenantId: this.tenantId,
+      partnerId: scope.entry.partnerId,
+      partnerProgramId: scope.entry.programId,
+      partnerEntrySlug: scope.entry.entrySlug,
+    });
+    const readPage = (page: number) =>
+      this.fixture.call<TenantBookingsPageRecord>(
+        `partner/bookings?page=${page}&pageSize=20`,
+        session.accessToken,
+        "GET",
+        undefined,
+        this.tenantId,
+      );
+    const first = await readPage(1);
+    const { totalItems, totalPages } = first.pagination;
+    expect(totalPages).toBe(Math.ceil(totalItems / 20));
+    const items: BookingRecord[] = [];
+    for (let page = 1; page <= Math.max(1, totalPages); page += 1) {
+      const result = page === 1 ? first : await readPage(page);
+      expect(result.pagination).toMatchObject({
+        page,
+        pageSize: 20,
+        totalItems,
+        totalPages,
+      });
+      expect(result.items).toHaveLength(
+        Math.min(20, Math.max(0, totalItems - (page - 1) * 20)),
+      );
+      for (const booking of result.items) {
+        expect(booking).toMatchObject({
+          tenantId: this.tenantId,
+          partnerId: scope.entry.partnerId,
+          partnerProgramId: scope.entry.programId,
+          partnerEntrySlug: scope.entry.entrySlug,
+          businessDispatchSubtype: "travel_agency_transfer",
+        });
+        items.push(booking);
+      }
+    }
+    expect(items).toHaveLength(totalItems);
+    expect(new Set(items.map((booking) => booking.bookingId)).size).toBe(
+      items.length,
+    );
+    expect(new Set(items.map((booking) => booking.orderId)).size).toBe(
+      items.length,
+    );
+    return { items, totalItems, pagesRead: Math.max(1, totalPages) };
   }
 
   async close() {
