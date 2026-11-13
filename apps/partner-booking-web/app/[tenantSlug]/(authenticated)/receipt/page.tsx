@@ -37,7 +37,14 @@ export default async function PartnerReceiptPage({
           screen="receipt"
         />
         {record.receipt ? (
-          <PartnerPaymentReceipt receipt={record.receipt} locale={locale} />
+          <PartnerPaymentReceipt
+            receipt={record.receipt}
+            locale={locale}
+            tourIncluded={
+              record.booking.businessDispatchSubtype ===
+              "travel_agency_transfer"
+            }
+          />
         ) : null}
       </>
     );
