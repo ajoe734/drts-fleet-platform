@@ -22,13 +22,37 @@ describe("protected production inventory actual exported boundaries", () => {
     expect(report.effectiveIamPermissions).toBe("unverified");
     expect(
       report.records.filter((r: any) => r.kind === "service"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(
       report.records.filter((r: any) => r.kind === "revision"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(report.records.filter((r: any) => r.kind === "iap")).toHaveLength(
       10,
     );
+    const agencyRecords = [
+      ["service", "agency-portal-web"],
+      ["revision", "agency-portal-web:prod-agency-portal-web-00001"],
+      ["policy", "agency-portal-web-policy"],
+    ];
+    for (const [kind, id] of agencyRecords) {
+      expect(report.records.find((r: any) => r.id === id)).toMatchObject({
+        kind,
+        status: "observed",
+      });
+      expect(() =>
+        c.serialize({
+          ...report,
+          records: report.records.filter((r: any) => r.id !== id),
+        }),
+      ).toThrow("INSUFFICIENT_OBSERVATION");
+    }
+    expect(
+      report.records.find((r: any) => r.id === "agency-portal-web").data
+        .ingress,
+    ).toBe("INGRESS_TRAFFIC_ALL");
+    expect(
+      report.records.some((r: any) => r.id === "agency-portal-web-iap"),
+    ).toBe(false);
     expect(
       report.records.find((r: any) => r.id === "api-policy").data
         .unconditionalDeployerInvoker,
@@ -311,7 +335,7 @@ describe("official Google HTTP method boundary", () => {
     ).toBe(false);
     expect(
       f.plan.operations.filter((op: any) => op.kind === "policy"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
   });
 });
 describe("actual parsed workflow protection", () => {

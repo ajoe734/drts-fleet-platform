@@ -124,7 +124,7 @@ export type FleetCase = {
   responsibility: "fleet" | "shared" | "platform" | "unattributed";
   status: string;
   actionDescriptor?: FleetCaseItem["actionDescriptor"];
-  sla: "breached" | "on_track";
+  sla: "breached" | "on_track" | "unknown";
   date: string;
 };
 
@@ -1308,12 +1308,12 @@ export interface FleetCaseItem {
   responsibility: "fleet" | "shared" | "platform" | "unattributed";
   fleetPartnerId: string;
   status: string;
-  slaDueAt: string;
+  slaDueAt: string | null;
   slaBreachedAt: string | null;
-  slaBreach: boolean;
+  slaBreach: boolean | null;
   slaTone: "danger" | "success" | "neutral";
   slaLabel: string;
-  reopenCount: number;
+  reopenCount: number | null;
   relatedOrder: string | null;
   relatedCall: string | null;
   assignee: string;
@@ -1343,7 +1343,7 @@ export interface FleetCaseTimelineEvent {
   tone: "accent" | "warn" | "danger" | "success";
   t: string;
   actor: string;
-  actorRealm: "ops" | "tenant" | "system";
+  actorRealm: "ops" | "tenant" | "system" | "unknown";
   body: string;
   attachments?: FleetCaseTimelineAttachment[];
 }
@@ -1662,7 +1662,12 @@ export async function loadCases(): Promise<CasesView> {
       responsibility: r.responsibility,
       status: r.status,
       ...(r.actionDescriptor ? { actionDescriptor: r.actionDescriptor } : {}),
-      sla: r.slaBreach ? "breached" : "on_track",
+      sla:
+        r.slaBreach === null
+          ? "unknown"
+          : r.slaBreach
+            ? "breached"
+            : "on_track",
       date: r.openedAt ? r.openedAt.slice(0, 10) : "",
     }));
     return { rows, source: "live", connected: true };

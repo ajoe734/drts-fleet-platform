@@ -435,18 +435,20 @@ export function opsReportJobArtifactPathname(jobId: string): string {
   return `/control-plane-proxy/reports/${encodeURIComponent(text(jobId, "daily-report-job-id-required"))}/artifact`;
 }
 
+const TAIPEI_SERVICE_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 export function toTaipeiServiceDate(isoTimestamp: string): string {
   const parsed = Date.parse(isoTimestamp);
   requireFact(
     Number.isFinite(parsed),
     "daily-report-valid-timestamp-for-service-date",
   );
-  const formatted = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(parsed));
+  const formatted = TAIPEI_SERVICE_DATE_FORMATTER.format(new Date(parsed));
   requireFact(
     /^\d{4}-\d{2}-\d{2}$/.test(formatted),
     "daily-report-taipei-service-date-format",
@@ -3496,12 +3498,9 @@ export async function runOwnedDailyReportDownloads(
       evidence,
     );
     assertEmptyQuery(rebuiltEmpty.searchParams);
-    requireFact(
-      unwrapEnvelopeList(
-        rebuiltEmpty.bytes,
-        "daily-report-empty-rebuilt-preview",
-      ).length === 0,
-      "daily-report-empty-rebuilt-preview-zero-required",
+    requireEmptyDailyReportList(
+      rebuiltEmpty.bytes,
+      "daily-report-empty-rebuilt-preview",
     );
     emptyDayConsumerPhase = "rebuild-row-detached";
     await page

@@ -4727,7 +4727,7 @@ export class IdentityRepository implements OnModuleInit {
     }
     const result = await this.databaseService!.query<JsonRecordRow>(
       `UPDATE iam.identity_invitations
-          SET delivery_status = $2,
+          SET delivery_status = $2::text,
               updated_at = $3::timestamptz,
               record = jsonb_set(jsonb_set(record, '{deliveryStatus}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($3::text))
         WHERE invitation_id = $1 AND realm = 'agency'

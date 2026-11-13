@@ -114,13 +114,35 @@ describe("FleetPartnerService", () => {
   });
 
   it("replaces persisted statement slices so stale rows are removed on rebuild", async () => {
+    const seededService = createService().fleetPartnerService;
+    const persistedAffiliations =
+      seededService.listFleetPartnerDrivers("fleet-demo-001");
+    const persistedRules = new Map(
+      seededService
+        .listRevenueShareRules("fleet-demo-001")
+        .map((rule) => [rule.ruleId, rule]),
+    );
     let persistedStatements: Parameters<
       FleetPartnerRepository["replaceStatementsForPeriodMonth"]
     >[1] = [];
     const repository = {
       isEnabled: () => true,
+      loadDriverAffiliations: vi.fn(async () =>
+        persistedAffiliations.map((record) => ({ ...record })),
+      ),
+      loadRevenueShareRules: vi.fn(async () =>
+        [...persistedRules.values()].map((record) => ({ ...record })),
+      ),
       loadStatements: vi.fn(async () => [...persistedStatements]),
-      persistChanges: vi.fn(async () => undefined),
+      persistChanges: vi.fn(
+        async (
+          changes: Parameters<FleetPartnerRepository["persistChanges"]>[0],
+        ) => {
+          for (const rule of changes.revenueShareRules ?? []) {
+            persistedRules.set(rule.ruleId, { ...rule });
+          }
+        },
+      ),
       replaceStatementsForPeriodMonth: vi.fn(
         async (
           _periodMonth: string,
@@ -131,7 +153,9 @@ describe("FleetPartnerService", () => {
           persistedStatements = statements;
         },
       ),
-      deleteRevenueShareRule: vi.fn(async () => undefined),
+      deleteRevenueShareRule: vi.fn(async (ruleId: string) => {
+        persistedRules.delete(ruleId);
+      }),
       reportPersistenceFailure: vi.fn(),
     } satisfies Partial<FleetPartnerRepository>;
     const { fleetPartnerService } = createService(repository);

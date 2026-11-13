@@ -507,9 +507,27 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       to?: string;
     } = {},
   ): Promise<SixMonthOperationsSummary[]> {
+    return this.previewOperationsSummary(query, 6);
+  }
+
+  // R09 has an existing twelve-month window; R10 remains limited to six.
+  // Both use one canonical source/read-model batch and one statisticsAsOf.
+  async previewComplaintMonthlyStatistics(
+    query: MonthlyOperationsSummaryQuery = {},
+  ): Promise<SixMonthOperationsSummary[]> {
+    return this.previewOperationsSummary(query, 12);
+  }
+
+  private async previewOperationsSummary(
+    query: MonthlyOperationsSummaryQuery & {
+      from?: string;
+      to?: string;
+    },
+    maxMonths: 6 | 12,
+  ): Promise<SixMonthOperationsSummary[]> {
     const { periodMonthFrom, periodMonthTo } = this.resolveSummaryMonthBounds(
       query,
-      { maxMonths: 6 },
+      { maxMonths },
     );
     const periods = this.enumerateMonths(periodMonthFrom, periodMonthTo);
     const monthlyQuery: MonthlyOperationsSummaryQuery = {

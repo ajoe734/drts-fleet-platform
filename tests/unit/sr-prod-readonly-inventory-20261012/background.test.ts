@@ -76,7 +76,7 @@ describe("background observations through actual GET, collection and serializati
         else expect(fields).not.toMatch(/manualInstanceCount|scalingMode/);
       } else expect(fields).not.toMatch(/cpuIdle|InstanceCount|scalingMode/);
     }
-    expect(f.calls).toHaveLength(64);
+    expect(f.calls).toHaveLength(67);
   });
   it("retains typed service and actual revision observations through hosted transport", async () => {
     const f = background();
@@ -98,7 +98,7 @@ describe("background observations through actual GET, collection and serializati
     expect(report.runtimeProvenance).toBe("unverified");
     expect(report.effectiveIamPermissions).toBe("unverified");
     expect(c.serialize(report)).not.toContain(SENTINEL);
-    expect(fetch).toHaveBeenCalledTimes(64);
+    expect(fetch).toHaveBeenCalledTimes(67);
   });
   it("serializes permitted observations independently of transport validation", async () => {
     const f = fixture({}, c);
@@ -210,7 +210,7 @@ describe("background observations through actual GET, collection and serializati
     expect(observed(output, "service").data).toEqual(f.service);
     expect(output.collection).toBe("incomplete");
     expect(output.runtimeProvenance).toBe("unverified");
-    expect(f.calls).toHaveLength(64);
+    expect(f.calls).toHaveLength(67);
     expect(
       f.calls.every(
         (d: any) =>
@@ -383,7 +383,7 @@ describe("background fields reject malformed and sensitive metadata", () => {
         output.records.filter(
           (r: any) => r.kind === "revision" && r.status === "observed",
         ),
-      ).toHaveLength(9);
+      ).toHaveLength(10);
       expect(c.serialize(output)).not.toContain(SENTINEL);
     },
   );

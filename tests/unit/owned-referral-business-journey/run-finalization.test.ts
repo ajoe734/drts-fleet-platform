@@ -55,6 +55,18 @@ type Harness = {
   artifact: (name: string) => Promise<Record<string, unknown>>;
 };
 
+
+/**
+ * Budget for tests whose first step must start and then run out of budget
+ * ("unknown-budget-exhausted"). Before each step the finalizer fsyncs an
+ * in-flight fact; on a slow CI disk that write alone took over 300 ms, so a
+ * 300 ms budget expired before the step started and the outcome became
+ * "not-attempted-budget-exhausted" (flaky shard failures on 2026-11-11).
+ * These steps are held by deferred promises, not timers, so a larger
+ * budget changes only how long each test waits.
+ */
+const STEP_BUDGET_MS = 1_500;
+
 async function harness(
   plan: (
     step: StepRunner,
@@ -199,7 +211,7 @@ describe("owned FULL run finalization custody", () => {
         await step("own-Admin-session-revoked", async () => undefined);
       },
       // Also covers the real fsync'd in-flight fact written before the step.
-      { budgetMs: 300 },
+      { budgetMs: STEP_BUDGET_MS },
     );
     const started = Date.now();
     const result = await h.finalizer.run("failed");
@@ -225,7 +237,7 @@ describe("owned FULL run finalization custody", () => {
     const journey = await h.artifact("journey-evidence.json");
     expect(journey.finalization).toMatchObject({
       reason: "failed",
-      budgetMs: 300,
+      budgetMs: STEP_BUDGET_MS,
     });
     const facts = await h.facts();
     expect(facts.status).toBe("finalized");
@@ -684,7 +696,7 @@ describe("Codex round-1 finalization regressions", () => {
           await guarded("https://ops.invalid/second-readback");
         });
       },
-      { budgetMs: 300 },
+      { budgetMs: STEP_BUDGET_MS },
     );
     const guarded = h.finalizer.guardFetch((async (input: unknown) => {
       sent.push(String(input));
@@ -719,7 +731,7 @@ describe("Codex round-1 finalization regressions", () => {
           await guarded("https://driver.invalid/session");
         });
       },
-      { budgetMs: 300 },
+      { budgetMs: STEP_BUDGET_MS },
     );
     const guarded = h.finalizer.guardFetch((async (input: unknown) => {
       sent.push(String(input));
@@ -1582,7 +1594,7 @@ describe("R08 original finalizer custody and Playwright request lease", () => {
           });
         });
       },
-      { budgetMs: 150 },
+      { budgetMs: STEP_BUDGET_MS },
     );
     const finishing = h.finalizer.run("failed");
     await entered.promise;

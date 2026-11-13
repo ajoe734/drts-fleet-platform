@@ -219,9 +219,9 @@ export function mapSubmissionToTypeZh(type?: string, t?: TranslateFn): string {
   if (type === "profile_correction")
     return t ? t("supplyReview.type.profile_correction") : "司機證照續期";
   if (type === "insurance_update")
-    return t ? t("supplyReview.type.insurance_update") : "同車續保更新";
+    return t ? t("supplyReview.type.insurance_update") : "保險";
   if (type === "contract_update")
-    return t ? t("supplyReview.type.contract_update") : "同車續約更新";
+    return t ? t("supplyReview.type.contract_update") : "合約";
   if (type.includes("driver"))
     return t ? t("supplyReview.type.driver") : "司機";
   if (type.includes("vehicle"))
@@ -469,8 +469,8 @@ export function buildSideBySideDiff(
         canonical: canonicalDriver?.taxiDriverRegistrationExpiry || "—",
         changed: Boolean(
           canonicalDriver &&
-            driverDraft.taxiDriverRegistrationExpiry !==
-              canonicalDriver.taxiDriverRegistrationExpiry,
+          driverDraft.taxiDriverRegistrationExpiry !==
+            canonicalDriver.taxiDriverRegistrationExpiry,
         ),
       });
     }

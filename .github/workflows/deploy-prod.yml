@@ -229,7 +229,7 @@ jobs:
         run: node operations/verification/production-release-rail/run.cjs migrate
 
   deploy:
-    name: Deploy all ten production services
+    name: Deploy all eleven production services
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production

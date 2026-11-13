@@ -121,6 +121,21 @@ jobs:
         with:
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
 
+      # The derived recipient alias is only accepted once session-bootstrap.ts
+      # observes it inside the *real*, currently-deployed allowlist secret, so
+      # this value must come from the secret itself at run time, never a
+      # repository variable or fixture string.
+      - name: Resolve observed SMTP recipient allowlist
+        id: allowlist
+        run: |
+          set -euo pipefail
+          allowlist="$(gcloud secrets versions access latest --secret=drts-dev-smtp-recipient-allowlist --project="$DEV_GCP_PROJECT_ID")"
+          IFS=',' read -ra allowlist_entries <<< "$allowlist"
+          for entry in "${allowlist_entries[@]}"; do
+            [[ -n "$entry" ]] && printf '::add-mask::%s\n' "$entry"
+          done
+          printf 'DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST=%s\n' "$allowlist" >> "$GITHUB_ENV"
+
       - name: Record configured provider metadata and alias revision freshness
         id: resources
         run: python3 tests/e2e/system-remediation/sr-live-invoice-mail-20261007/provider-metadata.py

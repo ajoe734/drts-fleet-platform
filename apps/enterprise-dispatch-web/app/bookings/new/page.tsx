@@ -1,15 +1,20 @@
+import { cookies } from "next/headers";
 import { EStepper } from "@/components/ent-kit";
 import { EnterpriseBookingForm } from "@/components/booking-form";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
   createEnterpriseBookingDraft,
   parseEnterpriseBookingDraft,
+  resolveCostCenterMode,
 } from "@/lib/enterprise-booking-draft";
 import {
-  getEnterpriseAddresses,
-  getEnterpriseCostCenters,
-  getEnterprisePassengers,
-} from "@/lib/enterprise-fixtures";
+  createEnterpriseDispatchSessionClient,
+  type EnterpriseBookingDirectory,
+} from "@/lib/api-client";
+import {
+  ENTERPRISE_TENANT_SESSION_COOKIE,
+  verifyEnterpriseTenantSession,
+} from "@/lib/enterprise-session.server";
 import { tenantEnterpriseTheme as t } from "@/components/booking-form/theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
@@ -34,6 +39,46 @@ export default async function NewBookingPage({
       ? parseEnterpriseBookingDraft(resolvedSearchParams, locale)
       : createEnterpriseBookingDraft(locale, { entry: "self" });
 
+  if (!Object.prototype.hasOwnProperty.call(resolvedSearchParams, "cc")) {
+    initialDraft.costCenterCode = "";
+    initialDraft.costCenterLabel = "";
+  }
+
+  let directory: EnterpriseBookingDirectory = {
+    passengers: [],
+    addresses: [],
+    costCenters: [],
+  };
+  let directoryUnavailable = false;
+  try {
+    const cookieStore = await cookies();
+    const verified = await verifyEnterpriseTenantSession(
+      cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
+    );
+    if (verified.session) {
+      directory = await createEnterpriseDispatchSessionClient(
+        verified.session,
+      ).getBookingDirectory();
+    } else {
+      directoryUnavailable = true;
+    }
+  } catch {
+    directoryUnavailable = true;
+  }
+
+  const activeCostCenters = directory.costCenters.filter(
+    (row) => row.activeFlag,
+  );
+  const costCenterMode = resolveCostCenterMode(
+    directoryUnavailable ? null : activeCostCenters.length,
+  );
+  const onlyCostCenter =
+    activeCostCenters.length === 1 ? activeCostCenters[0] : undefined;
+  if (onlyCostCenter && !initialDraft.costCenterCode.trim()) {
+    initialDraft.costCenterCode = onlyCostCenter.code;
+    initialDraft.costCenterLabel = `${onlyCostCenter.code} · ${onlyCostCenter.name}`;
+  }
+
   return (
     <>
       <EntPageHead
@@ -52,11 +97,20 @@ export default async function NewBookingPage({
           active={0}
         />
       </div>
+      {directoryUnavailable ? (
+        <div
+          role="status"
+          data-testid="enterprise-booking-directory-unavailable"
+        >
+          {tr("new.directoryUnavailable")}
+        </div>
+      ) : null}
       <EnterpriseBookingForm
         initialDraft={initialDraft}
-        passengers={getEnterprisePassengers(locale)}
-        addresses={getEnterpriseAddresses(locale)}
-        costCenters={getEnterpriseCostCenters(locale)}
+        passengers={directory.passengers.filter((row) => row.activeFlag)}
+        addresses={directory.addresses.filter((row) => row.activeFlag)}
+        costCenters={activeCostCenters}
+        costCenterMode={costCenterMode}
         {...(bookingId ? { bookingId } : {})}
       />
     </>

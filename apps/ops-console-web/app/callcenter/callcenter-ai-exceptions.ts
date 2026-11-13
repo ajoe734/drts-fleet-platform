@@ -22,6 +22,7 @@ export type AiCallProcessingStep =
 
 export type AiCallExceptionCategory =
   | "location_unresolved"
+  | "speech_not_understood"
   | "customer_requested"
   | "service_unsupported"
   | "urgent_safety"

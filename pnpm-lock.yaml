@@ -6,12 +6,13 @@ settings:
 
 overrides:
   "@modelcontextprotocol/sdk@<1.32.1": 1.32.1
-  "@hono/node-server@>=1.19.10 <2.1.3": 2.1.3
+  "@hono/node-server@>=1.19.10 <2.1.6": 2.1.6
+  hono@<4.13.16: 4.13.16
   js-yaml@3.15.2>argparse: 2.0.1
   ip-address@<10.7.4: 10.7.4
   proxy-addr@<2.0.8: 2.0.8
   source-map-js@<1.2.2: 1.2.2
-  node-forge@<1.4.1: 1.4.1
+  node-forge@<1.4.3: 1.4.3
   openclaw>zod: ^4.6.6
   openclaw>undici: ^8.12.2
   jsdom>undici: ^8.12.2
@@ -185,6 +186,9 @@ importers:
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
+      express:
+        specifier: 5.2.1
+        version: 5.2.1
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -207,6 +211,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      "@types/express":
+        specifier: 5.0.6
+        version: 5.0.6
       "@types/jsonwebtoken":
         specifier: ^9.0.10
         version: 9.0.10
@@ -615,6 +622,9 @@ importers:
       expo-constants:
         specifier: ~18.0.14
         version: 18.0.14(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))
+      expo-file-system:
+        specifier: ~19.0.24
+        version: 19.0.24(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))
       expo-linking:
         specifier: ~8.0.12
         version: 8.0.12(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -627,6 +637,9 @@ importers:
       expo-secure-store:
         specifier: ~15.0.8
         version: 15.0.8(expo@54.0.37)
+      expo-sharing:
+        specifier: ~14.0.8
+        version: 14.0.8(expo@54.0.37)
       expo-web-browser:
         specifier: ~15.0.11
         version: 15.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))
@@ -2999,14 +3012,14 @@ packages:
       }
     hasBin: true
 
-  "@hono/node-server@2.1.3":
+  "@hono/node-server@2.1.6":
     resolution:
       {
-        integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==,
+        integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==,
       }
     engines: { node: ">=20" }
     peerDependencies:
-      hono: ^4
+      hono: 4.13.16
 
   "@humanfs/core@0.19.1":
     resolution:
@@ -5815,10 +5828,22 @@ packages:
         integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==,
       }
 
+  "@types/body-parser@1.19.6":
+    resolution:
+      {
+        integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==,
+      }
+
   "@types/chai@5.2.3":
     resolution:
       {
         integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==,
+      }
+
+  "@types/connect@3.4.38":
+    resolution:
+      {
+        integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==,
       }
 
   "@types/deep-eql@4.0.2":
@@ -5839,6 +5864,18 @@ packages:
         integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==,
       }
 
+  "@types/express-serve-static-core@5.1.3":
+    resolution:
+      {
+        integrity: sha512-dPfW8NFiOF4wOHc7+N/QSxlY9cfSsenewGbAz8C8U/MULPd/YZ27LvJUIlzaXie7e6Ove9YunJGgC9tbHD2cKw==,
+      }
+
+  "@types/express@5.0.6":
+    resolution:
+      {
+        integrity: sha512-sKYVuV7Sv9fbPIt/442koC7+IIwK5olP1KWeD88e/idgoJqDm3JV/YUiPwkoKK92ylff2MGxSz1CSjsXelx0YA==,
+      }
+
   "@types/geojson@7946.0.16":
     resolution:
       {
@@ -5855,6 +5892,12 @@ packages:
     resolution:
       {
         integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==,
+      }
+
+  "@types/http-errors@2.0.5":
+    resolution:
+      {
+        integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==,
       }
 
   "@types/istanbul-lib-coverage@2.0.6":
@@ -5941,6 +5984,18 @@ packages:
         integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==,
       }
 
+  "@types/qs@6.15.1":
+    resolution:
+      {
+        integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==,
+      }
+
+  "@types/range-parser@1.2.7":
+    resolution:
+      {
+        integrity: sha512-hKormJbkJqzQGhziax5PItDUTMAM9uE2XXQmM37dyd4hVM+5aVl7oVxMVUiVQn2oCQFN/LKCZdvSM0pFRqbSmQ==,
+      }
+
   "@types/react-dom@19.1.11":
     resolution:
       {
@@ -5979,6 +6034,18 @@ packages:
     resolution:
       {
         integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==,
+      }
+
+  "@types/send@1.2.1":
+    resolution:
+      {
+        integrity: sha512-arsCikDvlU99zl1g69TcAB3mzZPpxgw0UQnaHeC1Nwb015xp8bknZv5rIfri9xTOcMuaVgvabfIRA7PSZVuZIQ==,
+      }
+
+  "@types/serve-static@2.2.0":
+    resolution:
+      {
+        integrity: sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ==,
       }
 
   "@types/stack-utils@2.0.3":
@@ -8251,6 +8318,14 @@ packages:
       }
     engines: { node: ">=20.16.0" }
 
+  expo-sharing@14.0.8:
+    resolution:
+      {
+        integrity: sha512-A1pPr2iBrxypFDCWVAESk532HK+db7MFXbvO2sCV9ienaFXAk7lIBm6bkqgE6vzRd9O3RGdEGzYx80cYlc089Q==,
+      }
+    peerDependencies:
+      expo: "*"
+
   expo-splash-screen@31.0.13:
     resolution:
       {
@@ -8869,10 +8944,10 @@ packages:
       }
     engines: { node: ">=12.0.0" }
 
-  hono@4.13.12:
+  hono@4.13.16:
     resolution:
       {
-        integrity: sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==,
+        integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==,
       }
     engines: { node: ">=16.9.0" }
 
@@ -10598,10 +10673,10 @@ packages:
       }
     engines: { node: ^12.20.0 || ^14.13.1 || >=16.0.0 }
 
-  node-forge@1.4.1:
+  node-forge@1.4.3:
     resolution:
       {
-        integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==,
+        integrity: sha512-P6wzfh6t70avmV8FrVEAd/36sOPJQ+hkaJVX1Laap9J/77m7M0eyozDvc8SwnDf4P7MP94gwbAAo0rg3YVXT+g==,
       }
     engines: { node: ">= 6.13.0" }
 
@@ -15140,7 +15215,7 @@ snapshots:
       glob: 13.0.6
       lan-network: 0.2.1
       minimatch: 9.0.9
-      node-forge: 1.4.1
+      node-forge: 1.4.3
       npm-package-arg: 11.0.3
       ora: 3.4.0
       picomatch: 4.0.7
@@ -15177,7 +15252,7 @@ snapshots:
 
   "@expo/code-signing-certificates@0.0.6":
     dependencies:
-      node-forge: 1.4.1
+      node-forge: 1.4.3
 
   "@expo/config-plugins@54.0.5":
     dependencies:
@@ -15499,9 +15574,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  "@hono/node-server@2.1.3(hono@4.13.12)":
+  "@hono/node-server@2.1.6(hono@4.13.16)":
     dependencies:
-      hono: 4.13.12
+      hono: 4.13.16
 
   "@humanfs/core@0.19.1": {}
 
@@ -15813,7 +15888,7 @@ snapshots:
 
   "@modelcontextprotocol/sdk@1.32.1(zod@4.6.7)":
     dependencies:
-      "@hono/node-server": 2.1.3(hono@4.13.12)
+      "@hono/node-server": 2.1.6(hono@4.13.16)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -15823,7 +15898,7 @@ snapshots:
       eventsource-parser: 3.1.0
       express: 5.2.1
       express-rate-limit: 8.5.2(express@5.2.1)
-      hono: 4.13.12
+      hono: 4.13.16
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -17176,16 +17251,38 @@ snapshots:
     dependencies:
       "@babel/types": 7.29.0
 
+  "@types/body-parser@1.19.6":
+    dependencies:
+      "@types/connect": 3.4.38
+      "@types/node": 26.6.4
+
   "@types/chai@5.2.3":
     dependencies:
       "@types/deep-eql": 4.0.2
       assertion-error: 2.0.1
+
+  "@types/connect@3.4.38":
+    dependencies:
+      "@types/node": 26.6.4
 
   "@types/deep-eql@4.0.2": {}
 
   "@types/doctrine@0.0.9": {}
 
   "@types/estree@1.0.8": {}
+
+  "@types/express-serve-static-core@5.1.3":
+    dependencies:
+      "@types/node": 26.6.4
+      "@types/qs": 6.15.1
+      "@types/range-parser": 1.2.7
+      "@types/send": 1.2.1
+
+  "@types/express@5.0.6":
+    dependencies:
+      "@types/body-parser": 1.19.6
+      "@types/express-serve-static-core": 5.1.3
+      "@types/serve-static": 2.2.0
 
   "@types/geojson@7946.0.16": {}
 
@@ -17194,6 +17291,8 @@ snapshots:
   "@types/graceful-fs@4.1.9":
     dependencies:
       "@types/node": 24.12.2
+
+  "@types/http-errors@2.0.5": {}
 
   "@types/istanbul-lib-coverage@2.0.6": {}
 
@@ -17249,6 +17348,10 @@ snapshots:
       pg-protocol: 1.13.0
       pg-types: 2.2.0
 
+  "@types/qs@6.15.1": {}
+
+  "@types/range-parser@1.2.7": {}
+
   "@types/react-dom@19.1.11(@types/react@19.1.17)":
     dependencies:
       "@types/react": 19.1.17
@@ -17273,6 +17376,15 @@ snapshots:
   "@types/resolve@1.20.6": {}
 
   "@types/retry@0.12.0": {}
+
+  "@types/send@1.2.1":
+    dependencies:
+      "@types/node": 26.6.4
+
+  "@types/serve-static@2.2.0":
+    dependencies:
+      "@types/http-errors": 2.0.5
+      "@types/node": 26.6.4
 
   "@types/stack-utils@2.0.3": {}
 
@@ -18737,6 +18849,10 @@ snapshots:
 
   expo-server@1.0.7: {}
 
+  expo-sharing@14.0.8(expo@54.0.37):
+    dependencies:
+      expo: 54.0.37(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(@expo/metro-runtime@6.1.2)(expo-router@6.0.24)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
+
   expo-splash-screen@31.0.13(expo@54.0.37)(typescript@5.9.3):
     dependencies:
       "@expo/prebuild-config": 54.0.9(expo@54.0.37)(typescript@5.9.3)
@@ -19170,7 +19286,7 @@ snapshots:
 
   highlight.js@11.12.0: {}
 
-  hono@4.13.12: {}
+  hono@4.13.16: {}
 
   hosted-git-info@10.1.1:
     dependencies:
@@ -20383,7 +20499,7 @@ snapshots:
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
 
-  node-forge@1.4.1: {}
+  node-forge@1.4.3: {}
 
   node-gyp-build@4.8.4: {}
 

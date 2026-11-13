@@ -75,7 +75,32 @@ export async function registerDriver(
   });
 }
 
+/** Every caller signs in a fixed rehearsal phone and binds a card per run, so
+ * the sixth run would meet the five-card cap with 新增信用卡 disabled. Before
+ * binding, remove earlier runs' cards through the ordinary UI. The list is the
+ * default card first, then oldest to newest, so the second row is the oldest
+ * non-default card and never one this run just bound. */
+async function freeOneCardSlot(page: Page) {
+  await page.goto(`${PAX}/account/payment-methods`);
+  const remove = page.getByRole("button", { name: "刪除", exact: true });
+  await expect(
+    remove.first().or(page.getByText("尚未設定付款卡片", { exact: true })),
+  ).toBeVisible();
+  for (let count = await remove.count(); count >= 5; count -= 1) {
+    await remove.nth(1).click();
+    const removed = page.waitForResponse(
+      (r) =>
+        /\/payment-methods\/[^/]+$/.test(new URL(r.url()).pathname) &&
+        r.request().method() === "DELETE",
+    );
+    await page.getByRole("button", { name: "確定刪除", exact: true }).click();
+    expect((await removed).ok(), "Remove an earlier run's card").toBe(true);
+    await expect(remove).toHaveCount(count - 1);
+  }
+}
+
 export async function bind(page: Page, scenario: "success" | "retry_once") {
+  await freeOneCardSlot(page);
   await page.goto(`${PAX}/account/payment-methods`);
   await page
     .getByLabel("模擬 PSP 結果", { exact: true })
@@ -294,7 +319,11 @@ export async function readAssignedTripAndAccept(
     }
   });
   await step("Driver verify assigned trip UUID", async () => {
-    await expect(driver).toHaveURL(/\/trip$/);
+    await expect(driver).toHaveURL(
+      (url) =>
+        url.pathname === new URL(`${base}/trip`).pathname &&
+        (taskId === undefined || url.searchParams.get("taskId") === taskId),
+    );
     await expect(
       driver.getByText(orderId, { exact: false }).first(),
     ).toBeVisible();
