@@ -20,9 +20,11 @@ import {
   isEnterpriseDraftComplete,
   parseEnterpriseBookingDraft,
   resolveCopyByLocale,
+  resolveCostCenterMode,
   serializeEnterpriseBookingDraft,
   validateReservationWindow,
 } from "../../../lib/enterprise-booking-draft";
+import { createEnterpriseDispatchSessionClient } from "../../../lib/api-client";
 import {
   ENTERPRISE_TENANT_SESSION_COOKIE,
   verifyEnterpriseTenantSession,
@@ -59,15 +61,28 @@ export default async function ReviewBookingPage({
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   let verifiedTenantId: string | undefined;
+  // Null when the directory cannot be read: the page then keeps requiring a
+  // cost center, as the new-booking form does.
+  let activeCostCenterCount: number | null = null;
   try {
     const cookieStore = await cookies();
     const verified = await verifyEnterpriseTenantSession(
       cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
     );
     verifiedTenantId = verified.session?.tenantId;
+    if (verified.session) {
+      activeCostCenterCount = (
+        await createEnterpriseDispatchSessionClient(
+          verified.session,
+        ).listActiveCostCenters()
+      ).filter((row) => row.activeFlag).length;
+    }
   } catch {
-    verifiedTenantId = undefined;
+    // A failed cost-center read must not unset an already verified tenant.
+    activeCostCenterCount = null;
   }
+  const costCenterMode = resolveCostCenterMode(activeCostCenterCount);
+  const costCenterUsed = costCenterMode === "required";
   const resolvedSearchParams = (await searchParams) ?? {};
   const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
@@ -89,7 +104,10 @@ export default async function ReviewBookingPage({
     now,
     locale,
   );
-  const canSubmit = timeValidation.isValid && isEnterpriseDraftComplete(draft, now);
+  const canSubmit =
+    timeValidation.isValid &&
+    isEnterpriseDraftComplete(draft, now, costCenterMode);
+  const costCenterFilled = draft.costCenterCode.trim().length > 0;
 
   const effectivePassenger =
     draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
@@ -154,35 +172,37 @@ export default async function ReviewBookingPage({
             title={tr("review.card.approval")}
             sub={tr("card.sub.costOwnershipApproval")}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 14px",
-                background: t.primaryBg,
-                border: "1px solid " + t.primaryBd,
-                borderRadius: 12,
-                marginBottom: 14,
-              }}
-            >
-              <span style={{ color: t.primary }}>
-                <EIcon name="building" size={22} />
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {draft.costCenterLabel}
+            {costCenterUsed ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 14px",
+                  background: t.primaryBg,
+                  border: "1px solid " + t.primaryBd,
+                  borderRadius: 12,
+                  marginBottom: 14,
+                }}
+              >
+                <span style={{ color: t.primary }}>
+                  <EIcon name="building" size={22} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>
+                    {displayDraftValue(draft.costCenterLabel)}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
+                    {tr("review.approval.costNote", {
+                      remain: preview.remainingBudgetLabel,
+                    })}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
-                  {tr("review.approval.costNote", {
-                    remain: preview.remainingBudgetLabel,
-                  })}
-                </div>
+                <EPill t={t} tone={costCenterFilled ? "success" : "warn"} dot>
+                  {tr(costCenterFilled ? "new.check.valid" : "new.check.pending")}
+                </EPill>
               </div>
-              <EPill t={t} tone="success" dot>
-                {tr("new.check.valid")}
-              </EPill>
-            </div>
+            ) : null}
             <ERow
               t={t}
               k={tr("new.check.fare")}

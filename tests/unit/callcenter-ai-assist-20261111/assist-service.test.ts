@@ -405,6 +405,45 @@ describe("CallcenterAssistService outcomes and accuracy", () => {
     ]);
   });
 
+  it("counts an outcome recorded in the same millisecond as the accuracy query", async () => {
+    // CI caught this as a flake on 2026-11-13: with the range end at exactly
+    // "now" (exclusive), an outcome stamped in that millisecond was dropped.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T01:00:00.000Z"));
+    try {
+      const queue = new VoiceHandoffQueueService();
+      await queue.enqueue({
+        handoffId: "h-ms",
+        voiceSessionId: "vs-ms",
+        callId: "call-ms",
+        resourceScopeId: "scope",
+        reason: "customer_requested",
+      });
+      const { assist } = service({ queue });
+      await assist.seedFromVoiceHandoff({
+        callId: "call-ms",
+        handoffId: "h-ms",
+        voiceSessionId: "vs-ms",
+        fields: buildAssistFieldsFromDialogue(dialogue(), T0),
+      });
+      await assist.recordOutcomes("call-ms", {
+        orderId: "order-ms",
+        fields: [
+          {
+            field: "pickup",
+            aiApplied: true,
+            agentEdited: false,
+            finalPresent: true,
+          },
+        ],
+      });
+      const report = await assist.getAccuracy({});
+      expect(report.totals.accepted).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records nothing when no AI draft existed", async () => {
     const { assist } = service();
     await expect(

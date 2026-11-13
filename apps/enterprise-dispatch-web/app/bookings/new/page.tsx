@@ -5,6 +5,7 @@ import { EntPageHead } from "@/components/enterprise-shell";
 import {
   createEnterpriseBookingDraft,
   parseEnterpriseBookingDraft,
+  resolveCostCenterMode,
 } from "@/lib/enterprise-booking-draft";
 import {
   createEnterpriseDispatchSessionClient,
@@ -65,6 +66,19 @@ export default async function NewBookingPage({
     directoryUnavailable = true;
   }
 
+  const activeCostCenters = directory.costCenters.filter(
+    (row) => row.activeFlag,
+  );
+  const costCenterMode = resolveCostCenterMode(
+    directoryUnavailable ? null : activeCostCenters.length,
+  );
+  const onlyCostCenter =
+    activeCostCenters.length === 1 ? activeCostCenters[0] : undefined;
+  if (onlyCostCenter && !initialDraft.costCenterCode.trim()) {
+    initialDraft.costCenterCode = onlyCostCenter.code;
+    initialDraft.costCenterLabel = `${onlyCostCenter.code} · ${onlyCostCenter.name}`;
+  }
+
   return (
     <>
       <EntPageHead
@@ -95,7 +109,8 @@ export default async function NewBookingPage({
         initialDraft={initialDraft}
         passengers={directory.passengers.filter((row) => row.activeFlag)}
         addresses={directory.addresses.filter((row) => row.activeFlag)}
-        costCenters={directory.costCenters.filter((row) => row.activeFlag)}
+        costCenters={activeCostCenters}
+        costCenterMode={costCenterMode}
         {...(bookingId ? { bookingId } : {})}
       />
     </>
