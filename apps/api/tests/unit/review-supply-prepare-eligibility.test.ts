@@ -80,6 +80,16 @@ vi.mock(
           changes.driverCredentials as never,
           "driverId",
         );
+        upsertBy(state.drivers!, changes.drivers as never, "driverId");
+      }
+      async lockDriver(driverId: string) {
+        const driver = store.current!.registry.drivers.find(
+          (d) => d.driverId === driverId,
+        );
+        return driver ? clone(driver) : null;
+      }
+      reportPersistenceFailure(error: unknown) {
+        throw error;
       }
       async loadDriverMatchingSuppressions() {
         return [];
@@ -470,6 +480,50 @@ describe("ReviewSupplyService.prepare on shared-dev rehearsal supply", () => {
       serviceProduct: "taxi_reservation",
       reason: "inactive",
     });
+  });
+
+  // Deploy-dev 2026-11-13: run 43414983170 paused rehearsal supply in step C and
+  // failed before restoring it; every later prepare (run 43430367573, both
+  // acceptance jobs) then refused with DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT.
+  it("restores rehearsal drivers an interrupted run left offline, then passes eligibility", async () => {
+    const state = sharedDevStateBeforeR02();
+    for (const driver of state.registry.drivers) driver.workState = "offline";
+    store.current = state;
+    const { service } = createReviewSupply();
+
+    await expect(service.prepare()).resolves.toMatchObject({
+      simulated: true,
+      restoredDriverIds: REVIEW_SUPPLY.map((f) => f.driverId),
+    });
+    for (const fixture of REVIEW_SUPPLY)
+      expect(
+        state.registry.drivers.find((d) => d.driverId === fixture.driverId)
+          ?.workState,
+      ).toBe("available");
+
+    // Already-available supply is not rewritten on the next prepare.
+    await expect(createReviewSupply().service.prepare()).resolves.toMatchObject(
+      { restoredDriverIds: [] },
+    );
+  });
+
+  it("never forces a rehearsal driver in another work state available", async () => {
+    const state = sharedDevStateBeforeR02();
+    const suspended = state.registry.drivers.find(
+      (d) => d.driverId === REVIEW_SUPPLY[0]!.driverId,
+    )!;
+    suspended.workState = "suspended";
+    store.current = state;
+
+    await expect(createReviewSupply().service.prepare()).rejects.toMatchObject({
+      response: {
+        error: { code: "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT" },
+      },
+    });
+    expect(
+      state.registry.drivers.find((d) => d.driverId === suspended.driverId)
+        ?.workState,
+    ).toBe("suspended");
   });
 });
 
