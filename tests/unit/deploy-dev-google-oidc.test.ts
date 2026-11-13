@@ -64,6 +64,56 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
     },
   );
 
+  // Every Google OIDC browser host must be in AUTH_ALLOWED_ORIGINS, or the API's
+  // validateRedirectUri rejects its callback ("Redirect URI host ... is not allowed").
+  it.each([
+    {
+      fleet: "https://drts-dev-fleet-partner-portal-web-xyz.a.run.app",
+      exit: 0,
+    },
+    { fleet: "", exit: 0 },
+    { fleet: "https://fleet.example.test/path", exit: 1 },
+  ])(
+    "adds the Fleet Partner Portal origin '$fleet' to AUTH_ALLOWED_ORIGINS",
+    ({ fleet, exit }) => {
+      const start = workflow.indexOf('          auth_allowed_origins=""\n');
+      const end = workflow.indexOf(
+        '          if [[ -z "$auth_allowed_origins" ]]; then',
+        start,
+      );
+      expect(start).toBeGreaterThan(0);
+      expect(end).toBeGreaterThan(start);
+      const outputs: Record<string, string> = {
+        tenant_console_origin: "https://tenant.smarttransport.tw",
+        enterprise_dispatch_origin: "https://dispatch.smarttransport.tw",
+        fleet_partner_portal_origin: fleet,
+      };
+      const assembly = workflow
+        .slice(start, end)
+        .replace(
+          /\$\{\{ needs\.prepare\.outputs\.([a-z_]+) \}\}/g,
+          (_match, name: string) => {
+            expect(Object.keys(outputs)).toContain(name);
+            return outputs[name];
+          },
+        );
+      const script = `set -euo pipefail\ntenant_console_cloud_run_origin=https://drts-dev-tenant-console-web-xyz.a.run.app\nenterprise_dispatch_cloud_run_origin=\nagency_portal_configured_origin=\nagency_portal_cloud_run_origin=https://drts-dev-agency-portal-web-xyz.a.run.app\n${assembly}\nprintf '%s' "$auth_allowed_origins"\n`;
+      const result = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(exit);
+      if (exit !== 0) return;
+      const origins = result.stdout.split(",");
+      expect(origins).toEqual(
+        [
+          "https://tenant.smarttransport.tw",
+          "https://drts-dev-tenant-console-web-xyz.a.run.app",
+          "https://dispatch.smarttransport.tw",
+          "https://drts-dev-agency-portal-web-xyz.a.run.app",
+          fleet,
+        ].filter(Boolean),
+      );
+    },
+  );
+
   it("mounts tenant_auth secrets on agency-portal-web and wires agency origin + invitation base in API env and post-deploy reconciliation", () => {
     const deployAgencyStart = workflow.indexOf(
       "      - name: Deploy — agency-portal-web\n",

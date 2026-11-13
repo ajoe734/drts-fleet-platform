@@ -1162,6 +1162,20 @@ jobs:
             esac
             auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
           done
+          # Fleet Partner Portal Google login sends ${origin}/api/auth/callback
+          # as its redirect_uri; the API's validateRedirectUri rejects any origin
+          # missing from AUTH_ALLOWED_ORIGINS.
+          for origin in "${{ needs.prepare.outputs.fleet_partner_portal_origin }}"; do
+            [[ -n "$origin" ]] || continue
+            if [[ ! "$origin" =~ ^https://[^/[:space:]]+$ ]]; then
+              echo "::error::Fleet Partner Portal origin must be a bare HTTPS origin: $origin"
+              exit 1
+            fi
+            case ",${auth_allowed_origins}," in
+              *",${origin},"*) continue ;;
+            esac
+            auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
+          done
 
           if [[ -z "$auth_allowed_origins" ]]; then
             echo "::warning::No Tenant Console origin available: ${{ needs.prepare.outputs.tenant_console_service }} does not exist in ${{ needs.prepare.outputs.project_id }} yet and DEV_TENANT_CONSOLE_ORIGIN is unset. Deploying the API with an empty browser origin allowlist -- dev treats that as local-origins-only, not as a wildcard. Re-run this deploy once the Tenant Console service exists to grant it access."
