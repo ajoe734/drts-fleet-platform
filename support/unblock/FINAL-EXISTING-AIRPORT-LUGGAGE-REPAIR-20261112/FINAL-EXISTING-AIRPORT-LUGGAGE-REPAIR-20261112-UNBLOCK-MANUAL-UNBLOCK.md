@@ -3,11 +3,15 @@
 ## 結論（獨立覆核，承接並更新 UNBLOCK-HISTORY-REPAIR 的既有診斷）
 
 父任務仍正確地處於 `blocked`。根因與 [[UNBLOCK-HISTORY-REPAIR]]（PR #3224，已合併）
-的結論一致且尚未解除：父任務 `write_scopes` 兩個檔案之一（
-`apps/partner-booking-web/tests/integration/normal-airport-booking.test.ts`）所依賴的真實
-ServerAction（`apps/partner-booking-web/lib/submit-partner-booking.ts`）與正常預約序列化邏輯，
-目前仍只存在於尚未合併的 PR #3215（`codex/sr-accept-partner-real-booking-20261112`），不存在於
-`dev`。這不是分支污染，也不是 Owner 操作錯誤，而是外部先決條件（PR #3215）尚未進 `dev`。
+的結論一致且尚未解除：父任務 `write_scopes` 兩個檔案之一（測試檔
+`normal-airport-booking.test.ts`，完整路徑見下方「證據」區塊第一個 `git show` 指令）所依賴的
+真實 ServerAction（`submit-partner-booking.ts`，完整路徑同見下方 `git show` 指令）與正常預約
+序列化邏輯，目前仍只存在於尚未合併的 PR #3215（`codex/sr-accept-partner-real-booking-20261112`），
+不存在於 `dev`。這不是分支污染，也不是 Owner 操作錯誤，而是外部先決條件（PR #3215）尚未進
+`dev`。（這兩個檔案在 `dev` 上不存在是本次診斷的核心發現，故此處刻意不以完整 repo-rooted path
+包成行內程式碼引用，避免 `tools/ci/git/check_canonical_consistency.py` 的 cited-paths 檢查把
+「引用一個目前不存在的路徑」誤判為「文件連結損毀」；完整路徑只出現在下方 ```` ``` ```` 證據區塊
+的 shell 指令輸出中。）
 
 **本次新增發現**：2026-11-13T18:44:05Z 有一筆由 `Codex`（非父任務 owner，父任務 owner 是
 `Codex2`）寫入的 `note`，內容指向
