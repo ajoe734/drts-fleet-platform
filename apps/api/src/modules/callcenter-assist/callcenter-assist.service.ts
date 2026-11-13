@@ -371,7 +371,11 @@ export class CallcenterAssistService {
     since?: string | undefined;
     until?: string | undefined;
   }): Promise<AssistAccuracyReport> {
-    const until = input.until ? new Date(input.until) : new Date();
+    // The range end is exclusive. Without an explicit end, include the
+    // current millisecond so an outcome recorded just now is counted.
+    const until = input.until
+      ? new Date(input.until)
+      : new Date(Date.now() + 1);
     const since = input.since
       ? new Date(input.since)
       : new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
