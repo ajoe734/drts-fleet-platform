@@ -77,6 +77,7 @@ export const DRTS_REALTIME_TOOLS: RealtimeToolDefinition[] = [
             "service_unsupported",
             "urgent_safety",
             "provider_unavailable",
+            "speech_not_understood",
           ],
         },
       },

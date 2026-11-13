@@ -177,6 +177,45 @@ async function navigate(page: Page, origin: string, route: string) {
   });
 }
 
+const hydrationTimeoutMs = 15_000;
+
+/**
+ * Every surface is a server-rendered Next.js page, so a control is visible
+ * before React hydrates it. A fill or click that lands earlier only reaches
+ * the static HTML: React then hydrates with its own state and the typed value
+ * or the click is lost. deploy-dev 2026-11-12 filled the enterprise cost
+ * center 130 ms after DOMContentLoaded, before the page chunk had loaded, and
+ * the review link stayed disabled. React 19 tags each hydrated DOM node with
+ * a `__reactProps$<key>` property, so wait for that on the control itself.
+ * A control React never hydrates falls through after the timeout, which is
+ * how every step behaved before this wait existed.
+ */
+async function waitForHydration(control: Locator) {
+  await control
+    .evaluate(
+      (element, timeoutMs) =>
+        new Promise<boolean>((resolve) => {
+          const deadline = Date.now() + timeoutMs;
+          const check = () => {
+            if (
+              Object.keys(element).some((key) =>
+                key.startsWith("__reactProps$"),
+              )
+            ) {
+              resolve(true);
+            } else if (Date.now() > deadline) {
+              resolve(false);
+            } else {
+              setTimeout(check, 50);
+            }
+          };
+          check();
+        }),
+      hydrationTimeoutMs,
+    )
+    .catch(() => false);
+}
+
 function interpolateOperationValue(
   value: string,
   resultId: unknown,
@@ -734,8 +773,14 @@ async function runSteps(
     await expect(control, `${step.control} must be visible`).toBeVisible({
       timeout: interactionTimeoutMs,
     });
+    await waitForHydration(control);
     if (step.kind === "fill") {
-      await control.fill(materializeString(step.value, variables));
+      const value = materializeString(step.value, variables);
+      await control.fill(value);
+      await expect(
+        control,
+        `${step.control} must keep the filled value`,
+      ).toHaveValue(value);
     } else {
       await control.click();
     }
@@ -1087,6 +1132,7 @@ for (const journey of manifest.journeys) {
         activeControl,
         `${journey.id}/${operation.name} control after preconditions`,
       ).toBeVisible({ timeout: interactionTimeoutMs });
+      await waitForHydration(activeControl);
 
       if (operation.kind === "navigation") {
         const expectedQuery = Object.fromEntries(

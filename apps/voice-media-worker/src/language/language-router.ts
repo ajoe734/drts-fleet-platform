@@ -5,6 +5,41 @@ export type LanguageSelectionSource =
   | "customer_explicit"
   | "verified_detector";
 
+/**
+ * CALLCENTER-AI-ASSIST-20261111: the language the AI speaks back in.
+ *
+ * Taiwan Mobile TTS offers Mandarin, Taiwanese and Hakka (Sixian, Hailu)
+ * voices, but the AI's replies are written in Mandarin; reading Mandarin
+ * text with a Taiwanese or Hakka voice is not a Taiwanese or Hakka reply
+ * (SD §11.3). A language is used for replies only after a person has
+ * checked its reply scripts and lists it in VOICE_REPLY_VERIFIED_LANGUAGES
+ * (comma separated, e.g. "nan-TW,hak-TW"). Everything else is answered in
+ * Mandarin, whatever language the caller was recognised in.
+ */
+export const DEFAULT_REPLY_LANGUAGE: VoiceLanguage = "cmn-TW";
+const VOICE_LANGUAGES: readonly VoiceLanguage[] = ["cmn-TW", "nan-TW", "hak-TW"];
+
+export function replyLanguagesFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): ReadonlySet<VoiceLanguage> {
+  const listed = (env.VOICE_REPLY_VERIFIED_LANGUAGES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is VoiceLanguage =>
+      (VOICE_LANGUAGES as readonly string[]).includes(value),
+    );
+  return new Set<VoiceLanguage>([DEFAULT_REPLY_LANGUAGE, ...listed]);
+}
+
+export function resolveReplyLanguage(
+  recognized: string | null | undefined,
+  verified: ReadonlySet<VoiceLanguage>,
+): VoiceLanguage {
+  return recognized && verified.has(recognized as VoiceLanguage)
+    ? (recognized as VoiceLanguage)
+    : DEFAULT_REPLY_LANGUAGE;
+}
+
 export interface VoiceLanguageRoute {
   language: VoiceLanguage;
   asrModelName: string;
@@ -57,7 +92,7 @@ export class VoiceLanguageRouter {
   }
 
   shortPrompt(): string {
-    return "國語請按1，台語請按2，客語請按3。";
+    return "國語請按1，台語請按2，客語請按3；要找客服人員，隨時請按0。";
   }
 
   selectDtmf(digit: string): LanguageSwitchResult {
