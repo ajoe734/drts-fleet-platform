@@ -5,10 +5,15 @@ import ConfirmedPage from "@/app/[tenantSlug]/(authenticated)/confirmed/page";
 import ReceiptPage from "@/app/[tenantSlug]/(authenticated)/receipt/page";
 import TripsPage from "@/app/[tenantSlug]/(authenticated)/trips/page";
 import { clearPartnerEntryAuthorityCacheForTests } from "@/lib/api-client";
+import { loadPartnerBookingRecord } from "@/lib/partner-booking-read-model";
 
-vi.mock("@/lib/server-locale", () => ({ getServerLocale: async () => "en" }));
+const localeControl = vi.hoisted(() => ({ locale: "en" as "en" | "zh" }));
+vi.mock("@/lib/server-locale", () => ({
+  getServerLocale: async () => localeControl.locale,
+}));
 afterEach(() => {
   clearPartnerEntryAuthorityCacheForTests();
+  localeControl.locale = "en";
   vi.unstubAllGlobals();
 });
 
@@ -86,7 +91,7 @@ function transport(
   let mode: "rows" | "empty" | "empty-page" | "error" = "rows";
   const calls: string[] = [];
   const requestHeaders: { path: string; authorization: string | null }[] = [];
-  let quotationMinor = 4500;
+  let quotationMinor: number | null = 4500;
   let receiptErrorCode: string | null = null;
   let receipt: ReceiptWire = {
     ...completedReceipt(),
@@ -116,7 +121,7 @@ function transport(
       updatedBy: null,
     },
   };
-  const details =
+  let details =
     subtype === "travel_agency_transfer"
       ? {
           subtype,
@@ -185,7 +190,10 @@ function transport(
     pickup: { address: "SIM actual pickup" },
     dropoff: { address: "SIM actual dropoff" },
     passenger: { name: "SIM Persisted Rider", phone: "0900000000" },
-    quotedFare: { currency: "TWD", amountMinor: quotationMinor },
+    quotedFare:
+      quotationMinor === null
+        ? null
+        : { currency: "TWD", amountMinor: quotationMinor },
     quotedFareSource: "platform_pricing_rule",
     ...(details
       ? { partnerBookingDetails: details }
@@ -318,7 +326,10 @@ function transport(
     updateReceipt: (value: ReceiptWire) => {
       receipt = value;
     },
-    updateQuotation: (value: number) => {
+    omitDetails: () => {
+      details = undefined;
+    },
+    updateQuotation: (value: number | null) => {
       quotationMinor = value;
     },
     failReceipt: (code: string) => {
@@ -445,18 +456,33 @@ describe("persisted partner booking pages", () => {
       const html = renderToStaticMarkup(
         await ReceiptPage(args({ bookingId: "booking-SIM-persisted" })),
       );
-      expect(html).toContain("<h2>Quotation</h2><p>NT$40.00</p>");
-      expect(html).toContain('data-testid="partner-actual-fare">NT$55.00</dd>');
+      if (subtype === "travel_agency_transfer") {
+        expect(html).toContain("Included in the tour fee");
+        expect(html).not.toContain("<h2>Quotation</h2>");
+        expect(html).not.toContain('data-testid="partner-actual-fare"');
+        expect(html).not.toContain("platform_pricing_rule");
+      } else {
+        expect(html).toContain("<h2>Quotation</h2><p>NT$40.00</p>");
+        expect(html).toContain(
+          'data-testid="partner-actual-fare">NT$55.00</dd>',
+        );
+      }
       expect(html).toContain(
         'data-testid="partner-payment-amount">NT$61.00</dd>',
       );
       expect(html).toContain("SIM-actual-completed-task");
       expect(html).toContain('data-order-id="SIM-persisted-order"');
       expect(html).toContain('data-booking-id="booking-SIM-persisted"');
-      expect(html).toContain("Starting fare");
-      expect(html).toContain("Distance fare");
-      expect(html).toContain("Delay fare");
-      expect(html).toContain("Night fare");
+      for (const title of [
+        "Starting fare",
+        "Distance fare",
+        "Delay fare",
+        "Night fare",
+      ]) {
+        if (subtype === "travel_agency_transfer")
+          expect(html).not.toContain(title);
+        else expect(html).toContain(title);
+      }
       expect(html).toContain("12.5");
       expect(html).toContain("1200");
       expect(html).toContain("Passenger electronic payment record");
@@ -464,7 +490,9 @@ describe("persisted partner booking pages", () => {
       expect(html).toContain(
         "does not show partner invoices or program settlement",
       );
-      expect(html).toContain("not confirmation of payment");
+      if (subtype === "travel_agency_transfer")
+        expect(html).not.toContain("not confirmation of payment");
+      else expect(html).toContain("not confirmation of payment");
       expect(html).not.toContain("SIM-unit-only-server-session");
       const normalReads = api.requestHeaders.filter(
         ({ path }) =>
@@ -485,7 +513,7 @@ describe("persisted partner booking pages", () => {
   );
 
   it("reloads the same receipt IDs and fresh task/payment values without reusing the quotation", async () => {
-    const api = transport();
+    const api = transport("credit_card_airport_transfer");
     api.updateStatus("completed");
     api.updateQuotation(4000);
     api.updateReceipt(completedReceipt());
@@ -550,7 +578,7 @@ describe("persisted partner booking pages", () => {
   );
 
   it("keeps the quotation readable without inventing a completed task or actual fare", async () => {
-    const api = transport();
+    const api = transport("credit_card_airport_transfer");
     api.updateQuotation(4000);
     const receipt = completedReceipt();
     receipt.completion = null;
@@ -570,7 +598,7 @@ describe("persisted partner booking pages", () => {
   });
 
   it("does not borrow either the quote or task fare when captured ledger amount is absent", async () => {
-    const api = transport();
+    const api = transport("credit_card_airport_transfer");
     api.updateQuotation(4000);
     const receipt = completedReceipt();
     receipt.completion!.actualFare = null;
@@ -593,7 +621,7 @@ describe("persisted partner booking pages", () => {
   });
 
   it("renders recorded zero task and passenger payment amounts as real zero values", async () => {
-    const api = transport();
+    const api = transport("credit_card_airport_transfer");
     const receipt = completedReceipt();
     receipt.completion!.actualFare = { currency: "TWD", amountMinor: 0 };
     receipt.completion!.actualFareBreakdown = {
@@ -831,13 +859,34 @@ describe("normal Partner same-order progress pages", () => {
     );
     expect(html).toContain("Trip completed");
     expect(html).toContain("SIM-PROGRESS-PLATE");
-    expect(html).toContain("not confirmation of payment");
+    expect(html).toContain("Included in the tour fee");
+    expect(html).not.toContain("<h2>Quotation</h2>");
+    expect(html).not.toContain('data-testid="partner-actual-fare"');
     expect(html).toContain('data-testid="partner-payment-receipt"');
-    expect(html).toContain("55.00");
     expect(html).toContain("61.00");
     expect(api.calls.filter((path) => path.endsWith("/receipt"))).toHaveLength(
       1,
     );
+    const raw = await loadPartnerBookingRecord(
+      "sim-persisted",
+      {
+        partnerUserRef: "SIM-existing-ref",
+        orderId: "SIM-persisted-order",
+      },
+      true,
+    );
+    expect(raw.order.quotedFare).toEqual({
+      currency: "TWD",
+      amountMinor: 4500,
+    });
+    expect(raw.receipt?.completion?.actualFare).toEqual({
+      currency: "TWD",
+      amountMinor: 5500,
+    });
+    expect(raw.receipt?.payment.amount).toEqual({
+      currency: "TWD",
+      amountMinor: 6100,
+    });
   });
 
   it("shows an old API's absent progress as not provided without breaking a real booking", async () => {
@@ -1214,8 +1263,24 @@ it.each(["confirmed", "receipt"] as const)(
     expect(html).toContain("See the payment record for payment status.");
     expect(html).toContain("booking-SIM-persisted");
     expect(html).toContain("SIM-persisted-order");
-    expect(html).toContain("<h2>Quotation</h2><p>NT$45.00</p>");
-    expect(html).toContain("not confirmation of payment");
+    expect(html).not.toContain("<h2>Quotation</h2>");
+    expect(html).not.toContain("platform_pricing_rule");
+    expect(html).not.toContain('data-testid="partner-actual-fare"');
+    expect(html).not.toContain("not confirmation of payment");
+    const raw = await loadPartnerBookingRecord(
+      "sim-persisted",
+      {
+        partnerUserRef: "SIM-existing-ref",
+        orderId: "SIM-persisted-order",
+      },
+      screen === "receipt",
+    );
+    expect(raw.order.quotedFare).toEqual({
+      currency: "TWD",
+      amountMinor: 4500,
+    });
+    if (screen === "receipt")
+      expect(raw.receipt?.payment.availability).toBe("not_recorded");
     expect(html).not.toContain("SIM imported tour");
     if (screen === "receipt") {
       expect(html).toContain(
@@ -1227,3 +1292,207 @@ it.each(["confirmed", "receipt"] as const)(
     expect(api.calls).toContain("/api/partner/orders/SIM-persisted-order");
   },
 );
+
+// Section5.4 is a program-specific passenger presentation rule, not a new
+// payment/fee writer. Existing canonical money is read intact through the BFF.
+describe("tour-included passenger receipt presentation", () => {
+  const presentations = (["en", "zh"] as const).flatMap((locale) =>
+    (["manual", "sourceplan", "legacy"] as const).flatMap((kind) =>
+      (["confirmed", "receipt"] as const).map((screen) => ({
+        locale,
+        kind,
+        screen,
+      })),
+    ),
+  );
+  it.each(presentations)(
+    "uses canonical tour-included fees for $locale $kind $screen without erasing real money",
+    async ({ locale, kind, screen }) => {
+      localeControl.locale = locale;
+      const api = transport(
+        "travel_agency_transfer",
+        false,
+        kind === "sourceplan",
+      );
+      if (kind === "legacy") api.omitDetails();
+      api.updateStatus("completed");
+      api.updateQuotation(4000);
+      api.updateReceipt(completedReceipt());
+      const html = renderToStaticMarkup(
+        await (screen === "confirmed" ? ConfirmedPage : ReceiptPage)(
+          args({
+            bookingId: "booking-SIM-persisted",
+            orderId: "SIM-persisted-order",
+          }),
+        ),
+      );
+      expect(html).toContain(
+        locale === "zh" ? "已含團費" : "Included in the tour fee",
+      );
+      expect(html).toContain('data-testid="partner-record-tour-fee"');
+      expect(html).not.toContain("<h2>Quotation</h2>");
+      expect(html).not.toContain("<h2>報價</h2>");
+      expect(html).not.toContain("platform_pricing_rule");
+      expect(html).not.toContain('data-testid="partner-actual-fare"');
+      for (const title of [
+        "Starting fare",
+        "Distance fare",
+        "Delay fare",
+        "Night fare",
+        "起跳車資",
+        "里程車資",
+        "延滯車資",
+        "夜間加成",
+      ])
+        expect(html).not.toContain("<dt>" + title + "</dt>");
+      if (screen === "receipt") {
+        expect(html).toContain(
+          locale === "zh" ? "已完成行程" : "Completed trip",
+        );
+        expect(html).toContain("SIM-actual-completed-task");
+        expect(html).toContain("2099-01-01T11:00:00Z");
+        expect(html).toContain("12.5");
+        expect(html).toContain("1200");
+        expect(html).toContain(
+          locale === "zh"
+            ? "乘客電子付款已擷取"
+            : "Passenger electronic payment captured",
+        );
+        expect(html).toContain(
+          'data-testid="partner-payment-amount">' +
+            new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+              style: "currency",
+              currency: "TWD",
+            }).format(61) +
+            "</dd>",
+        );
+      } else {
+        expect(html).not.toContain('data-testid="partner-passenger-payment"');
+        expect(api.calls.filter((p) => p.endsWith("/receipt"))).toHaveLength(0);
+      }
+      const raw = await loadPartnerBookingRecord(
+        "sim-persisted",
+        {
+          partnerUserRef: "SIM-existing-ref",
+          orderId: "SIM-persisted-order",
+        },
+        true,
+      );
+      expect(raw.order.quotedFare).toEqual({
+        currency: "TWD",
+        amountMinor: 4000,
+      });
+      expect(raw.receipt?.quotedFare).toEqual({
+        currency: "TWD",
+        amountMinor: 4000,
+      });
+      expect(raw.receipt?.completion?.actualFare).toEqual({
+        currency: "TWD",
+        amountMinor: 5500,
+      });
+      expect(raw.receipt?.completion?.actualFareBreakdown).toEqual(
+        completedReceipt().completion!.actualFareBreakdown,
+      );
+      expect(raw.receipt?.payment).toEqual(completedReceipt().payment);
+      expect(raw.booking.businessDispatchSubtype).toBe(
+        "travel_agency_transfer",
+      );
+      expect(raw.booking.bookingId).toBe("booking-SIM-persisted");
+      expect(raw.order.orderId).toBe("SIM-persisted-order");
+    },
+  );
+
+  it.each(["zero", "absent"] as const)(
+    "keeps %s tour fee facts separate from the passenger ledger",
+    async (kind) => {
+      const api = transport();
+      const receipt = completedReceipt();
+      const fare = kind === "zero" ? { currency: "TWD", amountMinor: 0 } : null;
+      api.updateQuotation(kind === "zero" ? 0 : null);
+      receipt.quotedFare = fare;
+      receipt.completion!.actualFare = fare;
+      receipt.completion!.actualFareBreakdown =
+        kind === "zero"
+          ? { startMinor: 0, distanceMinor: 0, delayMinor: 0, nightMinor: 0 }
+          : null;
+      receipt.payment.amount = fare;
+      api.updateReceipt(receipt);
+      const html = renderToStaticMarkup(
+        await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+      );
+      expect(html).toContain("Included in the tour fee");
+      expect(html).not.toContain("<h2>Quotation</h2>");
+      expect(html).not.toContain('data-testid="partner-actual-fare"');
+      expect(html).toContain(
+        'data-testid="partner-payment-amount">' +
+          (kind === "zero" ? "NT$0.00" : "Not provided") +
+          "</dd>",
+      );
+      const raw = await loadPartnerBookingRecord(
+        "sim-persisted",
+        {
+          partnerUserRef: "SIM-existing-ref",
+          orderId: "SIM-persisted-order",
+        },
+        true,
+      );
+      expect(raw.order.quotedFare).toEqual(fare);
+      expect(raw.receipt?.completion?.actualFare).toEqual(fare);
+      expect(raw.receipt?.payment.amount).toEqual(fare);
+      expect(raw.receipt?.payment.status).toBe("captured");
+    },
+  );
+
+  it("reloads the same tour receipt and current ledger without exposing per-ride fares", async () => {
+    const api = transport();
+    api.updateStatus("completed");
+    api.updateQuotation(4000);
+    api.updateReceipt(completedReceipt());
+    const first = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    const newer = completedReceipt();
+    newer.completion!.actualFare = { currency: "TWD", amountMinor: 6600 };
+    newer.payment.amount = { currency: "TWD", amountMinor: 6200 };
+    api.updateReceipt(newer);
+    api.updateQuotation(4100);
+    const reloaded = renderToStaticMarkup(
+      await ReceiptPage(args({ orderId: "SIM-persisted-order" })),
+    );
+    expect(first).toContain(
+      'data-testid="partner-payment-amount">NT$61.00</dd>',
+    );
+    expect(reloaded).toContain(
+      'data-testid="partner-payment-amount">NT$62.00</dd>',
+    );
+    for (const html of [first, reloaded]) {
+      expect(html).toContain('data-order-id="SIM-persisted-order"');
+      expect(html).toContain('data-booking-id="booking-SIM-persisted"');
+      expect(html).toContain("SIM-actual-completed-task");
+      expect(html).not.toContain("<h2>Quotation</h2>");
+      expect(html).not.toContain('data-testid="partner-actual-fare"');
+    }
+    expect(reloaded).not.toContain("NT$61.00");
+    expect(api.calls.filter((p) => p.endsWith("/receipt"))).toHaveLength(2);
+    const raw = await loadPartnerBookingRecord(
+      "sim-persisted",
+      {
+        partnerUserRef: "SIM-existing-ref",
+        orderId: "SIM-persisted-order",
+      },
+      true,
+    );
+    expect(raw.order.quotedFare).toEqual({
+      currency: "TWD",
+      amountMinor: 4100,
+    });
+    expect(raw.receipt?.completion?.actualFare).toEqual({
+      currency: "TWD",
+      amountMinor: 6600,
+    });
+    expect(raw.receipt?.payment.amount).toEqual({
+      currency: "TWD",
+      amountMinor: 6200,
+    });
+  });
+});
