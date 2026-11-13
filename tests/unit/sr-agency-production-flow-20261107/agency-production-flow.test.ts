@@ -59,42 +59,55 @@ afterEach(() => vi.unstubAllEnvs());
 // Only cloud/Secret Manager/HTTP metadata ports use the existing SIM fixtures.
 describe("Agency existing production end-to-end release wiring", () => {
   it("builds and deploys the Agency image at its actual port while retaining all original services", () => {
-    const f = configuredFixture();
-    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
-    const agency = plan.services.find(
-      (service: { id: string }) => service.id === AGENCY,
-    );
-    expect(agency).toBeDefined();
-    expect(agency).toMatchObject({
-      id: AGENCY,
-      name: "drts-prod-agency-portal-web",
-      port: 3012,
-      origin: AGENCY_ORIGIN,
-      probe: { path: "/api/auth/session", expect: AGENCY_EXPECT },
-    });
-    expect(plan.services).toHaveLength(11);
-    expect(plan.builds).toContainEqual({
-      id: AGENCY,
-      dockerfile: "apps/agency-portal-web/Dockerfile",
-    });
-    expect(plan.builds).toHaveLength(12);
-    const images = Object.fromEntries(
-      plan.builds.map((build: { id: string }) => [
-        build.id,
-        `${plan.registry}/${build.id}@sha256:${"a".repeat(64)}`,
-      ]),
-    );
-    const commands: string[][] = [];
-    deploy(plan, images, (args: string[]) => {
-      commands.push(args);
-      return "[]";
-    });
-    const deployments = commands.filter((args) => args[1] === "deploy");
-    expect(deployments).toHaveLength(11);
-    const command = deployments.find((args) => args[2] === agency.name)!;
-    expect(command[command.indexOf("--port") + 1]).toBe("3012");
-    expect(command[command.indexOf("--image") + 1]).toBe(images[AGENCY]);
-    expect(command).toContain("--no-allow-unauthenticated");
+    for (const allowUnauthenticated of [false, true]) {
+      const f = configuredFixture();
+      if (allowUnauthenticated) {
+        f.vars.PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED = "true";
+      } else {
+        delete f.vars.PROD_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED;
+      }
+      const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+      const agency = plan.services.find(
+        (service: { id: string }) => service.id === AGENCY,
+      );
+      expect(agency).toBeDefined();
+      expect(agency).toMatchObject({
+        id: AGENCY,
+        name: "drts-prod-agency-portal-web",
+        port: 3012,
+        origin: AGENCY_ORIGIN,
+        probe: { path: "/api/auth/session", expect: AGENCY_EXPECT },
+      });
+      expect(plan.services).toHaveLength(11);
+      expect(plan.builds).toContainEqual({
+        id: AGENCY,
+        dockerfile: "apps/agency-portal-web/Dockerfile",
+      });
+      expect(plan.builds).toHaveLength(12);
+      const images = Object.fromEntries(
+        plan.builds.map((build: { id: string }) => [
+          build.id,
+          `${plan.registry}/${build.id}@sha256:${"a".repeat(64)}`,
+        ]),
+      );
+      const commands: string[][] = [];
+      deploy(plan, images, (args: string[]) => {
+        commands.push(args);
+        return "[]";
+      });
+      const deployments = commands.filter((args) => args[1] === "deploy");
+      expect(deployments).toHaveLength(11);
+      const command = deployments.find((args) => args[2] === agency.name)!;
+      expect(command[command.indexOf("--port") + 1]).toBe("3012");
+      expect(command[command.indexOf("--image") + 1]).toBe(images[AGENCY]);
+      if (allowUnauthenticated) {
+        expect(command).toContain("--allow-unauthenticated");
+        expect(command).not.toContain("--no-allow-unauthenticated");
+      } else {
+        expect(command).toContain("--no-allow-unauthenticated");
+        expect(command).not.toContain("--allow-unauthenticated");
+      }
+    }
   });
 
   it("delivers the Agency BFF state mount and a real invitation link to the configured Agency host", () => {
