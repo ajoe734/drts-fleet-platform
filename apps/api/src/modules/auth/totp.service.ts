@@ -95,8 +95,8 @@ function generateRecoveryCode(): string {
   const length = 16;
   const bytes = randomBytes(length);
   let raw = "";
-  for (let i = 0; i < length; i++) {
-    raw += RECOVERY_CODE_ALPHABET[bytes[i] % RECOVERY_CODE_ALPHABET.length];
+  for (const byte of bytes) {
+    raw += RECOVERY_CODE_ALPHABET[byte % RECOVERY_CODE_ALPHABET.length];
   }
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}`;
 }
