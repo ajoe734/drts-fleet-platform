@@ -117,6 +117,7 @@ env:
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
   DEV_OIDC_CLIENT_ID: ${{ vars.DEV_OIDC_CLIENT_ID }}
   DEV_PASSWORD_PEPPER_CURRENT_VERSION: ${{ vars.DEV_PASSWORD_PEPPER_CURRENT_VERSION }}
+  DEV_PASSWORD_LOGIN_ENABLED: ${{ vars.DEV_PASSWORD_LOGIN_ENABLED }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
   DEV_AGENCY_PORTAL_ORIGIN: ${{ vars.DEV_AGENCY_PORTAL_ORIGIN }}
@@ -1408,11 +1409,23 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ steps.api_secrets.outputs.password_login_enabled }}" == "true" ]]; then
+            # DEV_PASSWORD_LOGIN_ENABLED (SA/SD portal-password-login-20261113
+            # §10) is a separate global rollout input for staged deploys
+            # (backend support first, frontend entry later); it must never be
+            # inferred from secret presence. Default true preserves today's
+            # already-live behavior (entry open once both secrets exist) for
+            # deployments that never set it; an explicit "false" keeps the
+            # secrets mounted -- so existing password/TOTP logins keep
+            # working -- while only hiding the entry/new password creation.
+            password_login_enabled_effective="${DEV_PASSWORD_LOGIN_ENABLED:-true}"
+            if [[ "$password_login_enabled_effective" != "true" ]]; then
+              password_login_enabled_effective=false
+            fi
             gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
               --region "${{ needs.prepare.outputs.region }}" \
               --project "${{ needs.prepare.outputs.project_id }}" \
               --update-secrets "PASSWORD_PEPPER_SECRETS_JSON=${{ needs.prepare.outputs.secret_prefix }}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${{ needs.prepare.outputs.secret_prefix }}-totp-encryption-key:latest" \
-              --update-env-vars "PASSWORD_LOGIN_ENABLED=true,PASSWORD_PEPPER_CURRENT_VERSION=${DEV_PASSWORD_PEPPER_CURRENT_VERSION:-v1}"
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=${password_login_enabled_effective},PASSWORD_PEPPER_CURRENT_VERSION=${DEV_PASSWORD_PEPPER_CURRENT_VERSION:-v1}"
           else
             gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
               --region "${{ needs.prepare.outputs.region }}" \
