@@ -4,7 +4,10 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { FleetPartnerRepository } from "../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
-import type { FleetInvitationDeliveryService } from "../../apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service";
+import type {
+  FleetInvitationDeliveryRequest,
+  FleetInvitationDeliveryService,
+} from "../../apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import type { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import type { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -567,7 +570,12 @@ describe("FleetPartnerService Fleet staff invitations", () => {
   it("never records delivered when the adapter does not acknowledge sent", async () => {
     const { service } = createInvitationService({
       invitationDelivery: {
-        send: vi.fn(async () => ({
+        send: vi.fn(async (request: FleetInvitationDeliveryRequest) => ({
+          invitationId: request.invitationId,
+          fleetPartnerId: request.fleetPartnerId,
+          entrySlug: request.entrySlug,
+          recipientEmail: request.recipientEmail,
+          expiresAt: request.expiresAt,
           status: "unavailable" as const,
           attemptedAt: new Date().toISOString(),
         })),

@@ -227,7 +227,7 @@ export class FleetPartnerService implements OnModuleInit {
 
   private requireFleetManager(
     manager: BootstrapRequestIdentity | null,
-  ): asserts manager is BootstrapRequestIdentity {
+  ): asserts manager is BootstrapRequestIdentity & { principalId: string } {
     if (
       !manager ||
       !["platform", "ops"].includes(manager.realm) ||
