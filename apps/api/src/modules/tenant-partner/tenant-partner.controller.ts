@@ -133,6 +133,8 @@ import type {
 import {
   TenantPartnerService,
   type UpsertReferralRevenueShareRuleCommand,
+  type AcceptTenantInvitationWithPasswordCommand,
+  type AcceptAgencyInvitationWithPasswordCommand,
 } from "./tenant-partner.service";
 
 type JwtExpiresIn = NonNullable<
@@ -2088,6 +2090,40 @@ export class TenantPartnerController {
       await this.tenantPartnerService.acceptTenantInvitation(
         command,
         requestId,
+      ),
+      requestId,
+    );
+  }
+
+  /** PWD-LOGIN-004: "set a password" branch of invitation acceptance
+   * (SA/SD §5). Pre-session, same as `tenant/invitations/accept`. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/invitations/accept-with-password")
+  async acceptTenantInvitationWithPassword(
+    @Body() command: AcceptTenantInvitationWithPasswordCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acceptTenantInvitationWithPassword(
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  /** Agency-realm counterpart; see SA/SD §5 "agency/partner 側對等擴充". */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("agency/invitations/accept-with-password")
+  async acceptAgencyInvitationWithPassword(
+    @Body() command: AcceptAgencyInvitationWithPasswordCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acceptAgencyInvitationWithPassword(
+        command,
       ),
       requestId,
     );

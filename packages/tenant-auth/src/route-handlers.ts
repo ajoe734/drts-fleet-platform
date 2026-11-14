@@ -361,6 +361,53 @@ async function postAuth(
   const { auth = [] } = await context.params;
   const actionPath = auth.join("/");
 
+  // 0. /api/auth/tenant/invitation/accept-with-password
+  // PWD-LOGIN-004 "set a password" branch (SA/SD §5). Pre-session, like the
+  // invitation-login forwarding above: the one-time invitation token itself
+  // authorizes the action, so no session/CSRF cookie exists yet to check.
+  if (actionPath === "tenant/invitation/accept-with-password") {
+    const body = await request.json().catch(() => null);
+    const invitationToken =
+      typeof body?.invitationToken === "string"
+        ? body.invitationToken.trim()
+        : "";
+    const password =
+      typeof body?.password === "string" ? body.password : "";
+    if (!invitationToken || invitationToken.length > 512 || !password) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_INVALID",
+          message: "A valid invitation token and password are required.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const res = await tenantAuthFetch(
+        `${resolveApiUrl()}/api/tenant/invitations/accept-with-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitationToken, password }),
+          cache: "no-store",
+        },
+      );
+      const data = await res.json().catch(() => null);
+      return NextResponse.json(data ?? {}, { status: res.status || 502 });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream invitation service unavailable",
+        },
+        { status: 503 },
+      );
+    }
+  }
+
   // 1. /api/auth/logout
   if (actionPath === "logout") {
     const csrfError = validateCsrfAndOrigin(request);
