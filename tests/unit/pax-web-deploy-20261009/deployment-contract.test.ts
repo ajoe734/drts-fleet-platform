@@ -786,9 +786,9 @@ printf '%s' "$MOCK_HTTP_STATUS"
 printf '%s\\n' "$*" >> "$COMMAND_LOG"
 if [[ "$*" == *'services describe drts-dev-partner-booking-web'* ]]; then printf '%s' 'https://partner.example.test';
 elif [[ "$*" == *'services describe drts-dev-api'* ]]; then printf '%s' "$MOCK_API_JSON";
-elif [[ "$*" == *'services update drts-dev-api'* ]]; then exit 0;
 elif [[ "$*" == *'run deploy'* && "$*" != *'--image'* ]]; then
   echo 'ERROR: (gcloud.run.deploy) Missing required argument [--image]' >&2; exit 1;
+elif [[ "$*" == *'run deploy drts-dev-api'* ]]; then exit 0;
 else exit 90; fi
 `,
       );
@@ -814,7 +814,10 @@ else exit 90; fi
               template: {
                 spec: {
                   containers: [
-                    { env: [{ name: "AUTH_ALLOWED_ORIGINS", value: origins }] },
+                    {
+                      image: "registry.example.test/api:candidate",
+                      env: [{ name: "AUTH_ALLOWED_ORIGINS", value: origins }],
+                    },
                   ],
                 },
               },
@@ -826,14 +829,19 @@ else exit 90; fi
       expect(result.status, result.stderr).toBe(0);
       const writes = readFileSync(log, "utf8")
         .split("\n")
-        .filter((line) => line.includes("services update drts-dev-api"));
+        .filter((line) => line.includes("run deploy drts-dev-api"));
       expect(writes).toHaveLength(alreadyPresent ? 0 : 1);
-      if (!alreadyPresent)
+      if (!alreadyPresent) {
+        // gcloud run deploy demands --image: keep the image already running.
+        expect(writes[0]).toContain(
+          "--image registry.example.test/api:candidate",
+        );
         expect(writes[0]).toContain(
           "--update-env-vars ^@^AUTH_ALLOWED_ORIGINS=" +
             original +
             ",https://partner.example.test",
         );
+      }
     },
   );
 });
