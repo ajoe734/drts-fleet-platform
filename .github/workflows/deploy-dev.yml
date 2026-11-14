@@ -1857,8 +1857,14 @@ jobs:
             *",${partner_origin},"*) ;;
             *)
               origins="${origins:+${origins},}${partner_origin}"
+              # The quota-retry wrapper runs `gcloud run deploy`, which
+              # demands --image even for an env-only change. Keep the API on
+              # the image this job already deployed.
+              api_image="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$current_api_env")"
+              [[ -n "$api_image" ]]
               operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
                 --region "${{ needs.prepare.outputs.region }}" --project "${{ needs.prepare.outputs.project_id }}" \
+                --image "$api_image" \
                 --update-env-vars "^@^AUTH_ALLOWED_ORIGINS=${origins}"
               ;;
           esac
