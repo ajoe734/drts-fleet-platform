@@ -35,6 +35,7 @@ ARG DRTS_CANDIDATE_SHA
 ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/enterprise-dispatch-web/ apps/enterprise-dispatch-web/
 COPY tsconfig.base.json .
+COPY tests/unit/system-remediation/sr-wire-001/ui-module-loader.ts tests/unit/system-remediation/sr-wire-001/ui-module-loader.ts
 
 RUN pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/ui-tokens build && \
