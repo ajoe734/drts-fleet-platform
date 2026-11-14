@@ -7,6 +7,7 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
+import { t, type Locale } from "./translations";
 
 // Accept the actual API producer and the original displayed event numbers.
 const SOS_EVENT_NO_PATTERN = /SOS-(?:\d{14}-[0-9A-Fa-f]{6}|\d{8}-\d{4})\b/;
@@ -134,10 +135,13 @@ export function buildVehiclePlateMap(
   );
 }
 
-export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
+export function getSosStatusMeta(
+  incident: IncidentRecord,
+  locale: Locale = "zh",
+): SosStatusMeta {
   if (incident.status === "open" && !incident.assignedTo) {
     return {
-      label: "待確認",
+      label: t("sos.status.pending", locale),
       tone: "danger",
       isPending: true,
       isAcked: false,
@@ -147,7 +151,7 @@ export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
 
   if (incident.status === "open" && incident.assignedTo) {
     return {
-      label: "已確認",
+      label: t("sos.status.acknowledged", locale),
       tone: "accent",
       isPending: false,
       isAcked: true,
@@ -157,7 +161,7 @@ export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
 
   if (incident.status === "investigating") {
     return {
-      label: "調查中",
+      label: t("sos.status.investigating", locale),
       tone: "warn",
       isPending: false,
       isAcked: true,
@@ -169,7 +173,9 @@ export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
     const isFalseAlarm =
       incident.resolutionNote?.toLowerCase().includes("false alarm") === true;
     return {
-      label: isFalseAlarm ? "駕駛回報誤觸" : "已處理",
+      label: isFalseAlarm
+        ? t("sos.status.falseAlarm", locale)
+        : t("sos.status.resolved", locale),
       tone: "info",
       isPending: false,
       isAcked: true,
@@ -178,7 +184,7 @@ export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
   }
 
   return {
-    label: "已結案",
+    label: t("sos.status.closed", locale),
     tone: "success",
     isPending: false,
     isAcked: true,
@@ -186,16 +192,19 @@ export function getSosStatusMeta(incident: IncidentRecord): SosStatusMeta {
   };
 }
 
-export function getSosSeverityLabel(severity: IncidentSeverity): string {
+export function getSosSeverityLabel(
+  severity: IncidentSeverity,
+  locale: Locale = "zh",
+): string {
   switch (severity) {
     case "critical":
-      return "重大";
+      return t("sos.severity.critical", locale);
     case "high":
-      return "高";
+      return t("sos.severity.high", locale);
     case "medium":
-      return "中";
+      return t("sos.severity.medium", locale);
     default:
-      return "低";
+      return t("sos.severity.low", locale);
   }
 }
 
@@ -212,20 +221,23 @@ export function getSosSeverityTone(severity: IncidentSeverity): SosPillTone {
   }
 }
 
-export function getSosTypeLabel(incident: IncidentRecord): string {
+export function getSosTypeLabel(
+  incident: IncidentRecord,
+  locale: Locale = "zh",
+): string {
   switch (incident.category) {
     case "traffic":
-      return "交通事故";
+      return t("sos.type.traffic", locale);
     case "passenger_injury":
-      return "乘客急病";
+      return t("sos.type.passengerInjury", locale);
     case "driver_injury":
-      return "駕駛受傷";
+      return t("sos.type.driverInjury", locale);
     case "safety":
-      return "治安事件";
+      return t("sos.type.safety", locale);
     case "vehicle_damage":
-      return "車損事件";
+      return t("sos.type.vehicleDamage", locale);
     default:
-      return "其他";
+      return t("sos.type.other", locale);
   }
 }
 
@@ -244,6 +256,7 @@ export function formatSosTimestamp(
     second: "2-digit",
     hour12: false,
   },
+  locale: Locale = "zh",
 ): string {
   if (!value) {
     return "—";
@@ -254,7 +267,8 @@ export function formatSosTimestamp(
     return "—";
   }
 
-  return parsed.toLocaleString("zh-TW", options);
+  const intlLocale = locale === "en" ? "en-US" : "zh-TW";
+  return parsed.toLocaleString(intlLocale, options);
 }
 
 export function formatSosElapsedSince(
@@ -303,15 +317,17 @@ export function buildSosQueueRows(
     nowMs: number;
     driverNamesById?: DriverNameById;
     platesByVehicleId?: PlateByVehicleId;
+    locale?: Locale;
   },
 ): SosQueueRow[] {
   const driverNamesById = options.driverNamesById ?? new Map();
   const platesByVehicleId = options.platesByVehicleId ?? new Map();
+  const locale = options.locale ?? "zh";
 
   const rows = incidents
     .filter((incident) => isSosIncident(incident))
     .map((incident) => {
-      const status = getSosStatusMeta(incident);
+      const status = getSosStatusMeta(incident, locale);
       const driverLabel = resolveDriverLabel(incident, driverNamesById);
       const plateLabel = resolvePlateLabel(incident, platesByVehicleId);
       const occurredAt = incident.occurredAt ?? incident.createdAt;
@@ -328,11 +344,11 @@ export function buildSosQueueRows(
         plateLabel,
         orderLabel: incident.relatedOrderId ?? "—",
         locationLabel: incident.location ?? "—",
-        typeLabel: getSosTypeLabel(incident),
-        severityLabel: getSosSeverityLabel(incident.severity),
+        typeLabel: getSosTypeLabel(incident, locale),
+        severityLabel: getSosSeverityLabel(incident.severity, locale),
         severityTone: getSosSeverityTone(incident.severity),
         ackLabel: formatSosActorLabel(incident.assignedTo),
-        occurredAtLabel: formatSosTimestamp(occurredAt),
+        occurredAtLabel: formatSosTimestamp(occurredAt, undefined, locale),
         isPending: status.isPending,
         isCriticalAlert: status.isPending && incident.severity === "critical",
         highlight: status.isPending,
@@ -361,35 +377,38 @@ export function buildSosQueueRows(
   return rows;
 }
 
-export function getSosTimelineTitle(entry: IncidentTimelineEntry): string {
+export function getSosTimelineTitle(
+  entry: IncidentTimelineEntry,
+  locale: Locale = "zh",
+): string {
   switch (entry.action) {
     case "incident_created":
     case "created":
-      return "系統收到通報";
+      return t("sos.timeline.received", locale);
     case "incident_assigned":
     case "assigned":
-      return "值班人員已確認";
+      return t("sos.timeline.acknowledged", locale);
     case "status_changed":
     case "statusChanged":
       if (
         entry.note.toLowerCase().includes("investigating") ||
         entry.note.toLowerCase().includes("investigation")
       ) {
-        return "開始調查";
+        return t("sos.timeline.investigating", locale);
       }
       if (entry.note.toLowerCase().includes("closed")) {
-        return "已結案";
+        return t("sos.status.closed", locale);
       }
       if (entry.note.toLowerCase().includes("resolved")) {
-        return "已處理";
+        return t("sos.status.resolved", locale);
       }
-      return "狀態更新";
+      return t("sos.timeline.statusChanged", locale);
     case "incident_resolved":
     case "resolved":
-      return "已處理";
+      return t("sos.status.resolved", locale);
     case "incident_closed":
     case "closed":
-      return "已結案";
+      return t("sos.status.closed", locale);
     default:
       return entry.action;
   }

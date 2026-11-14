@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { IncidentRecord } from "@drts/contracts";
+import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
 import {
   applyCanonicalSosDuty,
+  formatSosTimestamp,
+  getSosSeverityLabel,
+  getSosStatusMeta,
   getSosSupplementText,
+  getSosTimelineTitle,
+  getSosTypeLabel,
   buildDriverNameMap,
   buildSosQueueRows,
   collectUnreportedSosIncidentIds,
@@ -204,5 +209,130 @@ describe("sos-view-model", () => {
     expect(rows[0]?.severityLabel).toBe("重大");
     expect(rows[0]?.waitLabel).toBe("05:00");
     expect(rows[1]?.statusLabel).toBe("已結案");
+  });
+
+  it("localizes status, severity, type, timeline, and timestamps in English and Traditional Chinese while preserving canonical state and raw data", () => {
+    const nowMs = new Date("2026-07-20T10:05:00.000Z").getTime();
+    const pendingIncident = buildIncident();
+    const ackedIncident = buildIncident({
+      incidentId: "inc-acked",
+      assignedTo: "ops-duty-1",
+      category: "passenger_injury",
+      severity: "high",
+    });
+    const investigatingIncident = buildIncident({
+      incidentId: "inc-inv",
+      status: "investigating",
+      assignedTo: "ops-duty-1",
+      category: "driver_injury",
+      severity: "medium",
+    });
+    const falseAlarmIncident = buildIncident({
+      incidentId: "inc-false",
+      status: "resolved",
+      assignedTo: "ops-duty-1",
+      resolutionNote: "Driver confirmed false alarm",
+      category: "vehicle_damage",
+      severity: "low",
+    });
+    const resolvedIncident = buildIncident({
+      incidentId: "inc-resolved",
+      status: "resolved",
+      assignedTo: "ops-duty-1",
+      resolutionNote: "Handled on scene",
+      category: "safety",
+      severity: "low",
+    });
+    const closedIncident = buildIncident({
+      incidentId: "inc-closed",
+      status: "closed",
+      assignedTo: "ops-duty-1",
+    });
+
+    expect(getSosStatusMeta(pendingIncident, "en")).toEqual({
+      label: "Awaiting acknowledgement",
+      tone: "danger",
+      isPending: true,
+      isAcked: false,
+      isClosed: false,
+    });
+    expect(getSosStatusMeta(pendingIncident, "zh").label).toBe("待確認");
+    expect(getSosStatusMeta(ackedIncident, "en").label).toBe("Acknowledged");
+    expect(getSosStatusMeta(investigatingIncident, "en").label).toBe(
+      "Investigating",
+    );
+    expect(getSosStatusMeta(falseAlarmIncident, "en").label).toBe(
+      "Driver reported an accidental trigger",
+    );
+    expect(getSosStatusMeta(resolvedIncident, "en").label).toBe("Resolved");
+    expect(getSosStatusMeta(closedIncident, "en").label).toBe("Closed");
+
+    expect(getSosSeverityLabel("critical", "en")).toBe("Critical");
+    expect(getSosSeverityLabel("high", "en")).toBe("High");
+    expect(getSosSeverityLabel("medium", "en")).toBe("Medium");
+    expect(getSosSeverityLabel("low", "en")).toBe("Low");
+
+    expect(getSosTypeLabel(pendingIncident, "en")).toBe("Traffic accident");
+    expect(getSosTypeLabel(ackedIncident, "en")).toBe(
+      "Passenger medical emergency",
+    );
+    expect(getSosTypeLabel(investigatingIncident, "en")).toBe("Driver injury");
+    expect(getSosTypeLabel(resolvedIncident, "en")).toBe("Safety incident");
+    expect(getSosTypeLabel(falseAlarmIncident, "en")).toBe("Vehicle damage");
+
+    const enRows = buildSosQueueRows([pendingIncident, closedIncident], {
+      nowMs,
+      locale: "en",
+    });
+    expect(enRows[0]?.id).toBe("inc-1");
+    expect(enRows[0]?.eventNo).toBe("SOS-20260720-0012");
+    expect(enRows[0]?.statusLabel).toBe("Awaiting acknowledgement");
+    expect(enRows[0]?.typeLabel).toBe("Traffic accident");
+    expect(enRows[0]?.severityLabel).toBe("Critical");
+    expect(enRows[0]?.orderLabel).toBe("ZX-240720-0186");
+    expect(enRows[0]?.locationLabel).toBe("信義區松仁路 100 號附近");
+    expect(enRows[0]?.isCriticalAlert).toBe(true);
+    expect(enRows[1]?.statusLabel).toBe("Closed");
+
+    const makeEntry = (action: string, note = ""): IncidentTimelineEntry => ({
+      entryId: "tl-1",
+      incidentId: "inc-1",
+      action,
+      actor: "ops-duty-1",
+      note,
+      createdAt: "2026-07-20T10:01:00.000Z",
+    });
+    expect(getSosTimelineTitle(makeEntry("incident_created"), "en")).toBe(
+      "Report received",
+    );
+    expect(getSosTimelineTitle(makeEntry("incident_assigned"), "en")).toBe(
+      "Duty operator acknowledged",
+    );
+    expect(
+      getSosTimelineTitle(
+        makeEntry("status_changed", "Status changed to investigating"),
+        "en",
+      ),
+    ).toBe("Investigation started");
+    expect(
+      getSosTimelineTitle(
+        makeEntry("status_changed", "Status changed to closed"),
+        "en",
+      ),
+    ).toBe("Closed");
+    expect(
+      getSosTimelineTitle(makeEntry("status_changed", "Updated note"), "en"),
+    ).toBe("Status updated");
+    expect(
+      getSosTimelineTitle(makeEntry("provider_raw_webhook_code"), "en"),
+    ).toBe("provider_raw_webhook_code");
+
+    expect(
+      formatSosTimestamp(
+        "2026-07-20T10:00:00.000Z",
+        { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" },
+        "en",
+      ),
+    ).toContain("Jul");
   });
 });
