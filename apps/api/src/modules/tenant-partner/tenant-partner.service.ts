@@ -242,6 +242,10 @@ import {
   type TenantOidcProof,
   type OidcBoundTenantUser,
 } from "../identity/identity.repository";
+import {
+  PasswordHashingService,
+  PasswordPepperNotConfiguredError,
+} from "../../common/auth/password-hashing.service";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
 import {
@@ -1300,6 +1304,35 @@ export type PartnerNotificationDispatchAttemptCommand = {
     | PartnerPassengerNotificationWirePayload
     | PartnerPassengerNotificationTestWirePayload;
 };
+
+/** PWD-LOGIN-004: "set a password" branch of invitation acceptance
+ * (SA/SD §5). `password` is plaintext in memory only for the duration of
+ * this command; it is hashed before touching the repository and is never
+ * logged, audited, or echoed back. */
+export interface AcceptTenantInvitationWithPasswordCommand {
+  invitationToken: string;
+  password: string;
+}
+
+export interface AcceptAgencyInvitationWithPasswordCommand {
+  invitationToken: string;
+  password: string;
+  agencyId?: string;
+}
+
+export interface AcceptAgencyInvitationWithPasswordResult {
+  accepted: true;
+  agencyId: string;
+  principalId: string;
+  membershipId: string;
+  roleCode: string;
+}
+
+/** Provisional floor pending the full offline-breach/length policy of
+ * PWD-LOGIN-003; keeps this card from accepting a trivially empty or
+ * absurdly long password while that task is not yet implemented. */
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 128;
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
@@ -5142,6 +5175,135 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
     return accepted.user;
+  }
+
+  /** PWD-LOGIN-004 "set a password" branch (SA/SD §5): the password-side
+   * counterpart of `acceptTenantOidcInvitation`. The two branches race the
+   * same invitation token through `IdentityRepository`'s shared row lock;
+   * only one of them can ever consume it (see that method's doc comment). */
+  async acceptTenantInvitationWithPassword(
+    command: AcceptTenantInvitationWithPasswordCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.invitationToken, "invitationToken");
+    this.assertNonBlank(command.password, "password");
+    if (
+      command.password.length < PASSWORD_MIN_LENGTH ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSWORD_POLICY_VIOLATION",
+        `Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters.`,
+      );
+    }
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(command.password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based invitation acceptance is not available.",
+        );
+      }
+      throw error;
+    }
+    const tokenHash = createHash("sha256")
+      .update(command.invitationToken)
+      .digest("hex");
+    const accepted =
+      await this.identityRepository?.acceptTenantInvitationWithPassword(
+        tokenHash,
+        {
+          passwordHash: hashed.hash,
+          passwordAlgo: hashed.algo,
+          pepperVersion: hashed.pepperVersion,
+        },
+      );
+    if (!accepted)
+      throw new ApiRequestError(
+        403,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
+    this.cacheAuthenticatedTenantUser(accepted.user);
+    this.recordTenantAudit(
+      {
+        actorId: accepted.user.userId,
+        actorType: "tenant_admin",
+        tenantId: accepted.user.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "accept_tenant_invitation_with_password",
+        resourceType: "tenant_user_role",
+        resourceId: accepted.user.userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(accepted.user),
+      },
+      requestId,
+    );
+    return accepted.user;
+  }
+
+  /** Agency-realm counterpart; `acceptAgencyOidcInvitation` itself is
+   * invoked directly from the OIDC callback path (outside this service), so
+   * this password branch owns its own thin wrapper around the repository
+   * rather than mirroring an existing service method. */
+  async acceptAgencyInvitationWithPassword(
+    command: AcceptAgencyInvitationWithPasswordCommand,
+  ): Promise<AcceptAgencyInvitationWithPasswordResult> {
+    this.assertNonBlank(command.invitationToken, "invitationToken");
+    this.assertNonBlank(command.password, "password");
+    if (
+      command.password.length < PASSWORD_MIN_LENGTH ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSWORD_POLICY_VIOLATION",
+        `Password must be between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters.`,
+      );
+    }
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(command.password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based invitation acceptance is not available.",
+        );
+      }
+      throw error;
+    }
+    const tokenHash = createHash("sha256")
+      .update(command.invitationToken)
+      .digest("hex");
+    const accepted =
+      await this.identityRepository?.acceptAgencyInvitationWithPassword(
+        tokenHash,
+        {
+          passwordHash: hashed.hash,
+          passwordAlgo: hashed.algo,
+          pepperVersion: hashed.pepperVersion,
+        },
+      );
+    if (!accepted)
+      throw new ApiRequestError(
+        403,
+        "AGENCY_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
+    return {
+      accepted: true,
+      agencyId: accepted.agencyId,
+      principalId: accepted.principal.principalId,
+      membershipId: accepted.membership.membershipId,
+      roleCode:
+        accepted.roleBindings.find((binding) => Boolean(binding.validTo))
+          ?.roleCode ?? accepted.roleBindings[0]?.roleCode ?? "",
+    };
   }
 
   bindTenantUserSubject(
