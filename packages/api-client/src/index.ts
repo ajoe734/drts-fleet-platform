@@ -5027,8 +5027,10 @@ export class ApiClient {
     return this.getList<MaintenanceRecord>(path);
   }
 
-  async createMaintenance(command: CreateMaintenanceRecordCommand) {
-    return this.post("/api/maintenance", { body: command });
+  async createMaintenance(
+    command: CreateMaintenanceRecordCommand,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/maintenance", { body: command });
   }
 
   async getMaintenance(maintenanceId: string) {
@@ -5038,8 +5040,10 @@ export class ApiClient {
   async updateMaintenance(
     maintenanceId: string,
     command: UpdateMaintenanceRecordCommand,
-  ) {
-    return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
+  ): Promise<ActionReceipt> {
+    return this.patch<ActionReceipt>(`/api/maintenance/${maintenanceId}`, {
+      body: command,
+    });
   }
 
   async deleteMaintenance(maintenanceId: string) {
