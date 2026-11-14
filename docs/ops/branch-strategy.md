@@ -53,7 +53,8 @@ You get a stable dev VM, a small list of meaningful tags, and a clear "which ver
                                               dev GCP env now on v2026.05.18.0
                                               (stable for ~24h)
                                                        │
-                                                       │ hourly-promote.yml (~15 past every hour)
+                                                       │ hourly-promote.yml (right after a green dev deploy
+                                                       │   of the latest publish; ~15 past every hour as fallback)
                                                        │  ─ pick latest publish/v*
                                                        │  ─ require ≥30 min soak time
                                                        │  ─ require no open issue labeled regression:v<date>
@@ -106,7 +107,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 | `ci-integ.yml`                          | PR to dev; push dev; workflow_dispatch                    | scope-aware PR checks; full integration on dev push — prerequisite for `nightly-publish`                       |
 | `nightly-publish.yml`                   | cron `0 3 * * *`; workflow_dispatch                       | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD                                                   |
 | `deploy-dev.yml`                        | push to `publish/v*`; workflow_dispatch                   | deploy to dev GCP (this is what makes dev VM roll)                                                            |
-| `hourly-promote.yml` (promote job)      | cron `15 * * * *`; workflow_dispatch                      | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
+| `hourly-promote.yml` (promote job)      | cron `15 * * * *`; green dev deploy; workflow_dispatch    | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
 | `hourly-promote.yml` (tag-on-merge job) | push to main                                              | tag `prod/v<date>` if main's tree matches a publish snapshot                                                  |
 | `deploy-staging.yml`                    | workflow_dispatch only                                    | operator picks any ref → staging                                                                              |
 | `deploy-prod.yml`                       | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production deploy + protected health verification                                 |

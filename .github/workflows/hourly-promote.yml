@@ -14,6 +14,13 @@ on:
     - cron: "15 * * * *" # 15 past every hour, staggered from other crons
   push:
     branches: [main] # for tag-on-merge job
+  # GitHub delays or drops scheduled runs for hours: on 2026-11-14 none ran
+  # between 03:10Z and 10:18Z or after it, so three green publishes waited
+  # most of a day for main. A successful dev deploy of the latest publish now
+  # starts promotion itself; the hourly schedule stays as the fallback.
+  workflow_run:
+    workflows: ["Deploy — Dev"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -38,11 +45,17 @@ concurrency:
 
 jobs:
   promote:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: >-
+      ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'publish/v')) }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SOAK_MINUTES: ${{ github.event.inputs.soak_minutes || '30' }}
+      TRIGGER_EVENT: ${{ github.event_name }}
+      TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,6 +93,15 @@ jobs:
           sha=$(git rev-parse "origin/$branch")
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Considering $branch @ ${sha:0:12} for promotion"
+          # A deploy-triggered run promotes only the publish that deploy just
+          # verified. An older publish finishing late must never replace a
+          # newer one on main; the newer publish's own deploy or the hourly run
+          # handles it.
+          if [ "$TRIGGER_EVENT" = "workflow_run" ] && [ "$sha" != "$TRIGGER_SHA" ]; then
+            echo "::notice::The finished dev deploy was for ${TRIGGER_SHA:0:12}, not the latest publish $branch @ ${sha:0:12}; skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Soak period check
