@@ -1,3 +1,5 @@
+import type { ReconciliationIssueRecord } from "@drts/contracts";
+import type { PersistBillingSettlementChanges } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -246,7 +248,7 @@ function createInMemoryBillingSettlementRepository() {
   let fulfillmentSegments: any[] = [];
   let sandboxBillingTreatments: any[] = [];
 
-  return {
+  const repository = {
     isEnabled: () => true,
     loadState: async () => ({
       tenantBillingProfiles: [],
@@ -293,6 +295,23 @@ function createInMemoryBillingSettlementRepository() {
     listLiveCardBenefitSettlementPeriods: async () => [],
     reportPersistenceFailure: () => {},
   };
+
+  return Object.assign(repository, {
+    withReconciliationIssueTarget: async <T>(
+      issueId: string,
+      execute: (target: {
+        issue: ReconciliationIssueRecord | null;
+        persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+      }) => Promise<T>,
+    ): Promise<T> =>
+      execute({
+        issue: structuredClone(
+          reconciliationIssues.find((issue) => issue.issueId === issueId) ??
+            null,
+        ),
+        persist: repository.persistChanges,
+      }),
+  });
 }
 
 describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
