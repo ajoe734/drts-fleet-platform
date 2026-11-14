@@ -1524,6 +1524,9 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
+          # Every page needs a fleet session (Google login at /login, or the
+          # session bearer the operational harness sends), so the portal can
+          # be reachable without showing the demo fleet to anonymous visitors.
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
@@ -1531,7 +1534,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@DRTS_FLEET_PORTAL_AUTH_REQUIRED=true" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \

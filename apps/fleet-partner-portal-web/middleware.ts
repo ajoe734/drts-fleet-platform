@@ -51,14 +51,30 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // The portal does not ship a login route yet.  Keeping the unfinished gate
-  // enabled turns every deployed route into /login → 404, including the
-  // required operational dashboard.  Auth remains opt-in until that flow is
-  // deployed as one complete surface.
+  // With DRTS_FLEET_PORTAL_AUTH_REQUIRED=true a request needs an application
+  // session: the browser's drts_session cookie from Google login (/login →
+  // /api/auth/login), or a session bearer in x-drts-authorization, which the
+  // operational harness and Host callers send and the BFF already forwards.
+  // Presence is all this gate checks; the API verifies the session itself.
   if (!isPublic && process.env.DRTS_FLEET_PORTAL_AUTH_REQUIRED === "true") {
-    if (!sessionCookie) {
+    const headerSession = /^Bearer\s+\S+/i.test(
+      request.headers.get("x-drts-authorization")?.trim() ?? "",
+    );
+    if (!sessionCookie && !headerSession) {
+      if (pathname.startsWith("/control-plane-proxy/")) {
+        return NextResponse.json(
+          {
+            error: "AUTHENTICATION_REQUIRED",
+            message: "Fleet partner session required.",
+          },
+          { status: 401 },
+        );
+      }
       const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("redirect_uri", pathname);
+      loginUrl.searchParams.set(
+        "redirect_uri",
+        `${pathname}${request.nextUrl.search}`,
+      );
       return NextResponse.redirect(loginUrl);
     }
   }
