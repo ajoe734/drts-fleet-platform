@@ -335,7 +335,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
       const fleetContract = await regService.createContract({
         vehicleId: "veh-demo-001",
-        partnerId: "fleet-demo-001",
+        // FLEET-ONB-001 seeded a real active partner entry for
+        // "fleet-demo-001"; use an unregistered id here so this still
+        // exercises the no-partner-entry fallback this test targets.
+        partnerId: "fleet-demo-999",
         partnerType: "fleet_partner",
         contractType: "fleet_lease_contract",
         serviceScope: "standard_taxi",

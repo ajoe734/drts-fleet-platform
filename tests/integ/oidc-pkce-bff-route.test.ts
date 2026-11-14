@@ -202,6 +202,10 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
   });
 
   it("exercises Fleet Partner Web App BFF login and callback flows", async () => {
+    // FLEET-ONB-001: the BFF's login action now resolves partner_id from
+    // this server env var only (never the client's query param), 503ing
+    // FLEET_SELECTOR_REQUIRED when unset.
+    process.env.DRTS_FLEET_PARTNER_ID = "fleet-demo-001";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       if (url.toString().includes("/api/auth/partner/login")) {
         const loginParams = oidcService.generateLoginParameters("partner", {

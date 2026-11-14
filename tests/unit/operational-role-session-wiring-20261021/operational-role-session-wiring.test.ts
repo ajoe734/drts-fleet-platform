@@ -2311,7 +2311,15 @@ process.exit(99);
         fleetPartnerRepository,
       );
       tenantPartnerService.onModuleDestroy();
-      for (const seededEntry of tenantPartnerService.listPlatformPartnerEntries()) {
+      // FLEET-ONB-001 added a default-seed fleet_partner entry for
+      // OPERATIONAL_OWN_FLEET_PARTNER_ID (apps/api's in-memory
+      // PARTNER_ENTRY_SEED, used by the fleet BFF login route). This harness
+      // owns its own canonical own-Fleet binding below (or deliberately
+      // leaves none when skipOwnSourceEntry), so the readback must not also
+      // carry that default-seed row through as a second, ambiguous source.
+      for (const seededEntry of tenantPartnerService
+        .listPlatformPartnerEntries()
+        .filter((entry) => entry.partnerId !== OPERATIONAL_OWN_FLEET_PARTNER_ID)) {
         sqlTables
           .get("admin.phase1_partner_channel_entries")!
           .set(seededEntry.entrySlug, {
