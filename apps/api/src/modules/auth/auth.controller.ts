@@ -13,6 +13,9 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AgencyBootstrapSession,
+  CanonicalIdentityMembershipRecord,
+  CanonicalIdentityPrincipalRecord,
   CanonicalIdentitySessionRecord,
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
@@ -43,10 +46,12 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import {
+  getAgencyRoleScopes,
   getTenantRoleScopes,
   AUTH_SCOPE_PRESETS,
   AUTH_TENANT_ROLE_SCOPE_PRESETS,
 } from "../../common/auth/auth.constants";
+import { getIamFleetRoleScopes } from "@drts/contracts";
 import {
   toPublicPartnerAuthError,
   toPublicTenantAuthError,
@@ -73,12 +78,22 @@ import {
 } from "../../common/auth/trusted-mfa.policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
+import { DatabaseService } from "../../common/db/database.service";
+import {
+  PasswordHashingService,
+  PasswordPepperNotConfiguredError,
+} from "../../common/auth/password-hashing.service";
+import { PASSWORD_MAX_LENGTH } from "../../common/auth/password-policy.service";
+import { AgencyDirectoryRepository } from "../agency-access/agency-directory.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
-import { IdentityRepository } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  type OidcBoundTenantUser,
+} from "../identity/identity.repository";
 import {
   maskSessionRecord,
   validateCsrfHeader,
@@ -99,10 +114,6 @@ import {
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
 import { randomUUID } from "node:crypto";
-import {
-  PasswordHashingService,
-  PasswordPepperNotConfiguredError,
-} from "../../common/auth/password-hashing.service";
 import { PasswordPolicyService } from "../../common/auth/password-policy.service";
 import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
@@ -203,6 +214,14 @@ export class AuthController {
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
     @Optional()
     private readonly idempotencyService?: IdempotencyService,
+    // Appended, and optional, for the same reason as `oidcPkceService` above
+    // (PWD-LOGIN-005). `DatabaseService` and `AgencyDirectoryRepository` are
+    // both `@Global()`-provided, so no `AuthModule` wiring is needed for
+    // Nest to supply them here.
+    @Optional()
+    private readonly databaseService?: DatabaseService,
+    @Optional()
+    private readonly agencyDirectoryRepository?: AgencyDirectoryRepository,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -225,6 +244,750 @@ export class AuthController {
       );
     }
     return this.idempotencyService;
+  }
+
+  /**
+   * PWD-LOGIN-005 (SA/SD §4,
+   * docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+   * account-not-found, wrong-password, not-yet-invited and disabled all
+   * deny through this single path so every response carries the exact same
+   * code/message/status. Only `security_events.password_login.denied`
+   * (reasonCode, never persisted to the client) distinguishes them.
+   *
+   * `partner` is supported for the `fleet_partner` business type (Fleet269,
+   * `FLEET-STAFF-ONBOARDING-20261114` SA/SD §3): role/scope resolution goes
+   * directly through `findMembershipsByPrincipalId` (same query shape as
+   * `manageFleetHumanRole`), never through `exchangePartnerCallbackSession`'s
+   * `partner_user_identity_links` lookup, since a password-login principal
+   * has no Google `sub` to link. No production invitation-acceptance branch
+   * writes a partner-realm `identity_password_credentials` row yet (that is
+   * `FLEET-ONB-004`, which depends on this task); until it ships, a
+   * partner-realm attempt simply finds no matching membership and falls
+   * through to the same uniform denial as every other realm.
+   */
+  private denyPasswordLogin(): never {
+    throw new ApiRequestError(
+      401,
+      "AUTHENTICATION_FAILED",
+      "The email or password is incorrect, or the account is not available.",
+    );
+  }
+
+  private recordPasswordLoginEvent(params: {
+    outcome: "success" | "denied";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    actorId?: string | null;
+    tokenId?: string | null;
+    tenantId?: string | null;
+    partnerId?: string | null;
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.actorId ?? null,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.actorId ?? null,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType:
+        params.outcome === "success"
+          ? "password_login.issued"
+          : "password_login.denied",
+      eventFamily: "auth",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "password_login",
+      targetId: null,
+      sessionId: null,
+      tokenId: params.tokenId ?? null,
+      authMethods: ["password"],
+      sourceIp: params.meta.sourceIp ?? null,
+      userAgent: params.meta.userAgent ?? null,
+      requestId: params.meta.requestId ?? null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  private requirePasswordHashingService(): PasswordHashingService {
+    try {
+      return new PasswordHashingService();
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password login is not available on this deployment.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async issueTenantPasswordSession(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    existingUser: OidcBoundTenantUser,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession> {
+    const scopes = [...(getTenantRoleScopes(existingUser.roleCode) ?? [])];
+    const tokenVersion = Date.parse(existingUser.updatedAt);
+    const authTimeIso = new Date().toISOString();
+    // TOTP step-up for this amr is PWD-LOGIN-007/008's scope (session issuance
+    // consistency depends on both 005 and 007); this issues a plain password
+    // session, matching the task's own dependency chain.
+    const amr = ["pwd"];
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: existingUser.userId,
+        principalId: principal.principalId,
+        membershipId: membership.membershipId,
+        subject: principal.principalId,
+        realm: "tenant",
+        tenantId: existingUser.tenantId,
+        roleFamilies: ["tenant"],
+        roles: [existingUser.roleCode],
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "tenant_admin",
+      actorId: existingUser.userId,
+      realm: "tenant",
+      tenantId: existingUser.tenantId,
+      roleFamilies: ["tenant"],
+      roles: [existingUser.roleCode],
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "tenant",
+      actorId: existingUser.userId,
+      tokenId: issued.tokenId,
+      tenantId: existingUser.tenantId,
+      meta,
+    });
+
+    const profile: TenantPortalProfile = {
+      id: existingUser.userId,
+      tenantId: existingUser.tenantId,
+      fullName: existingUser.displayName,
+      email: existingUser.email,
+      roleCode: existingUser.roleCode,
+    };
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      profile,
+      identity,
+    };
+  }
+
+  private async issueAgencyPasswordSession(
+    snapshot: NonNullable<
+      Awaited<
+        ReturnType<IdentityRepository["findAgencyMembershipForPrincipal"]>
+      >
+    >,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<AgencyBootstrapSession | null> {
+    const now = Date.now();
+    const binding = snapshot.roleBindings.find(
+      (candidate) =>
+        Boolean(getAgencyRoleScopes(candidate.roleCode)) &&
+        Boolean(candidate.validTo) &&
+        Date.parse(candidate.validFrom) <= now &&
+        now < Date.parse(candidate.validTo!),
+    );
+    if (!binding) return null;
+
+    const agency = await this.agencyDirectoryRepository?.findById(
+      snapshot.agencyId,
+    );
+    if (!agency || agency.status !== "active") return null;
+
+    const scopes = [...(getAgencyRoleScopes(binding.roleCode) ?? [])];
+    const tokenVersion = Math.max(
+      ...[
+        snapshot.principal.updatedAt,
+        snapshot.membership.updatedAt,
+        ...snapshot.roleBindings.map((candidate) => candidate.updatedAt),
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+    const authTimeIso = new Date().toISOString();
+    const amr = ["pwd"];
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "agency_user",
+        actorId: snapshot.principal.principalId,
+        principalId: snapshot.principal.principalId,
+        membershipId: snapshot.membership.membershipId,
+        subject: snapshot.principal.principalId,
+        realm: "agency",
+        tenantId: null,
+        agencyId: snapshot.agencyId,
+        roleFamilies: ["agency"],
+        roles: [binding.roleCode],
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", ensurePrincipal: false, tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "agency_user",
+      actorId: snapshot.principal.principalId,
+      principalId: snapshot.principal.principalId,
+      membershipId: snapshot.membership.membershipId,
+      realm: "agency",
+      tenantId: null,
+      agencyId: snapshot.agencyId,
+      roleFamilies: ["agency"],
+      roles: [binding.roleCode],
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "agency",
+      actorId: snapshot.principal.principalId,
+      tokenId: issued.tokenId,
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      identity,
+      agency: { agencyId: agency.agencyId, displayName: agency.displayName },
+      roleCode: binding.roleCode,
+      accessValidTo: binding.validTo!,
+    };
+  }
+
+  private async verifyPasswordAndLockout(
+    hasher: PasswordHashingService,
+    principal: CanonicalIdentityPrincipalRecord,
+    password: string,
+  ): Promise<"locked" | "no_credential" | "mismatch" | "ok"> {
+    if (principal.status !== "active") {
+      return "no_credential";
+    }
+    const credential =
+      await this.identityRepository!.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+    if (!credential) {
+      return "no_credential";
+    }
+    const state = await this.identityRepository!.getPasswordLoginLockoutState(
+      principal.principalId,
+    );
+    if (state.lockedUntil && Date.parse(state.lockedUntil) > Date.now()) {
+      return "locked";
+    }
+    const verification = await hasher.verify(password, {
+      hash: credential.passwordHash,
+      pepperVersion: credential.pepperVersion,
+    });
+    if (!verification.valid) {
+      await this.identityRepository!.recordPasswordLoginFailure(
+        principal.principalId,
+      );
+      return "mismatch";
+    }
+    await this.identityRepository!.recordPasswordLoginSuccess(
+      principal.principalId,
+    );
+    if (verification.needsRehash) {
+      const rehashed = await hasher.hash(password);
+      await this.identityRepository!.updatePasswordCredentialHash(
+        principal.principalId,
+        rehashed,
+      );
+    }
+    return "ok";
+  }
+
+  private async attemptTenantPasswordLogin(
+    email: string,
+    password: string,
+    tenantId: string | undefined,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals = await this.identityRepository!.findPrincipalsByEmail(
+      email,
+    );
+    for (const principal of principals) {
+      const memberships =
+        await this.identityRepository!.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      const membership = memberships.find(
+        (candidate) =>
+          candidate.realm === "tenant" &&
+          (!tenantId || candidate.tenantId === tenantId),
+      );
+      if (!membership || !membership.tenantId) continue;
+      const userId = /^tenant_user_role:(.+):membership$/.exec(
+        membership.sourceRef ?? "",
+      )?.[1];
+      if (!userId) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "tenant",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          tenantId: membership.tenantId,
+          meta,
+        });
+        return null;
+      }
+
+      const existingUser =
+        await this.tenantPartnerService.findTenantUserForAuthentication(
+          membership.tenantId,
+          userId,
+        );
+      if (!existingUser || existingUser.status !== "active") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "tenant",
+          reasonCode: "TENANT_USER_NOT_ACTIVE",
+          actorId: principal.principalId,
+          tenantId: membership.tenantId,
+          meta,
+        });
+        return null;
+      }
+
+      return this.issueTenantPasswordSession(
+        principal,
+        membership,
+        existingUser,
+        meta,
+      );
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "tenant",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  private async attemptAgencyPasswordLogin(
+    email: string,
+    password: string,
+    agencyId: string | undefined,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<AgencyBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals = await this.identityRepository!.findPrincipalsByEmail(
+      email,
+    );
+    for (const principal of principals) {
+      const snapshot =
+        await this.identityRepository!.findAgencyMembershipForPrincipal(
+          principal.principalId,
+        );
+      if (!snapshot) continue;
+      if (agencyId && agencyId !== snapshot.agencyId) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "agency",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          meta,
+        });
+        return null;
+      }
+
+      const session = await this.issueAgencyPasswordSession(snapshot, meta);
+      if (!session) {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "agency",
+          reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
+          actorId: principal.principalId,
+          meta,
+        });
+        return null;
+      }
+      return session;
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "agency",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  /** Fleet269 §3 (FLEET-STAFF-ONBOARDING-20261114 SA/SD): a partner-realm
+   * password login has no Google `sub`, so it cannot go through
+   * `exchangePartnerCallbackSession`'s `partner_user_identity_links` lookup.
+   * It resolves the fleet-staff membership directly, the same way
+   * `manageFleetHumanRole` does: `realm === "partner"` and
+   * `scopeRef === "fleet:" + entrySlug` on a membership whose `sourceRef`
+   * follows the `fleet_member:<entrySlug>:<principalId>` convention. */
+  private async attemptPartnerPasswordLogin(
+    email: string,
+    password: string,
+    partnerId: string | undefined,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<PartnerBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals = await this.identityRepository!.findPrincipalsByEmail(
+      email,
+    );
+    for (const principal of principals) {
+      if (
+        principal.sourceRef !== `jwt_principal:partner:${principal.principalId}`
+      ) {
+        continue;
+      }
+      const memberships =
+        await this.identityRepository!.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      const membership = memberships.find((candidate) => {
+        if (candidate.realm !== "partner") return false;
+        const entrySlug = /^fleet:(.+)$/.exec(candidate.scopeRef ?? "")?.[1];
+        if (!entrySlug) return false;
+        if (
+          candidate.sourceRef !==
+          `fleet_member:${entrySlug}:${principal.principalId}`
+        ) {
+          return false;
+        }
+        return (
+          !partnerId ||
+          entrySlug === partnerId ||
+          candidate.partnerId === partnerId
+        );
+      });
+      if (!membership) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "partner",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          partnerId: membership.partnerId,
+          meta,
+        });
+        return null;
+      }
+
+      const session = await this.issuePartnerPasswordSession(
+        principal,
+        membership,
+        meta,
+      );
+      if (!session) {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "partner",
+          reasonCode: "PARTNER_ACCESS_NOT_ACTIVE",
+          actorId: principal.principalId,
+          partnerId: membership.partnerId,
+          meta,
+        });
+        return null;
+      }
+      return session;
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "partner",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  /** Mirrors `exchangePartnerCallbackSession`'s fleet-staff session shape
+   * (same `actorType`/`realm`/`roleFamilies`, same single-active-role rule)
+   * but starting from an already-resolved membership instead of a
+   * `partner_user_identity_links` row. */
+  private async issuePartnerPasswordSession(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<PartnerBootstrapSession | null> {
+    if (membership.status !== "active") return null;
+    const entrySlug = /^fleet:(.+)$/.exec(membership.scopeRef)?.[1];
+    if (!entrySlug) return null;
+    const matchedEntry = this.tenantPartnerService
+      .listPartnerEntries(entrySlug)
+      .find(
+        (entry) =>
+          entry.entrySlug === entrySlug &&
+          entry.partnerId === membership.partnerId,
+      );
+    if (!matchedEntry) return null;
+
+    const now = Date.now();
+    const roleBindings =
+      await this.identityRepository!.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      );
+    const activeRoles = roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${entrySlug}:${principal.principalId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
+    const [role] = activeRoles;
+    if (!role || activeRoles.length !== 1) return null;
+    const scopes = [...getIamFleetRoleScopes(role.roleCode)!];
+    const roles = [role.roleCode];
+    const tokenVersion = Math.max(
+      ...[
+        principal.updatedAt,
+        membership.updatedAt,
+        role.updatedAt,
+        matchedEntry.updatedAt,
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+    const authTimeIso = new Date().toISOString();
+    const amr = ["pwd"];
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "partner_user",
+        actorId: principal.principalId,
+        principalId: principal.principalId,
+        membershipId: membership.membershipId,
+        subject: principal.principalId,
+        realm: "partner",
+        tenantId: matchedEntry.tenantId ?? null,
+        partnerId: matchedEntry.partnerId,
+        partnerEntrySlug: matchedEntry.entrySlug,
+        roleFamilies: ["partner"],
+        roles,
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "partner_user",
+      actorId: principal.principalId,
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      realm: "partner",
+      tenantId: matchedEntry.tenantId ?? null,
+      partnerId: matchedEntry.partnerId,
+      partnerEntrySlug: matchedEntry.entrySlug,
+      roleFamilies: ["partner"],
+      roles,
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "partner",
+      actorId: principal.principalId,
+      tokenId: issued.tokenId,
+      partnerId: matchedEntry.partnerId,
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      partnerEntry: matchedEntry,
+      identity,
+    };
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-login")
+  async passwordLogin(
+    @Param("realm") realm: string,
+    @Body()
+    command: {
+      email?: string;
+      password?: string;
+      tenantId?: string;
+      agencyId?: string;
+      partnerId?: string;
+    },
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (realm !== "tenant" && realm !== "agency" && realm !== "partner") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Password login is not supported for realm '${realm}'.`,
+      );
+    }
+    if (
+      typeof command?.email !== "string" ||
+      !command.email.trim() ||
+      typeof command?.password !== "string" ||
+      !command.password ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Email and password are required.",
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+
+    const email = command.email.trim().toLowerCase();
+    const meta = this.buildMeta(forwardedFor, realIp, userAgent, requestId);
+
+    const session =
+      realm === "tenant"
+        ? await this.attemptTenantPasswordLogin(
+            email,
+            command.password,
+            command.tenantId?.trim() || undefined,
+            meta,
+          )
+        : realm === "agency"
+          ? await this.attemptAgencyPasswordLogin(
+              email,
+              command.password,
+              command.agencyId?.trim() || undefined,
+              meta,
+            )
+          : await this.attemptPartnerPasswordLogin(
+              email,
+              command.password,
+              command.partnerId?.trim() || undefined,
+              meta,
+            );
+
+    if (!session) {
+      this.denyPasswordLogin();
+    }
+    return toApiSuccessEnvelope(session, requestId);
   }
 
   @OpenRoute()
