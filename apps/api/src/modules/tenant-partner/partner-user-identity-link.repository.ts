@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
-import type { PoolClient } from "pg";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import type {
   PartnerUserIdentityConsentScope,
@@ -14,8 +14,18 @@ import { DatabaseService } from "../../common/db";
 /** The minimal surface `createForInvitedPrincipal` needs from a caller's own
  * transaction client, so the insert composes atomically with FLEET-ONB-004's
  * invitation-accept transaction (SA/SD §3 step 4) instead of only ever
- * running against the pool directly. */
-type PartnerUserIdentityLinkQueryExecutor = Pick<PoolClient, "query">;
+ * running against the pool directly. Declared as a single non-overloaded
+ * call signature (matching `DatabaseService.query`) rather than
+ * `Pick<PoolClient, "query">`, because `PoolClient["query"]` is a union of
+ * incompatible overloads that TS cannot call through a
+ * `DatabaseService | PoolClient` union parameter (TS2349). A real
+ * `PoolClient` still satisfies this narrower shape structurally. */
+interface PartnerUserIdentityLinkQueryExecutor {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
+}
 
 type JsonRecordRow = {
   record: unknown;
