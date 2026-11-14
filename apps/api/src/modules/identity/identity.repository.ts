@@ -249,6 +249,28 @@ export function buildFleetRoleBindingSourceRef(
   return `fleet_role:${entrySlug}:${principalId}`;
 }
 
+/**
+ * FLEET-ONB-003 SA/SD §2: unlike `issueAgencyInvitation`, the Fleet
+ * principal/membership/role-binding sourceRef formulas above are keyed by
+ * `principalId`, which does not exist yet when an invitation is first
+ * issued. The principal's `subject` (`fleet:<entrySlug>:email:<email>`) is
+ * the only value known in advance of a principalId and is covered by the
+ * `(issuer, subject)` unique constraint, so `issueFleetStaffInvitation`
+ * locks on it to find a pre-existing (e.g. previously revoked/deactivated)
+ * invited principal before deriving the sourceRef-keyed rows.
+ */
+export interface IssueFleetStaffInvitationInput {
+  entrySlug: string;
+  fleetPartnerId: string;
+  email: string;
+  roleCode: string;
+  /** Optional explicit expiry; null means no expiry (SA/SD §2). */
+  validTo: string | null;
+  tokenHash: string;
+  expiresAt: string;
+  issuerPrincipalId: string | null;
+}
+
 @Injectable()
 export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
@@ -1750,6 +1772,359 @@ export class IdentityRepository implements OnModuleInit {
         "iam.identity_role_bindings",
       ),
     }));
+  }
+
+  /**
+   * Creates (or re-invites) the Fleet-invited principal, membership, role
+   * binding and a pending invitation in one transaction (FLEET-ONB-003
+   * SA/SD §2, mirroring `issueAgencyInvitation`). An already active member
+   * is never silently re-invited (returns null; caller maps to 409).
+   *
+   * Unlike `issueAgencyInvitation`, the sourceRef formulas here are keyed by
+   * `principalId` (`buildFleetMemberSourceRef`/`buildFleetRoleBindingSourceRef`),
+   * which `manageFleetHumanRole`/`exchangePartnerCallbackSession` already
+   * compare against as inline literals and which does not exist until a
+   * principal does. The lock-and-reuse step therefore keys on the
+   * `(issuer, subject)` unique constraint — the one value deterministic
+   * from `entrySlug`+`email` alone — to find a pre-existing invited/revoked
+   * principal before deriving the principalId-keyed rows.
+   */
+  async issueFleetStaffInvitation(
+    input: IssueFleetStaffInvitationInput,
+  ): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+    roleBinding: CanonicalIdentityRoleBindingRecord;
+    invitation: CanonicalIdentityInvitationRecord;
+  } | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const email = input.email.trim().toLowerCase();
+    const scopeRef = buildFleetScopeRef(input.entrySlug);
+    const subject = `${scopeRef}:email:${email}`;
+    const invitationId = `invitation_${randomUUID().replace(/-/g, "")}`;
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE issuer = $1 AND subject = $2 FOR UPDATE`,
+        [FLEET_INVITATION_ISSUER, subject],
+      );
+      const existingPrincipal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      const principalId =
+        existingPrincipal?.principalId ??
+        `principal_${randomUUID().replace(/-/g, "")}`;
+      const membershipSourceRef = buildFleetMemberSourceRef(
+        input.entrySlug,
+        principalId,
+      );
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 FOR UPDATE`,
+        [membershipSourceRef],
+      );
+      const existingMembership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (existingMembership?.status === "active") {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const bindingSourceRef = buildFleetRoleBindingSourceRef(
+        input.entrySlug,
+        principalId,
+      );
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 FOR UPDATE`,
+        [bindingSourceRef],
+      );
+      const existingBinding = bindingRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+            bindingRows.rows[0].record,
+            "iam.identity_role_bindings",
+          )
+        : null;
+      const issuerPrincipalId = await this.principalExists(
+        client,
+        input.issuerPrincipalId,
+      );
+      // A re-invited principal (e.g. previously deactivated) is reset to the
+      // unbound invitation placeholder: the new proof must be accepted
+      // again, with a freshly verified (issuer, sub), before any session is
+      // issued.
+      const principal: CanonicalIdentityPrincipalRecord = existingPrincipal
+        ? {
+            ...existingPrincipal,
+            issuer: FLEET_INVITATION_ISSUER,
+            subject,
+            email,
+            emailVerified: false,
+            status: "invited",
+            updatedAt: now,
+          }
+        : {
+            principalId,
+            sourceRef: buildFleetPartnerPrincipalSourceRef(principalId),
+            issuer: FLEET_INVITATION_ISSUER,
+            subject,
+            principalType: "human",
+            email,
+            emailVerified: false,
+            displayName: null,
+            status: "invited",
+            createdAt: now,
+            updatedAt: now,
+          };
+      const membership: CanonicalIdentityMembershipRecord = {
+        membershipId:
+          existingMembership?.membershipId ??
+          `membership_${randomUUID().replace(/-/g, "")}`,
+        sourceRef: membershipSourceRef,
+        principalId,
+        realm: "partner",
+        scopeRef,
+        tenantId: null,
+        partnerId: input.fleetPartnerId,
+        status: "invited",
+        invitedByPrincipalId: issuerPrincipalId,
+        invitationId: null,
+        createdAt: existingMembership?.createdAt ?? now,
+        updatedAt: now,
+      };
+      const roleBinding: CanonicalIdentityRoleBindingRecord = {
+        roleBindingId:
+          existingBinding?.roleBindingId ??
+          `role_binding_${randomUUID().replace(/-/g, "")}`,
+        sourceRef: bindingSourceRef,
+        membershipId: membership.membershipId,
+        roleCode: input.roleCode,
+        grantedByPrincipalId: issuerPrincipalId,
+        approvalId: null,
+        validFrom: now,
+        validTo: input.validTo,
+        createdAt: existingBinding?.createdAt ?? now,
+        updatedAt: now,
+      };
+      const invitation: CanonicalIdentityInvitationRecord = {
+        invitationId,
+        sourceRef: `fleet_invitation:${invitationId}`,
+        membershipId: membership.membershipId,
+        issuerPrincipalId,
+        realm: "partner",
+        scopeRef,
+        tenantId: null,
+        partnerId: input.fleetPartnerId,
+        email,
+        roleCode: input.roleCode,
+        tokenHash: input.tokenHash,
+        deliveryStatus: "pending_delivery",
+        deliveryId: null,
+        expiresAt: input.expiresAt,
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (existingMembership) {
+        await client.query(
+          `UPDATE iam.identity_invitations
+              SET revoked_at = $2::timestamptz,
+                  updated_at = $2::timestamptz,
+                  record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($2::text))
+            WHERE membership_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [existingMembership.membershipId, now],
+        );
+      }
+      const persistedPrincipal = await this.upsertPrincipal(
+        client,
+        principal,
+        true,
+      );
+      await this.upsertMembership(
+        client,
+        { ...membership, principalId: persistedPrincipal.principalId },
+        true,
+      );
+      const persistedBinding = await this.upsertRoleBinding(
+        client,
+        roleBinding,
+        true,
+        { allowValidFromMutation: true },
+      );
+      const persistedInvitation = await this.upsertInvitation(
+        client,
+        invitation,
+      );
+      const persistedMembership = await this.upsertMembership(
+        client,
+        {
+          ...membership,
+          principalId: persistedPrincipal.principalId,
+          invitationId: persistedInvitation.invitationId,
+        },
+        true,
+      );
+      await client.query("COMMIT");
+      return {
+        principal: persistedPrincipal,
+        membership: persistedMembership,
+        roleBinding: persistedBinding,
+        invitation: persistedInvitation,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Revokes a not-yet-accepted Fleet staff invitation of the given entry. */
+  async revokeFleetStaffInvitation(
+    entrySlug: string,
+    fleetPartnerId: string,
+    invitationId: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const scopeRef = buildFleetScopeRef(entrySlug);
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `UPDATE iam.identity_invitations
+          SET revoked_at = $4::timestamptz,
+              updated_at = $4::timestamptz,
+              record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($4::text)), '{updatedAt}', to_jsonb($4::text))
+        WHERE invitation_id = $1 AND realm = 'partner' AND scope_ref = $2 AND partner_id = $3
+          AND accepted_at IS NULL AND revoked_at IS NULL
+        RETURNING record`,
+      [invitationId, scopeRef, fleetPartnerId, now],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  /**
+   * Disables a Fleet staff membership, revokes its pending invitations and
+   * every active session of the principal in the same transaction (mirrors
+   * `deactivateAgencyMembership`; reuses `revokePrincipalSessionsInTransaction`
+   * per SA/SD §8).
+   */
+  async deactivateFleetStaffMembership(
+    entrySlug: string,
+    fleetPartnerId: string,
+    membershipId: string,
+    revokedByPrincipalId: string | null,
+  ): Promise<CanonicalIdentityMembershipRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const scopeRef = buildFleetScopeRef(entrySlug);
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships
+          WHERE membership_id = $1 AND realm = 'partner' AND scope_ref = $2 AND partner_id = $3
+          FOR UPDATE`,
+        [membershipId, scopeRef, fleetPartnerId],
+      );
+      const membership = rows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            rows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const disabled = await this.upsertMembership(
+        client,
+        { ...membership, status: "disabled", updatedAt: now },
+        true,
+      );
+      await client.query(
+        `UPDATE iam.identity_invitations
+            SET revoked_at = $2::timestamptz,
+                updated_at = $2::timestamptz,
+                record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($2::text))
+          WHERE membership_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+        [membershipId, now],
+      );
+      await this.revokePrincipalSessionsInTransaction(
+        client,
+        membership.principalId,
+        now,
+        "fleet_staff_membership_deactivated",
+        revokedByPrincipalId,
+      );
+      await client.query("COMMIT");
+      return disabled;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Lists Fleet staff invitations for the given entry (newest first). */
+  async listFleetStaffInvitations(
+    entrySlug: string,
+    fleetPartnerId: string,
+  ): Promise<CanonicalIdentityInvitationRecord[]> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const scopeRef = buildFleetScopeRef(entrySlug);
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_invitations
+        WHERE realm = 'partner' AND scope_ref = $1 AND partner_id = $2
+        ORDER BY created_at DESC`,
+      [scopeRef, fleetPartnerId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalIdentityInvitationRecord>(
+        row.record,
+        "iam.identity_invitations",
+      ),
+    );
+  }
+
+  /** Only an acknowledged mail send is ever recorded as delivered (SA/SD §7). */
+  async setFleetStaffInvitationDeliveryStatus(
+    invitationId: string,
+    deliveryStatus: "delivered" | "delivery_failed",
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `UPDATE iam.identity_invitations
+          SET delivery_status = $2::text,
+              updated_at = $3::timestamptz,
+              record = jsonb_set(jsonb_set(record, '{deliveryStatus}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($3::text))
+        WHERE invitation_id = $1 AND realm = 'partner'
+        RETURNING record`,
+      [invitationId, deliveryStatus, now],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
   }
 
   async ensurePrincipalRecord(

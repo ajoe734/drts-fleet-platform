@@ -1,15 +1,29 @@
-import { PLATFORM_CURRENCY, getIamFleetRoleScopes } from "@drts/contracts";
+import {
+  PLATFORM_CURRENCY,
+  getIamFleetRoleScopes,
+  FLEET_STAFF_ROLE_CODES,
+} from "@drts/contracts";
 import type {
   ManageFleetHumanRoleCommand,
   FleetHumanRoleRecord,
+  InviteFleetStaffCommand,
+  FleetStaffRoleCode,
+  FleetStaffInvitationIssued,
+  FleetStaffInvitationView,
+  FleetStaffMemberView,
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityMembershipRecord,
+  CanonicalIdentityRoleBindingRecord,
+  CanonicalIdentityInvitationRecord,
 } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import { IdentityRepository } from "../identity/identity.repository";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
+import { FleetInvitationDeliveryService } from "./fleet-invitation-delivery.service";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -51,6 +65,64 @@ import {
 } from "./fleet-partner.repository";
 
 const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
+
+const FLEET_INVITATION_TTL_MS = 24 * 60 * 60 * 1000;
+const FLEET_INVITE_EMAIL_PATTERN =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/;
+
+function currentFleetStaffRoleBinding(
+  bindings: CanonicalIdentityRoleBindingRecord[],
+): CanonicalIdentityRoleBindingRecord | null {
+  return (
+    bindings
+      .filter((binding) => getIamFleetRoleScopes(binding.roleCode))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ??
+    null
+  );
+}
+
+export function toFleetStaffMemberView(input: {
+  principal: CanonicalIdentityPrincipalRecord | null;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBindings: CanonicalIdentityRoleBindingRecord[];
+  fleetPartnerId: string;
+  entrySlug: string;
+}): FleetStaffMemberView {
+  const binding = currentFleetStaffRoleBinding(input.roleBindings);
+  return {
+    membershipId: input.membership.membershipId,
+    principalId: input.membership.principalId,
+    fleetPartnerId: input.fleetPartnerId,
+    entrySlug: input.entrySlug,
+    email: input.principal?.email ?? null,
+    displayName: input.principal?.displayName ?? null,
+    status: input.membership.status,
+    roleCode: binding?.roleCode ?? null,
+    validTo: binding?.validTo ?? null,
+    createdAt: input.membership.createdAt,
+    updatedAt: input.membership.updatedAt,
+  };
+}
+
+export function toFleetStaffInvitationView(
+  invitation: CanonicalIdentityInvitationRecord,
+  fleetPartnerId: string,
+  entrySlug: string,
+): FleetStaffInvitationView {
+  return {
+    invitationId: invitation.invitationId,
+    membershipId: invitation.membershipId,
+    fleetPartnerId,
+    entrySlug,
+    email: invitation.email,
+    roleCode: invitation.roleCode,
+    deliveryStatus: invitation.deliveryStatus,
+    expiresAt: invitation.expiresAt,
+    acceptedAt: invitation.acceptedAt,
+    revokedAt: invitation.revokedAt,
+    createdAt: invitation.createdAt,
+  };
+}
 
 const FLEET_PARTNER_SEED: FleetPartnerRecord[] = [
   {
@@ -149,7 +221,27 @@ export class FleetPartnerService implements OnModuleInit {
     @Optional()
     private readonly partnerLinkRepository?: PartnerUserIdentityLinkRepository,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional()
+    private readonly invitationDelivery?: FleetInvitationDeliveryService,
   ) {}
+
+  private requireFleetManager(
+    manager: BootstrapRequestIdentity | null,
+  ): asserts manager is BootstrapRequestIdentity {
+    if (
+      !manager ||
+      !["platform", "ops"].includes(manager.realm) ||
+      !["platform_admin", "ops_user"].includes(manager.actorType) ||
+      !manager.scopes?.includes("foundation:write") ||
+      !manager.principalId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "FLEET_ROLE_MANAGER_DENIED",
+        "A verified platform Fleet manager is required.",
+      );
+    }
+  }
 
   private async requireManagedFleetEntry(
     fleetPartnerId: string,
@@ -213,19 +305,7 @@ export class FleetPartnerService implements OnModuleInit {
     command: ManageFleetHumanRoleCommand,
     manager: BootstrapRequestIdentity | null,
   ): Promise<FleetHumanRoleRecord> {
-    if (
-      !manager ||
-      !["platform", "ops"].includes(manager.realm) ||
-      !["platform_admin", "ops_user"].includes(manager.actorType) ||
-      !manager.scopes?.includes("foundation:write") ||
-      !manager.principalId
-    ) {
-      throw new ApiRequestError(
-        403,
-        "FLEET_ROLE_MANAGER_DENIED",
-        "A verified platform Fleet manager is required.",
-      );
-    }
+    this.requireFleetManager(manager);
     if (
       !command ||
       typeof command.entrySlug !== "string" ||
@@ -322,6 +402,299 @@ export class FleetPartnerService implements OnModuleInit {
       status: records.membership.status,
       validTo: records.binding.validTo,
     };
+  }
+
+  /** FLEET-ONB-003 SA/SD §1, §2: platform/ops issue a Fleet staff invitation. */
+  async inviteFleetStaff(
+    fleetPartnerId: string,
+    command: InviteFleetStaffCommand,
+    manager: BootstrapRequestIdentity | null,
+  ): Promise<FleetStaffInvitationIssued> {
+    this.requireFleetManager(manager);
+    if (
+      !command ||
+      typeof command.entrySlug !== "string" ||
+      !command.entrySlug.trim()
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_INVITE_ENTRY_REQUIRED",
+        "entrySlug is required.",
+      );
+    }
+    const entrySlug = command.entrySlug.trim();
+    const email =
+      typeof command.email === "string"
+        ? command.email.trim().toLowerCase()
+        : "";
+    if (
+      !email ||
+      email.length > 254 ||
+      !FLEET_INVITE_EMAIL_PATTERN.test(email)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_INVITE_EMAIL_INVALID",
+        "email is invalid.",
+      );
+    }
+    if (
+      !FLEET_STAFF_ROLE_CODES.includes(command.roleCode as FleetStaffRoleCode)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_INVITE_ROLE_INVALID",
+        "roleCode must be fleet_partner_admin, fleet_partner_ops or fleet_partner_finance.",
+      );
+    }
+    let validTo: string | null = null;
+    if (command.validTo != null) {
+      if (
+        typeof command.validTo !== "string" ||
+        !Number.isFinite(Date.parse(command.validTo)) ||
+        Date.parse(command.validTo) <= Date.now()
+      ) {
+        throw new ApiRequestError(
+          400,
+          "FLEET_INVITE_EXPIRY_INVALID",
+          "validTo must be a future ISO-8601 timestamp.",
+        );
+      }
+      validTo = new Date(Date.parse(command.validTo)).toISOString();
+    }
+    await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
+    const rawToken = `fi_${randomBytes(32).toString("base64url")}`;
+    const issued = await this.identityRepository!.issueFleetStaffInvitation({
+      entrySlug,
+      fleetPartnerId,
+      email,
+      roleCode: command.roleCode,
+      validTo,
+      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+      expiresAt: new Date(Date.now() + FLEET_INVITATION_TTL_MS).toISOString(),
+      issuerPrincipalId: manager.principalId,
+    });
+    if (!issued) {
+      throw new ApiRequestError(
+        409,
+        "FLEET_STAFF_ALREADY_ACTIVE",
+        "This email already has an active membership in this Fleet entry.",
+      );
+    }
+    // Only an acknowledged send is recorded as delivered; anything else
+    // stays visibly delivery_failed and can be re-issued.
+    const delivery = this.invitationDelivery
+      ? await this.invitationDelivery.send({
+          invitationId: issued.invitation.invitationId,
+          fleetPartnerId,
+          entrySlug,
+          recipientEmail: email,
+          expiresAt: issued.invitation.expiresAt,
+          rawToken,
+        })
+      : { status: "unavailable" as const, attemptedAt: new Date().toISOString() };
+    const invitation =
+      (await this.identityRepository!.setFleetStaffInvitationDeliveryStatus(
+        issued.invitation.invitationId,
+        delivery.status === "sent" ? "delivered" : "delivery_failed",
+      )) ?? issued.invitation;
+    await this.securityEventsService!.recordEventRequired({
+      actorId: manager.actorId,
+      actorType: manager.actorType,
+      realm: manager.realm,
+      tenantId: null,
+      partnerId: entrySlug,
+      eventType: "fleet_staff_invitation.issued",
+      eventFamily: "role",
+      outcome: "success",
+      severity: "medium",
+      targetType: "user",
+      targetId: issued.membership.principalId,
+      sessionId: manager.sessionId ?? null,
+      tokenId: manager.tokenId ?? null,
+      authMethods: manager.amr ?? [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        fleetPartnerId,
+        entrySlug,
+        invitationId: invitation.invitationId,
+        roleCode: command.roleCode,
+        deliveryStatus: invitation.deliveryStatus,
+      },
+    });
+    return {
+      invitation: toFleetStaffInvitationView(
+        invitation,
+        fleetPartnerId,
+        entrySlug,
+      ),
+      member: toFleetStaffMemberView({
+        principal: issued.principal,
+        membership: issued.membership,
+        roleBindings: [issued.roleBinding],
+        fleetPartnerId,
+        entrySlug,
+      }),
+      deliveryOutcome: delivery.status,
+    };
+  }
+
+  /** FLEET-ONB-003 SA/SD §8: revokes a not-yet-accepted Fleet staff invitation. */
+  async revokeFleetStaffInvitation(
+    fleetPartnerId: string,
+    entrySlug: string,
+    invitationId: string,
+    manager: BootstrapRequestIdentity | null,
+  ): Promise<FleetStaffInvitationView> {
+    this.requireFleetManager(manager);
+    if (typeof entrySlug !== "string" || !entrySlug.trim()) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_INVITE_ENTRY_REQUIRED",
+        "entrySlug is required.",
+      );
+    }
+    const slug = entrySlug.trim();
+    await this.requireManagedFleetEntry(fleetPartnerId, slug);
+    const revoked = await this.identityRepository!.revokeFleetStaffInvitation(
+      slug,
+      fleetPartnerId,
+      invitationId,
+    );
+    if (!revoked) {
+      throw new ApiRequestError(
+        404,
+        "FLEET_INVITATION_NOT_FOUND",
+        "No pending invitation was found for this Fleet entry.",
+      );
+    }
+    await this.securityEventsService!.recordEventRequired({
+      actorId: manager.actorId,
+      actorType: manager.actorType,
+      realm: manager.realm,
+      tenantId: null,
+      partnerId: slug,
+      eventType: "fleet_staff_invitation.revoked",
+      eventFamily: "role",
+      outcome: "success",
+      severity: "medium",
+      targetType: "user",
+      targetId: revoked.membershipId,
+      sessionId: manager.sessionId ?? null,
+      tokenId: manager.tokenId ?? null,
+      authMethods: manager.amr ?? [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: {
+        fleetPartnerId,
+        entrySlug: slug,
+        revokedAt: revoked.revokedAt,
+      },
+    });
+    return toFleetStaffInvitationView(revoked, fleetPartnerId, slug);
+  }
+
+  /**
+   * FLEET-ONB-003 SA/SD §8: disables a Fleet staff membership and revokes
+   * its principal's existing sessions in the same transaction (reuses
+   * `revokePrincipalSessionsInTransaction` via
+   * `identityRepository.deactivateFleetStaffMembership`).
+   */
+  async deactivateFleetStaffMember(
+    fleetPartnerId: string,
+    entrySlug: string,
+    membershipId: string,
+    manager: BootstrapRequestIdentity | null,
+  ): Promise<FleetStaffMemberView> {
+    this.requireFleetManager(manager);
+    if (typeof entrySlug !== "string" || !entrySlug.trim()) {
+      throw new ApiRequestError(
+        400,
+        "FLEET_INVITE_ENTRY_REQUIRED",
+        "entrySlug is required.",
+      );
+    }
+    const slug = entrySlug.trim();
+    await this.requireManagedFleetEntry(fleetPartnerId, slug);
+    const disabled =
+      await this.identityRepository!.deactivateFleetStaffMembership(
+        slug,
+        fleetPartnerId,
+        membershipId,
+        manager.principalId,
+      );
+    if (!disabled) {
+      throw new ApiRequestError(
+        404,
+        "FLEET_STAFF_MEMBER_NOT_FOUND",
+        "Fleet staff membership was not found.",
+      );
+    }
+    await this.securityEventsService!.recordEventRequired({
+      actorId: manager.actorId,
+      actorType: manager.actorType,
+      realm: manager.realm,
+      tenantId: null,
+      partnerId: slug,
+      eventType: "fleet_staff_membership.deactivated",
+      eventFamily: "role",
+      outcome: "success",
+      severity: "medium",
+      targetType: "user",
+      targetId: disabled.principalId,
+      sessionId: manager.sessionId ?? null,
+      tokenId: manager.tokenId ?? null,
+      authMethods: manager.amr ?? [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: { fleetPartnerId, entrySlug: slug, status: disabled.status },
+    });
+    const principal = await this.identityRepository!.findPrincipalById(
+      disabled.principalId,
+    );
+    const roleBindings =
+      await this.identityRepository!.findRoleBindingsByMembershipId(
+        disabled.membershipId,
+      );
+    return toFleetStaffMemberView({
+      principal,
+      membership: disabled,
+      roleBindings,
+      fleetPartnerId,
+      entrySlug: slug,
+    });
+  }
+
+  /** Lists Fleet staff invitations for the given entry (newest first). */
+  async listFleetStaffInvitations(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetStaffInvitationView[]> {
+    await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
+    const invitations =
+      await this.identityRepository!.listFleetStaffInvitations(
+        entrySlug,
+        fleetPartnerId,
+      );
+    return invitations.map((invitation) =>
+      toFleetStaffInvitationView(invitation, fleetPartnerId, entrySlug),
+    );
   }
 
   async onModuleInit() {
