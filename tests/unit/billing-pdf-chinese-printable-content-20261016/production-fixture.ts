@@ -156,9 +156,11 @@ export async function issueDocuments(count = 3, longDescription = false) {
     { periodMonth: "2026-05", driverId: DRIVER },
     `pdf-generate-${count}`,
   );
-  const statement = runtime.controller.getDriverStatement(
-    generated.data.items[0]!.statementId,
-    identity("driver", DRIVER),
+  const statement = (
+    await runtime.controller.getDriverStatement(
+      generated.data.items[0]!.statementId,
+      identity("driver", DRIVER),
+    )
   ).data;
   const batch = runtime.service.getReimbursementBatch(
     generated.data.reimbursementBatchIds[0]!,

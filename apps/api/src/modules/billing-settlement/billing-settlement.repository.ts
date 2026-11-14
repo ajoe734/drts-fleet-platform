@@ -946,6 +946,18 @@ export class BillingSettlementRepository {
     return profile.tenantId === tenantId ? profile : null;
   }
 
+  async listCommittedDriverStatements(): Promise<DriverStatementRecord[]> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_driver_statements ORDER BY updated_at DESC, created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DriverStatementRecord>(
+        row.record,
+        "billing.phase1_driver_statements",
+      ),
+    );
+  }
+
   async listCommittedReimbursementBatches() {
     const result = await this.databaseService!.query<JsonRecordRow>(
       `SELECT record FROM billing.phase1_reimbursement_batches ORDER BY updated_at DESC`,

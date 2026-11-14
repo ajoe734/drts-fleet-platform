@@ -2782,7 +2782,52 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   listDriverStatements(periodMonth?: string, driverId?: string) {
-    return this.driverStatements
+    return this.listDriverStatementsFrom(
+      this.driverStatements,
+      periodMonth,
+      driverId,
+    );
+  }
+
+  getDriverStatement(statementId: string, requestingDriverId?: string) {
+    return this.getDriverStatementFrom(
+      this.driverStatements,
+      statementId,
+      requestingDriverId,
+    );
+  }
+
+  async listDriverStatementsFresh(periodMonth?: string, driverId?: string) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.listDriverStatements(periodMonth, driverId);
+    }
+    const statements =
+      await this.billingSettlementRepository.listCommittedDriverStatements();
+    return this.listDriverStatementsFrom(statements, periodMonth, driverId);
+  }
+
+  async getDriverStatementFresh(
+    statementId: string,
+    requestingDriverId?: string,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.getDriverStatement(statementId, requestingDriverId);
+    }
+    const statements =
+      await this.billingSettlementRepository.listCommittedDriverStatements();
+    return this.getDriverStatementFrom(
+      statements,
+      statementId,
+      requestingDriverId,
+    );
+  }
+
+  private listDriverStatementsFrom(
+    statements: DriverStatementRecord[],
+    periodMonth?: string,
+    driverId?: string,
+  ) {
+    return statements
       .filter(
         (statement) =>
           (!periodMonth ||
@@ -2794,8 +2839,12 @@ export class BillingSettlementService implements OnModuleInit {
       );
   }
 
-  getDriverStatement(statementId: string, requestingDriverId?: string) {
-    const statement = this.driverStatements.find(
+  private getDriverStatementFrom(
+    statements: DriverStatementRecord[],
+    statementId: string,
+    requestingDriverId?: string,
+  ) {
+    const statement = statements.find(
       (candidate) => candidate.statementId === statementId,
     );
     if (!statement) {
