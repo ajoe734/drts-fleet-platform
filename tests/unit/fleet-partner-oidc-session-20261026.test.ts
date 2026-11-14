@@ -32,6 +32,9 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
     vi.stubEnv("NEXT_PUBLIC_API_URL", "/control-plane-proxy");
     vi.stubEnv("DRTS_API_URL", "https://drts-dev-api-xyz.a.run.app");
     vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    // FLEET-ONB-001: the login action 503s FLEET_SELECTOR_REQUIRED without
+    // this server-side selector.
+    vi.stubEnv("DRTS_FLEET_PARTNER_ID", "fleet-demo-001");
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(
       "fetch",
@@ -64,6 +67,9 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
   });
 
   it("keeps opaque state in HttpOnly cookie and exchanges snake_case session for secure cookies and current session", async () => {
+    // FLEET-ONB-001: the login action 503s FLEET_SELECTOR_REQUIRED without
+    // this server-side selector.
+    vi.stubEnv("DRTS_FLEET_PARTNER_ID", "fleet-demo-001");
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(
       "fetch",
@@ -84,6 +90,8 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
     );
 
     const login = await GET(
+      // partner_id=entry-1 is a client-supplied value; the BFF must ignore
+      // it and resolve the server's own DRTS_FLEET_PARTNER_ID instead.
       request("login?redirect_uri=%2Ffleet%3Ftab%3Dhome&partner_id=entry-1"),
       context("login"),
     );
@@ -91,7 +99,8 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
     expect(login.headers.get("location")).toBe(
       "https://issuer.example.test/authorize?state=opaque",
     );
-    expect(calls[0]!.url).toContain("partner_id=entry-1");
+    expect(calls[0]!.url).toContain("partner_id=fleet-demo-001");
+    expect(calls[0]!.url).not.toContain("entry-1");
     const state = login.cookies.get("drts_oidc_state")!;
     expect(state.value).toContain("opaque-state");
     expect(state.httpOnly).toBe(true);
@@ -147,6 +156,9 @@ describe("Fleet production GET OIDC wire boundary (serializer, no local server)"
   // child's own URL is http://127.0.0.1:3107. The wrapper supplies the browser
   // origin, as this app's control-plane-proxy already reads it.
   it("builds the callback and final redirect from the wrapper's browser origin", async () => {
+    // FLEET-ONB-001: the login action 503s FLEET_SELECTOR_REQUIRED without
+    // this server-side selector.
+    vi.stubEnv("DRTS_FLEET_PARTNER_ID", "fleet-demo-001");
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(
       "fetch",

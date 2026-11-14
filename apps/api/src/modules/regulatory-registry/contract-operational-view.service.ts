@@ -366,8 +366,15 @@ export class ContractOperationalViewService {
     const partnerEntry = context
       ? context.partnerEntry
       : this.lookupPartnerEntry(contract);
+    // A fleet_partner contract's own serviceScope (e.g. "standard_taxi")
+    // governs its modifiable-window/proof-requirement policy; a matched
+    // partnerEntry's businessDispatchSubtype describes that channel's portal
+    // scope, an unrelated concept, and must not override this (mirrors the
+    // authMode fix above for the same fleet_partner/partnerEntry collision).
     const scopeKey =
-      partnerEntry?.businessDispatchSubtype ?? contract.serviceScope;
+      contract.partnerType === "fleet_partner"
+        ? contract.serviceScope
+        : partnerEntry?.businessDispatchSubtype ?? contract.serviceScope;
     const policy = SCOPE_POLICIES[scopeKey] ?? null;
 
     // 1. Modifiable Window
@@ -501,7 +508,11 @@ export class ContractOperationalViewService {
     // 7. Auth Mode
     let authMode: ContractOperationalViewRecord["authMode"] = null;
     let authStatus: ContractOperationalDataStatus = "missing_data";
-    if (partnerEntry) {
+    // A fleet_partner contract's own drivers/vehicles always authenticate
+    // through the fleet partner's portal; a matched partnerEntry's authMode
+    // (e.g. "partner_api_key") describes that channel's service-to-service
+    // credential, an unrelated concept, and must not override this.
+    if (partnerEntry && contract.partnerType !== "fleet_partner") {
       authMode = {
         mode: partnerEntry.authMode,
         eligibilityMode: partnerEntry.eligibilityMode || undefined,

@@ -97,12 +97,32 @@ export async function GET(
   const action = auth[0] ?? "";
 
   if (action === "login") {
+    // entrySlug is never taken from the client's partner_id query parameter:
+    // this service's deployment configuration is the only authority over
+    // which fleet entry a login can resolve to. Letting a caller supply its
+    // own partner_id would let any unauthenticated subject probe for the
+    // existence of other fleet entrySlug values (a PARTNER_ENTRY_MISMATCH
+    // side channel), even though the identity-link check downstream would
+    // ultimately still deny an unbound subject.
+    const partnerId = process.env.DRTS_FLEET_PARTNER_ID?.trim() || "";
+    if (!partnerId) {
+      return NextResponse.json(
+        {
+          error: "FLEET_SELECTOR_REQUIRED",
+          message:
+            "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID is required.",
+        },
+        { status: 503 },
+      );
+    }
+
     const returnUrl = request.nextUrl.searchParams.get("redirect_uri") || "/";
-    const partnerId = request.nextUrl.searchParams.get("partner_id") || "";
     const callbackUrl = `${browserOrigin(request)}/api/auth/callback`;
 
-    const query = new URLSearchParams({ redirect_uri: callbackUrl });
-    if (partnerId) query.set("partner_id", partnerId);
+    const query = new URLSearchParams({
+      redirect_uri: callbackUrl,
+      partner_id: partnerId,
+    });
 
     const res = await apiFetch(`/api/auth/partner/login?${query}`);
     const data = await res.json();
