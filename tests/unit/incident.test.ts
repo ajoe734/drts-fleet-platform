@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { IncidentRecord } from "@drts/contracts";
+
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { IncidentRepository } from "../../apps/api/src/modules/incident/incident.repository";
 import { IncidentService } from "../../apps/api/src/modules/incident/incident.service";
@@ -242,7 +244,7 @@ describe("incident service", () => {
     const updated = service.updateIncidentForCommit(incident.incidentId, {
       category: "driver_injury",
       severity: "critical",
-    });
+    }) as IncidentRecord;
 
     expect(updated.category).toBe("driver_injury");
     expect(updated.severity).toBe("critical");
