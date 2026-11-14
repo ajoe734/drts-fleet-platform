@@ -26,6 +26,8 @@ import {
   getDriverClient,
   getDriverId,
   getProvisionedSession,
+  initializeDriverIdentity,
+  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
   registerProtectedCacheClearHandler,
@@ -196,7 +198,8 @@ function UtilityRow({
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const isProvisioned = isDriverIdentityProvisioned();
+  const [identityReady, setIdentityReady] = useState(isDriverIdentityHydrated);
+  const isProvisioned = identityReady && isDriverIdentityProvisioned();
   const driverId = isProvisioned ? getDriverId() : "";
 
   const [loading, setLoading] = useState(true);
@@ -223,6 +226,21 @@ export default function SettingsScreen() {
   );
 
   useEffect(() => {
+    if (identityReady) return;
+    let cancelled = false;
+    initializeDriverIdentity()
+      .catch((identityError: unknown) => {
+        if (!cancelled) setLoadError(toErrorMessage(identityError));
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityReady]);
+
+  useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
       setSettingsValues(DEFAULT_SETTINGS_VALUES);
       setProfileValues(DEFAULT_PROFILE_VALUES);
@@ -233,6 +251,7 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
+    if (!identityReady) return;
     if (!isProvisioned) {
       setLoading(false);
       return;
@@ -304,7 +323,7 @@ export default function SettingsScreen() {
     return () => {
       isActive = false;
     };
-  }, [driverId, isProvisioned]);
+  }, [driverId, identityReady, isProvisioned]);
 
   const settingsErrors = validateSettingsValues(settingsValues);
   const profileErrors = profileLoaded
@@ -464,11 +483,11 @@ export default function SettingsScreen() {
     ]);
   };
 
-  if (!isProvisioned) {
+  if (identityReady && !isProvisioned) {
     return <Redirect href="/onboarding" />;
   }
 
-  if (loading) {
+  if (!identityReady || loading) {
     return (
       <AppScreen scrollable={false}>
         <PageHeader title={driverStrings.settings.title} />

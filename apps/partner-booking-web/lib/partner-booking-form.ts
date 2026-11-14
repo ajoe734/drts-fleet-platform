@@ -1,8 +1,23 @@
 import type {
+  ComputeGeoRouteCommand,
+  GeoRouteResponse,
+  GeoSearchResponse,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  SearchGeoQuery,
+  ResolveAddressCommand,
+  ReverseGeocodeCommand,
   BusinessDispatchSubtype,
+  BookingRecord,
+  PartnerBookingDetails,
   PartnerChannelEntryRecord,
+  VerifyPartnerEligibilityCommand,
+  PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 import {
+  AddressProviderUnavailableError,
+  type AddressMapPickerProvider,
+  type AddressProviderHealth,
   evaluateAddressSubmitGate,
   type AddressPayload,
   type AddressProviderState,
@@ -55,7 +70,7 @@ function padDateTimeSegment(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function formatDateTimeLocalInputValue(value: Date) {
+export function formatDateTimeLocalInputValue(value: Date) {
   return [
     value.getFullYear(),
     padDateTimeSegment(value.getMonth() + 1),
@@ -480,4 +495,166 @@ export function getPartnerMapSubmitGate(params: {
   }
 
   return baseGate;
+}
+
+/** Serializable form/action contract. Partner credentials never enter this payload. */
+export type PartnerBookingSubmission = {
+  draft: PartnerBookingDraftValues;
+  pickup: AddressPayload | null;
+  dropoff: AddressPayload | null;
+  serviceability: ServiceAreaEvaluationResult | null;
+  providerState: AddressProviderState;
+  idempotencyKey: string;
+  eligibilityVerificationId?: string;
+};
+
+export type PartnerBookingConfirmation = Pick<
+  BookingRecord,
+  | "bookingId"
+  | "orderId"
+  | "orderStatus"
+  | "reservationWindowStart"
+  | "reservationWindowEnd"
+> & {
+  partnerBookingDetails?: PartnerBookingDetails;
+  businessDispatchSubtype?: BookingRecord["businessDispatchSubtype"];
+  direction?: BookingRecord["direction"];
+  flightNo?: BookingRecord["flightNo"];
+  terminal?: BookingRecord["terminal"];
+  eligibilityVerificationId: string | null;
+};
+
+export type PartnerBookingActionResult =
+  | { ok: true; confirmation: PartnerBookingConfirmation }
+  | {
+      ok: false;
+      errorCode: string;
+      errorMessage: string;
+      eligibilityVerificationId?: string;
+    };
+
+/** Read links carry normal ingress context and real IDs, never a bearer/key. */
+export function partnerBookingReadHref(
+  entrySlug: string,
+  screen: "confirmed" | "receipt" | "trips",
+  partnerUserRef: string,
+  ids: { bookingId?: string; orderId?: string; page?: number } = {},
+): string {
+  const query = new URLSearchParams({ partnerUserRef });
+  if (ids.bookingId) query.set("bookingId", ids.bookingId);
+  if (ids.orderId) query.set("orderId", ids.orderId);
+  if (ids.page) query.set("page", String(ids.page));
+  return (
+    "/" + encodeURIComponent(entrySlug) + "/" + screen + "?" + query.toString()
+  );
+}
+
+/** Existing partner eligibility fields only; no session/key enters this payload. */
+export type PartnerEligibilitySubmission = Omit<
+  VerifyPartnerEligibilityCommand,
+  "entrySlug"
+>;
+
+export type PartnerEligibilityActionResult =
+  | {
+      ok: true;
+      verification: Pick<
+        PartnerEligibilityVerificationRecord,
+        | "eligibilityVerificationId"
+        | "verificationStatus"
+        | "verificationReasonCode"
+      >;
+    }
+  | { ok: false; errorCode: string; errorMessage: string };
+
+/** Serializable map inputs; the BFF supplies the actual Partner bearer/actor. */
+export type PartnerAirportMapRequest =
+  | { operation: "health" }
+  | { operation: "search"; query: SearchGeoQuery }
+  | { operation: "resolve"; command: ResolveAddressCommand }
+  | { operation: "reverse"; command: ReverseGeocodeCommand }
+  | {
+      operation: "route";
+      origin: ComputeGeoRouteCommand["origin"];
+      destination: ComputeGeoRouteCommand["destination"];
+      direction: "pickup" | "dropoff";
+    };
+export type PartnerAirportMapResult =
+  | {
+      ok: true;
+      data:
+        | AddressProviderHealth
+        | GeoSearchResponse
+        | GeoResolveResponse
+        | GeoReverseResponse
+        | GeoRouteResponse;
+    }
+  | { ok: false; errorCode: string };
+export type PartnerAirportMapAction = (
+  request: PartnerAirportMapRequest,
+) => Promise<PartnerAirportMapResult>;
+
+/** Geo and coverage remain normal API reads, including when external maps are SIM. */
+export function createPartnerAirportMapProvider(
+  action: PartnerAirportMapAction | undefined,
+  direction: "" | "pickup" | "dropoff",
+): AddressMapPickerProvider {
+  async function read<T>(request: PartnerAirportMapRequest): Promise<T> {
+    if (!action)
+      throw new AddressProviderUnavailableError(
+        "The address service is unavailable.",
+        "partner_map_unavailable",
+      );
+    const result = await action(request);
+    if (!result.ok)
+      throw new AddressProviderUnavailableError(
+        "The address service is unavailable.",
+        result.errorCode,
+      );
+    return result.data as T;
+  }
+  let pendingHealth: Promise<AddressProviderHealth> | null = null;
+  return {
+    search: (query) => read<GeoSearchResponse>({ operation: "search", query }),
+    resolve: (command) =>
+      read<GeoResolveResponse>({ operation: "resolve", command }),
+    reverse: (command) =>
+      read<GeoReverseResponse>({ operation: "reverse", command }),
+    getHealth: () => {
+      if (!pendingHealth) {
+        pendingHealth = read<AddressProviderHealth>({
+          operation: "health",
+        }).then(
+          (health) => {
+            pendingHealth = null;
+            return health;
+          },
+          (error: unknown) => {
+            pendingHealth = null;
+            throw error;
+          },
+        );
+      }
+      return pendingHealth;
+    },
+    async evaluateServiceArea(command) {
+      if (!command.dropoff || !direction)
+        throw new AddressProviderUnavailableError(
+          "Confirm both stops and the airport direction.",
+          "airport_route_incomplete",
+        );
+      const route = await read<GeoRouteResponse>({
+        operation: "route",
+        origin: command.pickup,
+        destination: command.dropoff,
+        direction,
+      });
+      if (!route.serviceAreaEvaluation)
+        throw new AddressProviderUnavailableError(
+          "The route service-area result is unavailable.",
+          "airport_preview_unavailable",
+        );
+      return route.serviceAreaEvaluation;
+    },
+  };
 }

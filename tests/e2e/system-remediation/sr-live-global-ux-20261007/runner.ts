@@ -19,6 +19,7 @@ import {
   type Inventory,
   type ManualEvidence,
   type Plan,
+  type Recipe,
   type Session,
   type Applicability,
 } from "./model";
@@ -174,6 +175,180 @@ export function scaffoldPlan(inventory: Inventory): Plan {
           "EnterpriseGatePage auth-required has instructions/actions, no date or money amount; verify against frozen source during review.",
         mask: [],
       };
+  }
+  // Draft only the concrete public-page render paths below. Real role sessions,
+  // review, deployment readback and manual evidence are still required by prepare/gate.
+  const agencyScreens = inventory.screens.filter((s) =>
+    ["agency-portal-web:/login", "agency-portal-web:/invite"].includes(s.id),
+  );
+  if (agencyScreens.length) {
+    let dictionary = "";
+    let languageSwitch = "";
+    try {
+      dictionary = sourceAt(
+        inventory.runtimeSha,
+        "apps/agency-portal-web/lib/translations.ts",
+      ).replace(/\s+/g, " ");
+      languageSwitch = sourceAt(
+        inventory.runtimeSha,
+        "apps/agency-portal-web/components/language-switch.tsx",
+      );
+    } catch {
+      // Historical sources without these controls/dictionaries remain pending.
+    }
+    const text = {
+      title: {
+        "zh-TW": "主管機關唯讀查詢",
+        "en-US": "Regulatory Agency Read-Only Portal",
+      },
+      cta: { "zh-TW": "使用 Google 帳號登入", "en-US": "Sign in with Google" },
+      loginError: {
+        "zh-TW": "登入狀態不符，請重新登入。",
+        "en-US": "Authentication state mismatch. Please sign in again.",
+      },
+      inviteTitle: {
+        "zh-TW": "接受機關帳號邀請",
+        "en-US": "Accept Agency Account Invitation",
+      },
+      inviteError: {
+        "zh-TW": "邀請連結無效。請向平台管理者確認。",
+        "en-US":
+          "Invalid invitation link. Please contact the platform administrator.",
+      },
+    };
+    const translations = [
+      ["login.title", text.title],
+      ["login.cta", text.cta],
+      ["login.error.stateMismatch", text.loginError],
+      ["invite.title", text.inviteTitle],
+      ["invite.invalidLink", text.inviteError],
+    ] as const;
+    const sourceMatches =
+      translations.every(([key, values]) =>
+        Object.values(values).every((value) =>
+          dictionary.includes(
+            `${JSON.stringify(key)}: ${JSON.stringify(value)}`,
+          ),
+        ),
+      ) &&
+      languageSwitch.includes("<button") &&
+      languageSwitch.includes("aria-label={ariaLabel}");
+    if (sourceMatches)
+      for (const agencyScreen of agencyScreens) {
+        const page = sourceAt(inventory.runtimeSha, agencyScreen.source);
+        if (
+          !page.includes("<h1 ") ||
+          !page.includes("<LanguageSwitch locale={locale} />")
+        )
+          continue;
+        if (
+          agencyScreen.route === "/login" &&
+          page.includes('AUTH_STATE_MISMATCH: "login.error.stateMismatch"') &&
+          page.includes("const error = firstParam(params.error)") &&
+          page.includes("href={loginHref}") &&
+          page.includes('<p role="alert"')
+        ) {
+          const login: Recipe = {
+            route: "/login",
+            finalPath: "/login",
+            ready: "main h1",
+            expectedStatus: 200,
+            stateProof: {
+              selector: "main h1",
+              text: text.title,
+              source: agencyScreen.source,
+            },
+            steps: {
+              "zh-TW": [
+                {
+                  kind: "tab",
+                  target: 'main a[href^="/api/auth/agency/login?"]',
+                  max: 20,
+                },
+                {
+                  kind: "visible",
+                  target: 'main a[href^="/api/auth/agency/login?"]',
+                  text: text.cta["zh-TW"],
+                },
+              ],
+              "en-US": [
+                {
+                  kind: "tab",
+                  target: 'main a[href^="/api/auth/agency/login?"]',
+                  max: 20,
+                },
+                {
+                  kind: "visible",
+                  target: 'main a[href^="/api/auth/agency/login?"]',
+                  text: text.cta["en-US"],
+                },
+              ],
+            },
+            formats: { "zh-TW": [], "en-US": [] },
+            noFormatsReason:
+              "The frozen Agency login page contains its heading, instructions, language button, Google link and optional static error; it renders no dates or money.",
+            mask: [],
+          };
+          for (const role of agencyScreen.roles) {
+            recipes[
+              recipeKey({ screen: agencyScreen, role, state: "default" })
+            ] = login;
+            // This exercises the source's query-driven error display, not an OAuth attack or exchange.
+            recipes[recipeKey({ screen: agencyScreen, role, state: "error" })] =
+              {
+                ...login,
+                route: "/login?error=AUTH_STATE_MISMATCH",
+                stateProof: {
+                  selector: 'main [role="alert"]',
+                  text: text.loginError,
+                  source: agencyScreen.source,
+                },
+              };
+          }
+        } else if (
+          agencyScreen.route === "/invite" &&
+          page.includes("const token = firstParam(params.token)") &&
+          page.includes("{token ? (") &&
+          page.includes('<p role="alert">{t("invite.invalidLink"')
+        ) {
+          const invite: Recipe = {
+            route: "/invite",
+            finalPath: "/invite",
+            ready: "main h1",
+            expectedStatus: 200,
+            stateProof: {
+              selector: 'main [role="alert"]',
+              text: text.inviteError,
+              source: agencyScreen.source,
+            },
+            steps: {
+              "zh-TW": [
+                { kind: "tab", target: "main button[aria-label]", max: 20 },
+                {
+                  kind: "visible",
+                  target: "main h1",
+                  text: text.inviteTitle["zh-TW"],
+                },
+              ],
+              "en-US": [
+                { kind: "tab", target: "main button[aria-label]", max: 20 },
+                {
+                  kind: "visible",
+                  target: "main h1",
+                  text: text.inviteTitle["en-US"],
+                },
+              ],
+            },
+            formats: { "zh-TW": [], "en-US": [] },
+            noFormatsReason:
+              "With no token the frozen Agency invitation page renders its heading, language button and invalid-link alert; no invitation is redeemed and no dates or money are displayed.",
+            mask: [],
+          };
+          for (const role of agencyScreen.roles)
+            recipes[recipeKey({ screen: agencyScreen, role, state: "error" })] =
+              invite;
+        }
+      }
   }
   return {
     runtimeSha: inventory.runtimeSha,

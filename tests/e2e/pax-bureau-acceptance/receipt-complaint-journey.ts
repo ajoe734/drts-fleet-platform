@@ -168,6 +168,12 @@ export async function completedOrderAftercare(
         expect(result.status()).toBe(201);
         const caseNo = camel(await result.json()).data.complaintId as string;
         expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/);
+        await expect(pax.getByTestId("passenger-complaint-id")).toHaveText(
+          caseNo,
+        );
+        await expect(
+          pax.getByTestId("passenger-complaint-ack"),
+        ).toHaveAttribute("data-order-id", orderId);
         const read = async (suffix = "") => {
           const response = await ops.request.get(
             `${OPS}/control-plane-proxy/complaints/${caseNo}${suffix}`,

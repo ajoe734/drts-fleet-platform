@@ -7,6 +7,7 @@ import type {
   BookingQualification,
 } from "./booking-requirements";
 export * from "./booking-requirements";
+import type { PassengerServiceSelection } from "./passenger-app";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 export * from "./iam-contracts";
@@ -224,15 +225,27 @@ export interface GeoReverseResponse {
 export const GEO_ROUTE_TRAVEL_MODES = ["drive", "two_wheeler", "walk"] as const;
 export type GeoRouteTravelMode = (typeof GEO_ROUTE_TRAVEL_MODES)[number];
 
+export interface AirportTransferRouteIntent {
+  direction: "pickup" | "dropoff";
+}
+
+export interface EvaluateAirportTransferRouteCommand extends AirportTransferRouteIntent {
+  pickup: GeoPoint;
+  dropoff: GeoPoint;
+  requestedAt?: string;
+}
+
 export interface ComputeGeoRouteCommand {
   origin: GeoPoint;
   destination: GeoPoint;
+  airportTransfer?: AirportTransferRouteIntent;
   travelMode?: GeoRouteTravelMode;
   locale?: string;
   requestedByActorId?: string | null;
 }
 
 export interface GeoRouteResponse {
+  serviceAreaEvaluation?: ServiceAreaEvaluationResult;
   provider: string;
   distanceMeters: number;
   durationSeconds: number;
@@ -385,6 +398,7 @@ export interface ServiceAreaBoundaryRecord {
   effectiveFrom: string;
   effectiveUntil: string | null;
   version: number;
+  /** Operator-published airport identity, when present: airportIataCode (3 uppercase letters). */
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -657,6 +671,9 @@ export const VEHICLE_LICENSE_TYPES = [
   "airport_transfer_vehicle",
 ] as const;
 export type VehicleLicenseType = (typeof VEHICLE_LICENSE_TYPES)[number];
+
+/** Existing reg.vehicle_form_t values, per vehicle rather than license class. */
+export type VehicleForm = "sedan" | "wagon" | "mpv" | "accessible" | "other";
 
 export interface VehicleEligibilityMatrixRecord {
   capabilityId: string;
@@ -3349,7 +3366,31 @@ export interface CreateCallCenterOrderCommand {
   mapFallbackReview?: CallCenterMapFallbackReview | null;
 }
 
+/** Partner intake facts retained with the original booking, not an external verification result. */
+export type PartnerBookingDetails =
+  | {
+      subtype: "travel_agency_transfer";
+      groupCode: string;
+      groupSize: number;
+      itineraryLink: string;
+      rosterPassengers: string[];
+      meetingPoint: string;
+    }
+  | {
+      subtype: "insurance_replacement_vehicle";
+      claimNumber: string;
+      policyNumber: string;
+      claimReference: string;
+      claimantName: string;
+      replacementStart: string;
+      replacementEnd: string;
+      replacementVehicleClass: string;
+      caseHandler: string;
+    };
+
 export interface CreateTenantBookingCommand {
+  partnerBookingDetails?: PartnerBookingDetails;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
   businessDispatchSubtype: BusinessDispatchSubtype;
   partnerEntrySlug?: string;
   eligibilityVerificationId?: string;
@@ -3565,6 +3606,8 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  partnerBookingDetails?: PartnerBookingDetails;
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   orderId: string;
@@ -3686,6 +3729,7 @@ export interface OwnedOrderRecord {
 }
 
 export interface BookingRecord {
+  partnerBookingDetails?: PartnerBookingDetails;
   bookingId: string;
   orderId: string;
   tenantId: string;
@@ -3926,6 +3970,7 @@ export interface TenantOrderListQuery {
 }
 
 export interface DispatchCandidate {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   vehicleId: string;
@@ -4041,6 +4086,7 @@ export interface DispatchTimeoutRecord {
 }
 
 export interface DispatchAssignmentRecord {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   assignmentId: string;
@@ -4072,6 +4118,7 @@ export interface WaypointRecord {
 }
 
 export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
+  serviceSelection?: PassengerServiceSelection;
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;
@@ -4098,6 +4145,85 @@ export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot>
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;
+}
+
+/** Normal partner read projection only; never persisted into the owned order. */
+export interface PartnerOrderProgressRecord {
+  orderId: string;
+  orderStatus: OwnedOrderStatus;
+  readAt: string;
+  availability: "available" | "unavailable";
+  reason: "source_unavailable" | "inconsistent_context" | null;
+  currentTask: {
+    taskId: string;
+    assignmentId: string;
+    dispatchJobId: string;
+    driverId: string;
+    vehicleId: string;
+    status: DriverTaskStatus;
+    acceptedAt: string | null;
+    departedAt: string | null;
+    arrivedPickupAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  } | null;
+  driver: {
+    driverId: string;
+    driverSurname: string | null;
+    driverSurnameSource: "driver_profile_declared" | null;
+    driverSurnameProfileUpdatedAt: string | null;
+  } | null;
+  vehicle: { vehicleId: string; plateNo: string | null } | null;
+  location: {
+    status:
+      | "fresh"
+      | "missing"
+      | "stale"
+      | "low_accuracy"
+      | "context_mismatch"
+      | "not_live"
+      | "unavailable";
+    position: { lat: number; lng: number } | null;
+    recordedAt: string | null;
+    updatedAt: string | null;
+    accuracyM: number | null;
+  };
+}
+
+/** Additive normal GET response; general order records and writers stay unchanged. */
+export interface PartnerOrderReadRecord extends OwnedOrderRecord {
+  progress: PartnerOrderProgressRecord;
+}
+
+/**
+ * Read-only same-order completion and payment facts after normal partner ownership.
+ * A quote, completion fare or payment-method label never proves capture.
+ */
+export interface PartnerOrderReceiptRecord {
+  orderId: string;
+  bookingId: string | null;
+  orderNo: string;
+  orderStatus: OwnedOrderRecord["status"];
+  quotedFare: MoneyAmount | null;
+  completion: {
+    taskId: string;
+    assignmentId: string;
+    dispatchJobId: string;
+    driverId: string;
+    vehicleId: string;
+    completedAt: string | null;
+    actualFare: MoneyAmount | null;
+    actualFareBreakdown: ActualTripFareBreakdown | null;
+    actualDistanceKm: number | null;
+    actualDurationSec: number | null;
+  } | null;
+  payment: {
+    /** not_recorded means a successful ledger read returned no row. */
+    availability: "available" | "not_recorded" | "unavailable";
+    status: import("./phase1-p5-s3-multi-taxi").PassengerPaymentStatus | null;
+    /** Exact ledger amount only. Missing/invalid amounts never use the quote/task. */
+    amount: MoneyAmount | null;
+  };
 }
 
 export type DriverTaskStreamEventType =
@@ -4152,9 +4278,11 @@ export type DriverTaskOrderSummary = Pick<
   | "dispatchSemantics"
   | "fixedPrice"
   | "quotedFare"
+  | "serviceSelection"
 >;
 
 export interface UnifiedDriverTaskView {
+  serviceSelection?: PassengerServiceSelection;
   taskId: string;
   orderId: string;
   orderDomain: OrderDomain;
@@ -4426,6 +4554,7 @@ export interface VehicleRegistryRecord {
    */
   createdAt: string;
   licenseType?: VehicleLicenseType | null;
+  vehicleForm?: VehicleForm | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
   dispatchableFlag: boolean;
@@ -5353,7 +5482,10 @@ export interface ManageFleetHumanRoleCommand {
   entrySlug: string;
   /** Already-linked IdP subject, not an email or client-selected role claim. */
   partnerUserRef: string;
-  roleCode: "fleet_partner_admin" | "fleet_partner_ops" | "fleet_partner_finance";
+  roleCode:
+    | "fleet_partner_admin"
+    | "fleet_partner_ops"
+    | "fleet_partner_finance";
   enabled: boolean;
   /** Optional explicit expiry; null means the manager has not set an expiry. */
   validTo?: string | null;
@@ -8075,11 +8207,7 @@ export interface AgencyTripRecordView {
     | "manual_recovery"
     | "unknown";
   tollMinor: number | null;
-  tollSource:
-    | "driver_proof"
-    | "electronic_receipt"
-    | "none"
-    | "unavailable";
+  tollSource: "driver_proof" | "electronic_receipt" | "none" | "unavailable";
   currency: string;
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";

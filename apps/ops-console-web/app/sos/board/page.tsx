@@ -8,8 +8,11 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
+import {
+  getOpsClient,
+  createOpsDispatchEventSource,
+} from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -29,9 +32,10 @@ interface DispatchJobRow {
 }
 
 export default function SosBoardPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [jobs, setJobs] = useState<DispatchJobRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const intlLocale = (locale ?? "zh") === "en" ? "en-US" : "zh-TW";
 
   const fetchJobs = async () => {
     try {
@@ -99,6 +103,11 @@ export default function SosBoardPage() {
     };
   }, []);
 
+  const renderedJobs = jobs.map((job) => ({
+    ...job,
+    time: new Date(job.createdAt).toLocaleTimeString(intlLocale),
+  }));
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -111,27 +120,27 @@ export default function SosBoardPage() {
             </Pill>
           </div>
         }
-        subtitle="智行叫車 · 即時派車調度看板"
+        subtitle={t("sos.board.subtitle", { appName: t("app.name") })}
       />
 
       <div style={{ padding: 24 }}>
         <Card
           theme={theme}
           padding={0}
-          title={loading ? "載入中..." : "即時派遣狀態"}
+          title={loading ? t("sos.common.loading") : t("sos.board.tableTitle")}
         >
           <Table
             theme={theme}
             columns={[
-              { h: "任務編號", k: "id", w: 120, mono: true },
-              { h: "行程編號", k: "orderId", w: 160, mono: true },
-              { h: "狀態", k: "status", w: 130 },
-              { h: "駕駛", k: "driver", w: 100 },
-              { h: "車牌", k: "plate", w: 100, mono: true },
-              { h: "時間", k: "time", w: 120, mono: true },
-              { h: "預估到達", k: "eta", w: 90 },
+              { h: t("sos.field.taskId"), k: "id", w: 120, mono: true },
+              { h: t("sos.field.tripId"), k: "orderId", w: 160, mono: true },
+              { h: t("sos.field.status"), k: "status", w: 130 },
+              { h: t("sos.field.driver"), k: "driver", w: 100 },
+              { h: t("sos.field.plate"), k: "plate", w: 100, mono: true },
+              { h: t("sos.field.time"), k: "time", w: 120, mono: true },
+              { h: t("sos.field.eta"), k: "eta", w: 90 },
             ]}
-            rows={jobs}
+            rows={renderedJobs}
           />
         </Card>
       </div>

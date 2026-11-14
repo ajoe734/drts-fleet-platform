@@ -9,7 +9,10 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import type { PassengerBookingClient } from "@drts/passenger-client";
-import type { PassengerBookingSettingsResponse } from "@drts/contracts";
+import type {
+  PassengerBookingSettingsResponse,
+  PassengerServiceSelection,
+} from "@drts/contracts";
 import { earliestBookingTime, PassengerApiError } from "@drts/passenger-client";
 import {
   AddressMapPicker,
@@ -41,6 +44,7 @@ export interface BookingDraft {
   localTime: string;
   /** The app proposed localTime and keeps it current until the passenger picks one. */
   localTimeAuto?: boolean;
+  serviceSelection?: PassengerServiceSelection;
 }
 const realm = REALM_COLORS.passenger.light;
 const theme = {
@@ -256,6 +260,27 @@ export function BookingForm({
           }
         />
         <p style={PLAN.muted}>{T.lead(settings.minLeadTimeMinutes)}</p>
+      </P5Card>
+      <P5Card title={T.serviceRequirements}>
+        <label>
+          <input
+            type="checkbox"
+            aria-label={T.wheelchairRequirement}
+            checked={draft.serviceSelection?.accessible === true}
+            disabled={busy}
+            onChange={(event) => {
+              const accessible = event.target.checked;
+              onChange((current) => {
+                const next: BookingDraft = { ...current };
+                if (accessible) next.serviceSelection = { accessible: true };
+                else delete next.serviceSelection;
+                return next;
+              });
+            }}
+          />
+          {T.wheelchairRequirement}
+        </label>
+        <p>{T.serviceRequirementsNotice}</p>
       </P5Card>
       <div style={{ margin: "4px 14px 8px" }}>
         <P5Btn

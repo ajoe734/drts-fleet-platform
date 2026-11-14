@@ -109,6 +109,25 @@ export type OidcBoundTenantUser = TenantUserRoleRecord & {
   subjectId?: string;
 };
 
+/**
+ * Output of PasswordHashingService.hash(), handed to the invitation-accept
+ * password branch. Never contains the plaintext password (SA/SD §2, §4).
+ */
+export interface PasswordInvitationCredential {
+  passwordHash: string;
+  passwordAlgo: string;
+  pepperVersion: string;
+}
+
+export interface StoredPasswordCredential extends PasswordInvitationCredential {
+  principalId: string;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  mustChangeAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -182,6 +201,11 @@ export class IdentityRepository implements OnModuleInit {
     CanonicalIdentityInvitationRecord
   >();
   private readonly fallbackInvitationSourceRefs = new Map<string, string>();
+
+  private readonly fallbackPasswordCredentials = new Map<
+    string,
+    StoredPasswordCredential
+  >();
 
   private readonly fallbackSessions = new Map<
     string,
@@ -1033,6 +1057,249 @@ export class IdentityRepository implements OnModuleInit {
     }
   }
 
+  /**
+   * One transaction owns invitation consumption, membership activation and
+   * password credential creation, locking the same invitation row (`FOR
+   * UPDATE ... WHERE accepted_at IS NULL`) that `acceptTenantOidcInvitation`
+   * locks. A password acceptance and a Google acceptance racing the same
+   * token therefore serialize on that row: whichever transaction commits
+   * `accepted_at` first wins, and the loser's own `validInvitation` check
+   * (or its `expires_at > $2` / `accepted_at IS NULL` WHERE clause) sees the
+   * already-accepted invitation and returns null (SA/SD §1, §5).
+   *
+   * Unlike the Google branch, `issuer`/`subject` are left at their
+   * invitation-time placeholder (`LEGACY_TENANT_USER_ISSUER`): a password is
+   * not an external IdP identity and must not occupy the (issuer, subject)
+   * unique constraint, so a principal activated here can still bind Google
+   * afterwards without conflict (SA/SD §1).
+   */
+  async acceptTenantInvitationWithPassword(
+    tokenHash: string,
+    credential: PasswordInvitationCredential,
+  ): Promise<{
+    user: OidcBoundTenantUser;
+    invitation: CanonicalIdentityInvitationRecord;
+  } | null> {
+    const now = new Date().toISOString();
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined,
+    ) =>
+      invitation &&
+      invitation.realm === "tenant" &&
+      !invitation.acceptedAt &&
+      !invitation.revokedAt &&
+      Date.parse(invitation.expiresAt) > Date.parse(now);
+    const validUser = (
+      user: OidcBoundTenantUser | undefined,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      user &&
+      user.status === "invited" &&
+      !user.oidcIssuer &&
+      !user.subjectId &&
+      user.tenantId === invitation.tenantId &&
+      user.email.toLowerCase() === invitation.email.toLowerCase() &&
+      user.roleCode === invitation.roleCode;
+    if (!this.isEnabled()) {
+      // No await before all checks and writes: the offline repository
+      // preserves the same one-shot semantics for concurrent unit-test
+      // consumers as acceptTenantOidcInvitation.
+      const invitation = [...this.fallbackInvitations.values()].find(
+        (entry) => entry.tokenHash === tokenHash,
+      );
+      if (!invitation || !validInvitation(invitation)) return null;
+      const membership = this.fallbackMemberships.get(invitation.membershipId);
+      const principal =
+        membership && this.fallbackPrincipals.get(membership.principalId);
+      const user = [...this.fallbackTenantUsers.values()].find(
+        (entry) =>
+          membership?.sourceRef ===
+          `tenant_user_role:${entry.userId}:membership`,
+      );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId ||
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation)
+      )
+        return null;
+      const activated: OidcBoundTenantUser = {
+        ...user,
+        status: "active",
+        updatedAt: now,
+      };
+      this.upsertFallbackPrincipal({
+        ...principal,
+        status: "active",
+        emailVerified: true,
+        updatedAt: now,
+      });
+      this.upsertFallbackMembership({
+        ...membership,
+        status: "active",
+        updatedAt: now,
+      });
+      const accepted = this.upsertFallbackInvitation({
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      this.fallbackTenantUsers.set(user.userId, activated);
+      this.fallbackPasswordCredentials.set(principal.principalId, {
+        principalId: principal.principalId,
+        passwordHash: credential.passwordHash,
+        passwordAlgo: credential.passwordAlgo,
+        pepperVersion: credential.pepperVersion,
+        failedAttempts: 0,
+        lockedUntil: null,
+        mustChangeAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { user: { ...activated }, invitation: accepted };
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations WHERE token_hash = $1
+          AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $2::timestamptz FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation =
+        invitationRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityInvitationRecord>(
+          invitationRows.rows[0].record,
+          "iam.identity_invitations",
+        );
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership =
+        membershipRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityMembershipRecord>(
+          membershipRows.rows[0].record,
+          "iam.identity_memberships",
+        );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal =
+        principalRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityPrincipalRecord>(
+          principalRows.rows[0].record,
+          "iam.identity_principals",
+        );
+      const userId = /^tenant_user_role:(.+):membership$/.exec(
+        membership.sourceRef ?? "",
+      )?.[1];
+      if (
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !userId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const userRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_tenant_user_roles WHERE user_id = $1 FOR UPDATE`,
+        [userId],
+      );
+      const user =
+        userRows.rows[0] &&
+        this.parseRecord<OidcBoundTenantUser>(
+          userRows.rows[0].record,
+          "admin.phase1_tenant_user_roles",
+        );
+      if (
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation)
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activated: OidcBoundTenantUser = {
+        ...user,
+        status: "active",
+        updatedAt: now,
+      };
+      await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      const accepted = await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query(
+        `UPDATE admin.phase1_tenant_user_roles SET status = 'active', updated_at = $2::timestamptz, record = $3::jsonb WHERE user_id = $1`,
+        [user.userId, now, JSON.stringify(activated)],
+      );
+      await client.query(
+        `INSERT INTO iam.identity_password_credentials (
+           principal_id, password_hash, password_algo, pepper_version, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $5)
+         ON CONFLICT (principal_id) DO UPDATE SET
+           password_hash = EXCLUDED.password_hash,
+           password_algo = EXCLUDED.password_algo,
+           pepper_version = EXCLUDED.pepper_version,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          principal.principalId,
+          credential.passwordHash,
+          credential.passwordAlgo,
+          credential.pepperVersion,
+          now,
+        ],
+      );
+      await client.query("COMMIT");
+      return { user: activated, invitation: accepted };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   /** Atomically consumes a valid proof so concurrent acceptance cannot activate twice. */
   async consumeInvitationToken(
     tokenHash: string,
@@ -1513,6 +1780,48 @@ export class IdentityRepository implements OnModuleInit {
   ): Promise<CanonicalIdentityPrincipalRecord | null> {
     const [principal] = await this.findPrincipalsByEmail(email);
     return principal ?? null;
+  }
+
+  /** Never returns password_hash to a caller outside this repository's own
+   * verify/rehash flows in spirit; current callers are tests and the future
+   * password-login task, none of which may log or echo the hash back. */
+  async findPasswordCredentialByPrincipalId(
+    principalId: string,
+  ): Promise<StoredPasswordCredential | null> {
+    if (!this.isEnabled()) {
+      const credential = this.fallbackPasswordCredentials.get(principalId);
+      return credential ? { ...credential } : null;
+    }
+    const result = await this.databaseService!.query<{
+      principal_id: string;
+      password_hash: string;
+      password_algo: string;
+      pepper_version: string;
+      failed_attempts: number;
+      locked_until: string | null;
+      must_change_at: string | null;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT principal_id, password_hash, password_algo, pepper_version,
+              failed_attempts, locked_until, must_change_at, created_at, updated_at
+         FROM iam.identity_password_credentials
+        WHERE principal_id = $1`,
+      [principalId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      principalId: row.principal_id,
+      passwordHash: row.password_hash,
+      passwordAlgo: row.password_algo,
+      pepperVersion: row.pepper_version,
+      failedAttempts: row.failed_attempts,
+      lockedUntil: row.locked_until,
+      mustChangeAt: row.must_change_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 
   async findMembershipsByPrincipalId(
@@ -4628,6 +4937,244 @@ export class IdentityRepository implements OnModuleInit {
     } catch (error) {
       await client.query("ROLLBACK");
       // (issuer, sub) already bound to another principal: full rollback.
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Password-branch counterpart of `acceptAgencyOidcInvitation`, locking the
+   * same invitation row so a password acceptance and a Google acceptance
+   * racing the same agency invitation token can only have one winner
+   * (SA/SD §1, §5). `issuer`/`subject` stay at `AGENCY_INVITATION_ISSUER`
+   * rather than being rebound, matching the tenant password branch.
+   */
+  async acceptAgencyInvitationWithPassword(
+    tokenHash: string,
+    credential: PasswordInvitationCredential,
+  ): Promise<AgencyMembershipSnapshot | null> {
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined | null,
+    ) => {
+      const agencyId = parseAgencyScopeRef(invitation?.scopeRef);
+      return Boolean(
+        invitation &&
+        agencyId &&
+        invitation.realm === "agency" &&
+        !invitation.acceptedAt &&
+        !invitation.revokedAt &&
+        Date.parse(invitation.expiresAt) > nowMs,
+      );
+    };
+    const validMembership = (
+      membership: CanonicalIdentityMembershipRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        membership &&
+        membership.realm === "agency" &&
+        membership.status === "invited" &&
+        membership.scopeRef === invitation.scopeRef &&
+        membership.membershipId === invitation.membershipId,
+      );
+    const validPrincipal = (
+      principal: CanonicalIdentityPrincipalRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        principal &&
+        principal.status === "invited" &&
+        principal.issuer === AGENCY_INVITATION_ISSUER &&
+        principal.email?.toLowerCase() === invitation.email.toLowerCase(),
+      );
+    const hasActiveAccess = (
+      bindings: CanonicalIdentityRoleBindingRecord[],
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      bindings.some(
+        (binding) =>
+          binding.roleCode === invitation.roleCode &&
+          Boolean(binding.validTo) &&
+          Date.parse(binding.validTo!) > nowMs,
+      );
+
+    if (!this.isEnabled()) {
+      const invitation = [...this.fallbackInvitations.values()].find(
+        (entry) => entry.tokenHash === tokenHash,
+      );
+      if (!invitation || !validInvitation(invitation)) return null;
+      const agencyId = parseAgencyScopeRef(invitation.scopeRef)!;
+      const membership = this.fallbackMemberships.get(invitation.membershipId);
+      const principal =
+        membership && this.fallbackPrincipals.get(membership.principalId);
+      const bindings = [...this.fallbackRoleBindings.values()].filter(
+        (binding) => binding.membershipId === invitation.membershipId,
+      );
+      if (
+        !membership ||
+        !validMembership(membership, invitation) ||
+        !principal ||
+        !validPrincipal(principal, invitation) ||
+        !hasActiveAccess(bindings, invitation)
+      )
+        return null;
+      const activatedPrincipal = this.upsertFallbackPrincipal({
+        ...principal,
+        status: "active",
+        emailVerified: true,
+        updatedAt: now,
+      });
+      const activatedMembership = this.upsertFallbackMembership({
+        ...membership,
+        status: "active",
+        updatedAt: now,
+      });
+      this.upsertFallbackInvitation({
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      this.fallbackPasswordCredentials.set(principal.principalId, {
+        principalId: principal.principalId,
+        passwordHash: credential.passwordHash,
+        passwordAlgo: credential.passwordAlgo,
+        pepperVersion: credential.pepperVersion,
+        failedAttempts: 0,
+        lockedUntil: null,
+        mustChangeAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings.map((binding) => ({ ...binding })),
+        agencyId,
+      };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations
+          WHERE token_hash = $1 AND realm = 'agency'
+            AND accepted_at IS NULL AND revoked_at IS NULL
+            AND expires_at > $2::timestamptz
+          FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation = invitationRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+            invitationRows.rows[0].record,
+            "iam.identity_invitations",
+          )
+        : null;
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const agencyId = parseAgencyScopeRef(invitation.scopeRef)!;
+      const agencyRows = await client.query<{ status: string }>(
+        `SELECT status FROM core.regulatory_agencies WHERE agency_id = $1 FOR SHARE`,
+        [agencyId],
+      );
+      if (agencyRows.rows[0]?.status !== "active") {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership || !validMembership(membership, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      if (!principal || !validPrincipal(principal, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE membership_id = $1 FOR UPDATE`,
+        [membership.membershipId],
+      );
+      const bindings = bindingRows.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          row.record,
+          "iam.identity_role_bindings",
+        ),
+      );
+      if (!hasActiveAccess(bindings, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query(
+        `INSERT INTO iam.identity_password_credentials (
+           principal_id, password_hash, password_algo, pepper_version, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $5)
+         ON CONFLICT (principal_id) DO UPDATE SET
+           password_hash = EXCLUDED.password_hash,
+           password_algo = EXCLUDED.password_algo,
+           pepper_version = EXCLUDED.pepper_version,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          principal.principalId,
+          credential.passwordHash,
+          credential.passwordAlgo,
+          credential.pepperVersion,
+          now,
+        ],
+      );
+      await client.query("COMMIT");
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings,
+        agencyId,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
       if ((error as { code?: string }).code === "23505") return null;
       throw error;
     } finally {

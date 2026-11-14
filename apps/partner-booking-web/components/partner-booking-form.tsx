@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type CSSProperties } from "react";
+import {
+  startTransition,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { createIdempotencyKey } from "@drts/api-client";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
@@ -16,8 +25,13 @@ import {
   type CanvasTheme,
   type AddressMapPairChange,
   type AddressProviderMode,
+  type AddressProviderHealth,
 } from "@drts/ui-web";
 import {
+  createPartnerAirportMapProvider,
+  type PartnerAirportMapAction,
+  formatDateTimeLocalInputValue,
+  partnerBookingReadHref,
   getPartnerBookingFieldErrors,
   getPartnerMapSubmitGate,
   getPartnerProgramCoverage,
@@ -25,6 +39,8 @@ import {
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
   type PartnerBookingDraftValues,
+  type PartnerBookingActionResult,
+  type PartnerBookingSubmission,
 } from "@/lib/partner-booking-form";
 import { useTranslation } from "@/lib/i18n";
 
@@ -151,6 +167,9 @@ export function PartnerBookingForm({
   entry,
   eligibilityVerificationId,
   initialDraft,
+  submitBookingAction,
+  partnerUserRef,
+  readMapAction,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -159,11 +178,41 @@ export function PartnerBookingForm({
   >;
   eligibilityVerificationId: string | null;
   initialDraft: PartnerBookingDraftValues;
+  partnerUserRef?: string | null;
+  readMapAction?: PartnerAirportMapAction;
+  submitBookingAction?: (
+    submission: PartnerBookingSubmission,
+  ) => Promise<PartnerBookingActionResult>;
 }) {
   const { locale, t } = useTranslation();
+  const fieldIdPrefix = useId();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(initialDraft);
+  // The BFF sends offset-bearing defaults. Localize only those on hydration;
+  // an already edited datetime-local value must retain the browser's local time.
+  useEffect(() => {
+    if (!submitBookingAction) return;
+    const localInput = (value: string) =>
+      /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+        ? formatDateTimeLocalInputValue(new Date(value))
+        : value;
+    setDraft((current) => ({
+      ...current,
+      reservationWindowStart: localInput(current.reservationWindowStart),
+      reservationWindowEnd: localInput(current.reservationWindowEnd),
+      replacementStart: localInput(current.replacementStart),
+      replacementEnd: localInput(current.replacementEnd),
+    }));
+  }, [submitBookingAction]);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [bookingResult, setBookingResult] =
+    useState<PartnerBookingActionResult | null>(null);
+  const pendingSubmission = useRef<{
+    signature: string;
+    key: string;
+    eligibilityVerificationId?: string;
+  } | null>(null);
   const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
     pickup: null,
     dropoff: null,
@@ -179,10 +228,38 @@ export function PartnerBookingForm({
     (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
       | AddressProviderMode
       | undefined) ?? "healthy";
+  const canonicalAirportMap =
+    entry.businessDispatchSubtype === "credit_card_airport_transfer" &&
+    Boolean(submitBookingAction);
+  const [airportMapHealth, setAirportMapHealth] =
+    useState<AddressProviderHealth | null>(null);
   const mapProvider = useMemo(
-    () => createConfiguredMockAddressProvider(mapProviderMode),
-    [mapProviderMode],
+    () =>
+      canonicalAirportMap
+        ? createPartnerAirportMapProvider(readMapAction, draft.direction)
+        : createConfiguredMockAddressProvider(mapProviderMode),
+    [canonicalAirportMap, readMapAction, draft.direction, mapProviderMode],
   );
+  useEffect(() => {
+    if (!canonicalAirportMap) return;
+    let cancelled = false;
+    mapProvider
+      .getHealth?.()
+      .then((health) => {
+        if (!cancelled) setAirportMapHealth(health);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAirportMapHealth({
+            mode: "disabled",
+            status: "unhealthy",
+            failClosed: true,
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canonicalAirportMap, mapProvider]);
   const mapLabels = useMemo(() => buildAddressPickerLabels(locale), [locale]);
 
   const errors = getPartnerBookingFieldErrors({
@@ -209,6 +286,11 @@ export function PartnerBookingForm({
     serviceability: mapSelection.serviceability,
     providerState: mapSelection.providerState,
   });
+  const airportPreviewPending =
+    canonicalAirportMap &&
+    mapSelection.bothDispatchReady &&
+    mapSelection.providerState.available &&
+    !mapSelection.serviceability;
   const pickupTextFallbackHint =
     !mapSelection.providerState.available &&
     mapGate.code === "dispatch_manual_review_required"
@@ -221,6 +303,9 @@ export function PartnerBookingForm({
       : null;
 
   function updateField(name: string, value: string) {
+    setBookingResult(null);
+    if (canonicalAirportMap && name === "direction")
+      setMapSelection((current) => ({ ...current, serviceability: null }));
     setDraft((current) => ({
       ...current,
       [name]: value,
@@ -238,15 +323,28 @@ export function PartnerBookingForm({
     fullSpan?: boolean;
   }) {
     const error = errors[params.name];
+    const fieldId = `${fieldIdPrefix}-${params.name}`;
+    const labelId = `${fieldId}-label`;
+    const hintId = `${fieldId}-hint`;
+    const errorId = `${fieldId}-error`;
+    const descriptionIds =
+      [params.hint ? hintId : null, error ? errorId : null]
+        .filter(Boolean)
+        .join(" ") || undefined;
     const commonStyle = params.fullSpan
       ? { ...fieldStyle, ...fullSpanStyle }
       : fieldStyle;
 
     return (
-      <label key={params.name} style={commonStyle}>
-        <span style={{ ...labelStyle, color: theme.text }}>{params.label}</span>
+      <label key={params.name} htmlFor={fieldId} style={commonStyle}>
+        <span id={labelId} style={{ ...labelStyle, color: theme.text }}>
+          {params.label}
+        </span>
         {params.options ? (
           <select
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
             style={inputStyle(theme)}
@@ -260,6 +358,9 @@ export function PartnerBookingForm({
           </select>
         ) : params.textarea ? (
           <textarea
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
             style={textareaStyle(theme)}
@@ -267,6 +368,9 @@ export function PartnerBookingForm({
           />
         ) : (
           <input
+            id={fieldId}
+            aria-labelledby={labelId}
+            aria-describedby={descriptionIds}
             type={params.type ?? "text"}
             value={draft[params.name]}
             onChange={(event) => updateField(params.name, event.target.value)}
@@ -275,18 +379,98 @@ export function PartnerBookingForm({
           />
         )}
         {params.hint ? (
-          <span style={{ ...hintStyle, color: theme.textMuted }}>
+          <span id={hintId} style={{ ...hintStyle, color: theme.textMuted }}>
             {params.hint}
           </span>
         ) : null}
-        {error ? <span style={errorStyle}>{error}</span> : null}
+        {error ? (
+          <span id={errorId} style={errorStyle}>
+            {error}
+          </span>
+        ) : null}
       </label>
     );
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitted(true);
+    if (!submitBookingAction) {
+      setSubmitted(true);
+      return;
+    }
+    if (!ready || mapGate.blocking || airportPreviewPending || submitting)
+      return;
+    const payload = {
+      draft: {
+        ...draft,
+        // datetime-local has no offset. Convert in the browser, not in a UTC BFF.
+        reservationWindowStart: new Date(
+          draft.reservationWindowStart,
+        ).toISOString(),
+        reservationWindowEnd: new Date(
+          draft.reservationWindowEnd,
+        ).toISOString(),
+        ...(entry.businessDispatchSubtype === "insurance_replacement_vehicle"
+          ? {
+              replacementStart: new Date(draft.replacementStart).toISOString(),
+              replacementEnd: new Date(draft.replacementEnd).toISOString(),
+            }
+          : {}),
+      },
+      pickup: mapSelection.pickup,
+      dropoff: mapSelection.dropoff,
+      serviceability: mapSelection.serviceability,
+      providerState: mapSelection.providerState,
+    };
+    // A service-area preview may finish after submission. Only command changes
+    // should replace the key used to retry a booking whose readback failed.
+    const signature = JSON.stringify({
+      draft: payload.draft,
+      pickup: payload.pickup,
+      dropoff: payload.dropoff,
+      mapFallbackReview:
+        mapGate.code === "dispatch_manual_review_required"
+          ? {
+              reasonCode: "dispatch_manual_review_required",
+              providerAvailable: payload.providerState.available,
+              providerDegraded: payload.providerState.degraded,
+              providerReasonCode: payload.providerState.reasonCode,
+            }
+          : null,
+    });
+    const previous = pendingSubmission.current;
+    const pending: NonNullable<typeof pendingSubmission.current> =
+      previous && previous.signature === signature
+        ? previous
+        : { signature, key: createIdempotencyKey("partner-booking") };
+    pendingSubmission.current = pending;
+    const idempotencyKey = pending.key;
+    setSubmitting(true);
+    setBookingResult(null);
+    startTransition(async () => {
+      try {
+        const result = await submitBookingAction({
+          ...payload,
+          idempotencyKey,
+          ...(pending.eligibilityVerificationId
+            ? { eligibilityVerificationId: pending.eligibilityVerificationId }
+            : {}),
+        });
+        const verificationId = result.ok
+          ? result.confirmation.eligibilityVerificationId
+          : result.eligibilityVerificationId;
+        if (verificationId) pending.eligibilityVerificationId = verificationId;
+        setBookingResult(result);
+      } catch {
+        setBookingResult({
+          ok: false,
+          errorCode: "PARTNER_BOOKING_SUBMIT_FAILED",
+          errorMessage: t("book.create.failed"),
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    });
   }
 
   const programLabel = getPartnerProgramLabel(
@@ -410,7 +594,13 @@ export function PartnerBookingForm({
         actions={
           gate.actionHref ? (
             <Link
-              href={gate.actionHref}
+              href={
+                partnerUserRef
+                  ? gate.actionHref +
+                    "?" +
+                    new URLSearchParams({ partnerUserRef }).toString()
+                  : gate.actionHref
+              }
               style={{
                 color: theme.accent,
                 fontWeight: 700,
@@ -561,16 +751,28 @@ export function PartnerBookingForm({
             <span style={{ ...labelStyle, color: theme.text }}>
               {t("book.map.label")}
             </span>
+            {canonicalAirportMap && airportMapHealth?.mode === "mock" ? (
+              <CanvasBanner
+                theme={theme}
+                tone="info"
+                title={t("book.map.simulated")}
+              />
+            ) : null}
             <AddressMapPairPicker
               actorId={entry.entrySlug}
+              requireCompleteRoute={canonicalAirportMap}
+              {...(canonicalAirportMap
+                ? { providerHealth: airportMapHealth }
+                : {})}
               bounds={{
                 minLat: 24.9,
                 maxLat: 25.2,
-                minLng: 121.4,
+                minLng: canonicalAirportMap ? 121.1 : 121.4,
                 maxLng: 121.7,
               }}
               dropoffTitle={t("field.dropoffAddress")}
               onChange={(change) => {
+                setBookingResult(null);
                 setMapSelection(change);
                 setDraft((current) => ({
                   ...current,
@@ -580,7 +782,9 @@ export function PartnerBookingForm({
               }}
               pickupTitle={t("field.pickupAddress")}
               provider={mapProvider}
-              serviceProductType={entry.businessDispatchSubtype}
+              {...(canonicalAirportMap && !draft.direction
+                ? {}
+                : { serviceProductType: entry.businessDispatchSubtype })}
               surface="partner_booking"
               theme={theme}
               {...(mapLabels ? { labels: mapLabels } : {})}
@@ -605,9 +809,7 @@ export function PartnerBookingForm({
             name: "pickupAddress",
             label: t("field.pickupAddress"),
             fullSpan: true,
-            ...(pickupTextFallbackHint
-              ? { hint: pickupTextFallbackHint }
-              : {}),
+            ...(pickupTextFallbackHint ? { hint: pickupTextFallbackHint } : {}),
           })}
           {renderField({
             name: "dropoffAddress",
@@ -666,6 +868,11 @@ export function PartnerBookingForm({
               {renderField({
                 name: "terminal",
                 label: t("field.terminal"),
+              })}
+              {renderField({
+                name: "luggageCount",
+                label: t("field.luggageCount"),
+                type: "number",
               })}
               {renderField({
                 name: "direction",
@@ -745,6 +952,10 @@ export function PartnerBookingForm({
                 hint: t("hint.itineraryLink"),
               })}
               {renderField({
+                name: "flightNo",
+                label: t("field.flightNo"),
+              })}
+              {renderField({
                 name: "luggageCount",
                 label: t("field.luggageCount"),
                 type: "number",
@@ -772,15 +983,17 @@ export function PartnerBookingForm({
             data-testid="partner-booking-review-summary"
             style={{ color: theme.textMuted }}
           >
-            {mapGate.code === "outside_service_area"
-              ? t("book.map.outsideServiceArea")
-              : mapGate.code === "coordinates_required"
-                ? t("book.map.coordinatesRequired")
-                : mapGate.code === "dispatch_manual_review_required"
-                  ? t("book.map.manualReview")
-                : ready
-                  ? t("book.ready")
-                  : t("book.notReady")}
+            {airportPreviewPending
+              ? t("book.map.previewPending")
+              : mapGate.code === "outside_service_area"
+                ? t("book.map.outsideServiceArea")
+                : mapGate.code === "coordinates_required"
+                  ? t("book.map.coordinatesRequired")
+                  : mapGate.code === "dispatch_manual_review_required"
+                    ? t("book.map.manualReview")
+                    : ready
+                      ? t("book.ready")
+                      : t("book.notReady")}
           </span>
           {mapGate.code === "dispatch_manual_review_required" ? (
             <CanvasBanner
@@ -801,10 +1014,27 @@ export function PartnerBookingForm({
           <div style={actionRowStyle}>
             <button
               type="submit"
-              style={submitButtonStyle(theme, !ready || mapGate.blocking)}
-              disabled={!ready || mapGate.blocking}
+              style={submitButtonStyle(
+                theme,
+                !ready ||
+                  mapGate.blocking ||
+                  airportPreviewPending ||
+                  submitting,
+              )}
+              disabled={
+                !ready ||
+                mapGate.blocking ||
+                airportPreviewPending ||
+                submitting
+              }
             >
-              {t("book.submit")}
+              {submitBookingAction
+                ? t(
+                    submitting
+                      ? "book.create.submitting"
+                      : "book.create.submit",
+                  )
+                : t("book.submit")}
             </button>
             {entry.programCode ? (
               <span style={{ color: theme.textMuted }}>
@@ -812,7 +1042,114 @@ export function PartnerBookingForm({
               </span>
             ) : null}
           </div>
-          {submitted && ready && !mapGate.blocking ? (
+          {bookingResult?.ok === false ? (
+            <CanvasBanner
+              theme={theme}
+              tone="danger"
+              title={t("book.create.failed")}
+              body={
+                bookingResult.errorMessage + " · " + bookingResult.errorCode
+              }
+            />
+          ) : null}
+          {bookingResult?.ok ? (
+            <div
+              role="status"
+              data-testid="partner-booking-confirmation"
+              style={fieldStyle}
+            >
+              <strong>{t("book.create.success")}</strong>
+              {partnerUserRef ? (
+                <nav aria-label={t("read.navigation")}>
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "confirmed",
+                      partnerUserRef,
+                      bookingResult.confirmation,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.confirmation")}
+                  </Link>
+                  {" · "}
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "receipt",
+                      partnerUserRef,
+                      bookingResult.confirmation,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.record")}
+                  </Link>
+                  {" · "}
+                  <Link
+                    href={partnerBookingReadHref(
+                      entry.entrySlug,
+                      "trips",
+                      partnerUserRef,
+                    )}
+                    prefetch={false}
+                  >
+                    {t("read.history")}
+                  </Link>
+                </nav>
+              ) : null}
+              <dl>
+                <dt>{t("book.create.bookingId")}</dt>
+                <dd data-testid="partner-booking-id">
+                  {bookingResult.confirmation.bookingId}
+                </dd>
+                <dt>{t("book.create.orderId")}</dt>
+                <dd data-testid="partner-order-id">
+                  {bookingResult.confirmation.orderId}
+                </dd>
+                <dt>{t("book.create.status")}</dt>
+                <dd>{bookingResult.confirmation.orderStatus}</dd>
+                {Object.entries(
+                  bookingResult.confirmation.partnerBookingDetails ?? {},
+                )
+                  .filter(([field]) => field !== "subtype")
+                  .map(([field, value]) => (
+                    <div key={field}>
+                      <dt>{t("field." + field)}</dt>
+                      <dd>
+                        {Array.isArray(value)
+                          ? value.join(" · ")
+                          : String(value)}
+                      </dd>
+                    </div>
+                  ))}
+                {bookingResult.confirmation.partnerBookingDetails?.subtype ===
+                  "travel_agency_transfer" &&
+                bookingResult.confirmation.flightNo ? (
+                  <>
+                    <dt>{t("field.flightNo")}</dt>
+                    <dd>{bookingResult.confirmation.flightNo}</dd>
+                  </>
+                ) : null}
+                {bookingResult.confirmation.businessDispatchSubtype ===
+                "credit_card_airport_transfer" ? (
+                  <>
+                    <dt>{t("field.flightNo")}</dt>
+                    <dd>{bookingResult.confirmation.flightNo}</dd>
+                    <dt>{t("field.terminal")}</dt>
+                    <dd>{bookingResult.confirmation.terminal}</dd>
+                    <dt>{t("field.direction")}</dt>
+                    <dd>
+                      {t(
+                        "field.direction." +
+                          bookingResult.confirmation.direction,
+                      )}
+                    </dd>
+                  </>
+                ) : null}
+              </dl>
+            </div>
+          ) : null}
+          {submitted && !submitBookingAction && ready && !mapGate.blocking ? (
             <CanvasBanner
               theme={theme}
               tone={

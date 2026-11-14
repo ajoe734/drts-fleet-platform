@@ -12,7 +12,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { TenantBillingProfile } from "@drts/contracts";
-import { ApiClient } from "../../../packages/api-client/src/index";
+import {
+  ApiClient,
+  ApiClientError,
+} from "../../../packages/api-client/src/index";
 import * as canvas from "../../../packages/ui-web/src/index";
 import type * as BillingPageModule from "../../../apps/tenant-console-web/app/billing/page";
 import type * as FormModule from "../../../apps/tenant-console-web/app/billing/billing-profile-form";
@@ -57,6 +60,7 @@ const load = createUiModuleLoader(appRoot, {
   react: React,
   "react/jsx-runtime": jsxRuntime,
   "@drts/ui-web": canvas,
+  "@drts/api-client": { ApiClientError },
   "next/navigation": { useRouter: () => router },
   "next/cache": { revalidatePath: revalidate },
   "../../lib/api-client": api,

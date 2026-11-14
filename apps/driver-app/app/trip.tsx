@@ -367,6 +367,77 @@ function formatTimestamp(value: string | null | undefined): string | null {
   return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
+// Fulfillment facts come from the selected task's existing owned-order read.
+// These are booking details, not a claim of external program verification.
+function getPartnerFulfillmentRows(
+  order: OwnedOrderRecord | null,
+): { label: string; value: string }[] | null {
+  if (!order || order.serviceBucket !== "business_dispatch") return null;
+  const copy = driverStrings.trip.fulfillment;
+  const text = (value: string | null | undefined) =>
+    typeof value === "string" && value.trim() ? value.trim() : copy.notProvided;
+  const count = (value: number | null | undefined) =>
+    value == null ? copy.notProvided : String(value);
+  const row = (label: string, value: string) => ({ label, value });
+  switch (order.businessDispatchSubtype) {
+    case "credit_card_airport_transfer":
+      return [
+        row(
+          copy.direction,
+          order.direction === "pickup"
+            ? copy.pickup
+            : order.direction === "dropoff"
+              ? copy.dropoff
+              : copy.notProvided,
+        ),
+        row(copy.flightNo, text(order.flightNo)),
+        row(copy.terminal, text(order.terminal)),
+        row(copy.luggageCount, count(order.luggageCount)),
+      ];
+    case "travel_agency_transfer": {
+      const details =
+        order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row(copy.groupCode, text(details?.groupCode)),
+        row(copy.groupSize, count(details?.groupSize)),
+        row(copy.meetingPoint, text(details?.meetingPoint)),
+        row(copy.itineraryLink, text(details?.itineraryLink)),
+        row(
+          copy.rosterPassengers,
+          text((details?.rosterPassengers ?? []).join("、")),
+        ),
+      ];
+    }
+    case "insurance_replacement_vehicle": {
+      const details =
+        order.partnerBookingDetails?.subtype === "insurance_replacement_vehicle"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row(copy.claimNumber, text(details?.claimNumber)),
+        row(copy.claimantName, text(details?.claimantName)),
+        row(
+          copy.replacementVehicleClass,
+          text(details?.replacementVehicleClass),
+        ),
+        row(
+          copy.replacementStart,
+          formatTimestamp(details?.replacementStart) ?? copy.notProvided,
+        ),
+        row(
+          copy.replacementEnd,
+          formatTimestamp(details?.replacementEnd) ?? copy.notProvided,
+        ),
+        row(copy.caseHandler, text(details?.caseHandler)),
+      ];
+    }
+    default:
+      return null;
+  }
+}
+
 function formatPickupStopTime(order: OwnedOrderRecord | null): string {
   const start = formatShortTime(order?.reservationWindowStart);
   return start ? `預計 ${start}` : "時間待同步";
@@ -906,10 +977,21 @@ export default function TripScreen() {
 
   const completionOrder =
     orderDetail?.orderId === taskDetail?.orderId ? orderDetail : null;
+  const fulfillmentRows = isForwardedTask(taskDetail)
+    ? null
+    : getPartnerFulfillmentRows(completionOrder);
   const actualFareDraft =
     actualFareState.taskId === taskDetail?.taskId
       ? actualFareState.draft
       : emptyActualFareDraft();
+  const requiresCompletionFare =
+    !isForwardedTask(taskDetail) &&
+    completionOrder?.runtimeProfileCode === "multi_taxi_direct" &&
+    !completionOrder.fixedPrice &&
+    ["on_trip", "proof_pending"].includes(taskDetail?.status ?? "");
+  const actualFareHint = requiresCompletionFare
+    ? "本行程完單需填齊四項車資與實際總額；未發生的項目請填 0。"
+    : driverStrings.trip.actualFare.hint;
   const actualFareInput = readActualFareInput(
     actualFareDraft,
     Boolean(completionOrder?.fixedPrice),
@@ -917,7 +999,9 @@ export default function TripScreen() {
   );
   const actualFareError = actualFareInput.issue
     ? driverStrings.trip.actualFare.errors[actualFareInput.issue]
-    : null;
+    : requiresCompletionFare && !actualFareInput.command.fare
+      ? actualFareHint
+      : null;
   const proofRequirements = getCompletionProofRequirements(completionOrder);
   const proofRequirementsUnavailable = Boolean(
     taskDetail?.orderId && !completionOrder,
@@ -1466,6 +1550,7 @@ export default function TripScreen() {
             ? {
                 taskId: taskDetail.taskId,
                 driverId: taskDetail.driverId,
+                vehicleId: taskDetail.vehicleId,
                 status: taskDetail.status,
               }
             : null,
@@ -1510,6 +1595,7 @@ export default function TripScreen() {
     taskDetail?.driverId,
     taskDetail?.status,
     taskDetail?.taskId,
+    taskDetail?.vehicleId,
     trackingRetryKey,
   ]);
 
@@ -2085,13 +2171,22 @@ export default function TripScreen() {
               />
             }
             title={
-              <View style={styles.bannerTitleRow}>
+              <View
+                testID="driver-trip-authority"
+                style={styles.bannerTitleRow}
+              >
                 <Text style={styles.bannerTitleText}>
                   {tripAuthorityBanner.title}
                 </Text>
                 <Pill theme={driverCanvasTheme} tone="neutral">
                   {tripAuthorityBanner.authorityLabel}
                 </Pill>
+                {(taskDetail.serviceSelection ?? orderDetail?.serviceSelection)
+                  ?.accessible ? (
+                  <Pill theme={driverCanvasTheme} tone="info">
+                    輪椅需求
+                  </Pill>
+                ) : null}
               </View>
             }
             body={tripAuthorityBanner.description}
@@ -2126,6 +2221,27 @@ export default function TripScreen() {
               <RouteMetricChip label="車資" value={routeMetricFare} mono />
             </View>
           </Card>
+
+          {fulfillmentRows ? (
+            <Card theme={driverCanvasTheme} padding={14}>
+              <View
+                testID="driver-partner-fulfillment"
+                style={styles.bannerBodyStack}
+              >
+                <Text style={styles.bannerTitleText}>
+                  {driverStrings.trip.fulfillment.title}
+                </Text>
+                {fulfillmentRows.map((item) => (
+                  <View key={item.label} style={styles.routeStopCopy}>
+                    <Text style={styles.routeStopLabel}>{item.label}</Text>
+                    <Text selectable style={styles.bannerBodyText}>
+                      {item.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </Card>
+          ) : null}
 
           <Card
             theme={driverCanvasTheme}
@@ -2253,7 +2369,7 @@ export default function TripScreen() {
             <Card
               theme={driverCanvasTheme}
               title={driverStrings.trip.actualFare.title}
-              subtitle={driverStrings.trip.actualFare.hint}
+              subtitle={actualFareHint}
             >
               <View style={styles.fieldStack}>
                 {actualFareFields.map((field) => (
@@ -2261,6 +2377,7 @@ export default function TripScreen() {
                     key={field}
                     theme={driverCanvasTheme}
                     label={driverStrings.trip.actualFare.fields[field]}
+                    required={requiresCompletionFare}
                   >
                     <Input
                       theme={driverCanvasTheme}
@@ -2288,6 +2405,7 @@ export default function TripScreen() {
                   <Field
                     theme={driverCanvasTheme}
                     label={driverStrings.trip.actualFare.fields.aggregate}
+                    required={requiresCompletionFare}
                     hint={driverStrings.trip.actualFare.aggregateHint}
                   >
                     <Input

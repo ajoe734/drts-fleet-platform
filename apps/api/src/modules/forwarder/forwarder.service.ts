@@ -2233,8 +2233,12 @@ export class ForwarderService implements OnModuleInit {
     order: OwnedOrderRecord | null,
   ): UnifiedDriverTaskView {
     const blockingReason = this.resolveOwnedBlockingReason(task);
+    const serviceSelection = order?.serviceSelection ?? task.serviceSelection;
 
     return {
+      ...(serviceSelection
+        ? { serviceSelection: { ...serviceSelection } }
+        : {}),
       taskId: task.taskId,
       orderId: task.orderId,
       orderDomain: "owned",
@@ -2257,6 +2261,9 @@ export class ForwarderService implements OnModuleInit {
       dropoffSummary: order?.dropoff.address ?? null,
       orderSummary: order
         ? {
+            ...(order.serviceSelection
+              ? { serviceSelection: { ...order.serviceSelection } }
+              : {}),
             orderId: order.orderId,
             serviceBucket: order.serviceBucket,
             serviceProductCode: order.serviceProductCode ?? null,

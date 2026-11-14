@@ -1572,6 +1572,8 @@ export interface AddressMapPairPickerProps<
   pickupTitle?: ReactNode;
   dropoffTitle?: ReactNode;
   providerHealth?: AddressProviderHealth | null;
+  /** Route-backed previews require both endpoints; ordinary one-stop previews stay unchanged. */
+  requireCompleteRoute?: boolean;
 }
 
 /**
@@ -1593,6 +1595,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     pickupTitle = "Pickup",
     dropoffTitle = "Dropoff",
     providerHealth,
+    requireCompleteRoute = false,
   } = props;
 
   const theme = themeProp ?? DEFAULT_THEME;
@@ -1642,7 +1645,12 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
   }, [providerHealth]);
 
   useEffect(() => {
-    if (!serviceProductType || !provider.evaluateServiceArea || !pickupPoint) {
+    if (
+      !serviceProductType ||
+      !provider.evaluateServiceArea ||
+      !pickupPoint ||
+      (requireCompleteRoute && !dropoffPoint)
+    ) {
       setServiceability(null);
       setServiceabilityProviderState(
         deriveProviderState(providerHealth ?? null),
@@ -1659,6 +1667,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
       return;
     }
     let cancelled = false;
+    if (requireCompleteRoute) setServiceability(null);
     provider
       .evaluateServiceArea(command)
       .then((result) => {
@@ -1689,6 +1698,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     pickupPoint?.lng,
     provider,
     serviceProductType,
+    requireCompleteRoute,
   ]);
 
   const bothDispatchReady =

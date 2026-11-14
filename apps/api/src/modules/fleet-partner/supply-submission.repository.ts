@@ -141,6 +141,12 @@ export type SupplySubmissionPersistenceState = {
   vehicleAffiliations: VehicleFleetAffiliationRecord[];
 };
 
+/** One submission's rows. Vehicle affiliations are not per submission. */
+export type SupplySubmissionScopedState = Omit<
+  SupplySubmissionPersistenceState,
+  "vehicleAffiliations"
+>;
+
 export type PersistSupplySubmissionChanges = {
   submissions?: readonly SupplySubmissionRecord[];
   driverDrafts?: readonly DriverSupplyDraft[];
@@ -277,6 +283,68 @@ export class SupplySubmissionRepository {
       ),
       vehicleAffiliations: vehicleAffiliationsResult.rows.map((row) =>
         this.mapVehicleAffiliationRow(row),
+      ),
+    };
+  }
+
+  /**
+   * Read one submission's rows instead of every fleet supply table.
+   * loadState() returns all submissions, drafts, documents, review events and
+   * vehicle affiliations of every fleet partner; single-submission reads and
+   * status changes only look at their own submission, and on shared dev the
+   * full load made each such request slow enough to break deploy-dev's
+   * Fleet and Admin journeys (FLEET-SUPPLY-SCOPED-LOAD-20261114).
+   */
+  async loadSubmissionState(
+    submissionId: string,
+  ): Promise<SupplySubmissionScopedState> {
+    if (!this.isEnabled()) {
+      const state = this.cloneState(this.inMemoryState);
+      const own = <T extends { submissionId: string }>(rows: T[]) =>
+        rows.filter((row) => row.submissionId === submissionId);
+      return {
+        submissions: own(state.submissions),
+        driverDrafts: own(state.driverDrafts),
+        vehicleDrafts: own(state.vehicleDrafts),
+        documents: own(state.documents),
+        reviewEvents: own(state.reviewEvents),
+      };
+    }
+
+    const [submissionResult, artifacts, reviewEventsResult] = await Promise.all(
+      [
+        this.loadQuery<SupplySubmissionRow>(
+          "fleet.supply_submissions",
+          `
+            SELECT *
+            FROM fleet.supply_submissions
+            WHERE submission_id = $1
+          `,
+          [submissionId],
+        ),
+        this.loadApprovalArtifacts(this.databaseService!, submissionId),
+        this.loadQuery<SupplyReviewEventRow>(
+          "fleet.supply_review_events",
+          `
+            SELECT *
+            FROM fleet.supply_review_events
+            WHERE submission_id = $1
+            ORDER BY created_at DESC, event_id
+          `,
+          [submissionId],
+        ),
+      ],
+    );
+
+    return {
+      submissions: submissionResult.rows.map((row) =>
+        this.mapSubmissionRow(row),
+      ),
+      driverDrafts: artifacts.driverDraft ? [artifacts.driverDraft] : [],
+      vehicleDrafts: artifacts.vehicleDraft ? [artifacts.vehicleDraft] : [],
+      documents: artifacts.documents,
+      reviewEvents: reviewEventsResult.rows.map((row) =>
+        this.mapReviewEventRow(row),
       ),
     };
   }

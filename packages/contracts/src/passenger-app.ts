@@ -183,7 +183,13 @@ export interface FaresResponse {
   currentVersion: FareVersion;
 }
 
+/** Optional normal Passenger service choice, bound to its owned fare snapshot. */
+export interface PassengerServiceSelection {
+  accessible: true;
+}
+
 export interface FareQuoteCommand {
+  serviceSelection?: PassengerServiceSelection;
   originLat: number;
   originLng: number;
   destinationLat: number;
@@ -194,6 +200,7 @@ export interface FareQuoteCommand {
 export type FareQuoteResponse =
   | {
       serviceAreaResult: "serviceable";
+      serviceSelection?: PassengerServiceSelection;
       estimatedMin: number;
       estimatedMax: number;
       fareVersion: string;
