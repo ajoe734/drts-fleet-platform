@@ -15,6 +15,9 @@ import { GoogleWorkloadIdentityAdapter } from "./google-workload-identity.adapte
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adapter";
+import { TotpCredentialRepository } from "./totp-credential.repository";
+import { TotpController } from "./totp.controller";
+import { TotpService } from "./totp.service";
 
 import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
 
@@ -27,7 +30,7 @@ import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
     IdentityModule,
     IdempotencyModule,
   ],
-  controllers: [AuthController, BreakGlassController],
+  controllers: [AuthController, BreakGlassController, TotpController],
   providers: [
     JwtAuthService,
     DriverDeviceSessionRepository,
@@ -37,6 +40,8 @@ import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
     GoogleWorkloadIdentityAdapter,
     OidcPkceService,
     ConsumedOidcStateRepository,
+    TotpCredentialRepository,
+    TotpService,
   ],
   exports: [
     JwtAuthService,
