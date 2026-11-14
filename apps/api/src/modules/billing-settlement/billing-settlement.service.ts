@@ -63,6 +63,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { TenantVisibility } from "../../common/tenant-scope";
 import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
@@ -1958,6 +1959,21 @@ export class BillingSettlementService implements OnModuleInit {
 
   listPlatformInvoices() {
     return this.tenantInvoices.map((invoice) => this.cloneInvoice(invoice));
+  }
+
+  async listPlatformInvoicesFresh(visibility: TenantVisibility) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return this.listPlatformInvoices();
+    }
+    const invoices =
+      visibility.scope === "tenant"
+        ? await this.billingSettlementRepository.listInvoicesForTenant(
+            visibility.tenantId,
+          )
+        : await this.billingSettlementRepository.listAllInvoices();
+    return invoices.map((invoice) =>
+      this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice)),
+    );
   }
 
   listSettlementMatrix(): SettlementMatrixRecord[] {

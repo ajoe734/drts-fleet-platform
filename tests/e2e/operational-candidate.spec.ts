@@ -111,6 +111,15 @@ function getIdentityToken(surface: {
       process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
     );
   }
+  if (
+    surface.id === "partner-booking-web" ||
+    surface.urlEnv === "DRTS_OPERATIONAL_PARTNER_BOOKING_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_PARTNER_BOOKING_ID_TOKEN ||
+      process.env.DRTS_DEV_PARTNER_BOOKING_ID_TOKEN
+    );
+  }
   return undefined;
 }
 
@@ -209,3 +218,52 @@ for (const surface of manifest.retiredSurfaces) {
     expect(response.status()).toBe(surface.expectedStatus);
   });
 }
+
+// Replaces the former paused site/embed 404 claim with a real configured entry.
+// It intentionally proves entry availability, not a created or completed order.
+test("active Partner Booking renders the configured normal eligibility entry", async ({
+  page,
+  context,
+  request,
+}) => {
+  const entrySlug = process.env.DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG?.trim();
+  if (!entrySlug || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(entrySlug))
+    throw new Error(
+      "DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG must identify an active persisted entry",
+    );
+  const surface = manifest.activeSurfaces.find(
+    (entry) => entry.id === "partner-booking-web",
+  );
+  expect(surface).toBeDefined();
+  if (!surface) throw new Error("active Partner Booking surface is missing");
+  const url = new URL(`/${entrySlug}/eligibility`, target(surface)).toString();
+  const idToken = getIdentityToken(surface);
+  const headers = idToken ? { Authorization: `Bearer ${idToken}` } : undefined;
+  const response = await request.get(url, {
+    ...(headers ? { headers } : {}),
+    maxRedirects: 0,
+  });
+  expect(response.status()).toBe(200);
+  expect(response.headers()[manifest.responseHeader]).toBe(
+    manifest.candidateSha,
+  );
+  expect(await response.text()).toMatch(
+    /data-partner-entry-source="authority(?:_cache)?"/,
+  );
+  if (headers) await context.setExtraHTTPHeaders(headers);
+  const rendered = await page.goto(url, { waitUntil: "domcontentloaded" });
+  expect(rendered?.status()).toBe(200);
+  expect(rendered?.headers()[manifest.responseHeader]).toBe(
+    manifest.candidateSha,
+  );
+  await expect(
+    page.locator(
+      '[data-partner-entry-source="authority"], [data-partner-entry-source="authority_cache"]',
+    ),
+  ).toBeVisible();
+  await expect(page.locator("[data-partner-entry-fallback-code]")).toHaveCount(
+    0,
+  );
+  await expect(page.locator('form button[type="submit"]')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(`/${entrySlug}/eligibility`);
+});

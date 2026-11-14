@@ -88,7 +88,8 @@ export type IdentityReadbackClassification =
   | "direct"
   | "bank_ui_role"
   | "referral_public_session"
-  | "first_party_passenger_account";
+  | "first_party_passenger_account"
+  | "partner_normal_ingress_ssr";
 export type IdentityReadbackResult = {
   subject: string;
   effectiveRoles: string[];
@@ -107,6 +108,16 @@ export type Session = {
     rolePath: string;
     expectedSubject: string;
     classification?: IdentityReadbackClassification;
+    // Supplied by normal Partner fixture setup, never by a locale cookie or
+    // a token minted only for an unrelated identity preflight.
+    readerFamily?: "partner_normal_ingress_ssr";
+    partnerContext?: {
+      entrySlug: string;
+      partnerUserRef: string;
+      tenantId: string | null;
+      partnerId: string | null;
+      programId: string | null;
+    };
   };
   storageState: {
     cookies: Array<{

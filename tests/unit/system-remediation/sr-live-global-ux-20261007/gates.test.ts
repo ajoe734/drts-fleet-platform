@@ -467,8 +467,15 @@ describe("locale intent and source mapping", () => {
     }
     expect(manifest.excluded).not.toHaveProperty("passenger-app-web");
     expect(manifest.excluded).not.toHaveProperty("agency-portal-web");
-    for (const app of ["passenger-web", "partner-booking-web"])
-      expect(manifest.excluded).toHaveProperty(app);
+    expect(manifest.excluded).toHaveProperty("passenger-web");
+    expect(manifest.excluded).not.toHaveProperty("partner-booking-web");
+    expect(manifest.surfaces).toContainEqual({
+      app: "partner-booking-web",
+      service: "drts-dev-partner-booking-web",
+      roles: ["referral_passenger"],
+      roleSource:
+        "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+    });
     const plan = scaffoldPlan(manifest);
     expect(Object.keys(plan.recipes)).toHaveLength(4);
     expect(() => validatePlan(plan, manifest)).toThrow("missing/expired");
@@ -518,6 +525,38 @@ describe("locale intent and source mapping", () => {
     expect(
       cases(manifest).filter((c) => c.screen.app === "passenger-app-web"),
     ).toHaveLength(passengerPages.length * 8 * 2 * 3);
+    const partnerPages = pages.filter((file) =>
+      file.startsWith("apps/partner-booking-web/app/"),
+    );
+    const partnerScreens = manifest.screens.filter(
+      (screen) => screen.app === "partner-booking-web",
+    );
+    expect(partnerPages.length).toBeGreaterThan(0);
+    expect(partnerScreens.map((screen) => screen.source).sort()).toEqual(
+      partnerPages.sort(),
+    );
+    expect(
+      partnerScreens.every(
+        (screen) => screen.roles.join() === "referral_passenger",
+      ),
+    ).toBe(true);
+    expect(
+      cases(manifest).filter(
+        (item) => item.screen.app === "partner-booking-web",
+      ),
+    ).toHaveLength(partnerPages.length * 8 * 2 * 3);
+    const partnerTranslations = translationSourceAt(
+      head,
+      "partner-booking-web",
+    );
+    expect(partnerTranslations.kind).toBe("dictionary");
+    expect(partnerTranslations.locales).toEqual(["zh-TW", "en-US"]);
+    expect(
+      translationKeysForCase(partnerTranslations, "zh-TW").length,
+    ).toBeGreaterThan(0);
+    expect(
+      translationKeysForCase(partnerTranslations, "en-US").length,
+    ).toBeGreaterThan(0);
     const agencyPages = pages.filter((file) =>
       file.startsWith("apps/agency-portal-web/app/"),
     );
@@ -547,6 +586,68 @@ describe("locale intent and source mapping", () => {
     // Full git page/blob discovery can exceed the default 5s on a busy VM.
     // Keep all pages and checks; bound only this complete inventory probe.
   }, 30_000);
+  it("retains the historical Partner exclusion when the requested deployment source does not activate it", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const active = inventoryAt(head);
+    alterSource(head, ".github/workflows/deploy-dev.yml", (source) =>
+      source.replace(
+        /^.*assert_exact_active_service partner-booking-web .*$/m,
+        "",
+      ),
+    );
+    const paused = inventoryAt(head);
+    expect(paused.surfaces).toEqual(
+      active.surfaces.filter(
+        (surface) => surface.app !== "partner-booking-web",
+      ),
+    );
+    expect(paused.screens).toEqual(
+      active.screens.filter((screen) => screen.app !== "partner-booking-web"),
+    );
+    expect(paused.excluded["partner-booking-web"]).toBe(
+      ".github/workflows/deploy-dev.yml: paused-partner-booking-cleanup",
+    );
+    expect(paused.surfaces.flatMap((surface) => surface.roles)).toHaveLength(
+      21,
+    );
+  }, 30_000);
+  it.each([
+    ['actorType: "referral_passenger"', 'actorType: "tenant_admin"'],
+    ['realm: "partner"', 'realm: "tenant"'],
+    ['roles: ["referral_passenger"]', 'roles: ["partner_user"]'],
+  ])(
+    "rejects drift in the requested normal Partner ingress identity %s",
+    (before, after) => {
+      const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      alterSource(
+        head,
+        "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+        (source) => {
+          const start = source.indexOf("  async issuePartnerIngressHandoff(");
+          const end = source.indexOf(
+            "  async issueReferralEmbedHandoffArtifact(",
+            start,
+          );
+          expect(start).toBeGreaterThanOrEqual(0);
+          expect(end).toBeGreaterThan(start);
+          const method = source.slice(start, end);
+          expect(method).toContain(before);
+          return (
+            source.slice(0, start) +
+            method.replace(before, after) +
+            source.slice(end)
+          );
+        },
+      );
+      expect(() => inventoryAt(head)).toThrow(
+        "partner ingress identity source changed",
+      );
+    },
+  );
   it("binds tenant role discovery to the requested catalog SHA and rejects Fleet/Agency roles", () => {
     const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",

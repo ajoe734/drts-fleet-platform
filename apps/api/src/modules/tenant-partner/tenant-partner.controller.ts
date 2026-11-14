@@ -482,7 +482,7 @@ export class TenantPartnerController {
   }
 
   @OpenRoute()
-  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   @Post("partner/ingress/handoff")
   async issuePartnerIngressHandoff(
     @Body() command: CreatePartnerIngressHandoffCommand,

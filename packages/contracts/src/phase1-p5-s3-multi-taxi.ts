@@ -27,6 +27,7 @@ import type {
   MoneyAmount,
   OwnedOrderStatus,
   PassengerProfile,
+  PassengerServiceSelection,
   ResolvedAddressPayload,
   ServicePreferences,
   ServiceProductType,
@@ -577,6 +578,7 @@ export interface PassengerRideTracking {
 
 export interface PassengerRideAuthorityView {
   order: {
+    serviceSelection?: PassengerServiceSelection;
     orderId: string;
     orderNo: string;
     status: OwnedOrderStatus;

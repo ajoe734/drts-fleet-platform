@@ -86,6 +86,36 @@ export class PassengerFareRepository implements PassengerFareStore {
 
   async insertSnapshot(s: FareQuoteSnapshot): Promise<void> {
     return this.available(async () => {
+      if (s.serviceSelection) {
+        await this.database.query(
+          `INSERT INTO passenger.fare_quote_snapshots
+            (fare_snapshot_id, drts_passenger_id, fare_version, origin_lat, origin_lng,
+             destination_lat, destination_lng, scheduled_at, route, tariff_snapshot,
+             breakdown, service_area_evaluation, estimated_min, estimated_max, created_at, expires_at,
+             service_selection)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14,$15,$16,$17::jsonb)`,
+          [
+            s.fareSnapshotId,
+            s.drtsPassengerId,
+            s.fareVersion,
+            s.origin.lat,
+            s.origin.lng,
+            s.destination.lat,
+            s.destination.lng,
+            s.scheduledAt,
+            JSON.stringify(s.route),
+            JSON.stringify(s.tariffSnapshot),
+            JSON.stringify(s.breakdown),
+            JSON.stringify(s.serviceAreaEvaluation),
+            s.estimatedMin,
+            s.estimatedMax,
+            s.createdAt,
+            s.expiresAt,
+            JSON.stringify(s.serviceSelection),
+          ],
+        );
+        return;
+      }
       await this.database.query(
         `INSERT INTO passenger.fare_quote_snapshots
           (fare_snapshot_id, drts_passenger_id, fare_version, origin_lat, origin_lng,
@@ -129,13 +159,17 @@ export class PassengerFareRepository implements PassengerFareStore {
       const result = await this.database.query(
         `SELECT fare_snapshot_id, drts_passenger_id, fare_version, origin_lat, origin_lng,
                 destination_lat, destination_lng, scheduled_at, route, tariff_snapshot,
-                breakdown, service_area_evaluation, estimated_min, estimated_max, created_at, expires_at
+                breakdown, service_area_evaluation, estimated_min, estimated_max, created_at, expires_at,
+                service_selection
          FROM passenger.fare_quote_snapshots WHERE fare_snapshot_id = $1 AND drts_passenger_id = $2`,
         [id, passengerId],
       );
       const r = result.rows[0];
       return r
         ? {
+            ...(r.service_selection
+              ? { serviceSelection: { ...r.service_selection } }
+              : {}),
             fareSnapshotId: r.fare_snapshot_id,
             drtsPassengerId: r.drts_passenger_id,
             fareVersion: r.fare_version,

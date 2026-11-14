@@ -291,6 +291,19 @@ function reconstructImmutable337CallerSources(): {
   }
 
   const baselineRunner = currentRunner
+    // Undo only the later active Partner wiring for this immutable 337 proof.
+    .replace(
+      ': "${DRTS_DEV_PARTNER_BOOKING_BASE_URL:?missing active Partner Booking deployed URL}"',
+      ': "${DRTS_DEV_PARTNER_BOOKING_BASE_URL:?missing paused Partner Booking URL}"',
+    )
+    .replace(
+      ': "${DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG:?missing active persisted Partner entry slug}"\n',
+      "",
+    )
+    .replace(
+      'export DRTS_OPERATIONAL_PARTNER_BOOKING_ID_TOKEN="${DRTS_DEV_PARTNER_BOOKING_ID_TOKEN:-}"\n',
+      "",
+    )
     .replace("\numask 077\n", "\n")
     .replace(
       [
@@ -1943,6 +1956,8 @@ process.exit(99);
           "https://channel.example.test",
         DRTS_DEV_PARTNER_BOOKING_BASE_URL:
           "https://partner-booking.example.test",
+        // Unit-only SIM entry; the shim never creates or calls a live Partner entry.
+        DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG: "unit-persisted-entry",
         DRTS_DEV_CONCIERGE_BASE_URL: "https://concierge.example.test",
         DRTS_DEV_PASSENGER_BASE_URL: "https://passenger.example.test",
         DRTS_DEV_OPS_CONSOLE_ID_TOKEN: SIM_OPS_CONSOLE_ID_TOKEN,

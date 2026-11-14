@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPartnerBookingRecord } from "@/lib/partner-booking-read-model";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BookingRecord,
   OwnedOrderRecord,
@@ -631,7 +632,9 @@ describe("partner-booking-web BFF wiring", () => {
     expect(
       (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
     ).toBeUndefined();
-    await expect(getPartnerRouteContext("adventureworks")).rejects.toMatchObject({
+    await expect(
+      getPartnerRouteContext("adventureworks"),
+    ).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_REQUEST_FAILED",
       status: 500,
     });
@@ -848,6 +851,16 @@ describe("partner-booking-web BFF wiring", () => {
       updatedAt: "2026-05-19T00:00:00.000Z",
     } as unknown as OwnedOrderRecord;
 
+    const receipt = {
+      orderId: order.orderId,
+      bookingId: booking.bookingId,
+      orderNo: order.orderNo,
+      orderStatus: order.status,
+      quotedFare: null,
+      completion: null,
+      payment: { availability: "not_recorded", status: null, amount: null },
+    };
+
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -870,7 +883,7 @@ describe("partner-booking-web BFF wiring", () => {
       )
       .mockResolvedValueOnce(
         jsonResponse({
-          data: order,
+          data: receipt,
           meta: { requestId: "r4", timestamp: "t4" },
         }),
       );
@@ -893,7 +906,7 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toEqual(booking);
     await expect(getPartnerTrip(session, "order-001")).resolves.toEqual(order);
     await expect(getPartnerReceipt(session, "order-001")).resolves.toEqual(
-      order,
+      receipt,
     );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -928,5 +941,222 @@ describe("partner-booking-web BFF wiring", () => {
         }),
       }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      API_URL + "/api/partner/orders/order-001/receipt",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+          "x-realm": "partner",
+          "x-tenant-id": "tenant-001",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("normal Partner direct requests to a private Cloud Run API", () => {
+  it.each(["entry", "trip", "create"] as const)(
+    "carries the existing transport token for %s without replacing product identity",
+    async (operation) => {
+      const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+      process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+      clearPartnerEntryAuthorityCacheForTests();
+      const calls: { url: string; headers: Headers }[] = [];
+      const order = {
+        orderId: "SIM-cloud-order",
+        bookingId: "SIM-cloud-booking",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL, init?: RequestInit) => {
+          const url = new URL(String(input));
+          calls.push({ url: url.href, headers: new Headers(init?.headers) });
+          if (url.hostname === "metadata.google.internal")
+            return new Response("SIM-google-transport-token", { status: 200 });
+          return jsonResponse({
+            data:
+              operation === "entry"
+                ? activeEntry
+                : operation === "create"
+                  ? {
+                      booking: {
+                        bookingId: order.bookingId,
+                        orderId: order.orderId,
+                      },
+                      order,
+                    }
+                  : order,
+            meta: {
+              requestId: "SIM-cloud-transport",
+              timestamp: "2026-11-12T00:00:00Z",
+            },
+          });
+        }),
+      );
+      try {
+        if (operation === "entry") await getPublicPartnerEntry("acme");
+        else if (operation === "trip")
+          await getPartnerTrip(session, order.orderId);
+        else
+          await createPartnerBooking(session, {
+            businessDispatchSubtype: "credit_card_airport_transfer",
+            partnerEntrySlug: "acme",
+            eligibilityVerificationId: "SIM-eligibility",
+            pickup: { address: "SIM A", lat: 25, lng: 121 },
+            dropoff: { address: "SIM B", lat: 25.1, lng: 121.1 },
+            reservationWindowStart: "2099-11-12T10:00:00Z",
+            reservationWindowEnd: "2099-11-12T11:00:00Z",
+            passenger: { name: "SIM Passenger", phone: "0900000000" },
+          });
+        expect(calls).toHaveLength(2);
+        const metadata = new URL(calls[0]!.url);
+        expect(metadata.hostname).toBe("metadata.google.internal");
+        expect(metadata.searchParams.get("audience")).toBe(
+          process.env.DRTS_API_AUTH_AUDIENCE,
+        );
+        expect(calls[0]!.headers.get("Metadata-Flavor")).toBe("Google");
+        const outbound = calls[1]!.headers;
+        expect(outbound.get("x-serverless-authorization")).toBe(
+          "Bearer SIM-google-transport-token",
+        );
+        expect(outbound.get("x-drts-google-id-token")).toBe(
+          "SIM-google-transport-token",
+        );
+        expect(outbound.get("Authorization")).toBe(
+          operation === "entry" ? null : "Bearer partner-token",
+        );
+        expect(outbound.get("x-request-id")).toBeTruthy();
+      } finally {
+        if (oldAudience === undefined)
+          delete process.env.DRTS_API_AUTH_AUDIENCE;
+        else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+        clearPartnerEntryAuthorityCacheForTests();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("does not invent a transport token when the existing metadata source has none", async () => {
+    const oldAudience = process.env.DRTS_API_AUTH_AUDIENCE;
+    process.env.DRTS_API_AUTH_AUDIENCE = "https://SIM-private-api.a.run.app";
+    const calls: Headers[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.hostname === "metadata.google.internal")
+          return new Response(null, { status: 503 });
+        calls.push(new Headers(init?.headers));
+        return jsonResponse({
+          data: { orderId: "SIM-cloud-order" },
+          meta: { requestId: "SIM-cloud-no-token", timestamp: "t" },
+        });
+      }),
+    );
+    try {
+      await getPartnerTrip(session, "SIM-cloud-order");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.get("x-serverless-authorization")).toBeNull();
+      expect(calls[0]!.get("x-drts-google-id-token")).toBeNull();
+      expect(calls[0]!.get("Authorization")).toBe("Bearer partner-token");
+    } finally {
+      if (oldAudience === undefined) delete process.env.DRTS_API_AUTH_AUDIENCE;
+      else process.env.DRTS_API_AUTH_AUDIENCE = oldAudience;
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("normal Partner order progress wire compatibility", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    clearPartnerEntryAuthorityCacheForTests();
+  });
+
+  it("preserves fresh progress on the same ordinary order GET and its original bearer", async () => {
+    const progress = {
+      orderId: "SIM-wire-order",
+      availability: "available",
+      currentTask: { taskId: "SIM-wire-task" },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: { orderId: "SIM-wire-order", progress },
+        meta: {},
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      getPartnerTrip(session, "SIM-wire-order"),
+    ).resolves.toMatchObject({ orderId: "SIM-wire-order", progress });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/orders/SIM-wire-order`,
+      expect.objectContaining({
+        cache: "no-store",
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer partner-token",
+        }),
+      }),
+    );
+  });
+
+  it("rejects cross-order progress through the original server read helper without exposing the session", async () => {
+    const privateToken = "SIM-wire-server-only";
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(path);
+        if (path === "/api/partner/entries/acme")
+          return jsonResponse({ data: activeEntry, meta: {} });
+        if (path === "/api/partner/ingress/handoff")
+          return jsonResponse({
+            data: {
+              accessToken: privateToken,
+              expiresIn: "15m",
+              tokenType: "Bearer",
+              identity: session.identity,
+            },
+            meta: {},
+          });
+        expect(new Headers(init?.headers).get("Authorization")).toBe(
+          "Bearer " + privateToken,
+        );
+        if (path === "/api/partner/bookings/SIM-wire-booking")
+          return jsonResponse({
+            data: { bookingId: "SIM-wire-booking", orderId: "SIM-wire-order" },
+            meta: {},
+          });
+        if (path === "/api/partner/orders/SIM-wire-order")
+          return jsonResponse({
+            data: {
+              bookingId: "SIM-wire-booking",
+              orderId: "SIM-wire-order",
+              progress: { orderId: "unrelated-order" },
+            },
+            meta: {},
+          });
+        throw new Error("Unexpected normal wire route: " + path);
+      }),
+    );
+    await expect(
+      loadPartnerBookingRecord("acme", {
+        partnerUserRef: "SIM-existing-owner",
+        bookingId: "SIM-wire-booking",
+      }),
+    ).rejects.toMatchObject({ code: "PARTNER_BOOKING_READBACK_MISMATCH" });
+    expect(calls).toEqual([
+      "/api/partner/entries/acme",
+      "/api/partner/ingress/handoff",
+      "/api/partner/bookings/SIM-wire-booking",
+      "/api/partner/orders/SIM-wire-order",
+    ]);
   });
 });

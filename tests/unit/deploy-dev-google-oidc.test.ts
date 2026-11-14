@@ -154,7 +154,10 @@ describe("deploy-dev Google OIDC all-or-nothing configuration", () => {
     const reconcileBlock = workflow
       .slice(
         reconcileStart,
-        workflow.indexOf("\n  paused-partner-booking-cleanup:", reconcileStart),
+        workflow.indexOf(
+          "      - name: Deploy — partner-booking-web",
+          reconcileStart,
+        ),
       )
       .split("        run: |\n")[1]!
       .split("\n")

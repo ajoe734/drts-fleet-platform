@@ -10,6 +10,7 @@ import type {
   UpdateVehicleEligibilityMatrixCommand,
   VehicleEligibilityMatrixRecord,
   VehicleLicenseType,
+  VehicleForm,
 } from "@drts/contracts";
 import { SERVICE_PRODUCT_TYPES, VEHICLE_LICENSE_TYPES } from "@drts/contracts";
 
@@ -38,6 +39,7 @@ export type RuntimeServiceProductDefinition = ServiceProductDefinition;
 
 export type RuntimeVehicleCapability = VehicleEligibilityMatrixRecord & {
   vehicleId: string;
+  vehicleForm?: VehicleForm | null;
 };
 
 export type EligibleSupplyRecord = DispatchCandidate & {
@@ -968,9 +970,12 @@ export class VehicleEligibilityService implements OnModuleInit {
       );
     }
 
+    const vehicleForm =
+      this.regulatoryRegistryService.getVehicleForm?.(vehicleId);
     return {
       ...capability,
       vehicleId,
+      ...(vehicleForm ? { vehicleForm } : {}),
     };
   }
 

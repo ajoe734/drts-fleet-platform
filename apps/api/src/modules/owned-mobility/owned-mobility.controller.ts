@@ -364,13 +364,29 @@ export class OwnedMobilityController {
     return toApiSuccessEnvelope(
       {
         ...result,
-        booking: this.ownedMobilityService.getTenantBooking(
+        booking: await this.ownedMobilityService.resolvePersistedTenantBooking(
           resolvedTenantId,
           result.bookingId,
           identity,
         ),
-        order: this.ownedMobilityService.getOrder(result.orderId, identity),
+        order: await this.ownedMobilityService.resolvePersistedOrder(
+          result.orderId,
+          identity,
+        ),
       },
+      requestId,
+    );
+  }
+
+  @Get("partner/bookings")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listPartnerBookings(
+    @Query() query: TenantBookingListQuery,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.listPartnerBookings(query, identity),
       requestId,
     );
   }
@@ -401,7 +417,23 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.resolvePersistedOrder(orderId, identity),
+      await this.ownedMobilityService.resolvePartnerOrderView(
+        orderId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/orders/:orderId/receipt")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getPartnerOrderReceipt(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getPartnerOrderReceipt(orderId, identity),
       requestId,
     );
   }

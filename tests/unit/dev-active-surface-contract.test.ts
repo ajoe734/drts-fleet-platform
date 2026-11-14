@@ -16,6 +16,7 @@ const expectedServices = {
   "channel-partner-portal-web": "drts-channel-partner-portal-web",
   "passenger-app-web": "drts-dev-passenger-app-web",
   "agency-portal-web": "drts-dev-agency-portal-web",
+  "partner-booking-web": "drts-dev-partner-booking-web",
 } as const;
 
 function readRepoFile(relativePath: string): string {
@@ -24,12 +25,13 @@ function readRepoFile(relativePath: string): string {
 
 function expectServiceDefaults(
   source: string,
-  variableNames: Record<keyof typeof expectedServices, string>,
+  variableNames: Partial<Record<keyof typeof expectedServices, string>>,
 ) {
   for (const [surface, service] of Object.entries(expectedServices)) {
     const variableName =
       variableNames[surface as keyof typeof expectedServices];
-    expect(source).toContain(`\${${variableName}:-${service}}`);
+    if (variableName)
+      expect(source).toContain(`\${${variableName}:-${service}}`);
   }
 }
 
@@ -49,6 +51,7 @@ describe("dev active surface contract", () => {
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
       "passenger-app-web": "DEV_GCP_PASSENGER_APP_SERVICE",
       "agency-portal-web": "DEV_GCP_AGENCY_PORTAL_SERVICE",
+      "partner-booking-web": "DEV_GCP_PARTNER_BOOKING_SERVICE",
     } as const;
 
     for (const [surface, service] of Object.entries(expectedServices)) {
@@ -69,7 +72,7 @@ describe("dev active surface contract", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 12 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
@@ -84,16 +87,23 @@ describe("dev active surface contract", () => {
     expect(source).toContain("Build & push — passenger-app-web");
     expect(source).not.toContain("DEV_GCP_PASSENGER_SERVICE");
     expect(source).not.toContain("passenger_service");
-    expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
+    expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "active"');
+    expect(source).toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
+    expect(source).toContain("Deploy — partner-booking-web");
+    expect(source).toContain("Build & push — partner-booking-web");
+    expect(source).not.toContain("cleanup-paused-partner-booking-service.sh");
+    expect(source).not.toContain("paused-partner-booking-cleanup");
     expect(source).toContain(
-      'DEV_PAUSED_PARTNER_BOOKING_SERVICE: "drts-dev-partner-booking-web"',
+      'partner_booking_exposure_flag="$(exposure_flag "${DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+    expect(source).toContain("Verify active Partner Booking entry");
+    expect(source).toContain('data-partner-entry-source="authority(_cache)?"');
+    expect(source).toContain(
+      "DRTS_DEV_PARTNER_BOOKING_BASE_URL: ${{ needs.health-check.outputs.partner_booking }}",
     );
     expect(source).toContain(
-      "./operations/deployment/cleanup-paused-partner-booking-service.sh",
+      "DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}",
     );
-    expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
-    expect(source).not.toContain("Deploy — partner-booking-web");
-    expect(source).not.toContain("Build & push — partner-booking-web");
     expect(source).not.toContain(
       "playwright.partner-booking-surfaces.config.ts",
     );
@@ -161,13 +171,15 @@ describe("dev active surface contract", () => {
 
     // PAX-QA owns the passenger runtime matrix after BOOKING-UI merges.
     for (const [surface, service] of Object.entries(expectedServices)) {
-      if (surface === "passenger-app-web") continue;
+      if (surface === "passenger-app-web" || surface === "partner-booking-web")
+        continue;
       expect(source).toContain(`"${service}"`);
     }
 
     expect(source).not.toContain('"drts-referral-embed-web"');
-    expect(source).not.toContain('"drts-dev-partner-booking-web"');
-    expect(source).not.toContain('"partner-booking-web"');
+    expect(source).toContain('"partner-booking-web"');
+    expect(source).toContain("DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG");
+    expect(source).toContain("data-partner-entry-source");
   });
 
   it("keeps the app entry index and smarttransport runbook on the same inventory", () => {
@@ -184,14 +196,9 @@ describe("dev active surface contract", () => {
     expect(appEntryIndex).toContain(
       "https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app",
     );
-    // The contract is that the frozen surface is declared paused and its URL is
-    // not advertised (GAP gate G7), not that a particular heading is worded a
-    // particular way. S1F-DOC-001 replaced the free-text "Partner Booking —
-    // PAUSED" section with a structured Paused Surfaces table carrying the same
-    // status, and this assertion failed on the wording while the substance was
-    // intact — turning a documentation improvement into a red trunk.
-    expect(appEntryIndex).toMatch(/##\s*\d*\.?\s*Paused Surfaces/i);
-    expect(appEntryIndex).toMatch(/partner-booking-web[\s\S]{0,600}?PAUSED/);
+    expect(appEntryIndex).toContain("Partner Booking — shared-dev activation");
+    expect(appEntryIndex).toContain("status.url");
+    expect(appEntryIndex).toContain("DEV_PARTNER_BOOKING_ENTRY_SLUG");
     expect(appEntryIndex).not.toContain(
       "https://drts-dev-partner-booking-web-4t7rg6fmeq-uc.a.run.app",
     );
@@ -206,7 +213,8 @@ describe("dev active surface contract", () => {
     expect(runbook).toContain("domain-maintenance");
     expect(runbook).toContain("nodal-alloy-503700-s3");
     expect(runbook).toContain("us-central1");
-    expect(runbook).toContain("Partner Booking — PAUSED");
+    expect(runbook).toContain("Partner Booking — shared-dev activation");
+    expect(runbook).toContain("12 個 Cloud Run");
     expect(runbook).not.toContain(
       "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
