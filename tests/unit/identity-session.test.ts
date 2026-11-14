@@ -63,6 +63,53 @@ describe("Identity session and refresh family repository (in-memory mode)", () =
     expect(fetchedFamily?.status).toBe("revoked");
   });
 
+  // PWD-LOGIN-008 (SA/SD §8): a password(+TOTP) login calls
+  // `JwtAuthService.issueSessionToken` into this same `createSession` path,
+  // with `authMethods` set to `["pwd"]` or `["pwd", "otp"]` instead of an
+  // OIDC provider's `amr`. The session row itself carries no login-method
+  // branching, so a pwd+otp session must be created, fetched, and revoked
+  // exactly like the `oidc_pkce`/`device_binding` sessions above.
+  it("creates, retrieves, and revokes a password+TOTP (amr ['pwd','otp']) session identically to an OIDC-issued session", async () => {
+    const repository = new IdentityRepository();
+
+    const session = await repository.createSession({
+      sessionId: "session_pwd_totp_001",
+      sourceRef: "session_source_pwd_totp_001",
+      principalId: "principal_pwd_totp_001",
+      membershipId: "membership_pwd_totp_001",
+      realm: "tenant",
+      status: "active",
+      authTime: "2026-11-14T12:00:00.000Z",
+      authMethods: ["pwd", "otp"],
+      tokenVersion: 1,
+      idleExpiresAt: "2026-11-14T12:30:00.000Z",
+      absoluteExpiresAt: "2026-11-14T20:00:00.000Z",
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: { ipPrefix: "10.0.0" },
+      riskSummary: { riskLevel: "low" },
+      createdAt: "2026-11-14T12:00:00.000Z",
+      updatedAt: "2026-11-14T12:00:00.000Z",
+    });
+
+    expect(session.sessionId).toBe("session_pwd_totp_001");
+    expect(session.authMethods).toEqual(["pwd", "otp"]);
+
+    const fetchedSession = await repository.getSession("session_pwd_totp_001");
+    expect(fetchedSession).not.toBeNull();
+    expect(fetchedSession?.status).toBe("active");
+    expect(fetchedSession?.authMethods).toEqual(["pwd", "otp"]);
+
+    const revokedSession = await repository.revokeSession(
+      "session_pwd_totp_001",
+      "USER_LOGOUT",
+      "principal_pwd_totp_001",
+    );
+    expect(revokedSession?.status).toBe("revoked");
+    expect(revokedSession?.revokeReason).toBe("USER_LOGOUT");
+  });
+
   it("consumes and rotates refresh tokens with hash-only persistence and detects token reuse", async () => {
     const repository = new IdentityRepository();
 

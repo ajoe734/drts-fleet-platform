@@ -118,6 +118,14 @@ import { PasswordPolicyService } from "../../common/auth/password-policy.service
 import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import type { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import { TotpCredentialRepository } from "./totp-credential.repository";
+import {
+  TotpCodeReplayedError,
+  TotpInvalidCodeError,
+  TotpRecoveryCodeInvalidError,
+  TotpSecretNotConfirmedError,
+  TotpService,
+} from "./totp.service";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -222,6 +230,16 @@ export class AuthController {
     private readonly databaseService?: DatabaseService,
     @Optional()
     private readonly agencyDirectoryRepository?: AgencyDirectoryRepository,
+    // Appended, and optional, for the same reason as `oidcPkceService` above
+    // (PWD-LOGIN-008). Both are always provided by `AuthModule`; `@Optional`
+    // only lets existing fixtures that construct this controller with the
+    // pre-PWD-LOGIN-008 positional argument list keep compiling, in which
+    // case `resolvePasswordLoginAmr` below falls back to the pre-TOTP
+    // password-only `amr`.
+    @Optional()
+    private readonly totpService?: TotpService,
+    @Optional()
+    private readonly totpCredentialRepository?: TotpCredentialRepository,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -334,19 +352,78 @@ export class AuthController {
     }
   }
 
+  /**
+   * PWD-LOGIN-008 (SA/SD §7/§8): the password-login session's `amr` must
+   * reflect what the server itself verified, never a client-asserted
+   * boolean. Returns `["pwd"]` when the principal has no *confirmed* TOTP
+   * credential (SA/SD §7: login still succeeds; the UI is responsible for
+   * forcing enrollment for roles that require it -- PWD-LOGIN-009's scope,
+   * not this one). Once a confirmed credential exists, a bypass of the
+   * second factor must be rejected outright (SA/SD §11 "MFA 繞過"): returns
+   * `null` if no code (or an invalid/replayed one) was presented, which the
+   * caller turns into the same uniform `denyPasswordLogin()` response used
+   * for every other password-login failure.
+   */
+  private async resolvePasswordLoginAmr(
+    principalId: string,
+    mfa: { totpCode?: string; recoveryCode?: string },
+  ): Promise<string[] | null> {
+    if (!this.totpService || !this.totpCredentialRepository) {
+      return ["pwd"];
+    }
+    const credential =
+      await this.totpCredentialRepository.findCredential(principalId);
+    if (!credential?.confirmedAt) {
+      return ["pwd"];
+    }
+    try {
+      if (mfa.recoveryCode) {
+        await this.totpService.verifyRecoveryCode(
+          principalId,
+          mfa.recoveryCode,
+        );
+      } else if (mfa.totpCode) {
+        await this.totpService.verifyLoginCode(principalId, mfa.totpCode);
+      } else {
+        return null;
+      }
+    } catch (error) {
+      if (
+        error instanceof TotpSecretNotConfirmedError ||
+        error instanceof TotpInvalidCodeError ||
+        error instanceof TotpCodeReplayedError ||
+        error instanceof TotpRecoveryCodeInvalidError
+      ) {
+        return null;
+      }
+      throw error;
+    }
+    return ["pwd", "otp"];
+  }
+
   private async issueTenantPasswordSession(
     principal: CanonicalIdentityPrincipalRecord,
     membership: CanonicalIdentityMembershipRecord,
     existingUser: OidcBoundTenantUser,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
-  ): Promise<TenantBootstrapSession> {
+  ): Promise<TenantBootstrapSession | null> {
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa);
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "tenant",
+        reasonCode: "MFA_REQUIRED",
+        actorId: existingUser.userId,
+        tenantId: existingUser.tenantId,
+        meta,
+      });
+      return null;
+    }
+
     const scopes = [...(getTenantRoleScopes(existingUser.roleCode) ?? [])];
     const tokenVersion = Date.parse(existingUser.updatedAt);
     const authTimeIso = new Date().toISOString();
-    // TOTP step-up for this amr is PWD-LOGIN-007/008's scope (session issuance
-    // consistency depends on both 005 and 007); this issues a plain password
-    // session, matching the task's own dependency chain.
-    const amr = ["pwd"];
     const acr = "aal1";
 
     const issued = await this.jwtAuthService.issueSessionToken(
@@ -426,6 +503,7 @@ export class AuthController {
         ReturnType<IdentityRepository["findAgencyMembershipForPrincipal"]>
       >
     >,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<AgencyBootstrapSession | null> {
     const now = Date.now();
@@ -436,12 +514,45 @@ export class AuthController {
         Date.parse(candidate.validFrom) <= now &&
         now < Date.parse(candidate.validTo!),
     );
-    if (!binding) return null;
+    if (!binding) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
 
     const agency = await this.agencyDirectoryRepository?.findById(
       snapshot.agencyId,
     );
-    if (!agency || agency.status !== "active") return null;
+    if (!agency || agency.status !== "active") {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
+
+    const amr = await this.resolvePasswordLoginAmr(
+      snapshot.principal.principalId,
+      mfa,
+    );
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "MFA_REQUIRED",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
 
     const scopes = [...(getAgencyRoleScopes(binding.roleCode) ?? [])];
     const tokenVersion = Math.max(
@@ -452,7 +563,6 @@ export class AuthController {
       ].map((timestamp) => Date.parse(timestamp)),
     );
     const authTimeIso = new Date().toISOString();
-    const amr = ["pwd"];
     const acr = "aal1";
 
     const issued = await this.jwtAuthService.issueSessionToken(
@@ -571,12 +681,12 @@ export class AuthController {
     email: string,
     password: string,
     tenantId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<TenantBootstrapSession | null> {
     const hasher = this.requirePasswordHashingService();
-    const principals = await this.identityRepository!.findPrincipalsByEmail(
-      email,
-    );
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
     for (const principal of principals) {
       const memberships =
         await this.identityRepository!.findMembershipsByPrincipalId(
@@ -631,6 +741,7 @@ export class AuthController {
         principal,
         membership,
         existingUser,
+        mfa,
         meta,
       );
     }
@@ -648,12 +759,12 @@ export class AuthController {
     email: string,
     password: string,
     agencyId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<AgencyBootstrapSession | null> {
     const hasher = this.requirePasswordHashingService();
-    const principals = await this.identityRepository!.findPrincipalsByEmail(
-      email,
-    );
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
     for (const principal of principals) {
       const snapshot =
         await this.identityRepository!.findAgencyMembershipForPrincipal(
@@ -678,18 +789,10 @@ export class AuthController {
         return null;
       }
 
-      const session = await this.issueAgencyPasswordSession(snapshot, meta);
-      if (!session) {
-        this.recordPasswordLoginEvent({
-          outcome: "denied",
-          realm: "agency",
-          reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
-          actorId: principal.principalId,
-          meta,
-        });
-        return null;
-      }
-      return session;
+      // `issueAgencyPasswordSession` records its own denial event (with the
+      // specific reason: inactive access or failed MFA) before returning
+      // null; it must not be re-recorded here with a generic reason.
+      return this.issueAgencyPasswordSession(snapshot, mfa, meta);
     }
 
     this.recordPasswordLoginEvent({
@@ -712,12 +815,12 @@ export class AuthController {
     email: string,
     password: string,
     partnerId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<PartnerBootstrapSession | null> {
     const hasher = this.requirePasswordHashingService();
-    const principals = await this.identityRepository!.findPrincipalsByEmail(
-      email,
-    );
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
     for (const principal of principals) {
       if (
         principal.sourceRef !== `jwt_principal:partner:${principal.principalId}`
@@ -763,23 +866,10 @@ export class AuthController {
         return null;
       }
 
-      const session = await this.issuePartnerPasswordSession(
-        principal,
-        membership,
-        meta,
-      );
-      if (!session) {
-        this.recordPasswordLoginEvent({
-          outcome: "denied",
-          realm: "partner",
-          reasonCode: "PARTNER_ACCESS_NOT_ACTIVE",
-          actorId: principal.principalId,
-          partnerId: membership.partnerId,
-          meta,
-        });
-        return null;
-      }
-      return session;
+      // `issuePartnerPasswordSession` records its own denial event (with the
+      // specific reason: inactive access or failed MFA) before returning
+      // null; it must not be re-recorded here with a generic reason.
+      return this.issuePartnerPasswordSession(principal, membership, mfa, meta);
     }
 
     this.recordPasswordLoginEvent({
@@ -798,11 +888,23 @@ export class AuthController {
   private async issuePartnerPasswordSession(
     principal: CanonicalIdentityPrincipalRecord,
     membership: CanonicalIdentityMembershipRecord,
+    mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<PartnerBootstrapSession | null> {
-    if (membership.status !== "active") return null;
+    const denyPartnerAccessNotActive = () => {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "partner",
+        reasonCode: "PARTNER_ACCESS_NOT_ACTIVE",
+        actorId: principal.principalId,
+        partnerId: membership.partnerId,
+        meta,
+      });
+      return null;
+    };
+    if (membership.status !== "active") return denyPartnerAccessNotActive();
     const entrySlug = /^fleet:(.+)$/.exec(membership.scopeRef)?.[1];
-    if (!entrySlug) return null;
+    if (!entrySlug) return denyPartnerAccessNotActive();
     const matchedEntry = this.tenantPartnerService
       .listPartnerEntries(entrySlug)
       .find(
@@ -810,7 +912,20 @@ export class AuthController {
           entry.entrySlug === entrySlug &&
           entry.partnerId === membership.partnerId,
       );
-    if (!matchedEntry) return null;
+    if (!matchedEntry) return denyPartnerAccessNotActive();
+
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa);
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "partner",
+        reasonCode: "MFA_REQUIRED",
+        actorId: principal.principalId,
+        partnerId: matchedEntry.partnerId,
+        meta,
+      });
+      return null;
+    }
 
     const now = Date.now();
     const roleBindings =
@@ -829,7 +944,7 @@ export class AuthController {
             now < Date.parse(binding.validTo))),
     );
     const [role] = activeRoles;
-    if (!role || activeRoles.length !== 1) return null;
+    if (!role || activeRoles.length !== 1) return denyPartnerAccessNotActive();
     const scopes = [...getIamFleetRoleScopes(role.roleCode)!];
     const roles = [role.roleCode];
     const tokenVersion = Math.max(
@@ -841,7 +956,6 @@ export class AuthController {
       ].map((timestamp) => Date.parse(timestamp)),
     );
     const authTimeIso = new Date().toISOString();
-    const amr = ["pwd"];
     const acr = "aal1";
 
     const issued = await this.jwtAuthService.issueSessionToken(
@@ -925,6 +1039,8 @@ export class AuthController {
       tenantId?: string;
       agencyId?: string;
       partnerId?: string;
+      totpCode?: string;
+      recoveryCode?: string;
     },
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("x-real-ip") realIp?: string,
@@ -961,6 +1077,26 @@ export class AuthController {
 
     const email = command.email.trim().toLowerCase();
     const meta = this.buildMeta(forwardedFor, realIp, userAgent, requestId);
+    // Server-verified only (SA/SD §9): these are raw candidate codes that
+    // `resolvePasswordLoginAmr` cryptographically verifies before any `amr`
+    // is derived from them. No client-asserted boolean (e.g. `mfa: true`)
+    // is ever accepted here.
+    const MFA_CODE_MAX_LENGTH = 64;
+    const mfa: { totpCode?: string; recoveryCode?: string } = {};
+    if (
+      typeof command.totpCode === "string" &&
+      command.totpCode.trim() &&
+      command.totpCode.length <= MFA_CODE_MAX_LENGTH
+    ) {
+      mfa.totpCode = command.totpCode.trim();
+    }
+    if (
+      typeof command.recoveryCode === "string" &&
+      command.recoveryCode.trim() &&
+      command.recoveryCode.length <= MFA_CODE_MAX_LENGTH
+    ) {
+      mfa.recoveryCode = command.recoveryCode.trim();
+    }
 
     const session =
       realm === "tenant"
@@ -968,6 +1104,7 @@ export class AuthController {
             email,
             command.password,
             command.tenantId?.trim() || undefined,
+            mfa,
             meta,
           )
         : realm === "agency"
@@ -975,12 +1112,14 @@ export class AuthController {
               email,
               command.password,
               command.agencyId?.trim() || undefined,
+              mfa,
               meta,
             )
           : await this.attemptPartnerPasswordLogin(
               email,
               command.password,
               command.partnerId?.trim() || undefined,
+              mfa,
               meta,
             );
 
@@ -1204,9 +1343,10 @@ export class AuthController {
     // as an unknown/expired token -- never a more specific error.
     if (!principal || principal.status !== "active") throw tokenInvalidError();
 
-    const memberships = await this.identityRepository.findMembershipsByPrincipalId(
-      principal.principalId,
-    );
+    const memberships =
+      await this.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
     const membership = memberships.find(
       (candidate) =>
         candidate.realm === resolvedRealm && candidate.status === "active",
@@ -1236,11 +1376,12 @@ export class AuthController {
       },
     );
 
-    const revokedCount = await this.identityRepository.revokeAllSessionsForPrincipal(
-      principal.principalId,
-      "password_reset",
-      principal.principalId,
-    );
+    const revokedCount =
+      await this.identityRepository.revokeAllSessionsForPrincipal(
+        principal.principalId,
+        "password_reset",
+        principal.principalId,
+      );
 
     if (principal.email) {
       try {

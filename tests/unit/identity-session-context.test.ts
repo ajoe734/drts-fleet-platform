@@ -375,9 +375,7 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
       // Advance past the TTL with no explicit expireDue/close call -- the
       // grant's own `status` field is still "active" in storage.
       vi.setSystemTime(new Date("2026-09-25T14:02:00.000Z"));
-      const afterExpiry = await controller.getSessionContext(
-        callerIdentity(),
-      );
+      const afterExpiry = await controller.getSessionContext(callerIdentity());
       expect(afterExpiry.data.sessionActive).toBe(true);
       expect(afterExpiry.data.activeBreakGlassGrants).toEqual([]);
     } finally {
@@ -443,5 +441,29 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
     const result = await controller.getSessionContext(callerIdentity());
     expect(result.data.sessionActive).toBe(true);
     expect(result.data.activeBreakGlassGrants).toEqual([]);
+  });
+
+  // PWD-LOGIN-008 (SA/SD §8): a password(+TOTP) login issues its session
+  // through the exact same `JwtAuthService.issueSessionToken` ->
+  // `createSession` path as the Google OIDC login, only with
+  // `authMethods: ["pwd", "otp"]` instead of an OIDC `amr`. This endpoint
+  // must recognize that session identically to every scenario above -- it
+  // never branches on login method.
+  it("scenario 8 (PWD-LOGIN-008): a password+TOTP session (authMethods ['pwd','otp']) is recognized as active identically to an OIDC session", async () => {
+    const repository = new IdentityRepository();
+    await repository.createSession(session({ authMethods: ["pwd", "otp"] }));
+    const breakGlassService = new BreakGlassService(repository);
+    const controller = new IdentityController(
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      breakGlassService,
+    );
+
+    const result = await controller.getSessionContext(callerIdentity());
+    expect(result.data.sessionActive).toBe(true);
+    expect(result.data.principalId).toBe("principal-1");
+    expect(result.data.sessionId).toBe("sess-1");
   });
 });
