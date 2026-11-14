@@ -1200,7 +1200,10 @@ export class SupplyReviewService implements OnModuleInit {
 
   private async findSubmission(submissionId: string) {
     if (this.supplySubmissionRepository) {
-      const state = await this.supplySubmissionRepository.loadState();
+      // Only this submission's rows: the full loadState() read every fleet
+      // supply table on each review detail (FLEET-SUPPLY-SCOPED-LOAD-20261114).
+      const state =
+        await this.supplySubmissionRepository.loadSubmissionState(submissionId);
       const submission = state.submissions.find(
         (item) => item.submissionId === submissionId,
       );
