@@ -338,7 +338,8 @@ describe.each(["en", "zh"] as const)(
       const typeCheckUpdate: (
         incidentId: string,
         command: UpdateIncidentCommand,
-      ) => Promise<IncidentRecord> = opsClient.updateIncident.bind(opsClient);
+      ) => ReturnType<typeof opsClient.updateIncident> =
+        opsClient.updateIncident.bind(opsClient);
       expect(typeof typeCheckUpdate).toBe("function");
 
       const container = await mountPanel({
