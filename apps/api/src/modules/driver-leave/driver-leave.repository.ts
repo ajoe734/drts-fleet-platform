@@ -81,7 +81,9 @@ export class DriverLeaveRepository {
     return this.shifts.get(shiftId);
   }
 
-  getMemorySuppression(sourceId: string): MatchingSuppressionRecord | undefined {
+  getMemorySuppression(
+    sourceId: string,
+  ): MatchingSuppressionRecord | undefined {
     return this.suppressions.get(sourceId);
   }
 
@@ -510,7 +512,20 @@ export class DriverLeaveRepository {
     const leaveEndMs = new Date(endTime).getTime();
 
     if (this.isEnabled()) {
-      const db = executor ?? this.databaseService!;
+      // Standalone annotation needs the same transaction lifetime as reviewLeave:
+      // keep each shift locked until its fresh JSON annotation has committed.
+      if (!executor) {
+        return this.withTransaction((client) =>
+          this.annotateOverlappingShifts(
+            driverId,
+            leaveId,
+            startTime,
+            endTime,
+            client,
+          ),
+        );
+      }
+      const db = executor;
       const selectResult = await db.query<{
         shift_id: string;
         record: unknown;
@@ -523,6 +538,7 @@ export class DriverLeaveRepository {
               (scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL AND scheduled_start < $3::timestamptz AND scheduled_end > $2::timestamptz)
               OR (scheduled_start IS NULL AND clock_in_at < $3::timestamptz AND (clock_out_at IS NULL OR clock_out_at > $2::timestamptz))
             )
+          FOR UPDATE
         `,
         [driverId, startTime, endTime],
       );
@@ -631,12 +647,7 @@ export class DriverLeaveRepository {
             updated_at = EXCLUDED.updated_at,
             record = EXCLUDED.record
         `,
-        [
-          sourceKey,
-          driverId,
-          endTime,
-          JSON.stringify(suppressionRecord),
-        ],
+        [sourceKey, driverId, endTime, JSON.stringify(suppressionRecord)],
       );
       return;
     }
