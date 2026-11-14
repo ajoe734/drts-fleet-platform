@@ -267,7 +267,6 @@ export class AuthController {
   private recordPasswordLoginEvent(params: {
     outcome: "success" | "denied";
     realm: "tenant" | "agency";
-    email: string;
     reasonCode?: string | null;
     actorId?: string | null;
     tokenId?: string | null;
@@ -277,7 +276,7 @@ export class AuthController {
     this.securityEventsService?.recordEvent({
       actorId: params.actorId ?? null,
       actorType: params.realm === "agency" ? "agency_user" : "tenant_admin",
-      subjectId: params.email,
+      subjectId: params.actorId ?? null,
       realm: params.realm,
       tenantId: params.tenantId ?? null,
       partnerId: null,
@@ -383,7 +382,6 @@ export class AuthController {
     this.recordPasswordLoginEvent({
       outcome: "success",
       realm: "tenant",
-      email: existingUser.email,
       actorId: existingUser.userId,
       tokenId: issued.tokenId,
       tenantId: existingUser.tenantId,
@@ -494,7 +492,6 @@ export class AuthController {
     this.recordPasswordLoginEvent({
       outcome: "success",
       realm: "agency",
-      email: snapshot.principal.email ?? "",
       actorId: snapshot.principal.principalId,
       tokenId: issued.tokenId,
       meta,
@@ -582,7 +579,6 @@ export class AuthController {
         this.recordPasswordLoginEvent({
           outcome: "denied",
           realm: "tenant",
-          email,
           reasonCode: verifyOutcome.toUpperCase(),
           actorId: principal.principalId,
           tenantId: membership.tenantId,
@@ -600,7 +596,6 @@ export class AuthController {
         this.recordPasswordLoginEvent({
           outcome: "denied",
           realm: "tenant",
-          email,
           reasonCode: "TENANT_USER_NOT_ACTIVE",
           actorId: principal.principalId,
           tenantId: membership.tenantId,
@@ -620,7 +615,6 @@ export class AuthController {
     this.recordPasswordLoginEvent({
       outcome: "denied",
       realm: "tenant",
-      email,
       reasonCode: "USER_NOT_FOUND",
       meta,
     });
@@ -654,7 +648,6 @@ export class AuthController {
         this.recordPasswordLoginEvent({
           outcome: "denied",
           realm: "agency",
-          email,
           reasonCode: verifyOutcome.toUpperCase(),
           actorId: principal.principalId,
           meta,
@@ -667,7 +660,6 @@ export class AuthController {
         this.recordPasswordLoginEvent({
           outcome: "denied",
           realm: "agency",
-          email,
           reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
           actorId: principal.principalId,
           meta,
@@ -680,7 +672,6 @@ export class AuthController {
     this.recordPasswordLoginEvent({
       outcome: "denied",
       realm: "agency",
-      email,
       reasonCode: "USER_NOT_FOUND",
       meta,
     });
