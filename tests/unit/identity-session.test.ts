@@ -538,12 +538,16 @@ describe("Password(+TOTP) login issues the session through the real entry chain 
       fixture.totpService,
       principal.principalId,
     );
+    const recoveryCode = recoveryCodes[0];
+    if (!recoveryCode) {
+      throw new Error("Expected a real recovery code from TOTP confirmation");
+    }
 
     const envelope = (await fixture.controller.passwordLogin("tenant", {
       email: "recovery-valid@example.com",
       password: CORRECT_PASSWORD,
       tenantId,
-      recoveryCode: recoveryCodes[0],
+      recoveryCode,
     })) as PasswordLoginEnvelope;
 
     expect(envelope.data.identity.amr).toEqual(["pwd", "otp"]);
