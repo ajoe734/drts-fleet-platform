@@ -1742,7 +1742,11 @@ export class AuthController {
       identity.principalId,
     );
     if (!principal || principal.status !== "active") {
-      this.denyCredentialPasswordChange("Active session required.");
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
     }
 
     const membership = identity.membershipId
@@ -1754,7 +1758,11 @@ export class AuthController {
       membership.realm !== realm ||
       membership.status !== "active"
     ) {
-      this.denyCredentialPasswordChange("Active session required.");
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
     }
 
     const existingCredential =
