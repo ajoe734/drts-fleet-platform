@@ -2349,6 +2349,8 @@ process.exit(99);
             record: structuredClone(persistedEntry),
           });
       }
+      // Hydrate persisted fixture rows before any scenario snapshots.
+      await tenantPartnerService.resolvePlatformPartnerEntries();
       // The owned-fixture source must be a real canonical own-Fleet binding,
       // rather than an arbitrary referral entry from the default seed.
       if (!options.skipOwnSourceEntry) {
@@ -2906,7 +2908,7 @@ process.exit(99);
               }
               return jsonResponse(
                 deepToSnakeCase(
-                  tenantPartnerController.listPlatformPartnerEntries(),
+                  await tenantPartnerController.listPlatformPartnerEntries(),
                 ),
               );
             }
