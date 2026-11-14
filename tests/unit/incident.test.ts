@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { IncidentRecord } from "@drts/contracts";
+
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { IncidentRepository } from "../../apps/api/src/modules/incident/incident.repository";
 import { IncidentService } from "../../apps/api/src/modules/incident/incident.service";
@@ -168,5 +170,86 @@ describe("incident service", () => {
     const timeline = service.getTimeline(incident.incidentId);
     expect(timeline.length).toBeGreaterThanOrEqual(2);
     expect(timeline.some((e) => e.action === "status_changed")).toBe(true);
+  });
+
+  it("updates incident category via updateIncident and persists it", () => {
+    const { service } = createService();
+
+    const incident = service.createIncident({
+      title: "Vehicle collision at intersection",
+      description: "Minor collision during passenger drop-off",
+      category: "vehicle_damage",
+      severity: "medium",
+      reportedBy: "driver-006",
+    });
+
+    const updated = service.updateIncident(incident.incidentId, {
+      category: "property_damage",
+    });
+
+    expect(updated.category).toBe("property_damage");
+    const readBack = service.getIncident(incident.incidentId);
+    expect(readBack.category).toBe("property_damage");
+  });
+
+  it("preserves the current category when updateIncident omits it", () => {
+    const { service } = createService();
+
+    const incident = service.createIncident({
+      title: "Traffic delay",
+      description: "Heavy traffic causing delays",
+      category: "traffic",
+      severity: "low",
+      reportedBy: "driver-007",
+    });
+
+    const updated = service.updateIncident(incident.incidentId, {
+      status: "investigating",
+    });
+
+    expect(updated.category).toBe("traffic");
+    expect(updated.status).toBe("investigating");
+  });
+
+  it("rejects an invalid category on updateIncident", () => {
+    const { service } = createService();
+
+    const incident = service.createIncident({
+      title: "Safety concern",
+      description: "Brake issue reported",
+      category: "safety",
+      severity: "high",
+      reportedBy: "driver-008",
+    });
+
+    expect(() =>
+      service.updateIncident(incident.incidentId, {
+        category: "invalid_category" as any,
+      }),
+    ).toThrow("Api Request Error");
+    expect(service.getIncident(incident.incidentId).category).toBe("safety");
+  });
+
+  it("updates incident category via updateIncidentForCommit when the repository is disabled", () => {
+    const { service } = createService();
+
+    const incident = service.createIncident({
+      title: "Passenger injury",
+      description: "Passenger reported minor injury",
+      category: "passenger_injury",
+      severity: "high",
+      reportedBy: "driver-009",
+    });
+
+    const updated = service.updateIncidentForCommit(incident.incidentId, {
+      category: "driver_injury",
+      severity: "critical",
+    }) as IncidentRecord;
+
+    expect(updated.category).toBe("driver_injury");
+    expect(updated.severity).toBe("critical");
+    expect(service.getIncident(incident.incidentId).category).toBe(
+      "driver_injury",
+    );
   });
 });

@@ -367,6 +367,7 @@ export function IncidentDetailActionPanel({
             ? {
                 status,
                 severity,
+                category,
                 escalationTarget: escalationTarget || null,
                 ...withOptionalString(assignedTo, (trimmed) => ({
                   assignedTo: trimmed,

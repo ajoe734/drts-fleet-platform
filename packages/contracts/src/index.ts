@@ -7197,6 +7197,7 @@ export interface UpdateIncidentCommand {
   resolutionNote?: string;
   escalationTarget?: IncidentEscalationTarget | null;
   severity?: IncidentSeverity;
+  category?: IncidentCategory;
 }
 
 export interface ExtendDriverMatchingSuppressionCommand {
