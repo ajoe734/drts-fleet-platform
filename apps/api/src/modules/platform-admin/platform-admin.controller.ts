@@ -198,6 +198,27 @@ export class PlatformAdminController {
     );
   }
 
+  // PWD-LOGIN-006 SA/SD §6: the admin side of "forgot password" -- this only
+  // ever (re)sends the same reset email a user could trigger themselves. It
+  // never reads, accepts, or returns a plaintext password.
+  @Post("identity/principals/:principalId/password-reset/send")
+  async sendUserPasswordReset(
+    @Param("principalId") principalId: string,
+    @Body() command: { reasonCode?: string },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.platformAdminService.sendUserPasswordReset(
+        principalId,
+        command,
+        requestId,
+        this.requireActorId(identity),
+      ),
+      requestId,
+    );
+  }
+
   // ── Platform Notices ──────────────────────────────────────────────────────
 
   @Get("notices")

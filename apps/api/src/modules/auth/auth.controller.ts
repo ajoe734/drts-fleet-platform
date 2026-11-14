@@ -98,6 +98,15 @@ import {
   isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
+import { randomUUID } from "node:crypto";
+import {
+  PasswordHashingService,
+  PasswordPepperNotConfiguredError,
+} from "../../common/auth/password-hashing.service";
+import { PasswordPolicyService } from "../../common/auth/password-policy.service";
+import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
+import type { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -158,6 +167,18 @@ function isStrictAuthEnvironment(): boolean {
 @Controller("auth")
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
+
+  // Lazily built, not DI-provided: this controller only has IdentityRepository
+  // injected, not a wired NotificationDeliveryService/TenantInvitationDeliveryService.
+  // Built the same way PasswordHashingService is used elsewhere in this
+  // codebase -- a direct `new`, reading live env on first use -- rather than
+  // widening the module's provider graph for one feature.
+  private passwordResetDelivery?: TenantInvitationDeliveryService;
+
+  // PasswordPolicyService.constructor synchronously reads the bundled
+  // common/breached password list from disk; one instance per controller
+  // lifetime instead of per request.
+  private readonly passwordPolicyService = new PasswordPolicyService();
 
   constructor(
     private readonly jwtAuthService: JwtAuthService,
@@ -232,6 +253,282 @@ export class AuthController {
       },
     );
     return toApiSuccessEnvelope(result, requestId);
+  }
+
+  private assertPasswordLoginRealm(
+    realm: string,
+  ): "tenant" | "agency" | "partner" {
+    if (realm !== "tenant" && realm !== "partner" && realm !== "agency") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Unsupported password-login realm '${realm}'. Only 'tenant', 'partner' and 'agency' are supported.`,
+      );
+    }
+    return realm;
+  }
+
+  /** Lazily built (see field doc comment): read live env on first use rather
+   * than at controller construction, so tests and dev fixtures that set
+   * notification env vars after construction still take effect. */
+  private resolvePasswordResetDelivery(): TenantInvitationDeliveryService {
+    if (!this.passwordResetDelivery) {
+      let notificationDeliveryService: NotificationDeliveryService | null;
+      try {
+        notificationDeliveryService = createNotificationDeliveryServiceFromEnv(
+          process.env,
+          this.identityRepository?.getDatabaseService(),
+        );
+      } catch {
+        notificationDeliveryService = null;
+      }
+      this.passwordResetDelivery = new TenantInvitationDeliveryService(
+        notificationDeliveryService ?? null,
+      );
+    }
+    return this.passwordResetDelivery;
+  }
+
+  /** The public response for password-reset/request must never depend on
+   * whether this succeeds, throws, or finds nothing (SA/SD §6, mirroring the
+   * unified-response rule in §4): every branch below is swallowed by the
+   * caller, never surfaced as a different status or body. */
+  private async dispatchPasswordResetEmail(
+    realm: "tenant" | "agency" | "partner",
+    email: string,
+  ): Promise<void> {
+    if (!this.identityRepository) return;
+    const match =
+      await this.identityRepository.findActivePrincipalAndMembershipForRealmByEmail(
+        email,
+        realm,
+      );
+    if (!match) return;
+    const credential =
+      await this.identityRepository.findPasswordCredentialByPrincipalId(
+        match.principal.principalId,
+      );
+    // No password credential (e.g. Google-only principal): nothing to reset,
+    // but the caller still returns the same 200 either way.
+    if (!credential) return;
+
+    const { rawToken, expiresAt } =
+      await this.identityRepository.createPasswordResetToken(
+        match.principal.principalId,
+      );
+    await this.resolvePasswordResetDelivery().sendPasswordReset({
+      dedupeKey: `${match.principal.principalId}:${randomUUID()}`,
+      realm,
+      tenantId: realm === "tenant" ? match.membership.tenantId : null,
+      recipientEmail: match.principal.email ?? email,
+      expiresAt,
+      rawToken,
+    });
+
+    this.securityEventsService?.recordEvent({
+      actorId: match.principal.principalId,
+      actorType: "system",
+      subjectId: match.principal.principalId,
+      realm,
+      tenantId: match.membership.tenantId,
+      partnerId: match.membership.partnerId,
+      eventType: "password_reset.requested",
+      eventFamily: "credential",
+      outcome: "success",
+      severity: "medium",
+      targetType: "principal",
+      targetId: match.principal.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: "self_service_password_reset_request",
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-reset/request")
+  async requestPasswordReset(
+    @Param("realm") realm: AuthRealm,
+    @Body() command: { email?: string } | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedRealm = this.assertPasswordLoginRealm(realm);
+    const email = command?.email?.trim();
+    if (email) {
+      try {
+        await this.dispatchPasswordResetEmail(resolvedRealm, email);
+      } catch (error) {
+        this.logger.warn(
+          `password-reset/request for realm '${resolvedRealm}' did not complete internally, but the public response is unaffected: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    // Always the same 200 body: this must never reveal whether the email
+    // matched an account, whether that account has a password set, or
+    // whether delivery actually succeeded (SA/SD §6).
+    return toApiSuccessEnvelope({ accepted: true }, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-reset/confirm")
+  async confirmPasswordReset(
+    @Param("realm") realm: AuthRealm,
+    @Body() command: { token?: string; password?: string } | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedRealm = this.assertPasswordLoginRealm(realm);
+    const token = command?.token?.trim();
+    const password = command?.password;
+    if (!token || !password) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_RESET_INVALID",
+        "A reset token and new password are required.",
+      );
+    }
+    // PWD-LOGIN-007 (TOTP enrollment/confirmation) has not merged yet, so
+    // there is no confirmed-TOTP lookup available here; always applying the
+    // stricter single-factor minimum (SA/SD §3) is conservative -- it can
+    // only reject passwords the final MFA-aware policy would also accept
+    // under the shorter bound, never the reverse.
+    const policyResult = this.passwordPolicyService.evaluate(password, {
+      totpEnabled: false,
+    });
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Password reset is not available on this deployment.",
+      );
+    }
+
+    const tokenInvalidError = () =>
+      new ApiRequestError(
+        400,
+        "PASSWORD_RESET_TOKEN_INVALID",
+        "This password reset link is invalid or has expired.",
+      );
+
+    const consumed =
+      await this.identityRepository.consumePasswordResetToken(token);
+    if (!consumed) throw tokenInvalidError();
+
+    const principal = await this.identityRepository.findPrincipalById(
+      consumed.principalId,
+    );
+    // A token issued for a principal that is no longer active (e.g.
+    // suspended between request and confirm) must fail the same generic way
+    // as an unknown/expired token -- never a more specific error.
+    if (!principal || principal.status !== "active") throw tokenInvalidError();
+
+    const memberships = await this.identityRepository.findMembershipsByPrincipalId(
+      principal.principalId,
+    );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === resolvedRealm && candidate.status === "active",
+    );
+    if (!membership) throw tokenInvalidError();
+
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based login is not available on this deployment.",
+        );
+      }
+      throw error;
+    }
+
+    await this.identityRepository.setPasswordCredentialForPrincipal(
+      principal.principalId,
+      {
+        passwordHash: hashed.hash,
+        passwordAlgo: hashed.algo,
+        pepperVersion: hashed.pepperVersion,
+      },
+    );
+
+    const revokedCount = await this.identityRepository.revokeAllSessionsForPrincipal(
+      principal.principalId,
+      "password_reset",
+      principal.principalId,
+    );
+
+    if (principal.email) {
+      try {
+        await this.resolvePasswordResetDelivery().sendPasswordResetCompletedNotice(
+          {
+            dedupeKey: `${principal.principalId}:${randomUUID()}`,
+            realm: resolvedRealm,
+            tenantId: resolvedRealm === "tenant" ? membership.tenantId : null,
+            recipientEmail: principal.email,
+          },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `password-reset/confirm completion notice did not send for principal ${principal.principalId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    this.securityEventsService?.recordEvent({
+      actorId: principal.principalId,
+      actorType: "system",
+      subjectId: principal.principalId,
+      realm: resolvedRealm,
+      tenantId: membership.tenantId,
+      partnerId: membership.partnerId,
+      eventType: "password_reset.completed",
+      eventFamily: "credential",
+      outcome: "success",
+      severity: "medium",
+      targetType: "principal",
+      targetId: principal.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: "self_service_password_reset_confirm",
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: { revokedSessionCount: revokedCount },
+      maskedContext: null,
+    });
+
+    return toApiSuccessEnvelope(
+      { passwordReset: true, revokedSessionCount: revokedCount },
+      requestId,
+    );
   }
 
   @OpenRoute()
