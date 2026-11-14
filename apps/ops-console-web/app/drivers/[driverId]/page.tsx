@@ -23,7 +23,6 @@ import type {
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
@@ -43,6 +42,7 @@ import {
   CanvasEmptyPanel,
   type CanvasActivityItem,
 } from "@/lib/canvas-workflow";
+import { DriverStatementActionPanel } from "./driver-statement-action-panel";
 
 type DriverDetailPageProps = {
   params: Promise<{
@@ -115,10 +115,6 @@ type TaskRow = Record<string, unknown> & {
 
 type RelayRow = Record<string, unknown> & {
   order: ForwardedOrderRecord;
-};
-
-type StatementRow = Record<string, unknown> & {
-  statement: DriverStatementRecord;
 };
 
 type ShiftRow = Record<string, unknown> & {
@@ -250,9 +246,7 @@ async function loadWithError<T>(
     return {
       data: fallback,
       error:
-        error instanceof Error
-          ? error.message
-          : t("common.unknown", locale),
+        error instanceof Error ? error.message : t("common.unknown", locale),
     };
   }
 }
@@ -850,7 +844,6 @@ export default async function DriverDetailPage({
   const driverStatements = statementsResult.data
     .filter((statement) => statement.driverId === driverId)
     .sort((left, right) => right.periodMonth.localeCompare(left.periodMonth));
-  const latestStatement = driverStatements[0] ?? null;
 
   const activeOwnedTasks = tasksResult.data
     .filter(
@@ -1088,9 +1081,6 @@ export default async function DriverDetailPage({
   ];
 
   const relayRows: RelayRow[] = relayFailures.map((order) => ({ order }));
-  const statementRows: StatementRow[] = driverStatements
-    .slice(0, 6)
-    .map((statement) => ({ statement }));
   const shiftRows: ShiftRow[] = driverShifts.slice(0, 6).map((shift) => ({
     shift,
     attendance: attendanceByShift.get(shift.shiftId),
@@ -1167,9 +1157,7 @@ export default async function DriverDetailPage({
 
   const tabs: ReactNode[] = [
     <span key="overview">{detailT(locale, "tab.overview")}</span>,
-    <span key="platforms">
-      {detailT(locale, "tab.platformBindings")}
-    </span>,
+    <span key="platforms">{detailT(locale, "tab.platformBindings")}</span>,
     <span key="tasks">{detailT(locale, "tab.activeTasks")}</span>,
     <span key="earnings">{detailT(locale, "tab.earnings")}</span>,
     <span key="shifts">{detailT(locale, "tab.shifts")}</span>,
@@ -1343,44 +1331,6 @@ export default async function DriverDetailPage({
         ) : (
           "—"
         ),
-    },
-  ];
-
-  const statementColumns: CanvasTableColumn<StatementRow>[] = [
-    {
-      h: detailT(locale, "col.period"),
-      w: 110,
-      mono: true,
-      r: (row) => row.statement.periodMonth,
-    },
-    {
-      h: detailT(locale, "col.payout"),
-      w: 110,
-      r: (row) => (
-        <Pill
-          theme={theme}
-          tone={row.statement.payoutStatus === "paid" ? "success" : "warn"}
-          dot
-        >
-          {formatOpsCodeLabel(locale, row.statement.payoutStatus)}
-        </Pill>
-      ),
-    },
-    {
-      h: detailT(locale, "col.net"),
-      w: 130,
-      mono: true,
-      align: "right",
-      r: (row) =>
-        formatMinorCurrency(
-          row.statement.netAmount.amountMinor,
-          row.statement.netAmount.currency,
-        ),
-    },
-    {
-      h: detailT(locale, "col.receipt"),
-      mono: true,
-      r: (row) => row.statement.receiptNo,
     },
   ];
 
@@ -1693,53 +1643,13 @@ export default async function DriverDetailPage({
               </Card>
             </div>
 
-            <Card
-              theme={theme}
-              title={detailT(locale, "card.earningsTitle", {
-                count: driverStatements.length,
-              })}
-              subtitle={
-                latestStatement
-                  ? detailT(locale, "card.latestStatement", {
-                      periodMonth: latestStatement.periodMonth,
-                      amount: formatMinorCurrency(
-                        latestStatement.netAmount.amountMinor,
-                        latestStatement.netAmount.currency,
-                      ),
-                    })
-                  : undefined
-              }
-              actions={renderDriverAction(
-                {
-                  descriptor: generateStatementDescriptor,
-                  label: detailT(locale, "action.generateStatement"),
-                  icon: "arrow",
-                  href: `/reports`,
-                },
-                locale,
-              )}
-              padding={statementRows.length > 0 ? 0 : 16}
-            >
-              {statementsResult.error ? (
-                renderEmptyState(
-                  locale,
-                  classifyErrorReason(statementsResult.error),
-                  statementsResult.error,
-                )
-              ) : statementRows.length > 0 ? (
-                <Table
-                  theme={theme}
-                  columns={statementColumns}
-                  rows={statementRows}
-                />
-              ) : (
-                renderEmptyState(
-                  locale,
-                  "no_data",
-                  detailT(locale, "card.noStatements"),
-                )
-              )}
-            </Card>
+            <DriverStatementActionPanel
+              driverId={driver.driverId}
+              initialLocale={locale}
+              descriptor={generateStatementDescriptor}
+              initialStatements={driverStatements}
+              initialError={statementsResult.error}
+            />
           </div>
 
           <div style={columnStyle}>
@@ -1876,9 +1786,7 @@ export default async function DriverDetailPage({
                 </div>
                 {driver.eligibilityBlockedReasons.length > 0 ? (
                   <div style={{ color: theme.textMuted }}>
-                    <strong>
-                      {detailT(locale, "eligibilityBlocked")}:
-                    </strong>{" "}
+                    <strong>{detailT(locale, "eligibilityBlocked")}:</strong>{" "}
                     {formatList(locale, driver.eligibilityBlockedReasons)}
                   </div>
                 ) : null}
