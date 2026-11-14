@@ -258,6 +258,34 @@ function buildPlan(vars, sha, tag, deployer) {
       if (!/^[a-zA-Z0-9_-]+$/.test(name)) reject(`PROD_${field}_SECRET`);
       secretNames[field] = name;
     }
+  // Password login (Argon2id pepper + TOTP envelope-encryption key) is
+  // all-or-nothing (PWD-LOGIN-010, SA/SD portal-password-login-20261113
+  // §10). Existence is checked by the workflow (a cloud call, which this
+  // function never performs) before this runs; PROD_PASSWORD_LOGIN_SECRETS_PRESENT
+  // only carries that already-established fact. When present, the two
+  // secrets join the api service's secret set below and are frozen to
+  // enabled numeric versions by the same preflight.cjs loop that freezes
+  // every other service secret -- never a separate :latest mount.
+  // PROD_PASSWORD_LOGIN_ENABLED is a distinct rollout input for staged
+  // deploys (backend support first, frontend entry later): it never
+  // substitutes for the all-or-nothing secret presence above, and it can
+  // stay false while both secrets exist, so disabling it only hides the
+  // entry/blocks new password creation without breaking existing logins.
+  const passwordLoginSecretsPresent =
+    vars.PROD_PASSWORD_LOGIN_SECRETS_PRESENT === "true";
+  const passwordLoginEnabled =
+    passwordLoginSecretsPresent &&
+    (vars.PROD_PASSWORD_LOGIN_ENABLED || "false") === "true";
+  if (passwordLoginSecretsPresent)
+    Object.assign(secretNames, {
+      PASSWORD_PEPPER_SECRETS_JSON: `${prefix}-password-pepper`,
+      TOTP_ENCRYPTION_KEYS_JSON: `${prefix}-totp-encryption-key`,
+    });
+  apiEnv.PASSWORD_LOGIN_ENABLED = String(passwordLoginEnabled);
+  if (passwordLoginSecretsPresent)
+    apiEnv.PASSWORD_PEPPER_CURRENT_VERSION = need(
+      "PROD_PASSWORD_PEPPER_CURRENT_VERSION",
+    );
   artifactConfig(vars, apiEnv, secretNames, need, reject, https);
   const backend = need("PROD_MAP_PROVIDER_BACKEND");
   if (!["mock", "google"].includes(backend))
