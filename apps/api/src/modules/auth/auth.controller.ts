@@ -353,6 +353,56 @@ export class AuthController {
   }
 
   /**
+   * SA/SD §4 (docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md:116)
+   * requires `totp.verified`/`totp.denied`/`totp.recovery_used` alongside the
+   * `password_login.*` events; this is the single seam `resolvePasswordLoginAmr`
+   * routes all three realms' TOTP outcomes through.
+   */
+  private recordTotpEvent(params: {
+    outcome: "success" | "denied";
+    eventType: "totp.verified" | "totp.denied" | "totp.recovery_used";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    actorId: string;
+    authMethod: "totp" | "recovery_code";
+    tenantId?: string | null | undefined;
+    partnerId?: string | null | undefined;
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.actorId,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.actorId,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType: params.eventType,
+      eventFamily: "auth",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "totp",
+      targetId: null,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [params.authMethod],
+      sourceIp: params.meta.sourceIp ?? null,
+      userAgent: params.meta.userAgent ?? null,
+      requestId: params.meta.requestId ?? null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  /**
    * PWD-LOGIN-008 (SA/SD §7/§8): the password-login session's `amr` must
    * reflect what the server itself verified, never a client-asserted
    * boolean. Returns `["pwd"]` when the principal has no *confirmed* TOTP
@@ -367,6 +417,12 @@ export class AuthController {
   private async resolvePasswordLoginAmr(
     principalId: string,
     mfa: { totpCode?: string; recoveryCode?: string },
+    context: {
+      realm: "tenant" | "agency" | "partner";
+      tenantId?: string | null | undefined;
+      partnerId?: string | null | undefined;
+      meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+    },
   ): Promise<string[] | null> {
     if (!this.totpService || !this.totpCredentialRepository) {
       return ["pwd"];
@@ -382,8 +438,28 @@ export class AuthController {
           principalId,
           mfa.recoveryCode,
         );
+        this.recordTotpEvent({
+          outcome: "success",
+          eventType: "totp.recovery_used",
+          realm: context.realm,
+          actorId: principalId,
+          authMethod: "recovery_code",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
       } else if (mfa.totpCode) {
         await this.totpService.verifyLoginCode(principalId, mfa.totpCode);
+        this.recordTotpEvent({
+          outcome: "success",
+          eventType: "totp.verified",
+          realm: context.realm,
+          actorId: principalId,
+          authMethod: "totp",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
       } else {
         return null;
       }
@@ -394,11 +470,35 @@ export class AuthController {
         error instanceof TotpCodeReplayedError ||
         error instanceof TotpRecoveryCodeInvalidError
       ) {
+        this.recordTotpEvent({
+          outcome: "denied",
+          eventType: "totp.denied",
+          realm: context.realm,
+          reasonCode: this.totpDenialReasonCode(error),
+          actorId: principalId,
+          authMethod: mfa.recoveryCode ? "recovery_code" : "totp",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
         return null;
       }
       throw error;
     }
     return ["pwd", "otp"];
+  }
+
+  private totpDenialReasonCode(error: unknown): string {
+    if (error instanceof TotpSecretNotConfirmedError) {
+      return "TOTP_NOT_CONFIRMED";
+    }
+    if (error instanceof TotpCodeReplayedError) {
+      return "TOTP_CODE_REPLAYED";
+    }
+    if (error instanceof TotpRecoveryCodeInvalidError) {
+      return "TOTP_RECOVERY_CODE_INVALID";
+    }
+    return "TOTP_INVALID_CODE";
   }
 
   private async issueTenantPasswordSession(
@@ -408,7 +508,11 @@ export class AuthController {
     mfa: { totpCode?: string; recoveryCode?: string },
     meta: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<TenantBootstrapSession | null> {
-    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa);
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa, {
+      realm: "tenant",
+      tenantId: existingUser.tenantId,
+      meta,
+    });
     if (!amr) {
       this.recordPasswordLoginEvent({
         outcome: "denied",
@@ -542,6 +646,7 @@ export class AuthController {
     const amr = await this.resolvePasswordLoginAmr(
       snapshot.principal.principalId,
       mfa,
+      { realm: "agency", meta },
     );
     if (!amr) {
       this.recordPasswordLoginEvent({
@@ -914,7 +1019,11 @@ export class AuthController {
       );
     if (!matchedEntry) return denyPartnerAccessNotActive();
 
-    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa);
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa, {
+      realm: "partner",
+      partnerId: matchedEntry.partnerId,
+      meta,
+    });
     if (!amr) {
       this.recordPasswordLoginEvent({
         outcome: "denied",
