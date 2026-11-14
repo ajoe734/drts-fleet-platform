@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import type {
   PartnerUserIdentityConsentScope,
@@ -9,6 +10,22 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+
+/** The minimal surface `createForInvitedPrincipal` needs from a caller's own
+ * transaction client, so the insert composes atomically with FLEET-ONB-004's
+ * invitation-accept transaction (SA/SD §3 step 4) instead of only ever
+ * running against the pool directly. Declared as a single non-overloaded
+ * call signature (matching `DatabaseService.query`) rather than
+ * `Pick<PoolClient, "query">`, because `PoolClient["query"]` is a union of
+ * incompatible overloads that TS cannot call through a
+ * `DatabaseService | PoolClient` union parameter (TS2349). A real
+ * `PoolClient` still satisfies this narrower shape structurally. */
+interface PartnerUserIdentityLinkQueryExecutor {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
+}
 
 type JsonRecordRow = {
   record: unknown;
@@ -130,6 +147,75 @@ export class PartnerUserIdentityLinkRepository {
     }
 
     return this.parseRecord(row.record);
+  }
+
+  /**
+   * FLEET-ONB-002 SA/SD §2 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md):
+   * accepting a Fleet staff invitation's Google-bound identity link. Unlike
+   * `resolveOrCreate`, `drtsPassengerId` is the caller's already-created
+   * invited principal, not a fresh random passenger id, and this never
+   * overwrites a conflicting existing row — it returns `null` so the caller
+   * rolls back the whole accept transaction instead of silently reusing (and
+   * rebinding) someone else's link, e.g. one created by a prior referral
+   * handoff for the same `(entrySlug, partnerUserRef)`.
+   *
+   * An optional `executor` (the caller's own `PoolClient`) lets this insert
+   * run inside FLEET-ONB-004's invitation-accept transaction, so a conflict
+   * here rolls back that whole transaction rather than only this statement
+   * (SA/SD §3 step 4). Without one, it runs directly against the pool.
+   */
+  async createForInvitedPrincipal(
+    entrySlugInput: string,
+    partnerUserRefInput: string,
+    drtsPassengerIdInput: string,
+    now: string = new Date().toISOString(),
+    executor?: PartnerUserIdentityLinkQueryExecutor,
+  ): Promise<PartnerUserIdentityLinkRecord | null> {
+    const entrySlug = this.requireNonBlank(entrySlugInput, "entrySlug");
+    const partnerUserRef = this.requireNonBlank(
+      partnerUserRefInput,
+      "partnerUserRef",
+    );
+    const drtsPassengerId = this.requireNonBlank(
+      drtsPassengerIdInput,
+      "drtsPassengerId",
+    );
+    const record: PartnerUserIdentityLinkRecord = {
+      entrySlug,
+      partnerUserRef,
+      drtsPassengerId,
+      status: "active",
+      consentScope: "fleet_staff_invitation",
+      linkedAt: now,
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (!executor && !this.isEnabled()) {
+      const key = this.buildKey(entrySlug, partnerUserRef);
+      if (this.fallbackLinks.has(key)) {
+        return null;
+      }
+      this.fallbackLinks.set(key, record);
+      return this.clone(record);
+    }
+
+    const exec = executor ?? this.databaseService!;
+    const result = await exec.query<JsonRecordRow>(
+      `
+        INSERT INTO admin.phase1_partner_user_identity_links (
+          entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,
+          linked_at, last_seen_at, created_at, updated_at, record
+        ) VALUES ($1, $2, $3, 'active', 'fleet_staff_invitation', $4, $4, $4, $4, $5::jsonb)
+        ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
+        RETURNING record
+      `,
+      [entrySlug, partnerUserRef, drtsPassengerId, now, JSON.stringify(record)],
+    );
+
+    const row = result.rows[0];
+    return row ? this.parseRecord(row.record) : null;
   }
 
   async touchLastSeen(
