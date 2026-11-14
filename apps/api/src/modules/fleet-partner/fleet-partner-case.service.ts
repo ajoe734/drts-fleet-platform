@@ -23,7 +23,10 @@ import {
   FleetDocumentStorageService,
   MAX_FLEET_DOCUMENT_BYTES,
 } from "./fleet-document-storage.service";
-import { FleetPartnerService } from "./fleet-partner.service";
+import {
+  type FleetAttributionBatch,
+  FleetPartnerService,
+} from "./fleet-partner.service";
 
 export interface FleetCaseItem {
   id: string;
@@ -694,6 +697,7 @@ export class FleetPartnerCaseService {
    */
   private async resolveComplaintFleetAttribution(
     complaint: ComplaintCaseRecord,
+    batch?: FleetAttributionBatch,
   ): Promise<{
     driverId: string;
     driverName: string;
@@ -708,7 +712,12 @@ export class FleetPartnerCaseService {
     if (!orderId) {
       return null;
     }
-    return this.fleetPartnerService.resolveOrderDriverFleetAttribution(orderId);
+    return batch
+      ? this.fleetPartnerService.resolveOrderDriverFleetAttribution(
+          orderId,
+          batch,
+        )
+      : this.fleetPartnerService.resolveOrderDriverFleetAttribution(orderId);
   }
 
   /**
@@ -744,12 +753,13 @@ export class FleetPartnerCaseService {
 
   private async mapComplaintToFleetCase(
     complaint: ComplaintCaseRecord,
+    batch?: FleetAttributionBatch,
   ): Promise<FleetCaseItem> {
     const isClosed = complaint.status === "closed";
     const isSettlement = complaint.category === "settlement_dispute";
     const attribution = isSettlement
       ? null
-      : await this.resolveComplaintFleetAttribution(complaint);
+      : await this.resolveComplaintFleetAttribution(complaint, batch);
     const isUnattributed = !isSettlement && !attribution;
     return {
       id: complaint.caseNo,
@@ -812,17 +822,29 @@ export class FleetPartnerCaseService {
 
   private async mapIncidentToFleetCase(
     incident: IncidentRecord,
+    batch?: FleetAttributionBatch,
   ): Promise<FleetCaseItem> {
-    const attribution = this.fleetPartnerService
-      ? incident.relatedOrderId
-        ? await this.fleetPartnerService.resolveOrderDriverFleetAttribution(
-            incident.relatedOrderId,
-          )
-        : await this.fleetPartnerService.resolveIncidentDriverFleetAttribution(
-            incident.relatedDriverId,
-            incident.occurredAt ?? incident.createdAt,
-          )
-      : null;
+    const attribution = !this.fleetPartnerService
+      ? null
+      : incident.relatedOrderId
+        ? batch
+          ? await this.fleetPartnerService.resolveOrderDriverFleetAttribution(
+              incident.relatedOrderId,
+              batch,
+            )
+          : await this.fleetPartnerService.resolveOrderDriverFleetAttribution(
+              incident.relatedOrderId,
+            )
+        : batch
+          ? await this.fleetPartnerService.resolveIncidentDriverFleetAttribution(
+              incident.relatedDriverId,
+              incident.occurredAt ?? incident.createdAt,
+              batch,
+            )
+          : await this.fleetPartnerService.resolveIncidentDriverFleetAttribution(
+              incident.relatedDriverId,
+              incident.occurredAt ?? incident.createdAt,
+            );
     const isClosed = incident.status === "closed";
     return {
       id: incident.incidentId,
@@ -864,6 +886,13 @@ export class FleetPartnerCaseService {
     await this.complaintService?.refreshSettlementCases?.();
     const result: FleetCaseItem[] = [];
     const seen = new Set<string>();
+    // One batch per list: each service bucket's dispatch supply is prepared
+    // once and driver affiliations are loaded once, instead of once per
+    // complaint/incident.
+    const batch =
+      typeof this.fleetPartnerService?.createAttributionBatch === "function"
+        ? this.fleetPartnerService.createAttributionBatch()
+        : undefined;
 
     for (const item of this.cases.values()) {
       if (seen.has(item.id)) continue;
@@ -888,7 +917,7 @@ export class FleetPartnerCaseService {
             : [];
       for (const c of complaints) {
         if (seen.has(c.caseNo)) continue;
-        const mapped = await this.mapComplaintToFleetCase(c);
+        const mapped = await this.mapComplaintToFleetCase(c, batch);
         // Ordinary complaints must be isolated to their actually
         // attributed fleet, same as settlement_dispute cases above; an
         // unattributed or foreign-fleet complaint must not leak into
@@ -903,7 +932,7 @@ export class FleetPartnerCaseService {
     if (this.incidentService) {
       for (const incident of await this.incidentService.listIncidentsForReadback()) {
         if (seen.has(incident.incidentId)) continue;
-        const mapped = await this.mapIncidentToFleetCase(incident);
+        const mapped = await this.mapIncidentToFleetCase(incident, batch);
         if (!this.isFleetScopeMatch(mapped.fleetPartnerId, fleetPartnerId))
           continue;
         seen.add(incident.incidentId);

@@ -104,6 +104,26 @@ type StatementRuleMatch = {
   affinityScore: number;
 };
 
+export type FleetDriverAttribution = {
+  driverId: string;
+  driverName: string;
+  fleetPartnerId: string;
+};
+
+/**
+ * Shared state for attributing many cases in one request. The Fleet case list
+ * used to refresh each order's dispatch supply and reload every driver
+ * affiliation once per complaint/incident; on shared dev that held a single
+ * GET /api/fleet-partner/cases for 8-18 s. Within a batch, each service
+ * bucket's supply is prepared once, affiliations are loaded once, and an
+ * order's attribution is resolved once. Results are unchanged.
+ */
+export type FleetAttributionBatch = {
+  preparedServiceBuckets: Set<string>;
+  affiliations?: DriverFleetAffiliationRecord[];
+  orders: Map<string, FleetDriverAttribution | null>;
+};
+
 @Injectable()
 export class FleetPartnerService implements OnModuleInit {
   private fleetPartners = FLEET_PARTNER_SEED.map((partner) => ({ ...partner }));
@@ -1302,20 +1322,52 @@ export class FleetPartnerService implements OnModuleInit {
    * single unambiguous effective affiliation cannot be established —
    * callers must treat that as unattributed rather than guessing a fleet.
    */
+  createAttributionBatch(): FleetAttributionBatch {
+    return { preparedServiceBuckets: new Set(), orders: new Map() };
+  }
+
+  private async attributionAffiliations(
+    batch?: FleetAttributionBatch,
+  ): Promise<DriverFleetAffiliationRecord[]> {
+    if (!this.isPersistenceEnabled()) return this.driverAffiliations;
+    if (!batch) return this.loadCanonicalDriverAffiliations();
+    batch.affiliations ??= await this.loadCanonicalDriverAffiliations();
+    return batch.affiliations;
+  }
+
   async resolveOrderDriverFleetAttribution(
     orderId: string | null | undefined,
-  ): Promise<{
-    driverId: string;
-    driverName: string;
-    fleetPartnerId: string;
-  } | null> {
+    batch?: FleetAttributionBatch,
+  ): Promise<FleetDriverAttribution | null> {
     if (!orderId) {
       return null;
     }
+    if (batch?.orders.has(orderId)) {
+      const cached = batch.orders.get(orderId) ?? null;
+      return cached ? { ...cached } : null;
+    }
+    const result = await this.resolveOrderDriverFleetAttributionOnce(
+      orderId,
+      batch,
+    );
+    batch?.orders.set(orderId, result ? { ...result } : null);
+    return result;
+  }
 
+  private async resolveOrderDriverFleetAttributionOnce(
+    orderId: string,
+    batch?: FleetAttributionBatch,
+  ): Promise<FleetDriverAttribution | null> {
     if (typeof this.ownedMobilityService.prepareOrderAction === "function") {
       try {
-        await this.ownedMobilityService.prepareOrderAction({ orderId });
+        if (batch) {
+          await this.ownedMobilityService.prepareOrderAction(
+            { orderId },
+            { preparedServiceBuckets: batch.preparedServiceBuckets },
+          );
+        } else {
+          await this.ownedMobilityService.prepareOrderAction({ orderId });
+        }
       } catch (error) {
         if (
           !(
@@ -1342,9 +1394,7 @@ export class FleetPartnerService implements OnModuleInit {
     }
     const { driverId, asOf } = sourceEvent;
 
-    const affiliations = this.isPersistenceEnabled()
-      ? await this.loadCanonicalDriverAffiliations()
-      : this.driverAffiliations;
+    const affiliations = await this.attributionAffiliations(batch);
 
     const effective = affiliations.filter(
       (affiliation) =>
@@ -1376,15 +1426,10 @@ export class FleetPartnerService implements OnModuleInit {
   async resolveIncidentDriverFleetAttribution(
     driverId: string | null,
     asOf: string | null,
-  ): Promise<{
-    driverId: string;
-    driverName: string;
-    fleetPartnerId: string;
-  } | null> {
+    batch?: FleetAttributionBatch,
+  ): Promise<FleetDriverAttribution | null> {
     if (!driverId || !asOf || !Number.isFinite(Date.parse(asOf))) return null;
-    const affiliations = this.isPersistenceEnabled()
-      ? await this.loadCanonicalDriverAffiliations()
-      : this.driverAffiliations;
+    const affiliations = await this.attributionAffiliations(batch);
     const at = Date.parse(asOf);
     const effective = affiliations.filter(
       (item) =>
