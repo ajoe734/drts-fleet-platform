@@ -124,3 +124,7 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 - 驗收條件：四入口各一組完整走訪證據（截圖/trace + 對應 SHA/CI/部署 revision）；本 VM 不得執行，必須在共享 dev 或等效 hosted 環境完成。
 - required_acceptance：`pwd-login-012_ready`
 - external_gate：`true`（需要可用的 hosted dev 環境與真實 SMTP/TOTP app，不是本機可自證的任務）
+- test_commands：
+  - 本 VM 禁止執行：不得在本機啟動瀏覽器、Docker、playwright 或任何 preview/dev server 來模擬或替代此驗收；本機沒有可產出有效證據的指令。
+  - hosted-only（僅可在共享 dev 或等效 hosted 環境執行）：對 tenant-console-web、enterprise-dispatch-web、agency-portal-web、fleet-partner-portal-web 四個入口各走一次「邀請→設定密碼→TOTP 註冊→登入→登出→重設密碼」，並收集：(1) 每步驟畫面截圖或 browser trace（如 Playwright trace.zip）；(2) 對應的 deploy-dev 或正式環境部署 revision 與 commit SHA；(3) PWD-LOGIN-009、PWD-LOGIN-010、PWD-LOGIN-011 的 CI 綠燈 run 連結。
+  - 證據存放：`docs/04-uat/portal-password-login-20261113/` 或本任務的 `.local/` 證據目錄，依入口與步驟命名；證據完成後才可記錄 `pwd-login-012_ready`。

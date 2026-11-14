@@ -86,7 +86,7 @@ CREATE TABLE iam.identity_password_reset_tokens (
 );
 ```
 
-**Argon2id 參數**：遵循 RFC 9106「RFC 9106 §4 的 second recommended option（非高記憶體伺服器場景）」基線起點 `memory=19 MiB (19456), iterations=2, parallelism=1`，由實作任務在真實 API 容器資源下量測調整並記錄於 migration 旁的 ADR 註記；memory-hard，每使用者隨機 salt（由 argon2 libray 內建產生並編碼進 `password_hash`）。
+**Argon2id 參數**：基線起點 `memory=19 MiB (19456 KiB), iterations=2, parallelism=1`，取自 OWASP Password Storage Cheat Sheet 的 Argon2id 最低建議設定（非 RFC 9106 §4 的建議值；RFC 9106 §4 的兩個建議選項分別是 `memory=2 GiB, iterations=1, parallelism=4`（高記憶體場景）與 `memory=64 MiB, iterations=3, parallelism=4`（第二建議，記憶體受限場景），皆高於此基線）。選擇較低的 OWASP 基線而非 RFC 9106 第二建議的理由：目前 `apps/api` 容器每個 pod 的可用記憶體尚未量測，在未確認併發登入請求下的記憶體餘裕前，先以 OWASP 的較低下限上線以避免記憶體壓力造成的服務降級；實作任務（PWD-LOGIN-002）須在真實 API 容器資源下量測，並於 migration 旁的 ADR 註記中記錄是否上調至 RFC 9106 §4 第二建議值或更高。memory-hard，每使用者隨機 salt（由 argon2 libray 內建產生並編碼進 `password_hash`）。
 
 **Server pepper**：額外的 server-side secret（不是 salt），存於 Secret Manager（`drts-{env}-password-pepper`），hash 時以 `HMAC-SHA256(pepper, password)` 的輸出再餵給 argon2id，等同於「資料庫全部外洩但 pepper 沒有外洩」時仍無法離線暴力破解。`pepper_version` 欄位支援未來輪替（新 pepper 版本上線後，舊版本仍可驗證既有 hash，下次登入成功時 opportunistic rehash 成新版本）。
 
