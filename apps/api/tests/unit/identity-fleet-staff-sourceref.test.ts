@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   CanonicalIdentityMembershipRecord,
@@ -14,6 +16,11 @@ import {
   FLEET_INVITATION_ISSUER,
   IdentityRepository,
 } from "../../src/modules/identity/identity.repository";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
+import { PartnerUserIdentityLinkRepository } from "../../src/modules/tenant-partner/partner-user-identity-link.repository";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 // FLEET-ONB-002 SA/SD §2 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md),
 // table row for each record kind. These are not re-derivations of the
@@ -218,5 +225,163 @@ describe("manageFleetHumanRole recognizes records built with the new sourceRef/s
     ).rejects.toThrow(
       "Target must have an existing active linked partner-human principal.",
     );
+  });
+});
+
+/**
+ * FLEET-ONB-002 acceptance line 290 names both `manageFleetHumanRole` and
+ * `exchangePartnerCallbackSession` as readers that must recognize records
+ * built with these helpers. The describe block above exercises the former
+ * directly; this one exercises the real, unmodified
+ * `exchangePartnerCallbackSession` (oidc-pkce.service.ts, outside this
+ * task's write_scopes — only imported, never changed) so an independent
+ * drift in that call site's own inline sourceRef literals would also fail
+ * here, not just a drift in `manageFleetHumanRole`'s.
+ */
+describe("exchangePartnerCallbackSession recognizes records built with the new sourceRef/scopeRef helpers (FLEET-ONB-002 regression)", () => {
+  const OIDC_CODE = "partner_fleet_staff_sourceref_oidc_subject";
+  const OIDC_SUB = `sub_oidc_${createHash("sha256").update(OIDC_CODE).digest("hex").slice(0, 12)}`;
+  const INVITED_PRINCIPAL_ID = "principal_fleet_fixture_oidc_sourceref_001";
+  // Matches tests/unit/fleet-partner-human-role-authority-20261026.test.ts's
+  // "fleet-demo-001" entry (tenant-partner.service.ts), already seeded as an
+  // active fleet_partner entry; no fixture mutation needed.
+  const ENTRY = "fleet-demo-001";
+
+  beforeEach(() => {
+    vi.stubEnv("APP_ENV", "local");
+    vi.stubEnv("AUTH_MODE", "local");
+    vi.stubEnv("OIDC_MOCK_MODE", "true");
+    vi.stubEnv("JWT_SECRET", "test_jwt_secret_key_32_characters_long_min!");
+  });
+
+  async function setup() {
+    const repository = new IdentityRepository();
+    const link = new PartnerUserIdentityLinkRepository();
+    const tenant = new TenantPartnerService(new AuditNotificationService());
+    const jwt = new JwtAuthService(repository, tenant, undefined, undefined, link);
+    const oidc = new OidcPkceService(jwt, tenant, undefined, link, undefined, repository);
+
+    // createForInvitedPrincipal (this task), not resolveOrCreate: the link's
+    // drtsPassengerId is the invited principal's already-known principalId.
+    const linked = await link.createForInvitedPrincipal(
+      ENTRY,
+      OIDC_SUB,
+      INVITED_PRINCIPAL_ID,
+      "2026-11-14T10:00:00.000Z",
+    );
+    expect(linked).not.toBeNull();
+
+    async function login() {
+      const state = oidc.generateLoginParameters("partner", { partnerId: ENTRY });
+      return oidc.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          code: OIDC_CODE,
+          state: state.state,
+          partnerId: ENTRY,
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+        },
+        { stateToken: state.stateToken },
+      );
+    }
+
+    return { repository, login };
+  }
+
+  it("grants the managed Fleet role once a principal/membership/binding built with the new helpers are seeded", async () => {
+    const { repository, login } = await setup();
+
+    // No principal yet: findPrincipalById(drtsPassengerId) finds nothing, so
+    // exchangePartnerCallbackSession must not grant managed Fleet access.
+    const unassigned = await login();
+    expect(unassigned.identity.membershipId).toBeUndefined();
+
+    const now = "2026-11-14T10:05:00.000Z";
+    await repository.ensurePrincipalRecord({
+      principalId: INVITED_PRINCIPAL_ID,
+      sourceRef: buildFleetPartnerPrincipalSourceRef(INVITED_PRINCIPAL_ID),
+      issuer: "google",
+      subject: `google-sub-${INVITED_PRINCIPAL_ID}`,
+      principalType: "human",
+      email: "fleet.staff.sourceref@example.com",
+      emailVerified: true,
+      displayName: "Fleet Staff SourceRef Fixture",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    } as CanonicalIdentityPrincipalRecord);
+    const membership = await repository.ensureMembershipRecord({
+      membershipId: "fleet-sourceref-test-membership",
+      sourceRef: buildFleetMemberSourceRef(ENTRY, INVITED_PRINCIPAL_ID),
+      principalId: INVITED_PRINCIPAL_ID,
+      realm: "partner",
+      scopeRef: buildFleetScopeRef(ENTRY),
+      tenantId: null,
+      partnerId: "fleet-demo-001",
+      status: "active",
+      invitedByPrincipalId: "manager",
+      invitationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repository.ensureRoleBindingRecord({
+      roleBindingId: "fleet-sourceref-test-binding",
+      sourceRef: buildFleetRoleBindingSourceRef(ENTRY, INVITED_PRINCIPAL_ID),
+      membershipId: membership.membershipId,
+      roleCode: "fleet_partner_ops",
+      grantedByPrincipalId: "manager",
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const granted = await login();
+    expect(granted.identity).toMatchObject({
+      membershipId: membership.membershipId,
+      partnerId: "fleet-demo-001",
+      partnerEntrySlug: ENTRY,
+      roles: ["fleet_partner_ops"],
+    });
+  });
+
+  it("does not grant managed Fleet role access when the principal sourceRef drifts from buildFleetPartnerPrincipalSourceRef's format (format-drift fence)", async () => {
+    const { repository, login } = await setup();
+
+    const now = "2026-11-14T10:05:00.000Z";
+    // Format drift: an off-convention sourceRef, as an uncoordinated change
+    // to the helper (or to exchangePartnerCallbackSession's own inline
+    // literal) could produce.
+    await repository.ensurePrincipalRecord({
+      principalId: INVITED_PRINCIPAL_ID,
+      sourceRef: `jwt_principal:${INVITED_PRINCIPAL_ID}`,
+      issuer: "google",
+      subject: `google-sub-${INVITED_PRINCIPAL_ID}`,
+      principalType: "human",
+      email: "fleet.staff.sourceref@example.com",
+      emailVerified: true,
+      displayName: "Fleet Staff SourceRef Fixture",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    } as CanonicalIdentityPrincipalRecord);
+    await repository.ensureMembershipRecord({
+      membershipId: "fleet-sourceref-drift-membership",
+      sourceRef: buildFleetMemberSourceRef(ENTRY, INVITED_PRINCIPAL_ID),
+      principalId: INVITED_PRINCIPAL_ID,
+      realm: "partner",
+      scopeRef: buildFleetScopeRef(ENTRY),
+      tenantId: null,
+      partnerId: "fleet-demo-001",
+      status: "active",
+      invitedByPrincipalId: "manager",
+      invitationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const result = await login();
+    expect(result.identity.membershipId).toBeUndefined();
   });
 });
