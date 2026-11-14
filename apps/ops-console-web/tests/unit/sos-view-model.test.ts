@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
 import {
+  DEFAULT_SOS_QUEUE_FILTERS,
   applyCanonicalSosDuty,
+  filterSosQueueRows,
   formatSosTimestamp,
   getSosSeverityLabel,
+  getSosStatusKey,
   getSosStatusMeta,
   getSosSupplementText,
   getSosTimelineTitle,
   getSosTypeLabel,
+  hasActiveSosQueueFilters,
   buildDriverNameMap,
   buildSosQueueRows,
   collectUnreportedSosIncidentIds,
@@ -334,5 +338,282 @@ describe("sos-view-model", () => {
         "en",
       ),
     ).toContain("Jul");
+  });
+
+  it("derives stable status keys from exact getSosStatusMeta predicates and filters queue rows by status, severity, and trimmed case-insensitive keyword across raw IDs, driver name, plate, and location without matching localized labels", () => {
+    const nowMs = new Date("2026-07-20T10:10:00.000Z").getTime();
+    const pendingCrit = buildIncident({
+      incidentId: "inc-pending-crit",
+      title: "Traffic accident SOS-20260720-0001",
+      description:
+        "Driver SOS SOS-20260720-0001 submitted from the driver app.",
+      severity: "critical",
+      status: "open",
+      assignedTo: null,
+      relatedDriverId: "drv-101",
+      relatedVehicleId: "veh-101",
+      relatedOrderId: "ZX-240720-0101",
+      location: "信義區松仁路 100 號附近",
+      occurredAt: "2026-07-20T10:05:00.000Z",
+    });
+    const ackedHigh = buildIncident({
+      incidentId: "inc-acked-high",
+      title: "Passenger medical SOS-20260720-0002",
+      description:
+        "Driver SOS SOS-20260720-0002 submitted from the driver app.",
+      category: "passenger_injury",
+      severity: "high",
+      status: "open",
+      assignedTo: "ops-duty-1",
+      relatedDriverId: "drv-102",
+      relatedVehicleId: "veh-102",
+      relatedOrderId: "ZX-240720-0102",
+      location: "大安區忠孝東路四段 45 號",
+      occurredAt: "2026-07-20T10:04:00.000Z",
+    });
+    const invMedium = buildIncident({
+      incidentId: "inc-inv-med",
+      title: "Driver injury SOS-20260720-0003",
+      description:
+        "Driver SOS SOS-20260720-0003 submitted from the driver app.",
+      category: "driver_injury",
+      severity: "medium",
+      status: "investigating",
+      assignedTo: "ops-duty-2",
+      relatedDriverId: "drv-103",
+      relatedVehicleId: "veh-103",
+      relatedOrderId: "ZX-240720-0103",
+      location: "中山區南京東路三段 12 號",
+      occurredAt: "2026-07-20T10:03:00.000Z",
+    });
+    const falseAlarmLow = buildIncident({
+      incidentId: "inc-false-low",
+      title: "Vehicle damage SOS-20260720-0004",
+      description:
+        "Driver SOS SOS-20260720-0004 submitted from the driver app.",
+      category: "vehicle_damage",
+      severity: "low",
+      status: "resolved",
+      assignedTo: "ops-duty-3",
+      resolutionNote: "Driver confirmed FALSE ALARM on phone",
+      relatedDriverId: "drv-104",
+      relatedVehicleId: "veh-104",
+      relatedOrderId: "ZX-240720-0104",
+      location: "松山區民生東路五段 88 號",
+      occurredAt: "2026-07-20T10:02:00.000Z",
+    });
+    const resolvedLow = buildIncident({
+      incidentId: "inc-resolved-low",
+      title: "Safety incident SOS-20260720-0005",
+      description:
+        "Driver SOS SOS-20260720-0005 submitted from the driver app.",
+      category: "safety",
+      severity: "low",
+      status: "resolved",
+      assignedTo: "ops-duty-4",
+      resolutionNote: "Assisted driver and passenger on scene",
+      relatedDriverId: "drv-105",
+      relatedVehicleId: "veh-105",
+      relatedOrderId: "ZX-240720-0105",
+      location: "內湖區瑞光路 258 號",
+      occurredAt: "2026-07-20T10:01:00.000Z",
+    });
+    const closedHigh = buildIncident({
+      incidentId: "inc-closed-high",
+      title: "Traffic accident SOS-20260720-0006",
+      description:
+        "Driver SOS SOS-20260720-0006 submitted from the driver app.",
+      category: "traffic",
+      severity: "high",
+      status: "closed",
+      assignedTo: "ops-duty-5",
+      relatedDriverId: "drv-106",
+      relatedVehicleId: "veh-106",
+      relatedOrderId: "ZX-240720-0106",
+      location: "南港區經貿二路 188 號",
+      occurredAt: "2026-07-20T10:00:00.000Z",
+    });
+
+    expect(getSosStatusKey(pendingCrit)).toBe("pending");
+    expect(getSosStatusKey(ackedHigh)).toBe("acknowledged");
+    expect(getSosStatusKey(invMedium)).toBe("investigating");
+    expect(getSosStatusKey(falseAlarmLow)).toBe("falseAlarm");
+    expect(getSosStatusKey(resolvedLow)).toBe("resolved");
+    expect(getSosStatusKey(closedHigh)).toBe("closed");
+
+    const allIncidents = [
+      closedHigh,
+      resolvedLow,
+      falseAlarmLow,
+      invMedium,
+      ackedHigh,
+      pendingCrit,
+    ];
+    const driverNamesById = new Map([
+      ["drv-101", "吳明翰"],
+      ["drv-102", "林佳穎"],
+      ["drv-103", "陳建宏"],
+      ["drv-104", "張雅婷"],
+      ["drv-105", "黃志豪"],
+      ["drv-106", "李冠宇"],
+    ]);
+    const platesByVehicleId = new Map([
+      ["veh-101", "BKR-2208"],
+      ["veh-102", "TPE-9981"],
+      ["veh-103", "KLM-5512"],
+      ["veh-104", "ABC-1104"],
+      ["veh-105", "DEF-1105"],
+      ["veh-106", "GHI-1106"],
+    ]);
+
+    const zhRows = buildSosQueueRows(allIncidents, {
+      nowMs,
+      driverNamesById,
+      platesByVehicleId,
+      locale: "zh",
+    });
+    const enRows = buildSosQueueRows(allIncidents, {
+      nowMs,
+      driverNamesById,
+      platesByVehicleId,
+      locale: "en",
+    });
+
+    const expectedOrder = [
+      "inc-pending-crit",
+      "inc-acked-high",
+      "inc-inv-med",
+      "inc-false-low",
+      "inc-resolved-low",
+      "inc-closed-high",
+    ];
+    expect(zhRows.map((row) => row.id)).toEqual(expectedOrder);
+
+    // Default and whitespace-only filters preserve all rows and original sorted order
+    expect(hasActiveSosQueueFilters(DEFAULT_SOS_QUEUE_FILTERS)).toBe(false);
+    expect(
+      hasActiveSosQueueFilters({
+        status: "all",
+        severity: "all",
+        keyword: "   ",
+      }),
+    ).toBe(false);
+    expect(hasActiveSosQueueFilters({ status: "pending" })).toBe(true);
+    expect(hasActiveSosQueueFilters({ severity: "critical" })).toBe(true);
+    expect(hasActiveSosQueueFilters({ keyword: "BKR" })).toBe(true);
+
+    expect(
+      filterSosQueueRows(zhRows, DEFAULT_SOS_QUEUE_FILTERS).map((r) => r.id),
+    ).toEqual(expectedOrder);
+    expect(
+      filterSosQueueRows(zhRows, {
+        status: "all",
+        severity: "all",
+        keyword: "   ",
+      }).map((r) => r.id),
+    ).toEqual(expectedOrder);
+
+    // Each status option
+    expect(
+      filterSosQueueRows(zhRows, { status: "pending" }).map((r) => r.id),
+    ).toEqual(["inc-pending-crit"]);
+    expect(
+      filterSosQueueRows(zhRows, { status: "acknowledged" }).map((r) => r.id),
+    ).toEqual(["inc-acked-high"]);
+    expect(
+      filterSosQueueRows(zhRows, { status: "investigating" }).map((r) => r.id),
+    ).toEqual(["inc-inv-med"]);
+    expect(
+      filterSosQueueRows(zhRows, { status: "falseAlarm" }).map((r) => r.id),
+    ).toEqual(["inc-false-low"]);
+    expect(
+      filterSosQueueRows(zhRows, { status: "resolved" }).map((r) => r.id),
+    ).toEqual(["inc-resolved-low"]);
+    expect(
+      filterSosQueueRows(zhRows, { status: "closed" }).map((r) => r.id),
+    ).toEqual(["inc-closed-high"]);
+
+    // Each severity option
+    expect(
+      filterSosQueueRows(zhRows, { severity: "critical" }).map((r) => r.id),
+    ).toEqual(["inc-pending-crit"]);
+    expect(
+      filterSosQueueRows(zhRows, { severity: "high" }).map((r) => r.id),
+    ).toEqual(["inc-acked-high", "inc-closed-high"]);
+    expect(
+      filterSosQueueRows(zhRows, { severity: "medium" }).map((r) => r.id),
+    ).toEqual(["inc-inv-med"]);
+    expect(
+      filterSosQueueRows(zhRows, { severity: "low" }).map((r) => r.id),
+    ).toEqual(["inc-false-low", "inc-resolved-low"]);
+
+    // AND combination (status + severity + keyword)
+    expect(
+      filterSosQueueRows(zhRows, {
+        status: "resolved",
+        severity: "low",
+        keyword: "  def-1105 ",
+      }).map((r) => r.id),
+    ).toEqual(["inc-resolved-low"]);
+    expect(
+      filterSosQueueRows(zhRows, {
+        status: "falseAlarm",
+        severity: "low",
+        keyword: "def-1105",
+      }),
+    ).toEqual([]);
+
+    // Case-insensitive keyword matching across eventNo, incidentId, relatedOrderId, relatedDriverId, relatedVehicleId, driver name, plate, and location
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "sos-20260720-0003" }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["inc-inv-med"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "INC-ACKED-HIGH" }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["inc-acked-high"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "zx-240720-0106" }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["inc-closed-high"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "DRV-104" }).map((r) => r.id),
+    ).toEqual(["inc-false-low"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "veh-105" }).map((r) => r.id),
+    ).toEqual(["inc-resolved-low"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "林佳穎" }).map((r) => r.id),
+    ).toEqual(["inc-acked-high"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "bkr-2208" }).map((r) => r.id),
+    ).toEqual(["inc-pending-crit"]);
+    expect(
+      filterSosQueueRows(zhRows, { keyword: "瑞光路 258" }).map((r) => r.id),
+    ).toEqual(["inc-resolved-low"]);
+
+    // Localized status/severity/type labels are NOT used as search keys; locale changes do not alter result identities
+    expect(filterSosQueueRows(zhRows, { keyword: "待確認" })).toEqual([]);
+    expect(
+      filterSosQueueRows(enRows, { keyword: "Awaiting acknowledgement" }),
+    ).toEqual([]);
+    expect(filterSosQueueRows(zhRows, { keyword: "重大" })).toEqual([]);
+    expect(filterSosQueueRows(enRows, { keyword: "Critical" })).toEqual([]);
+    expect(filterSosQueueRows(zhRows, { keyword: "交通事故" })).toEqual([]);
+    expect(filterSosQueueRows(enRows, { keyword: "Traffic accident" })).toEqual(
+      [],
+    );
+
+    const combinedFilter = {
+      status: "acknowledged" as const,
+      severity: "high" as const,
+      keyword: "tpe-9981",
+    };
+    expect(filterSosQueueRows(zhRows, combinedFilter).map((r) => r.id)).toEqual(
+      filterSosQueueRows(enRows, combinedFilter).map((r) => r.id),
+    );
   });
 });

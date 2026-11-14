@@ -4813,6 +4813,19 @@ const en = {
   "sos.nav.sos": "SOS emergencies",
   "sos.nav.trips": "Trips",
   "sos.nav.records": "Operations records",
+  "sos.queue.resultCount": "Showing {filtered} / {total}",
+  "sos.filter.title": "Filter SOS queue",
+  "sos.filter.allStatuses": "All statuses",
+  "sos.filter.allSeverities": "All severities",
+  "sos.filter.keyword": "Keyword",
+  "sos.filter.keywordPlaceholder":
+    "Event no., incident, order, driver, vehicle, plate, or address",
+  "sos.filter.apply": "Apply",
+  "sos.filter.reset": "Reset",
+  "sos.filter.resetAction": "Reset filters",
+  "sos.filter.emptyTitle": "No matching SOS events",
+  "sos.filter.emptyBody":
+    "No SOS events match the current filters. Adjust the status, severity, or keyword criteria, or reset to view the full queue.",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -9335,6 +9348,19 @@ const zh: Record<keyof typeof en, string> = {
   "sos.nav.sos": "SOS 緊急事件",
   "sos.nav.trips": "行程 · Trips",
   "sos.nav.records": "營運紀錄 · Records",
+  "sos.queue.resultCount": "顯示 {filtered} / {total} 筆",
+  "sos.filter.title": "篩選 SOS 佇列",
+  "sos.filter.allStatuses": "全部狀態",
+  "sos.filter.allSeverities": "全部嚴重度",
+  "sos.filter.keyword": "關鍵字",
+  "sos.filter.keywordPlaceholder":
+    "事件編號、事故、訂單、駕駛、車輛、車牌或地址",
+  "sos.filter.apply": "套用",
+  "sos.filter.reset": "重設",
+  "sos.filter.resetAction": "重設篩選",
+  "sos.filter.emptyTitle": "沒有符合篩選條件的 SOS 事件",
+  "sos.filter.emptyBody":
+    "目前沒有符合篩選條件的 SOS 事件。請調整狀態、嚴重度或關鍵字條件，或重設以檢視完整佇列。",
 };
 
 export const translations: Record<Locale, Record<string, string>> = { en, zh };

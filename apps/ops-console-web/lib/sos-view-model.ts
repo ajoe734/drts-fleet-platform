@@ -17,6 +17,29 @@ const GENERATED_DESCRIPTION_PATTERN = new RegExp(
 
 export type SosPillTone = Exclude<CanvasTone, "neutral">;
 
+export type SosStatusKey =
+  | "pending"
+  | "acknowledged"
+  | "investigating"
+  | "resolved"
+  | "falseAlarm"
+  | "closed";
+
+export type SosStatusFilter = "all" | SosStatusKey;
+export type SosSeverityFilter = "all" | IncidentSeverity;
+
+export interface SosQueueFilters {
+  status: SosStatusFilter;
+  severity: SosSeverityFilter;
+  keyword: string;
+}
+
+export const DEFAULT_SOS_QUEUE_FILTERS: SosQueueFilters = {
+  status: "all",
+  severity: "all",
+  keyword: "",
+};
+
 type DriverNameById = Map<string, string>;
 type PlateByVehicleId = Map<string, string>;
 
@@ -135,61 +158,84 @@ export function buildVehiclePlateMap(
   );
 }
 
-export function getSosStatusMeta(
-  incident: IncidentRecord,
-  locale: Locale = "zh",
-): SosStatusMeta {
+export function getSosStatusKey(incident: IncidentRecord): SosStatusKey {
   if (incident.status === "open" && !incident.assignedTo) {
-    return {
-      label: t("sos.status.pending", locale),
-      tone: "danger",
-      isPending: true,
-      isAcked: false,
-      isClosed: false,
-    };
+    return "pending";
   }
 
   if (incident.status === "open" && incident.assignedTo) {
-    return {
-      label: t("sos.status.acknowledged", locale),
-      tone: "accent",
-      isPending: false,
-      isAcked: true,
-      isClosed: false,
-    };
+    return "acknowledged";
   }
 
   if (incident.status === "investigating") {
-    return {
-      label: t("sos.status.investigating", locale),
-      tone: "warn",
-      isPending: false,
-      isAcked: true,
-      isClosed: false,
-    };
+    return "investigating";
   }
 
   if (incident.status === "resolved") {
     const isFalseAlarm =
       incident.resolutionNote?.toLowerCase().includes("false alarm") === true;
-    return {
-      label: isFalseAlarm
-        ? t("sos.status.falseAlarm", locale)
-        : t("sos.status.resolved", locale),
-      tone: "info",
-      isPending: false,
-      isAcked: true,
-      isClosed: true,
-    };
+    return isFalseAlarm ? "falseAlarm" : "resolved";
   }
 
-  return {
-    label: t("sos.status.closed", locale),
-    tone: "success",
-    isPending: false,
-    isAcked: true,
-    isClosed: true,
-  };
+  return "closed";
+}
+
+export function getSosStatusMeta(
+  incident: IncidentRecord,
+  locale: Locale = "zh",
+): SosStatusMeta {
+  const statusKey = getSosStatusKey(incident);
+
+  switch (statusKey) {
+    case "pending":
+      return {
+        label: t("sos.status.pending", locale),
+        tone: "danger",
+        isPending: true,
+        isAcked: false,
+        isClosed: false,
+      };
+    case "acknowledged":
+      return {
+        label: t("sos.status.acknowledged", locale),
+        tone: "accent",
+        isPending: false,
+        isAcked: true,
+        isClosed: false,
+      };
+    case "investigating":
+      return {
+        label: t("sos.status.investigating", locale),
+        tone: "warn",
+        isPending: false,
+        isAcked: true,
+        isClosed: false,
+      };
+    case "falseAlarm":
+      return {
+        label: t("sos.status.falseAlarm", locale),
+        tone: "info",
+        isPending: false,
+        isAcked: true,
+        isClosed: true,
+      };
+    case "resolved":
+      return {
+        label: t("sos.status.resolved", locale),
+        tone: "info",
+        isPending: false,
+        isAcked: true,
+        isClosed: true,
+      };
+    case "closed":
+      return {
+        label: t("sos.status.closed", locale),
+        tone: "success",
+        isPending: false,
+        isAcked: true,
+        isClosed: true,
+      };
+  }
 }
 
 export function getSosSeverityLabel(
@@ -375,6 +421,67 @@ export function buildSosQueueRows(
   });
 
   return rows;
+}
+
+export function hasActiveSosQueueFilters(
+  filters: Partial<SosQueueFilters> | null | undefined,
+): boolean {
+  if (!filters) {
+    return false;
+  }
+
+  return (
+    (filters.status !== undefined && filters.status !== "all") ||
+    (filters.severity !== undefined && filters.severity !== "all") ||
+    (filters.keyword !== undefined && filters.keyword.trim().length > 0)
+  );
+}
+
+export function filterSosQueueRows(
+  rows: readonly SosQueueRow[],
+  filters?: Partial<SosQueueFilters> | null,
+): SosQueueRow[] {
+  const statusFilter = filters?.status ?? "all";
+  const severityFilter = filters?.severity ?? "all";
+  const keyword = (filters?.keyword ?? "").trim().toLowerCase();
+
+  return rows.filter((row) => {
+    if (
+      statusFilter !== "all" &&
+      getSosStatusKey(row.incident) !== statusFilter
+    ) {
+      return false;
+    }
+
+    if (severityFilter !== "all" && row.incident.severity !== severityFilter) {
+      return false;
+    }
+
+    if (keyword.length === 0) {
+      return true;
+    }
+
+    const candidates = [
+      row.eventNo,
+      extractSosEventNo(row.incident),
+      row.id,
+      row.incident.incidentId,
+      row.incident.relatedOrderId,
+      row.incident.relatedDriverId,
+      row.incident.relatedVehicleId,
+      row.driverLabel !== "—" ? row.driverLabel : null,
+      row.plateLabel !== "—" ? row.plateLabel : null,
+      row.incident.location,
+      row.locationLabel !== "—" ? row.locationLabel : null,
+    ];
+
+    return candidates.some(
+      (candidate) =>
+        typeof candidate === "string" &&
+        candidate.trim().length > 0 &&
+        candidate.toLowerCase().includes(keyword),
+    );
+  });
 }
 
 export function getSosTimelineTitle(

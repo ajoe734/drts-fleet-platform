@@ -30,16 +30,22 @@ import {
   getOpsClient,
 } from "../../lib/api-client";
 import {
+  DEFAULT_SOS_QUEUE_FILTERS,
   applyCanonicalSosDuty,
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
   collectUnreportedSosIncidentIds,
+  filterSosQueueRows,
   formatSosActorLabel,
+  hasActiveSosQueueFilters,
   isSosIncident,
   unwrapListItems,
   type SosPillTone,
+  type SosQueueFilters,
   type SosQueueRow,
+  type SosSeverityFilter,
+  type SosStatusFilter,
 } from "../../lib/sos-view-model";
 import { useTranslation } from "../../lib/i18n";
 
@@ -151,6 +157,13 @@ export default function SosQueuePage() {
   const [latencySummary, setLatencySummary] =
     useState<DriverSosAlertLatencySummary | null>(null);
   const [renderReceiptRetry, setRenderReceiptRetry] = useState(0);
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const [draftFilters, setDraftFilters] = useState<SosQueueFilters>(
+    DEFAULT_SOS_QUEUE_FILTERS,
+  );
+  const [appliedFilters, setAppliedFilters] = useState<SosQueueFilters>(
+    DEFAULT_SOS_QUEUE_FILTERS,
+  );
   const reportedAlertIdsRef = useRef(new Set<string>());
 
   const driverNamesById = buildDriverNameMap(drivers);
@@ -161,6 +174,10 @@ export default function SosQueuePage() {
     platesByVehicleId,
     locale: activeLocale,
   });
+  const filteredRows = filterSosQueueRows(rows, appliedFilters);
+  const hasActiveFilters = hasActiveSosQueueFilters(appliedFilters);
+  const isFilteredEmpty =
+    !loading && !hasLoadError && rows.length > 0 && filteredRows.length === 0;
   const pendingCount = rows.filter((row) => row.isPending).length;
   const pendingAlert = rows.find((row) => row.isCriticalAlert);
   const pendingAlertId = pendingAlert?.incident.incidentId ?? null;
@@ -170,6 +187,15 @@ export default function SosQueuePage() {
     rows,
     reportedAlertIdsRef.current,
   ).join("|");
+
+  const handleApplyFilters = () => {
+    setAppliedFilters({ ...draftFilters });
+  };
+
+  const handleResetFilters = () => {
+    setDraftFilters({ ...DEFAULT_SOS_QUEUE_FILTERS });
+    setAppliedFilters({ ...DEFAULT_SOS_QUEUE_FILTERS });
+  };
 
   const fetchRuntime = async () => {
     try {
@@ -440,7 +466,14 @@ export default function SosQueuePage() {
           }
           subtitle={t("sos.queue.subtitle")}
           actions={
-            <Btn theme={theme} icon="filter">
+            <Btn
+              theme={theme}
+              icon="filter"
+              variant={
+                isFilterOpen || hasActiveFilters ? "primary" : "secondary"
+              }
+              onClick={() => setIsFilterOpen((current) => !current)}
+            >
               {t("sos.queue.filter")}
             </Btn>
           }
@@ -553,11 +586,191 @@ export default function SosQueuePage() {
             />
           </Card>
 
+          {isFilterOpen ? (
+            <Card theme={theme} title={t("sos.filter.title")}>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleApplyFilters();
+                }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 12,
+                  alignItems: "end",
+                }}
+              >
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.field.status")}</span>
+                  <select
+                    aria-label={t("sos.field.status")}
+                    value={draftFilters.status}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        status: event.target.value as SosStatusFilter,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                    }}
+                  >
+                    <option value="all">{t("sos.filter.allStatuses")}</option>
+                    <option value="pending">{t("sos.status.pending")}</option>
+                    <option value="acknowledged">
+                      {t("sos.status.acknowledged")}
+                    </option>
+                    <option value="investigating">
+                      {t("sos.status.investigating")}
+                    </option>
+                    <option value="resolved">{t("sos.status.resolved")}</option>
+                    <option value="falseAlarm">
+                      {t("sos.status.falseAlarm")}
+                    </option>
+                    <option value="closed">{t("sos.status.closed")}</option>
+                  </select>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.field.severity")}</span>
+                  <select
+                    aria-label={t("sos.field.severity")}
+                    value={draftFilters.severity}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        severity: event.target.value as SosSeverityFilter,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                    }}
+                  >
+                    <option value="all">{t("sos.filter.allSeverities")}</option>
+                    <option value="critical">
+                      {t("sos.severity.critical")}
+                    </option>
+                    <option value="high">{t("sos.severity.high")}</option>
+                    <option value="medium">{t("sos.severity.medium")}</option>
+                    <option value="low">{t("sos.severity.low")}</option>
+                  </select>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.filter.keyword")}</span>
+                  <input
+                    type="text"
+                    aria-label={t("sos.filter.keyword")}
+                    placeholder={t("sos.filter.keywordPlaceholder")}
+                    value={draftFilters.keyword}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        keyword: event.target.value,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </label>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Btn theme={theme} variant="primary" type="submit">
+                    {t("sos.filter.apply")}
+                  </Btn>
+                  <Btn
+                    theme={theme}
+                    variant="secondary"
+                    type="button"
+                    onClick={handleResetFilters}
+                  >
+                    {t("sos.filter.reset")}
+                  </Btn>
+                </div>
+              </form>
+            </Card>
+          ) : null}
+
           <Card
             theme={theme}
             padding={0}
             title={
-              loading ? t("sos.common.loading") : t("sos.queue.tableTitle")
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>
+                  {loading
+                    ? t("sos.common.loading")
+                    : t("sos.queue.tableTitle")}
+                </span>
+                {!loading ? (
+                  <Pill
+                    theme={theme}
+                    tone={hasActiveFilters ? "accent" : "neutral"}
+                  >
+                    <span data-testid="sos-queue-result-count">
+                      {t("sos.queue.resultCount", {
+                        filtered: filteredRows.length,
+                        total: rows.length,
+                      })}
+                    </span>
+                  </Pill>
+                ) : null}
+              </div>
             }
             actions={
               <button
@@ -661,8 +874,49 @@ export default function SosQueuePage() {
                 },
                 { h: t("sos.field.owner"), k: "ackLabel", w: 124 },
               ]}
-              rows={rows}
+              rows={filteredRows}
             />
+            {isFilteredEmpty ? (
+              <div
+                data-testid="sos-queue-filtered-empty"
+                style={{
+                  padding: 20,
+                  borderTop: `1px solid ${theme.border}`,
+                  background: theme.surfaceLo,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  alignItems: "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: theme.text,
+                  }}
+                >
+                  {t("sos.filter.emptyTitle")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {t("sos.filter.emptyBody")}
+                </div>
+                <Btn
+                  theme={theme}
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleResetFilters}
+                >
+                  {t("sos.filter.resetAction")}
+                </Btn>
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>
