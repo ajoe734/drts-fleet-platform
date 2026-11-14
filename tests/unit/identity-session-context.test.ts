@@ -1,8 +1,174 @@
-import { describe, expect, it, vi } from "vitest";
+import { generate } from "otplib";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { AgencyDirectoryRepository } from "../../apps/api/src/modules/agency-access/agency-directory.repository";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { TotpCredentialRepository } from "../../apps/api/src/modules/auth/totp-credential.repository";
+import { TotpService } from "../../apps/api/src/modules/auth/totp.service";
 import { BreakGlassService } from "../../apps/api/src/modules/identity/break-glass.service";
 import { IdentityController } from "../../apps/api/src/modules/identity/identity.controller";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
+import {
+  TenantInvitationDeliveryService,
+  type TenantInvitationDeliveryRequest,
+} from "../../apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+
+// PWD-LOGIN-008 (SA/SD §7/§8): fixture for driving a real password+TOTP
+// login (`AuthController.passwordLogin` -> `resolvePasswordLoginAmr` ->
+// `JwtAuthService.issueSessionToken` -> `IdentityRepository.createSession`)
+// so scenario 8 below exercises `getSessionContext` against a session the
+// real issuer produced, not one seeded directly into the repository.
+const PRIOR_ENV = { ...process.env };
+const CORRECT_PASSWORD = "correct horse battery staple";
+const TOTP_KEY_V1 = Buffer.alloc(
+  32,
+  "identity-session-context-totp-key",
+).toString("base64");
+
+beforeAll(() => {
+  process.env.APP_ENV = "local";
+  process.env.AUTH_MODE = "local";
+  process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
+  process.env.PASSWORD_PEPPER_SECRETS_JSON = JSON.stringify({
+    v1: "identity-session-context-test-pepper-32chars!",
+  });
+  process.env.PASSWORD_PEPPER_CURRENT_VERSION = "v1";
+  process.env.TOTP_ENCRYPTION_KEYS_JSON = JSON.stringify({
+    activeKeyId: "v1",
+    keys: { v1: TOTP_KEY_V1 },
+  });
+});
+
+afterAll(() => {
+  process.env = { ...PRIOR_ENV };
+});
+
+class CapturingInvitationDelivery extends TenantInvitationDeliveryService {
+  readonly tokens = new Map<string, string>();
+
+  override async send(request: TenantInvitationDeliveryRequest) {
+    this.tokens.set(request.invitationId, request.rawToken);
+    return super.send(request);
+  }
+}
+
+function createLoginFixture() {
+  const identityRepository = new IdentityRepository();
+  const agencyDirectoryRepository = new AgencyDirectoryRepository();
+  const securityEventsService = new SecurityEventsService();
+  const totpCredentialRepository = new TotpCredentialRepository();
+  const totpService = new TotpService(totpCredentialRepository);
+  const delivery = new CapturingInvitationDelivery();
+  const tenantPartnerService = new TenantPartnerService(
+    new AuditNotificationService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    identityRepository,
+    identityRepository,
+    delivery,
+  );
+  const jwtAuthService = new JwtAuthService(
+    identityRepository,
+    tenantPartnerService,
+    undefined,
+    agencyDirectoryRepository,
+  );
+  const authController = new AuthController(
+    jwtAuthService,
+    tenantPartnerService,
+    {} as never,
+    securityEventsService,
+    undefined,
+    undefined,
+    identityRepository,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    agencyDirectoryRepository,
+    totpService,
+    totpCredentialRepository,
+  );
+  return {
+    identityRepository,
+    tenantPartnerService,
+    delivery,
+    totpService,
+    authController,
+  };
+}
+
+async function createActiveTenantPasswordUser(
+  fixture: ReturnType<typeof createLoginFixture>,
+  options: { tenantId: string; email: string },
+) {
+  await fixture.tenantPartnerService.createTenantUser(options.tenantId, {
+    email: options.email,
+    displayName: "Identity Session Context Fixture",
+    roleCode: "tenant_viewer",
+  });
+  const invitation = fixture.identityRepository
+    .listInvitations()
+    .find(
+      (candidate) =>
+        candidate.email.toLowerCase() === options.email.toLowerCase(),
+    )!;
+  const rawToken = fixture.delivery.tokens.get(invitation.invitationId)!;
+  await fixture.tenantPartnerService.acceptTenantInvitationWithPassword({
+    invitationToken: rawToken,
+    password: CORRECT_PASSWORD,
+  });
+  const principal = fixture.identityRepository
+    .listPrincipals()
+    .find(
+      (candidate) =>
+        candidate.email?.toLowerCase() === options.email.toLowerCase(),
+    )!;
+  return { principal };
+}
+
+async function enrollAndConfirmTotp(
+  totpService: TotpService,
+  principalId: string,
+): Promise<{ secret: string }> {
+  const enrollment = await totpService.enroll(
+    principalId,
+    "tenant:identity-session-context-fixture",
+  );
+  const confirmCode = await generate({ secret: enrollment.secret });
+  await totpService.confirm(principalId, confirmCode);
+  return { secret: enrollment.secret };
+}
+
+/** Advances past the step `confirm()` already consumed so the next
+ * generated code lands on a fresh, unused 30s step. */
+async function freshLoginCode(secret: string): Promise<string> {
+  vi.useFakeTimers();
+  try {
+    vi.advanceTimersByTime(31_000);
+    return await generate({ secret });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+type PasswordLoginEnvelope = {
+  data: {
+    identity: {
+      sessionId?: string;
+      tokenVersion?: number;
+      amr?: string[];
+    };
+  };
+};
 
 const mutation = {
   reasonCode: "INCIDENT",
@@ -375,9 +541,7 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
       // Advance past the TTL with no explicit expireDue/close call -- the
       // grant's own `status` field is still "active" in storage.
       vi.setSystemTime(new Date("2026-09-25T14:02:00.000Z"));
-      const afterExpiry = await controller.getSessionContext(
-        callerIdentity(),
-      );
+      const afterExpiry = await controller.getSessionContext(callerIdentity());
       expect(afterExpiry.data.sessionActive).toBe(true);
       expect(afterExpiry.data.activeBreakGlassGrants).toEqual([]);
     } finally {
@@ -443,5 +607,69 @@ describe("IdentityController.getSessionContext (UI17-IAM-BREAK-GLASS-READ-CONTRA
     const result = await controller.getSessionContext(callerIdentity());
     expect(result.data.sessionActive).toBe(true);
     expect(result.data.activeBreakGlassGrants).toEqual([]);
+  });
+
+  // PWD-LOGIN-008 (SA/SD §8): a password(+TOTP) login issues its session
+  // through the exact same `JwtAuthService.issueSessionToken` ->
+  // `createSession` path as the Google OIDC login, only with
+  // `authMethods: ["pwd", "otp"]` instead of an OIDC `amr`. This endpoint
+  // must recognize that session identically to every scenario above -- it
+  // never branches on login method. Driven through the real entry chain
+  // (`AuthController.passwordLogin`) rather than a hand-seeded session row,
+  // so this also proves `resolvePasswordLoginAmr`'s real-verified `amr`
+  // reaches a session `getSessionContext` recognizes as active.
+  it("scenario 8 (PWD-LOGIN-008): a password+TOTP session (authMethods ['pwd','otp']) is recognized as active identically to an OIDC session", async () => {
+    const loginFixture = createLoginFixture();
+    const tenantId = "tenant-identity-session-context-pwd008";
+    const { principal } = await createActiveTenantPasswordUser(loginFixture, {
+      tenantId,
+      email: "pwd008-context@example.com",
+    });
+    const { secret } = await enrollAndConfirmTotp(
+      loginFixture.totpService,
+      principal.principalId,
+    );
+    const totpCode = await freshLoginCode(secret);
+
+    const envelope = (await loginFixture.authController.passwordLogin(
+      "tenant",
+      {
+        email: "pwd008-context@example.com",
+        password: CORRECT_PASSWORD,
+        tenantId,
+        totpCode,
+      },
+    )) as PasswordLoginEnvelope;
+    expect(envelope.data.identity.amr).toEqual(["pwd", "otp"]);
+
+    const issuedSessionId = envelope.data.identity.sessionId!;
+    const issuedPrincipalId = principal.principalId;
+    const issuedTokenVersion = envelope.data.identity.tokenVersion!;
+    const stored =
+      await loginFixture.identityRepository.getSession(issuedSessionId);
+    expect(stored?.authMethods).toEqual(["pwd", "otp"]);
+    expect(stored?.principalId).toBe(issuedPrincipalId);
+
+    const breakGlassService = new BreakGlassService(
+      loginFixture.identityRepository,
+    );
+    const controller = new IdentityController(
+      loginFixture.identityRepository,
+      undefined,
+      undefined,
+      undefined,
+      breakGlassService,
+    );
+
+    const result = await controller.getSessionContext(
+      callerIdentity({
+        principalId: issuedPrincipalId,
+        sessionId: issuedSessionId,
+        tokenVersion: issuedTokenVersion,
+      }),
+    );
+    expect(result.data.sessionActive).toBe(true);
+    expect(result.data.principalId).toBe(issuedPrincipalId);
+    expect(result.data.sessionId).toBe(issuedSessionId);
   });
 });
