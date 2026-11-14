@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -751,5 +752,126 @@ describe("Ops SOS complete bilingual journey across all 5 routes and subnavigati
     expect(screen.getByText("操作值班員")).toBeTruthy();
     expect(screen.getByText("系統")).toBeTruthy();
     recordsView.unmount();
+  });
+
+  it("preserves active critical SOS alert audio cadence across mid-interval locale switches without extra beep or interval reset", async () => {
+    localStorage.removeItem("drts-sos-sound-off");
+    createFixture();
+    vi.useFakeTimers();
+
+    let beepCount = 0;
+    const originalAudioContext = window.AudioContext;
+    class FakeAudioContext {
+      state = "running";
+      currentTime = 0;
+      destination = {};
+      resume = vi.fn(async () => undefined);
+      close = vi.fn(async () => undefined);
+      createGain = vi.fn(() => ({
+        connect: vi.fn(),
+        gain: { setValueAtTime: vi.fn() },
+      }));
+      createOscillator = vi.fn(() => {
+        const osc: {
+          type: string;
+          frequency: { setValueAtTime: ReturnType<typeof vi.fn> };
+          connect: ReturnType<typeof vi.fn>;
+          onended: (() => void) | null;
+          start: ReturnType<typeof vi.fn>;
+          stop: ReturnType<typeof vi.fn>;
+        } = {
+          type: "sine",
+          frequency: { setValueAtTime: vi.fn() },
+          connect: vi.fn(),
+          onended: null,
+          start: vi.fn(() => {
+            beepCount += 1;
+          }),
+          stop: vi.fn(() => {
+            osc.onended?.();
+          }),
+        };
+        return osc;
+      });
+    }
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      writable: true,
+      value: FakeAudioContext,
+    });
+
+    try {
+      const view = render(
+        <LocaleHarness defaultLocale="en">
+          <SosQueuePage />
+        </LocaleHarness>,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      expect(screen.getAllByText("Alert sound on").length).toBeGreaterThan(0);
+      expect(beepCount).toBe(1);
+
+      // Advance 2500ms into the 4000ms alert cadence
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(beepCount).toBe(1);
+
+      // Switch locale mid-interval: must not emit an extra immediate beep or reset the 4000ms timer
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("switch-locale-zh"));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getAllByText("提示音已啟用").length).toBeGreaterThan(0);
+      expect(beepCount).toBe(1);
+
+      // Remaining 1500ms of the original 4000ms interval triggers the scheduled second beep
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(beepCount).toBe(2);
+
+      // Toggling sound off stops the cadence; re-enabling sound emits one beep
+      await act(async () => {
+        fireEvent.click(screen.getAllByText("提示音已啟用")[0]!);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getAllByText("提示音未啟用").length).toBeGreaterThan(0);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      expect(beepCount).toBe(2);
+
+      await act(async () => {
+        fireEvent.click(screen.getAllByText("提示音未啟用")[0]!);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getAllByText("提示音已啟用").length).toBeGreaterThan(0);
+      expect(beepCount).toBe(4); // toggleSound immediate beep + effect start beep
+
+      // Acknowledging canonical event clears critical alert state and stops cadence
+      await act(async () => {
+        fireEvent.click(
+          screen.getAllByRole("button", { name: "確認接手" })[0]!,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      expect(beepCount).toBe(4);
+
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+      Object.defineProperty(window, "AudioContext", {
+        configurable: true,
+        writable: true,
+        value: originalAudioContext,
+      });
+    }
   });
 });

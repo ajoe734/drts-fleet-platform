@@ -163,6 +163,7 @@ export default function SosQueuePage() {
   });
   const pendingCount = rows.filter((row) => row.isPending).length;
   const pendingAlert = rows.find((row) => row.isCriticalAlert);
+  const pendingAlertId = pendingAlert?.incident.incidentId ?? null;
   const currentActorId = identity?.actorId?.trim() || DEFAULT_OPS_ACTOR_ID;
   const currentActorLabel = formatSosActorLabel(currentActorId);
   const renderedIncidentKey = collectUnreportedSosIncidentIds(
@@ -255,7 +256,7 @@ export default function SosQueuePage() {
   }, []);
 
   useEffect(() => {
-    if (!pendingAlert || soundOff) {
+    if (!pendingAlertId || soundOff) {
       return;
     }
 
@@ -277,7 +278,7 @@ export default function SosQueuePage() {
       active = false;
       clearInterval(timer);
     };
-  }, [pendingAlert, soundOff]);
+  }, [pendingAlertId, soundOff]);
 
   useEffect(() => {
     const incidentIds = renderedIncidentKey
