@@ -28,11 +28,11 @@ import {
 import {
   defer,
   distinctUntilChanged,
+  exhaustMap,
   filter,
   from,
   map,
   type Observable,
-  switchMap,
   timer,
 } from "rxjs";
 
@@ -2262,7 +2262,7 @@ export class MultiTaxiService implements OnModuleInit {
     return defer(() => {
       let previous: PassengerRideAuthorityView | null = null;
       return timer(0, 3_000).pipe(
-        switchMap(() => from(read())),
+        exhaustMap(() => from(read())),
         map((view) => ({
           view,
           eventType: this.resolvePassengerEventType(view),

@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ConsumerNotificationOutboxRecord,
   PassengerRideSseEventEnvelope,
+  PassengerRideTracking,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import type { MaskedCallPort } from "../../src/modules/multi-taxi/masked-call.port";
 import { UnavailableMaskedCallPort } from "../../src/modules/multi-taxi/masked-call.port";
 import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
+import type { MultiTaxiRepository } from "../../src/modules/multi-taxi/multi-taxi.repository";
 import type { PassengerPushPort } from "../../src/modules/multi-taxi/passenger-push.port";
 import { UnavailablePassengerPushPort } from "../../src/modules/multi-taxi/passenger-push.port";
 
@@ -21,6 +23,7 @@ type MutableOrder = {
 
 function createHarness(options?: {
   orderStatus?: string;
+  tracking?: () => Promise<PassengerRideTracking | null>;
   assigned?: boolean;
   assignmentVersion?: number;
   passenger?: { passengerId?: string | null; name: string; phone: string };
@@ -61,7 +64,7 @@ function createHarness(options?: {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
     resolvePersistedOrder: vi.fn(async () => ({ ...order })),
-    resolvePassengerRideTracking: async () => null,
+    resolvePassengerRideTracking: options?.tracking ?? (async () => null),
     resolvePersistedPassengerAssignmentDisclosure: vi.fn(
       async () => assignment,
     ),
@@ -237,7 +240,9 @@ describe("P5-PAX-001 passenger SSE version authority", () => {
 describe("P5-PAX-001 passenger token secrecy", () => {
   it("persists only a peppered digest and never the raw token", async () => {
     vi.stubEnv("PASSENGER_RIDE_TOKEN_PEPPER", "unit-test-pepper");
-    const persistRideAccessToken = vi.fn(async () => undefined);
+    const persistRideAccessToken = vi.fn<
+      MultiTaxiRepository["persistRideAccessToken"]
+    >(async () => undefined);
     const { service, order } = createHarness({
       repository: {
         persistRideAccessToken,
@@ -252,10 +257,9 @@ describe("P5-PAX-001 passenger token secrecy", () => {
     const rawToken = ride.passengerAccess.accessToken;
 
     expect(persistRideAccessToken).toHaveBeenCalledTimes(1);
-    const [persistedToken, digest] = persistRideAccessToken.mock.calls[0] as [
-      Record<string, unknown>,
-      string,
-    ];
+    const persistedCall = persistRideAccessToken.mock.calls[0];
+    if (!persistedCall) throw new Error("Expected persisted token call.");
+    const [persistedToken, digest] = persistedCall;
     expect(digest).toMatch(/^[a-f0-9]{64}$/);
     expect(digest).not.toBe(rawToken);
     expect(JSON.stringify(persistedToken)).not.toContain(rawToken);
@@ -302,7 +306,9 @@ describe("P5-PAX-001 passenger token secrecy", () => {
 
   it("hashes a phone-only passenger into the subject ref instead of storing the number", async () => {
     vi.stubEnv("PASSENGER_SUBJECT_PEPPER", "unit-test-pepper");
-    const persistRideAccessToken = vi.fn(async () => undefined);
+    const persistRideAccessToken = vi.fn<
+      MultiTaxiRepository["persistRideAccessToken"]
+    >(async () => undefined);
     const phone = "0987654321";
     const { service, order } = createHarness({
       passenger: { passengerId: null, name: "無帳號乘客", phone },
@@ -314,9 +320,9 @@ describe("P5-PAX-001 passenger token secrecy", () => {
     });
     await issueAccessToken(service, order);
 
-    const [persistedToken] = persistRideAccessToken.mock.calls[0] as [
-      Record<string, unknown>,
-    ];
+    const persistedCall = persistRideAccessToken.mock.calls[0];
+    if (!persistedCall) throw new Error("Expected persisted token call.");
+    const [persistedToken] = persistedCall;
     expect(persistedToken.passengerSubjectRef).toMatch(
       /^phone_sha256:[a-f0-9]{64}$/,
     );
@@ -371,7 +377,7 @@ describe("P5-PAX-001 masked-call provider port", () => {
 
   it("returns the provider proxy leg and never the raw driver number", async () => {
     vi.stubEnv("MULTI_TAXI_SUPPORT_TEL_URI", "tel:+886212345678");
-    const createSession = vi.fn(async () => ({
+    const createSession = vi.fn<MaskedCallPort["createSession"]>(async () => ({
       contactUri: "tel:+886285550000,,7781",
       expiresAt: "2026-07-23T01:00:00.000Z",
       providerName: "unit-test-provider",
@@ -396,7 +402,9 @@ describe("P5-PAX-001 masked-call provider port", () => {
     });
     // The port is identifier-only: the service never even receives the raw
     // driver number, so it cannot reach the passenger response.
-    const [subject] = createSession.mock.calls[0] as [Record<string, unknown>];
+    const sessionCall = createSession.mock.calls[0];
+    if (!sessionCall) throw new Error("Expected masked-call provider call.");
+    const [subject] = sessionCall;
     expect(subject).toEqual({
       orderId: "order-001",
       assignmentId: "assignment-001",
@@ -499,7 +507,7 @@ describe("P5-PAX-001 passenger push provider port", () => {
   });
 
   it("marks delivered only on a provider receipt and forwards no raw phone", async () => {
-    const send = vi.fn(async () => ({
+    const send = vi.fn<PassengerPushPort["send"]>(async () => ({
       providerName: "unit-test-push",
       providerMessageRef: "msg-001",
     }));
@@ -527,7 +535,9 @@ describe("P5-PAX-001 passenger push provider port", () => {
     expect(outcome.result).toBe("delivered");
     expect(outcome.providerName).toBe("unit-test-push");
     expect(outcome.deliveredAt).not.toBeNull();
-    const [message] = send.mock.calls[0] as [Record<string, unknown>];
+    const sendCall = send.mock.calls[0];
+    if (!sendCall) throw new Error("Expected passenger push provider call.");
+    const [message] = sendCall;
     expect(String(message.passengerSubjectRef)).toMatch(/^phone_sha256:/);
   });
 
@@ -554,5 +564,209 @@ describe("P5-PAX-001 passenger push provider port", () => {
     expect(port.isAvailable()).toBe(false);
     expect(port.providerName()).toBeNull();
     await expect(port.send()).rejects.toThrow(/not provisioned/);
+  });
+});
+
+describe("P5-PAX passenger SSE slow authority reads", () => {
+  it.each(["token", "account"] as const)(
+    "delivers slow %s reads without overlap and preserves ETA and terminal events",
+    async (entry) => {
+      vi.useFakeTimers();
+      let etaMinutes = 6;
+      const tracking = async (): Promise<PassengerRideTracking> => ({
+        assignmentId: "assignment-001",
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+        locationFreshness: "fresh",
+        location: {
+          lat: 25.04,
+          lng: 121.51,
+          accuracyM: 5,
+          recordedAt: new Date().toISOString(),
+        },
+        pickupEta: {
+          minutes: etaMinutes,
+          calculatedAt: new Date().toISOString(),
+        },
+      });
+      const { service, order, ownedMobilityService } = createHarness({
+        assigned: true,
+        orderStatus: "driver_accepted",
+        tracking,
+      });
+      const ride = await issueAccessToken(service, order);
+      let activeReads = 0;
+      let maxActiveReads = 0;
+      ownedMobilityService.resolvePersistedOrder.mockImplementation(
+        async () => {
+          const snapshot = { ...order };
+          ++activeReads;
+          maxActiveReads = Math.max(maxActiveReads, activeReads);
+          try {
+            await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+            return snapshot;
+          } finally {
+            --activeReads;
+          }
+        },
+      );
+      const envelopes: PassengerRideSseEventEnvelope[] = [];
+      const stream =
+        entry === "token"
+          ? service.streamPassengerRide(ride.passengerAccess.accessToken)
+          : service.streamTrustedPassengerEvents("order-001", "passenger-001");
+      const subscription = stream.subscribe((event) => {
+        envelopes.push(event.data as PassengerRideSseEventEnvelope);
+      });
+      try {
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(envelopes).toHaveLength(1);
+        expect(envelopes[0]?.data.tracking?.pickupEta?.minutes).toBe(6);
+        expect(
+          ownedMobilityService.resolvePersistedOrder,
+        ).toHaveBeenCalledTimes(1);
+        expect(maxActiveReads).toBe(1);
+
+        etaMinutes = 2;
+        order.status = "enroute_pickup";
+        await vi.advanceTimersByTimeAsync(6_000);
+        expect(envelopes).toHaveLength(2);
+        expect(envelopes[1]?.data.order.status).toBe("enroute_pickup");
+        expect(envelopes[1]?.data.tracking?.pickupEta?.minutes).toBe(2);
+
+        etaMinutes = 1;
+        await vi.advanceTimersByTimeAsync(6_000);
+        expect(envelopes).toHaveLength(3);
+        expect(envelopes[2]?.eventType).toBe("eta_changed");
+        expect(envelopes[2]?.data.tracking?.pickupEta?.minutes).toBe(1);
+
+        order.status = "completed";
+        await vi.advanceTimersByTimeAsync(6_000);
+        expect(envelopes).toHaveLength(4);
+        expect(envelopes[3]?.eventType).toBe("trip_completed");
+        expect(envelopes[3]?.data.order.status).toBe("completed");
+        expect(envelopes.map((event) => event.eventVersion)).toEqual([
+          1, 2, 3, 4,
+        ]);
+        expect(envelopes.every((event) => event.orderId === "order-001")).toBe(
+          true,
+        );
+        expect(envelopes.every((event) => event.assignmentVersion === 1)).toBe(
+          true,
+        );
+        expect(maxActiveReads).toBe(1);
+        expect(activeReads).toBe(0);
+        expect(
+          ownedMobilityService.resolvePersistedOrder,
+        ).toHaveBeenCalledTimes(4);
+      } finally {
+        subscription.unsubscribe();
+      }
+    },
+  );
+
+  it.each(["token", "account"] as const)(
+    "preserves a slow %s authority failure and stops reading",
+    async (entry) => {
+      vi.useFakeTimers();
+      const { service, order, ownedMobilityService } = createHarness({
+        assigned: true,
+      });
+      const ride = await issueAccessToken(service, order);
+      const failure = new ApiRequestError(
+        503,
+        "PASSENGER_AUTHORITY_READ_FAILED",
+        "Authority unavailable.",
+      );
+      ownedMobilityService.resolvePersistedOrder.mockImplementation(
+        async () => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+          throw failure;
+        },
+      );
+      const next = vi.fn();
+      const error = vi.fn();
+      const stream =
+        entry === "token"
+          ? service.streamPassengerRide(ride.passengerAccess.accessToken)
+          : service.streamTrustedPassengerEvents("order-001", "passenger-001");
+      const subscription = stream.subscribe({ next, error });
+      try {
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(error).toHaveBeenCalledExactlyOnceWith(failure);
+        expect(next).not.toHaveBeenCalled();
+        expect(subscription.closed).toBe(true);
+        await vi.advanceTimersByTimeAsync(12_000);
+        expect(
+          ownedMobilityService.resolvePersistedOrder,
+        ).toHaveBeenCalledTimes(1);
+      } finally {
+        subscription.unsubscribe();
+      }
+    },
+  );
+
+  it("rechecks token expiry after a slow successful read before the next authority read", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("PASSENGER_RIDE_TOKEN_TTL_HOURS", "1");
+    const { service, order, ownedMobilityService } = createHarness({
+      assigned: true,
+    });
+    const ride = await issueAccessToken(service, order);
+    ownedMobilityService.resolvePersistedOrder.mockImplementation(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+      return { ...order };
+    });
+    const next = vi.fn();
+    const error = vi.fn();
+    const subscription = service
+      .streamPassengerRide(ride.passengerAccess.accessToken)
+      .subscribe({ next, error });
+    try {
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(next).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(new Date(ride.passengerAccess.expiresAt));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error.mock.calls[0]?.[0]).toMatchObject({
+        code: "PASSENGER_RIDE_TOKEN_INVALID",
+        status: 404,
+      });
+      expect(subscription.closed).toBe(true);
+      expect(ownedMobilityService.resolvePersistedOrder).toHaveBeenCalledTimes(
+        1,
+      );
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(ownedMobilityService.resolvePersistedOrder).toHaveBeenCalledTimes(
+        1,
+      );
+    } finally {
+      subscription.unsubscribe();
+    }
+  });
+
+  it("does not publish or start another read after unsubscribe during a slow read", async () => {
+    vi.useFakeTimers();
+    const { service, order, ownedMobilityService } = createHarness({
+      assigned: true,
+    });
+    const ride = await issueAccessToken(service, order);
+    ownedMobilityService.resolvePersistedOrder.mockImplementation(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+      return { ...order };
+    });
+    const next = vi.fn();
+    const error = vi.fn();
+    const subscription = service
+      .streamPassengerRide(ride.passengerAccess.accessToken)
+      .subscribe({ next, error });
+    await vi.advanceTimersByTimeAsync(3_500);
+    subscription.unsubscribe();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(next).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(ownedMobilityService.resolvePersistedOrder).toHaveBeenCalledTimes(1);
+    expect(subscription.closed).toBe(true);
   });
 });
