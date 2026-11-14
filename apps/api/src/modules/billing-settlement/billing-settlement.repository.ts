@@ -558,6 +558,161 @@ export class BillingSettlementRepository {
     }
   }
 
+  async withReconciliationIssueTarget<T>(
+    issueId: string,
+    execute: (target: {
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    const key = `reconciliation-issue:${issueId}`;
+    let locked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        key,
+      ]);
+      locked = true;
+      const result = await client.query<JsonRecordRow>(
+        "SELECT record FROM billing.phase1_reconciliation_issues WHERE issue_id = $1",
+        [issueId],
+      );
+      const issue =
+        result.rows
+          .map((row) =>
+            this.parseRecord<ReconciliationIssueRecord>(
+              row.record,
+              "billing.phase1_reconciliation_issues",
+            ),
+          )
+          .find((candidate) => candidate.issueId === issueId) ?? null;
+      return await execute({
+        issue,
+        persist: (changes) => this.persistChanges(changes, client),
+      });
+    } finally {
+      if (!locked) {
+        client.release(
+          new Error(
+            "Reconciliation issue lock acquisition was not acknowledged.",
+          ),
+        );
+      } else {
+        try {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [key],
+          );
+          client.release();
+        } catch (error) {
+          client.release(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    }
+  }
+
+  async withDerivedReconciliationIssueTarget<T>(
+    identity: {
+      mirrorOrderId: string;
+      reconciliationJobId: string;
+      defaultIssueId: string;
+    },
+    execute: (target: {
+      issueId: string;
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    const mirrorKey = `reconciliation-mirror:${identity.mirrorOrderId}`;
+    let mirrorLocked = false;
+    let issueKey: string | null = null;
+    let issueLocked = false;
+    let attemptedIssueLock = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        mirrorKey,
+      ]);
+      mirrorLocked = true;
+      const lookupResult = await client.query<JsonRecordRow>(
+        `SELECT record FROM billing.phase1_reconciliation_issues
+         WHERE record->>'source' = 'forwarder_auto'
+           AND (record->>'mirrorOrderId' = $1 OR record->>'linkedReconciliationJobId' = $2)
+         ORDER BY updated_at DESC, created_at DESC`,
+        [identity.mirrorOrderId, identity.reconciliationJobId],
+      );
+      const matched =
+        lookupResult.rows
+          .map((row) =>
+            this.parseRecord<ReconciliationIssueRecord>(
+              row.record,
+              "billing.phase1_reconciliation_issues",
+            ),
+          )
+          .find(
+            (candidate) =>
+              candidate.source === "forwarder_auto" &&
+              (candidate.mirrorOrderId === identity.mirrorOrderId ||
+                candidate.linkedReconciliationJobId ===
+                  identity.reconciliationJobId),
+          ) ?? null;
+      const resolvedIssueId = matched?.issueId ?? identity.defaultIssueId;
+      issueKey = `reconciliation-issue:${resolvedIssueId}`;
+      attemptedIssueLock = true;
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        issueKey,
+      ]);
+      issueLocked = true;
+      const issueResult = await client.query<JsonRecordRow>(
+        "SELECT record FROM billing.phase1_reconciliation_issues WHERE issue_id = $1",
+        [resolvedIssueId],
+      );
+      const issue =
+        issueResult.rows
+          .map((row) =>
+            this.parseRecord<ReconciliationIssueRecord>(
+              row.record,
+              "billing.phase1_reconciliation_issues",
+            ),
+          )
+          .find((candidate) => candidate.issueId === resolvedIssueId) ??
+        matched;
+      return await execute({
+        issueId: resolvedIssueId,
+        issue,
+        persist: (changes) => this.persistChanges(changes, client),
+      });
+    } finally {
+      if (!mirrorLocked || (attemptedIssueLock && !issueLocked)) {
+        client.release(
+          new Error(
+            "Derived reconciliation issue lock acquisition was not acknowledged.",
+          ),
+        );
+      } else {
+        try {
+          if (issueLocked && issueKey) {
+            await client.query(
+              "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+              [issueKey],
+            );
+          }
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [mirrorKey],
+          );
+          client.release();
+        } catch (error) {
+          client.release(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    }
+  }
+
   async findMultiTaxiPaymentException(
     orderId: string,
   ): Promise<MultiTaxiPaymentExceptionRecord | null> {
@@ -981,6 +1136,39 @@ export class BillingSettlementRepository {
       "billing.phase1_reimbursement_batches",
     );
     return batch.batchId === batchId ? batch : null;
+  }
+
+  async listCommittedReconciliationIssues(): Promise<
+    ReconciliationIssueRecord[]
+  > {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_reconciliation_issues ORDER BY updated_at DESC, created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<ReconciliationIssueRecord>(
+        row.record,
+        "billing.phase1_reconciliation_issues",
+      ),
+    );
+  }
+
+  async findCommittedReconciliationIssue(
+    issueId: string,
+  ): Promise<ReconciliationIssueRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_reconciliation_issues WHERE issue_id = $1`,
+      [issueId],
+    );
+    return (
+      result.rows
+        .map((row) =>
+          this.parseRecord<ReconciliationIssueRecord>(
+            row.record,
+            "billing.phase1_reconciliation_issues",
+          ),
+        )
+        .find((issue) => issue.issueId === issueId) ?? null
+    );
   }
 
   async loadState(): Promise<BillingSettlementState> {
