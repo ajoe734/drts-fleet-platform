@@ -77,6 +77,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       registry: ${{ steps.plan.outputs.registry }}
       registry_host: ${{ steps.plan.outputs.registry_host }}
+      password_login_enabled: ${{ steps.registry.outputs.password_login_enabled }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,6 +117,27 @@ jobs:
           # the plan is emitted. No deploy uses the mutable latest reference.
           secret_args="WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
           echo "GOOGLE_REGISTRY_REFERENCE=$secret_args" >> "$GITHUB_ENV"
+
+          # Password login (Argon2id pepper + TOTP envelope-encryption key) is
+          # all-or-nothing (PWD-LOGIN-010, SA/SD portal-password-login-20261113
+          # §10), mirroring dev's Google OIDC gate: fails here, before any
+          # build/migrate/deploy job runs, when the two secrets are partially
+          # configured. Only check existence; never read either secret's
+          # value. The actual mount happens in a post-deploy reconcile step
+          # (api.secrets/api.env in rail.cjs stay untouched by this feature,
+          # since rail.cjs/run.cjs content is lineage-pinned by
+          # operations/verification/production-readonly-inventory/collector.cjs).
+          password_pepper_secret="${SECRET_PREFIX}-password-pepper"
+          totp_encryption_key_secret="${SECRET_PREFIX}-totp-encryption-key"
+          password_pepper_present=false
+          totp_encryption_key_present=false
+          gcloud secrets describe "$password_pepper_secret" --project "$PROJECT_ID" >/dev/null 2>&1 && password_pepper_present=true
+          gcloud secrets describe "$totp_encryption_key_secret" --project "$PROJECT_ID" >/dev/null 2>&1 && totp_encryption_key_present=true
+          if [[ "$password_pepper_present" != "$totp_encryption_key_present" ]]; then
+            echo "::error::Password login configuration is partial: ${password_pepper_secret} present=${password_pepper_present}, ${totp_encryption_key_secret} present=${totp_encryption_key_present}. Both or neither must exist."
+            exit 1
+          fi
+          echo "password_login_enabled=${password_pepper_present}" >> "$GITHUB_OUTPUT"
       - name: Validate public-entry policies and strict startup; freeze secret versions
         id: plan
         run: node operations/verification/production-release-rail/preflight.cjs
@@ -267,6 +289,39 @@ jobs:
         with: { project_id: "${{ env.PROJECT_ID }}" }
       - name: Deploy — api and all active web surfaces
         run: node operations/verification/production-release-rail/run.cjs deploy
+      - name: Reconcile password login configuration on the API service
+        # Mounted here, not via rail.cjs's plan/run.cjs deploy, because
+        # rail.cjs and run.cjs content is lineage-pinned by
+        # operations/verification/production-readonly-inventory/collector.cjs
+        # (sha256 check, RAIL_LINEAGE_CHANGED). validate-config already
+        # confirmed -- all-or-nothing, before any build/migrate/deploy ran --
+        # that both or neither of the two new secrets exist (PWD-LOGIN-010,
+        # SA/SD portal-password-login-20261113 §10). This step only acts on
+        # that already-validated result; it makes no new existence decision.
+        env:
+          API_SERVICE: ${{ vars.PROD_GCP_API_SERVICE }}
+          PASSWORD_LOGIN_ENABLED: ${{ needs.validate-config.outputs.password_login_enabled }}
+          PASSWORD_PEPPER_CURRENT_VERSION: ${{ vars.PROD_PASSWORD_PEPPER_CURRENT_VERSION }}
+        run: |
+          set -euo pipefail
+          if [[ "$PASSWORD_LOGIN_ENABLED" == "true" ]]; then
+            if [[ -z "$PASSWORD_PEPPER_CURRENT_VERSION" ]]; then
+              echo "::error::PROD_PASSWORD_PEPPER_CURRENT_VERSION must be configured once the password-pepper/totp-encryption-key secrets exist."
+              exit 1
+            fi
+            gcloud run services update "$API_SERVICE" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --update-secrets "PASSWORD_PEPPER_SECRETS_JSON=${SECRET_PREFIX}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${SECRET_PREFIX}-totp-encryption-key:latest" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=true,PASSWORD_PEPPER_CURRENT_VERSION=${PASSWORD_PEPPER_CURRENT_VERSION}" \
+              --quiet
+          else
+            gcloud run services update "$API_SERVICE" \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=false" \
+              --quiet
+          fi
 
   health-check:
     name: Verify exact revisions, public customer entry and protected contracts

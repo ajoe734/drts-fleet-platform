@@ -116,6 +116,7 @@ env:
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
   DEV_OIDC_CLIENT_ID: ${{ vars.DEV_OIDC_CLIENT_ID }}
+  DEV_PASSWORD_PEPPER_CURRENT_VERSION: ${{ vars.DEV_PASSWORD_PEPPER_CURRENT_VERSION }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
   DEV_AGENCY_PORTAL_ORIGIN: ${{ vars.DEV_AGENCY_PORTAL_ORIGIN }}
@@ -932,6 +933,34 @@ jobs:
           echo "oidc_enabled=${oidc_enabled}" >> "$GITHUB_OUTPUT"
           echo "tenant_auth=${tenant_auth_secret_args}" >> "$GITHUB_OUTPUT"
 
+          # Password login (Argon2id pepper + TOTP envelope-encryption key) is
+          # all-or-nothing (PWD-LOGIN-010, SA/SD portal-password-login-20261113
+          # §10). Never read either secret value into the runner; Cloud Run
+          # mounts the reference at runtime. The two secrets' contents must be
+          # the exact JSON the API expects on these env vars: password-pepper
+          # holds PASSWORD_PEPPER_SECRETS_JSON's {"<version>":"<pepper>"} ring
+          # (apps/api/src/common/auth/password-hashing.service.ts), and
+          # totp-encryption-key holds TOTP_ENCRYPTION_KEYS_JSON's
+          # {"activeKeyId":"<id>","keys":{"<id>":"<base64 32 bytes>"}} ring
+          # (apps/api/src/modules/auth/totp-secret-cipher.ts).
+          password_login_enabled=false
+          password_pepper_present=false
+          totp_encryption_key_present=false
+          if gcloud secrets describe "${secret_prefix}-password-pepper" --project "$project_id" >/dev/null 2>&1; then
+            password_pepper_present=true
+          fi
+          if gcloud secrets describe "${secret_prefix}-totp-encryption-key" --project "$project_id" >/dev/null 2>&1; then
+            totp_encryption_key_present=true
+          fi
+          if [[ "$password_pepper_present" == true && "$totp_encryption_key_present" == true ]]; then
+            password_login_enabled=true
+            secret_args="${secret_args},PASSWORD_PEPPER_SECRETS_JSON=${secret_prefix}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${secret_prefix}-totp-encryption-key:latest"
+          elif [[ "$password_pepper_present" == true || "$totp_encryption_key_present" == true ]]; then
+            echo "::error::Password login configuration is partial: ${secret_prefix}-password-pepper and ${secret_prefix}-totp-encryption-key must both exist."
+            exit 1
+          fi
+          echo "password_login_enabled=${password_login_enabled}" >> "$GITHUB_OUTPUT"
+
           # Remote SMTP is opt-in and fail-closed. Mount secret references only;
           # never access or print SMTP credentials in the deployment runner.
           # Dev mail secrets deliberately use the drts-dev- namespace.
@@ -1368,6 +1397,28 @@ jobs:
             --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Reconcile password login configuration on the API service
+        # A separate step (not folded into "Build API env vars"/"Deploy — api"
+        # above) so adding this does not change those two steps' literal
+        # content -- several tests (tests/unit/dev-pax-review-env-transport-20261016/transport.test.ts,
+        # tests/unit/notification-delivery/deploy-dev-smtp.test.ts) capture
+        # those steps' `run:` scalars verbatim and replace every `${{ }}`
+        # expression against a fixed fixture map.
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.api_secrets.outputs.password_login_enabled }}" == "true" ]]; then
+            gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --update-secrets "PASSWORD_PEPPER_SECRETS_JSON=${{ needs.prepare.outputs.secret_prefix }}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${{ needs.prepare.outputs.secret_prefix }}-totp-encryption-key:latest" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=true,PASSWORD_PEPPER_CURRENT_VERSION=${DEV_PASSWORD_PEPPER_CURRENT_VERSION:-v1}"
+          else
+            gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=false"
+          fi
 
       - name: Resolve API URL
         id: api_url
