@@ -21,6 +21,7 @@ import { SupplyReadinessService } from "../../src/modules/fleet-partner/supply-r
 import { SupplyReviewService } from "../../src/modules/fleet-partner/supply-review.service";
 import { SupplySubmissionRepository } from "../../src/modules/fleet-partner/supply-submission.repository";
 import { SupplySubmissionService } from "../../src/modules/fleet-partner/supply-submission.service";
+import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
@@ -1240,5 +1241,341 @@ describe("FleetPartnerController portal routes", () => {
         },
       },
     });
+  });
+});
+
+// FLEET-ONB-003: Fleet staff invitation issue/revoke/deactivate route wiring
+// (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md §1-2, §8).
+// The service-level validation/transaction logic is covered by
+// tests/unit/fleet-partner.service.test.ts; this file only verifies the
+// controller forwards path/query/body params and the actor correctly.
+describe("FleetPartnerController Fleet staff invitation routes", () => {
+  const ENTRY = "fleet-staff-entry";
+  const FLEET_PARTNER_ID = "fleet-test-001";
+
+  type Row = Record<string, unknown>;
+
+  function createFleetIamPort() {
+    let principals = new Map<string, Row>();
+    let memberships = new Map<string, Row>();
+    let bindings = new Map<string, Row>();
+    let invitations = new Map<string, Row>();
+    let snapshot: {
+      principals: Map<string, Row>;
+      memberships: Map<string, Row>;
+      bindings: Map<string, Row>;
+      invitations: Map<string, Row>;
+    } | null = null;
+
+    const query = async (sql: string, params: unknown[] = []) => {
+      if (sql === "BEGIN") {
+        snapshot = {
+          principals: new Map(principals),
+          memberships: new Map(memberships),
+          bindings: new Map(bindings),
+          invitations: new Map(invitations),
+        };
+        return { rows: [] };
+      }
+      if (sql === "ROLLBACK") {
+        if (snapshot) {
+          principals = snapshot.principals;
+          memberships = snapshot.memberships;
+          bindings = snapshot.bindings;
+          invitations = snapshot.invitations;
+        }
+        snapshot = null;
+        return { rows: [] };
+      }
+      if (sql === "COMMIT") {
+        snapshot = null;
+        return { rows: [] };
+      }
+      if (sql.startsWith("SAVEPOINT") || sql.startsWith("ROLLBACK TO SAVEPOINT"))
+        return { rows: [] };
+
+      if (sql.includes("iam.identity_principals")) {
+        if (sql.includes("INSERT INTO")) {
+          const record = JSON.parse(String(params.at(-1))) as Row;
+          principals.set(String(record.principalId), record);
+          return { rows: [{ record }] };
+        }
+        if (sql.includes("issuer = $1 AND subject = $2")) {
+          const hit = [...principals.values()].find(
+            (p) => p.issuer === params[0] && p.subject === params[1],
+          );
+          return { rows: hit ? [{ record: hit }] : [] };
+        }
+        if (sql.startsWith("SELECT principal_id FROM")) {
+          return {
+            rows: principals.has(String(params[0]))
+              ? [{ principal_id: params[0] }]
+              : [],
+          };
+        }
+        return {
+          rows: principals.has(String(params[0]))
+            ? [{ record: principals.get(String(params[0])) }]
+            : [],
+        };
+      }
+
+      if (sql.includes("iam.identity_memberships")) {
+        if (sql.includes("INSERT INTO")) {
+          const record = JSON.parse(String(params.at(-1))) as Row;
+          memberships.set(String(record.membershipId), record);
+          return { rows: [{ record }] };
+        }
+        if (sql.includes("source_ref = $1")) {
+          const hit = [...memberships.values()].find(
+            (m) => m.sourceRef === params[0],
+          );
+          return { rows: hit ? [{ record: hit }] : [] };
+        }
+        if (
+          sql.includes("realm = 'partner' AND scope_ref = $2 AND partner_id = $3")
+        ) {
+          const m = memberships.get(String(params[0]));
+          const hit =
+            m &&
+            m.realm === "partner" &&
+            m.scopeRef === params[1] &&
+            m.partnerId === params[2]
+              ? m
+              : null;
+          return { rows: hit ? [{ record: hit }] : [] };
+        }
+        return {
+          rows: memberships.has(String(params[0]))
+            ? [{ record: memberships.get(String(params[0])) }]
+            : [],
+        };
+      }
+
+      if (sql.includes("iam.identity_role_bindings")) {
+        if (sql.includes("INSERT INTO")) {
+          const record = JSON.parse(String(params.at(-1))) as Row;
+          bindings.set(String(record.roleBindingId), record);
+          return { rows: [{ record }] };
+        }
+        if (sql.includes("source_ref = $1")) {
+          const hit = [...bindings.values()].find(
+            (b) => b.sourceRef === params[0],
+          );
+          return { rows: hit ? [{ record: hit }] : [] };
+        }
+        const matches = [...bindings.values()].filter(
+          (b) => b.membershipId === params[0],
+        );
+        return { rows: matches.map((record) => ({ record })) };
+      }
+
+      if (sql.includes("iam.privileged_role_grants")) return { rows: [] };
+
+      if (sql.includes("iam.identity_invitations")) {
+        if (sql.includes("INSERT INTO")) {
+          const record = JSON.parse(String(params.at(-1))) as Row;
+          invitations.set(String(record.invitationId), record);
+          return { rows: [{ record }] };
+        }
+        if (sql.includes("SET delivery_status")) {
+          const inv = invitations.get(String(params[0]));
+          if (!inv || inv.realm !== "partner") return { rows: [] };
+          const updated = {
+            ...inv,
+            deliveryStatus: params[1],
+            updatedAt: params[2],
+          };
+          invitations.set(String(params[0]), updated);
+          return { rows: [{ record: updated }] };
+        }
+        if (sql.includes("SET revoked_at")) {
+          if (sql.includes("WHERE invitation_id = $1")) {
+            const inv = invitations.get(String(params[0]));
+            const hit =
+              inv &&
+              inv.realm === "partner" &&
+              inv.scopeRef === params[1] &&
+              inv.partnerId === params[2] &&
+              !inv.acceptedAt &&
+              !inv.revokedAt
+                ? inv
+                : null;
+            if (!hit) return { rows: [] };
+            const updated = {
+              ...hit,
+              revokedAt: params[3],
+              updatedAt: params[3],
+            };
+            invitations.set(String(params[0]), updated);
+            return { rows: [{ record: updated }] };
+          }
+          for (const [id, inv] of invitations) {
+            if (
+              inv.membershipId === params[0] &&
+              !inv.acceptedAt &&
+              !inv.revokedAt
+            ) {
+              invitations.set(id, {
+                ...inv,
+                revokedAt: params[1],
+                updatedAt: params[1],
+              });
+            }
+          }
+          return { rows: [] };
+        }
+        const matches = [...invitations.values()]
+          .filter(
+            (inv) =>
+              inv.realm === "partner" &&
+              inv.scopeRef === params[0] &&
+              inv.partnerId === params[1],
+          )
+          .sort((a, b) =>
+            String(b.createdAt).localeCompare(String(a.createdAt)),
+          );
+        return { rows: matches.map((record) => ({ record })) };
+      }
+
+      if (sql.includes("iam.identity_sessions")) return { rows: [] };
+
+      throw new Error(`Unexpected PG port query: ${sql.slice(0, 120)}`);
+    };
+
+    return {
+      isEnabled: () => true,
+      connect: async () => ({ query, release: () => undefined }),
+      query,
+    };
+  }
+
+  function createInvitationFixture() {
+    const port = createFleetIamPort();
+    const repo = new IdentityRepository(port as never);
+    const entries = {
+      resolvePartnerEntries: async () => [
+        {
+          entrySlug: ENTRY,
+          partnerType: "fleet_partner",
+          partnerId: FLEET_PARTNER_ID,
+        },
+      ],
+    };
+    const links = { isEnabled: () => true, find: async () => null };
+    const audit = {
+      isEnabled: () => true,
+      recordEventRequired: async () => undefined,
+    };
+    const invitationDelivery = {
+      send: async () => ({
+        status: "sent" as const,
+        attemptedAt: new Date().toISOString(),
+      }),
+    };
+    const fleetPartnerService = new FleetPartnerService(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      {
+        isEnabled: () => true,
+        findActiveFleetPartnerById: async () => ({
+          fleetPartnerId: FLEET_PARTNER_ID,
+          active: true,
+        }),
+      } as never,
+      undefined,
+      repo,
+      entries as never,
+      links as never,
+      audit as never,
+      invitationDelivery as never,
+    );
+    const controller = new FleetPartnerController(
+      fleetPartnerService,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+    return { controller, fleetPartnerService };
+  }
+
+  const manager = {
+    realm: "platform",
+    actorType: "platform_admin",
+    actorId: "manager",
+    principalId: "manager",
+    scopes: ["foundation:write"],
+    amr: [],
+  } as never;
+
+  it("issues, lists, revokes and deactivates via the HTTP route wiring", async () => {
+    const { controller } = createInvitationFixture();
+
+    const issuedResponse = await controller.inviteFleetStaff(
+      FLEET_PARTNER_ID,
+      {
+        entrySlug: ENTRY,
+        email: "route-staff@fleet.example.org",
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+      "req-invite-1",
+    );
+    expect(issuedResponse.data.invitation).toMatchObject({
+      fleetPartnerId: FLEET_PARTNER_ID,
+      entrySlug: ENTRY,
+      email: "route-staff@fleet.example.org",
+      deliveryStatus: "delivered",
+    });
+    const invitationId = issuedResponse.data.invitation.invitationId;
+    const membershipId = issuedResponse.data.member.membershipId;
+
+    const listResponse = await controller.listFleetStaffInvitations(
+      FLEET_PARTNER_ID,
+      ENTRY,
+      "req-list-1",
+    );
+    expect(
+      listResponse.data.items.some(
+        (invitation: { invitationId: string }) =>
+          invitation.invitationId === invitationId,
+      ),
+    ).toBe(true);
+
+    const revokeResponse = await controller.revokeFleetStaffInvitation(
+      FLEET_PARTNER_ID,
+      invitationId,
+      ENTRY,
+      manager,
+      "req-revoke-1",
+    );
+    expect(revokeResponse.data.revokedAt).not.toBeNull();
+
+    const deactivateResponse = await controller.deactivateFleetStaffMember(
+      FLEET_PARTNER_ID,
+      membershipId,
+      ENTRY,
+      manager,
+      "req-deactivate-1",
+    );
+    expect(deactivateResponse.data.status).toBe("disabled");
+  });
+
+  it("denies the invitation route to a non-platform/ops identity", async () => {
+    const { controller } = createInvitationFixture();
+    await expect(
+      controller.inviteFleetStaff(
+        FLEET_PARTNER_ID,
+        {
+          entrySlug: ENTRY,
+          email: "denied@fleet.example.org",
+          roleCode: "fleet_partner_ops",
+        },
+        { ...(manager as object), realm: "partner", actorType: "partner_user" } as never,
+        "req-invite-denied",
+      ),
+    ).rejects.toMatchObject({ code: "FLEET_ROLE_MANAGER_DENIED" });
   });
 });
