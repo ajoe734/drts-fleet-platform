@@ -1857,11 +1857,13 @@ jobs:
             *",${partner_origin},"*) ;;
             *)
               origins="${origins:+${origins},}${partner_origin}"
-              # An env-only change: `gcloud run deploy` (the deploy helper)
-              # requires --image, so update the existing API service in place,
-              # the same way the Agency origin reconcile above does.
-              gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              # `gcloud run deploy` (behind the retry wrapper) requires an image:
+              # redeploy the API's current image so only the env var changes.
+              api_image="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$current_api_env")"
+              [[ -n "$api_image" ]]
+              operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
                 --region "${{ needs.prepare.outputs.region }}" --project "${{ needs.prepare.outputs.project_id }}" \
+                --image "$api_image" \
                 --update-env-vars "^@^AUTH_ALLOWED_ORIGINS=${origins}"
               ;;
           esac
