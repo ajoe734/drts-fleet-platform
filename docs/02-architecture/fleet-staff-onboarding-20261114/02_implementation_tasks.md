@@ -34,7 +34,7 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 ## FLEET-ONB-003：邀請核發／撤銷端點與投遞服務
 
 - 目的：新增 `IdentityRepository.issueFleetStaffInvitation`／`revokeFleetStaffInvitation`（仿 `issueAgencyInvitation`／`revokeAgencyInvitation`，SA/SD §2、§8）、`FleetInvitationDeliveryService`（仿 `AgencyInvitationDeliveryService`，SA/SD §7）、`FleetPartnerController` 新端點 `POST/GET admin/fleet-partners/:fleetPartnerId/invitations`、`POST .../invitations/:invitationId/revoke`、`POST .../members/:membershipId/deactivate`，以及對應 step-up 規則（SA/SD §1）。
-- write_scopes：`apps/api/src/modules/identity/identity.repository.ts`、`apps/api/src/modules/fleet-partner/fleet-partner.service.ts`、`apps/api/src/modules/fleet-partner/fleet-partner.controller.ts`、新檔 `apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service.ts`、`apps/api/src/common/auth/step-up.policy.ts`、`packages/contracts/src/index.ts`（新 command/view 型別，仿 `InviteAgencyMemberCommand`/`AgencyInvitationView`）、對應單元測試。
+- write_scopes：`apps/api/src/modules/identity/identity.repository.ts`、`apps/api/src/modules/fleet-partner/fleet-partner.service.ts`、`apps/api/src/modules/fleet-partner/fleet-partner.controller.ts`、新檔 apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service.ts、`apps/api/src/common/auth/step-up.policy.ts`、`packages/contracts/src/index.ts`（新 command/view 型別，仿 `InviteAgencyMemberCommand`/`AgencyInvitationView`）、對應單元測試。
 - depends_on：FLEET-ONB-002
 - 驗收條件：核發邀請要求 `platform`/`ops` realm 與 step-up fresh session，否則 403；email 格式與 `roleCode`（`fleet_partner_admin`/`fleet_partner_ops`/`fleet_partner_finance`）驗證；已存在 active membership 的 email 重複邀請回 409；撤銷寫 `revokedAt`；停用成員同交易撤銷既有 session（重用 `revokePrincipalSessionsInTransaction`）；只有 adapter 回 `sent` 才記 `delivered`。
 - required_acceptance：`fleet-onb-003_ready`
@@ -85,7 +85,7 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 
 ## FLEET-ONB-008：車行入口 UI（接受邀請頁）
 
-- 目的：新增 `apps/fleet-partner-portal-web/app/invite/page.tsx`（仿 `apps/agency-portal-web/app/invite/page.tsx`），呈現「設定密碼」／「綁定 Google」兩個分支（與密碼登入 SA/SD §9 的通用接受邀請畫面規格一致）；核發/撤銷/重寄的管理操作 UI（供 platform-admin-web 或既有車行管理介面使用，依既有 `human-roles` 管理 UI 掛載位置決定，不新建獨立管理 app）。
+- 目的：新增 apps/fleet-partner-portal-web/app/invite/page.tsx（仿 `apps/agency-portal-web/app/invite/page.tsx`），呈現「設定密碼」／「綁定 Google」兩個分支（與密碼登入 SA/SD §9 的通用接受邀請畫面規格一致）；核發/撤銷/重寄的管理操作 UI（供 platform-admin-web 或既有車行管理介面使用，依既有 `human-roles` 管理 UI 掛載位置決定，不新建獨立管理 app）。
 - write_scopes：`apps/fleet-partner-portal-web/app/invite/**`、`apps/fleet-partner-portal-web/lib/translations.ts`（新增文案鍵）、既有車行人員角色管理 UI 所在檔案（依現況掛載位置而定，若在 `platform-admin-web` 則限定該既有頁面檔案，不擴大其他 write_scopes）。
 - depends_on：FLEET-ONB-004、FLEET-ONB-006；協調 [PWD-LOGIN-009](../portal-password-login-20261113/02_implementation_tasks.md)（見本文件開頭的協調說明）
 - 驗收條件：zh-TW/en 文案完整；表單可鍵盤操作；邀請狀態（`invited`/`active`/`disabled`）在管理 UI 清楚區分（SA/SD §6）。

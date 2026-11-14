@@ -151,7 +151,7 @@ const partnerId = requireNonBlankEnv("DRTS_FLEET_PARTNER_ID");
 
 ## 7. 邀請信投遞：durable SMTP outbox、recipient allowlist、`*_INVITATION_ACCEPT_URL_BASE`
 
-新增 `FleetInvitationDeliveryService`（`apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service.ts`，結構完全比照 `AgencyInvitationDeliveryService`，`agency-invitation-delivery.service.ts`），接上既有 durable SMTP outbox（`NotificationDeliveryService`／`V0103__notification_mail_outbox.sql`，與密碼登入 SA/SD §6 的重設信同一條 outbox，不新增第二套寄信機制）。
+新增 `FleetInvitationDeliveryService`（新檔 apps/api/src/modules/fleet-partner/fleet-invitation-delivery.service.ts，結構完全比照 `AgencyInvitationDeliveryService`，`agency-invitation-delivery.service.ts`），接上既有 durable SMTP outbox（`NotificationDeliveryService`／`V0103__notification_mail_outbox.sql`，與密碼登入 SA/SD §6 的重設信同一條 outbox，不新增第二套寄信機制）。
 
 新環境變數 `FLEET_INVITATION_ACCEPT_URL_BASE`（仿 `.github/workflows/deploy-dev.yml:1264` 的 `AGENCY_INVITATION_ACCEPT_URL_BASE=${agency_login_origin}/invite`），dev 設為 `${fleet_login_origin}/invite`（`fleet_login_origin` 沿用既有 `apps/fleet-partner-portal-web` 的 Cloud Run 對外網址解析慣例，deploy-dev.yml 已有同構的 `tenant_login_origin`／`agency_login_origin` 變數可抄）。
 
