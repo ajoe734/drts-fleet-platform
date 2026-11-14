@@ -2956,8 +2956,7 @@ export class BillingSettlementService implements OnModuleInit {
       return this.listReconciliationIssues(filters);
     }
     await this.syncDerivedForwarderIssuesFresh();
-    const committed =
-      await this.billingSettlementRepository.listCommittedReconciliationIssues();
+    const committed = await this.readCommittedReconciliationIssues();
     return this.listReconciliationIssuesFrom(
       committed.length > 0 ? committed : this.listSeedReconciliationIssues(),
       filters,
@@ -2972,14 +2971,92 @@ export class BillingSettlementService implements OnModuleInit {
         (issue) => issue.issueId === issueId,
       );
     }
-    const committed =
-      await this.billingSettlementRepository.findCommittedReconciliationIssue(
-        issueId,
-      );
+    const committed = await this.readCommittedReconciliationIssue(issueId);
     if (committed) {
       return this.cloneReconciliationIssue(committed);
     }
     return this.findSeedReconciliationIssue(issueId) ?? undefined;
+  }
+
+  private async readCommittedReconciliationIssues(): Promise<
+    ReconciliationIssueRecord[]
+  > {
+    const repo = this.billingSettlementRepository!;
+    if (typeof repo.listCommittedReconciliationIssues === "function") {
+      return repo.listCommittedReconciliationIssues();
+    }
+    const state = await repo.loadState();
+    return state.reconciliationIssues.map((issue) =>
+      this.cloneReconciliationIssue(issue),
+    );
+  }
+
+  private async readCommittedReconciliationIssue(
+    issueId: string,
+  ): Promise<ReconciliationIssueRecord | null> {
+    const repo = this.billingSettlementRepository!;
+    if (typeof repo.findCommittedReconciliationIssue === "function") {
+      return repo.findCommittedReconciliationIssue(issueId);
+    }
+    const committed = await this.readCommittedReconciliationIssues();
+    return committed.find((issue) => issue.issueId === issueId) ?? null;
+  }
+
+  private async withCanonicalReconciliationIssueTarget<T>(
+    issueId: string,
+    context: string,
+    execute: (target: {
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const repo = this.billingSettlementRepository!;
+    if (typeof repo.withReconciliationIssueTarget === "function") {
+      return repo.withReconciliationIssueTarget(issueId, execute);
+    }
+    const committed = await this.readCommittedReconciliationIssue(issueId);
+    return execute({
+      issue: committed,
+      persist: (changes) => this.persistChanges(changes, context),
+    });
+  }
+
+  private async withCanonicalDerivedReconciliationIssueTarget<T>(
+    identity: {
+      mirrorOrderId: string;
+      reconciliationJobId: string;
+      defaultIssueId: string;
+    },
+    execute: (target: {
+      issueId: string;
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const repo = this.billingSettlementRepository!;
+    if (typeof repo.withDerivedReconciliationIssueTarget === "function") {
+      return repo.withDerivedReconciliationIssueTarget(identity, execute);
+    }
+    const committed = await this.readCommittedReconciliationIssues();
+    const matched =
+      committed
+        .filter(
+          (issue) =>
+            issue.source === "forwarder_auto" &&
+            (issue.mirrorOrderId === identity.mirrorOrderId ||
+              issue.linkedReconciliationJobId === identity.reconciliationJobId),
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            right.createdAt.localeCompare(left.createdAt),
+        )[0] ?? null;
+    return execute({
+      issueId: matched?.issueId ?? identity.defaultIssueId,
+      issue: matched,
+      persist: (changes) =>
+        this.persistChanges(changes, "sync_forwarder_reconciliation_issues"),
+    });
   }
 
   private listReconciliationIssuesFrom(
@@ -5088,30 +5165,30 @@ export class BillingSettlementService implements OnModuleInit {
       };
 
       if (this.billingSettlementRepository?.isEnabled()) {
-        const draft =
-          await this.billingSettlementRepository.withReconciliationIssueTarget(
-            issueId,
-            async (target) => {
-              const current =
-                target.issue ?? this.findSeedReconciliationIssue(issueId);
-              if (!current) {
-                throw new ApiRequestError(
-                  HttpStatus.NOT_FOUND,
-                  "NOT_FOUND",
-                  "Reconciliation issue not found.",
-                  { issueId },
-                );
-              }
-              const staged = mutate(this.cloneReconciliationIssue(current));
-              audit = staged.audit;
-              await target.persist({
-                reconciliationIssues: [
-                  this.cloneReconciliationIssue(staged.draft),
-                ],
-              });
-              return staged.draft;
-            },
-          );
+        const draft = await this.withCanonicalReconciliationIssueTarget(
+          issueId,
+          context,
+          async (target) => {
+            const current =
+              target.issue ?? this.findSeedReconciliationIssue(issueId);
+            if (!current) {
+              throw new ApiRequestError(
+                HttpStatus.NOT_FOUND,
+                "NOT_FOUND",
+                "Reconciliation issue not found.",
+                { issueId },
+              );
+            }
+            const staged = mutate(this.cloneReconciliationIssue(current));
+            audit = staged.audit;
+            await target.persist({
+              reconciliationIssues: [
+                this.cloneReconciliationIssue(staged.draft),
+              ],
+            });
+            return staged.draft;
+          },
+        );
         published = this.publishReconciliationIssue(draft);
       } else {
         const current = this.requireReconciliationIssue(issueId);
@@ -5595,7 +5672,7 @@ export class BillingSettlementService implements OnModuleInit {
       localIssue.issueId,
       async () => {
         if (this.billingSettlementRepository?.isEnabled()) {
-          await this.billingSettlementRepository.withDerivedReconciliationIssueTarget(
+          await this.withCanonicalDerivedReconciliationIssueTarget(
             {
               mirrorOrderId: forwarderIssue.mirrorOrderId,
               reconciliationJobId:
@@ -5684,8 +5761,7 @@ export class BillingSettlementService implements OnModuleInit {
     if (!forwarderIssues.length) {
       return;
     }
-    const committed =
-      await this.billingSettlementRepository.listCommittedReconciliationIssues();
+    const committed = await this.readCommittedReconciliationIssues();
     for (const forwarderIssue of forwarderIssues) {
       const existing = committed.find(
         (issue) =>
