@@ -114,10 +114,6 @@ import {
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
 import { randomUUID } from "node:crypto";
-import {
-  PasswordHashingService,
-  PasswordPepperNotConfiguredError,
-} from "../../common/auth/password-hashing.service";
 import { PasswordPolicyService } from "../../common/auth/password-policy.service";
 import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
