@@ -2,6 +2,7 @@
 
 - `decision_id`: `SD-DP-20261113-001`
 - `date`: `2026-11-13`
+- `status`: `accepted`
 - `task`: `PORTAL-PASSWORD-LOGIN-SD-20261113`
 - `owner`: Claude（本文件）；`reviewer`: Claude2
 - `source`: 使用者於 2026-11-13 的 Claude Code 互動對話；逐字依據見

@@ -7,7 +7,7 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 ## PWD-LOGIN-001：依賴與 schema 基線
 
 - 目的：新增 Argon2id、TOTP（RFC 6238）、QR code 產生所需的套件依賴，並建立四張新表（§SA/SD §2）。
-- write_scopes：`package.json`、`apps/api/package.json`、`pnpm-lock.yaml`、`infra/migrations/V0138__portal_password_login_credentials.sql`（實際編號以當時 repo 最新 `infra/migrations/V0NNN` 為準）、`packages/contracts/src/iam-policy-catalog.ts`（如需新增 scope，否則不動）。
+- write_scopes：`package.json`、`apps/api/package.json`、`pnpm-lock.yaml`、新 migration 檔 infra/migrations/V0138__portal_password_login_credentials.sql（尚未建立；實際編號以當時 repo 最新 `infra/migrations/V0NNN` 為準）、`packages/contracts/src/iam-policy-catalog.ts`（如需新增 scope，否則不動）。
 - depends_on：無
 - 驗收條件：`pnpm install` 可重現 lockfile；migration 可在空白 schema 上 up/down；四張新表的 unique/FK/check constraint 符合 SA/SD §2 定義。
 - required_acceptance：`pwd-login-001_ready`
@@ -18,8 +18,8 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 
 ## PWD-LOGIN-002：密碼雜湊服務（Argon2id + pepper）
 
-- 目的：新增 `apps/api/src/common/auth/password-hashing.service.ts`：`hash(password)`/`verify(password, hash)`，內部套用 Secret Manager pepper（`pepper_version` 支援輪替、opportunistic rehash）。
-- write_scopes：`apps/api/src/common/auth/password-hashing.service.ts`（新檔）、對應單元測試。
+- 目的：新增 apps/api/src/common/auth/password-hashing.service.ts（新檔）：`hash(password)`/`verify(password, hash)`，內部套用 Secret Manager pepper（`pepper_version` 支援輪替、opportunistic rehash）。
+- write_scopes：新檔 apps/api/src/common/auth/password-hashing.service.ts、對應單元測試。
 - depends_on：PWD-LOGIN-001
 - 驗收條件：同密碼不同 salt 產生不同 hash；錯誤密碼拒絕；pepper 版本輪替後舊 hash 仍可驗證並於下次登入 rehash 成新版本；未設定 pepper secret 時服務啟動失敗（fail-closed，對齊 Stage 1.5 §15.2）。
 - required_acceptance：`pwd-login-002_ready`
@@ -28,7 +28,7 @@ Owner: Claude · Reviewer: Claude2 · 依據：[決策紀錄](../../01-decisions
 ## PWD-LOGIN-003：密碼政策與外洩密碼檢查
 
 - 目的：依 SA/SD §3 實作長度政策（視是否已啟用 TOTP 決定 8/15 字元下限）、離線常見/外洩密碼清單比對。
-- write_scopes：`apps/api/src/common/auth/password-policy.service.ts`（新檔）、離線清單資料檔（`apps/api/src/common/auth/data/common-passwords.txt` 或等效壓縮格式）、對應單元測試。
+- write_scopes：新檔 apps/api/src/common/auth/password-policy.service.ts、離線清單資料檔（`apps/api/src/common/auth/data/common-passwords.txt` 或等效壓縮格式）、對應單元測試。
 - depends_on：PWD-LOGIN-002
 - 驗收條件：長度不足、在清單內的密碼一律拒絕並給出不透露帳號狀態的錯誤；清單比對不呼叫任何外部網路服務。
 - required_acceptance：`pwd-login-003_ready`
