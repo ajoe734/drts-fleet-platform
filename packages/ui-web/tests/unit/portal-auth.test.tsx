@@ -20,8 +20,8 @@ const messages: PortalAuthMessages = {
   forgotPassword: "Forgot password?",
   verificationToggleShow: "Use a verification code",
   verificationToggleHide: "Hide verification code",
-  useAuthenticatorCode: "Authenticator code",
-  useRecoveryCode: "Recovery code",
+  useAuthenticatorCode: "Authenticator app code",
+  useRecoveryCode: "Use a recovery code",
   totpCodeLabel: "Authenticator code",
   totpCodeHint: "6-digit code from your authenticator app",
   recoveryCodeLabel: "Recovery code",
@@ -170,7 +170,7 @@ describe("PortalPasswordLoginForm", () => {
       totpCode: "123456",
     });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Recovery code" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use a recovery code" }));
     fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "AAAA-BBBB" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -192,7 +192,7 @@ describe("PortalForgotPasswordForm", () => {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(messages.forgotAccepted);
+    expect((await screen.findByRole("status")).textContent).toBe(messages.forgotAccepted);
   });
 });
 
@@ -205,7 +205,7 @@ describe("PortalResetPasswordForm", () => {
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "different" } });
     fireEvent.click(screen.getByRole("button", { name: "Save password" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(messages.passwordMismatch);
+    expect((await screen.findByRole("alert")).textContent).toBe(messages.passwordMismatch);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -218,7 +218,7 @@ describe("PortalResetPasswordForm", () => {
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "new-password-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save password" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(messages.passwordSaved);
+    expect((await screen.findByRole("status")).textContent).toBe(messages.passwordSaved);
     expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)).toEqual({
       token: "tok",
       password: "new-password-1",
