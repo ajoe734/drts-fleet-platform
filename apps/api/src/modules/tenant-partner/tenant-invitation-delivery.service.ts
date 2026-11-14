@@ -38,6 +38,69 @@ export type TenantInvitationDeliveryRecord = Omit<
 const DEFAULT_FROM_EMAIL = "tenant-invitations@notification.drts.invalid";
 const SAFE_ERROR_CODE = /^[a-z][a-z0-9_]{0,99}$/i;
 
+/** PWD-LOGIN-006 SA/SD §6: one shared password-reset delivery path across the
+ * three password-login realms. Tenant realm keeps the durable, queryable
+ * per-tenant outbox (enqueue+dispatch, same as invitation mail); agency and
+ * partner realms are not tenants, so they go through the same
+ * non-per-tenant `sendPlatformMail` path AgencyInvitationDeliveryService
+ * already uses for agency invitations. */
+export type PasswordResetDeliveryRealm = "tenant" | "agency" | "partner";
+
+export type PasswordResetDeliveryRequest = {
+  dedupeKey: string;
+  realm: PasswordResetDeliveryRealm;
+  tenantId: string | null;
+  recipientEmail: string;
+  expiresAt: string;
+  rawToken: string;
+};
+
+export type PasswordResetCompletedDeliveryRequest = {
+  dedupeKey: string;
+  realm: PasswordResetDeliveryRealm;
+  tenantId: string | null;
+  recipientEmail: string;
+};
+
+export type PasswordResetDeliveryOutcome = {
+  status: TenantInvitationDeliveryStatus;
+};
+
+const DEFAULT_PASSWORD_RESET_FROM_EMAIL =
+  "password-reset@notification.drts.invalid";
+
+/** The raw token only ever reaches this body; it is never logged or persisted. */
+function buildPasswordResetEmailBody(
+  request: PasswordResetDeliveryRequest,
+): string {
+  const resetBaseUrl = process.env.PASSWORD_RESET_URL_BASE?.trim();
+  const link = resetBaseUrl
+    ? `${resetBaseUrl}${resetBaseUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(request.rawToken)}`
+    : null;
+  return [
+    "Hello,",
+    "",
+    "We received a request to reset the password for your DRTS account.",
+    "If you did not request this, you can ignore this email.",
+    link
+      ? `Reset your password: ${link}`
+      : `Password reset code: ${request.rawToken}`,
+    `This link expires at ${request.expiresAt}.`,
+  ].join("\n");
+}
+
+/** Never includes the new password or any other secret; this is a
+ * notice-only email sent after the reset already completed (SA/SD §6). */
+function buildPasswordResetCompletedEmailBody(): string {
+  return [
+    "Hello,",
+    "",
+    "The password for your DRTS account was just reset.",
+    "All of your existing sessions have been signed out for your security.",
+    "If you did not make this change, contact your administrator immediately.",
+  ].join("\n");
+}
+
 function toInvitationIdempotencyKey(invitationId: string): string {
   return `tenant-invitation:${invitationId}`;
 }
@@ -217,5 +280,96 @@ export class TenantInvitationDeliveryService {
 
   listDeliveries() {
     return this.deliveries.map((delivery) => ({ ...delivery }));
+  }
+
+  async sendPasswordReset(
+    request: PasswordResetDeliveryRequest,
+  ): Promise<PasswordResetDeliveryOutcome> {
+    return this.deliverPasswordResetMail(
+      request.realm,
+      request.tenantId,
+      request.recipientEmail,
+      `password-reset:${request.dedupeKey}`,
+      "Reset your DRTS password",
+      buildPasswordResetEmailBody(request),
+    );
+  }
+
+  async sendPasswordResetCompletedNotice(
+    request: PasswordResetCompletedDeliveryRequest,
+  ): Promise<PasswordResetDeliveryOutcome> {
+    return this.deliverPasswordResetMail(
+      request.realm,
+      request.tenantId,
+      request.recipientEmail,
+      `password-reset-completed:${request.dedupeKey}`,
+      "Your DRTS password was reset",
+      buildPasswordResetCompletedEmailBody(),
+    );
+  }
+
+  private async deliverPasswordResetMail(
+    realm: PasswordResetDeliveryRealm,
+    tenantId: string | null,
+    recipientEmail: string,
+    idempotencyKey: string,
+    subject: string,
+    body: string,
+  ): Promise<PasswordResetDeliveryOutcome> {
+    if (!this.deliveryService) {
+      this.logger.warn(
+        `Password-reset email (${idempotencyKey}) is unavailable; the notification outbox is not configured.`,
+      );
+      return { status: "unavailable" };
+    }
+
+    const fromEmail =
+      process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+      DEFAULT_PASSWORD_RESET_FROM_EMAIL;
+
+    // Tenant realm keeps the durable, per-tenant, queryable outbox (same as
+    // invitation mail); agency/partner have no tenant row to key a durable
+    // outbox entry on, so they use the same immediate platform-mail path
+    // agency invitations already rely on.
+    if (realm === "tenant" && tenantId) {
+      try {
+        const queued = await this.deliveryService.enqueue({
+          tenantId,
+          idempotencyKey,
+          recipientEmail,
+          fromEmail,
+          subject,
+          body,
+        });
+        const receipt =
+          queued.status === "sent"
+            ? queued
+            : ((await this.deliveryService.dispatch(
+                tenantId,
+                queued.deliveryId,
+              )) ?? queued);
+        return { status: receipt.status };
+      } catch (error) {
+        this.logger.warn(
+          `Password-reset email (${idempotencyKey}) delivery failed: ${toSafeErrorCode(error)}`,
+        );
+        return { status: "failed" };
+      }
+    }
+
+    try {
+      const result = await this.deliveryService.sendPlatformMail({
+        recipientEmail,
+        fromEmail,
+        subject,
+        body,
+      });
+      return { status: result.status };
+    } catch {
+      this.logger.warn(
+        `Password-reset email (${idempotencyKey}) platform-mail delivery failed.`,
+      );
+      return { status: "failed" };
+    }
   }
 }

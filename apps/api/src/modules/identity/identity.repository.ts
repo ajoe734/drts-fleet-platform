@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResultRow } from "pg";
@@ -132,6 +132,12 @@ export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
+/** PWD-LOGIN-006 SA/SD §6: shorter than the 24h invitation window because this
+ * token acts on an already-active account, a higher-risk operation. */
+export const PASSWORD_RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+export type PasswordResetRealm = "tenant" | "agency" | "partner";
+
 /**
  * BUREAU-R13: placeholder issuer of an invited agency principal. The
  * principal is rebound to the verified Google (issuer, sub) when, and only
@@ -207,6 +213,17 @@ export class IdentityRepository implements OnModuleInit {
     StoredPasswordCredential
   >();
 
+  private readonly fallbackPasswordResetTokens = new Map<
+    string,
+    {
+      tokenHash: string;
+      principalId: string;
+      expiresAt: string;
+      consumedAt: string | null;
+      createdAt: string;
+    }
+  >();
+
   private readonly fallbackSessions = new Map<
     string,
     CanonicalIdentitySessionRecord
@@ -250,6 +267,14 @@ export class IdentityRepository implements OnModuleInit {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  /** Lets a caller that only has this repository injected (e.g. AuthController,
+   * PlatformAdminService) build its own NotificationDeliveryService against the
+   * same durable Postgres outbox, without each caller needing its own
+   * DatabaseService wiring. Never exposes credentials, only the connection. */
+  getDatabaseService(): DatabaseService | undefined {
+    return this.databaseService;
   }
 
   async ensureDefaultPlatformAccount(): Promise<{
@@ -1822,6 +1847,190 @@ export class IdentityRepository implements OnModuleInit {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  /** Writes a new password hash for an existing principal outside the
+   * invitation-accept flow (PWD-LOGIN-006 "forgot password" confirm). Clears
+   * any lockout, since proving control of the reset token is itself a form
+   * of re-authentication. */
+  async setPasswordCredentialForPrincipal(
+    principalId: string,
+    credential: PasswordInvitationCredential,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    if (!this.isEnabled()) {
+      const existing = this.fallbackPasswordCredentials.get(principalId);
+      this.fallbackPasswordCredentials.set(principalId, {
+        principalId,
+        passwordHash: credential.passwordHash,
+        passwordAlgo: credential.passwordAlgo,
+        pepperVersion: credential.pepperVersion,
+        failedAttempts: 0,
+        lockedUntil: null,
+        mustChangeAt: null,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      });
+      return;
+    }
+
+    await this.databaseService!.query(
+      `INSERT INTO iam.identity_password_credentials (
+         principal_id, password_hash, password_algo, pepper_version,
+         failed_attempts, locked_until, must_change_at, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, 0, NULL, NULL, $5, $5)
+       ON CONFLICT (principal_id) DO UPDATE SET
+         password_hash = EXCLUDED.password_hash,
+         password_algo = EXCLUDED.password_algo,
+         pepper_version = EXCLUDED.pepper_version,
+         failed_attempts = 0,
+         locked_until = NULL,
+         must_change_at = NULL,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        principalId,
+        credential.passwordHash,
+        credential.passwordAlgo,
+        credential.pepperVersion,
+        now,
+      ],
+    );
+  }
+
+  /** Issues a 128-bit, sha256-hash-only, single-use, 15-minute reset token
+   * (SA/SD §6) and supersedes any still-valid token this principal already
+   * holds, mirroring the invitation resend's "old token dies" semantics. */
+  async createPasswordResetToken(
+    principalId: string,
+  ): Promise<{ rawToken: string; expiresAt: string }> {
+    const now = new Date().toISOString();
+    const rawToken = `pwr_${randomBytes(16).toString("base64url")}`;
+    const tokenHash = hashIdentitySecret(rawToken);
+    const expiresAt = new Date(
+      Date.now() + PASSWORD_RESET_TOKEN_TTL_MS,
+    ).toISOString();
+
+    if (!this.isEnabled()) {
+      for (const [hash, entry] of this.fallbackPasswordResetTokens) {
+        if (entry.principalId === principalId && !entry.consumedAt) {
+          this.fallbackPasswordResetTokens.set(hash, {
+            ...entry,
+            consumedAt: now,
+          });
+        }
+      }
+      this.fallbackPasswordResetTokens.set(tokenHash, {
+        tokenHash,
+        principalId,
+        expiresAt,
+        consumedAt: null,
+        createdAt: now,
+      });
+      return { rawToken, expiresAt };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE iam.identity_password_reset_tokens
+            SET consumed_at = $2::timestamptz
+          WHERE principal_id = $1 AND consumed_at IS NULL`,
+        [principalId, now],
+      );
+      await client.query(
+        `INSERT INTO iam.identity_password_reset_tokens (
+           token_hash, principal_id, expires_at, consumed_at, created_at
+         ) VALUES ($1, $2, $3::timestamptz, NULL, $4::timestamptz)`,
+        [tokenHash, principalId, expiresAt, now],
+      );
+      await client.query("COMMIT");
+      return { rawToken, expiresAt };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Atomically consumes a valid, unexpired reset token. Never reveals
+   * whether a token merely doesn't exist vs. is expired/already consumed --
+   * all three return null, matching the existing invitation-token pattern. */
+  async consumePasswordResetToken(
+    rawToken: string,
+  ): Promise<{ principalId: string } | null> {
+    const tokenHash = hashIdentitySecret(rawToken);
+    const now = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const entry = this.fallbackPasswordResetTokens.get(tokenHash);
+      if (
+        !entry ||
+        entry.consumedAt ||
+        Date.parse(entry.expiresAt) <= Date.parse(now)
+      ) {
+        return null;
+      }
+      this.fallbackPasswordResetTokens.set(tokenHash, {
+        ...entry,
+        consumedAt: now,
+      });
+      return { principalId: entry.principalId };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<{ principal_id: string }>(
+        `SELECT principal_id FROM iam.identity_password_reset_tokens
+          WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > $2::timestamptz
+          FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const principalId = rows.rows[0]?.principal_id;
+      if (!principalId) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query(
+        `UPDATE iam.identity_password_reset_tokens
+            SET consumed_at = $2::timestamptz
+          WHERE token_hash = $1`,
+        [tokenHash, now],
+      );
+      await client.query("COMMIT");
+      return { principalId };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Scopes an email lookup to the one realm a password-reset/login request
+   * names, so a tenant principal and an agency principal that happen to share
+   * an email can never be confused for one another (SA/SD §1, §6). */
+  async findActivePrincipalAndMembershipForRealmByEmail(
+    email: string,
+    realm: PasswordResetRealm,
+  ): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+  } | null> {
+    const principals = await this.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      if (principal.status !== "active") continue;
+      const memberships = await this.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+      const membership = memberships.find(
+        (candidate) => candidate.realm === realm && candidate.status === "active",
+      );
+      if (membership) return { principal, membership };
+    }
+    return null;
   }
 
   async findMembershipsByPrincipalId(
