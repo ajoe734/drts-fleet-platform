@@ -74,9 +74,13 @@ import {
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
   DEV_MFA_WAIVED_AMR,
+  hasTrustedMfa,
   isDevWorkforceMfaWaiverEnabled,
 } from "../../common/auth/trusted-mfa.policy";
-import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import {
+  detectAuthEnvironment,
+  isOrdinaryLoginMfaRequired,
+} from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DatabaseService } from "../../common/db/database.service";
 import {
@@ -1542,6 +1546,302 @@ export class AuthController {
       { passwordReset: true, revokedSessionCount: revokedCount },
       requestId,
     );
+  }
+
+  // PWD-LOGIN-SESSION-ADD-PASSWORD-20261114 (SA/SD §1/§9/§12,
+  // docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+  // a fresh, trusted-MFA session for a role that requires it, used both to
+  // gate a Google-only principal's first password (§1) and as the
+  // `currentPassword`-less fallback for an existing password's change (§9).
+  private static readonly ACCOUNT_SECURITY_FRESH_SESSION_MS = 15 * 60 * 1000;
+
+  private isFreshSessionAuthTime(
+    identity: BootstrapRequestIdentity,
+    windowMs: number,
+  ): boolean {
+    const authTimeMs = identity.authTime ? Date.parse(identity.authTime) : NaN;
+    return Number.isFinite(authTimeMs) && Date.now() - authTimeMs <= windowMs;
+  }
+
+  /** Mirrors the tenant_admin/tenant_ops_admin role-sensitivity
+   * `exchangeTenantCallbackSession` already enforces at OIDC login time
+   * (oidc-pkce.service.ts) plus the existing ordinary-login MFA switch
+   * (`isOrdinaryLoginMfaRequired`), rather than inventing a third MFA-role
+   * policy for this one route. */
+  private accountSecurityMfaRequired(
+    realm: "tenant" | "agency" | "partner",
+    roles: readonly string[],
+  ): boolean {
+    return (
+      isOrdinaryLoginMfaRequired() ||
+      (realm === "tenant" &&
+        roles.some((role) =>
+          ["tenant_admin", "tenant_ops_admin"].includes(role),
+        ))
+    );
+  }
+
+  /**
+   * SA/SD §1: adding a *first* password credential to a Google-only
+   * principal only needs fresh, trusted MFA when the session's role is one
+   * this deployment already requires MFA for; an ordinary role's plain
+   * active session (already asserted by the caller) is sufficient on its
+   * own, exactly as the existing session is already enough for every other
+   * action that role can take.
+   */
+  private hasQualifyingFreshMfaForRoleSensitiveSetup(
+    identity: BootstrapRequestIdentity,
+    realm: "tenant" | "agency" | "partner",
+  ): boolean {
+    if (!this.accountSecurityMfaRequired(realm, identity.roles ?? [])) {
+      return true;
+    }
+    return (
+      hasTrustedMfa(identity) &&
+      this.isFreshSessionAuthTime(
+        identity,
+        AuthController.ACCOUNT_SECURITY_FRESH_SESSION_MS,
+      )
+    );
+  }
+
+  /**
+   * SA/SD §9: changing an *existing* password credential without supplying
+   * `currentPassword` instead requires the session itself to be recently
+   * authenticated ("fresh session"), regardless of role -- unlike the
+   * role-sensitive MFA gate above, this is the same bar for every realm.
+   */
+  private hasQualifyingFreshSessionForChange(
+    identity: BootstrapRequestIdentity,
+  ): boolean {
+    return this.isFreshSessionAuthTime(
+      identity,
+      AuthController.ACCOUNT_SECURITY_FRESH_SESSION_MS,
+    );
+  }
+
+  private denyCredentialPasswordChange(message: string): never {
+    throw new ApiRequestError(401, "AUTHENTICATION_FAILED", message);
+  }
+
+  private recordCredentialPasswordEvent(params: {
+    outcome: "success" | "denied";
+    action: "created" | "changed";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    principalId: string;
+    tenantId?: string | null;
+    partnerId?: string | null;
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.principalId,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.principalId,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType:
+        params.outcome === "success"
+          ? `password_credential.${params.action}`
+          : "password_credential.denied",
+      eventFamily: "credential",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "password_credential",
+      targetId: params.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: ["password"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  /**
+   * SA/SD §1 (docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md:34),
+   * §9 (:169) and §12 (:193): the one way an already-authenticated session
+   * adds a first password credential (Google-only principal) or changes an
+   * existing one. `principalId`/`realm`/`tenantId` all come from the
+   * verified session (`identity`); nothing in the request body can select a
+   * different identity, assert MFA, or bypass `PASSWORD_LOGIN_ENABLED`'s
+   * fail-closed pepper gate (`requirePasswordHashingService`). Reuses
+   * `IdentityRepository.setPasswordCredentialForPrincipal` -- the same
+   * upsert the invitation-accept and password-reset/confirm paths already
+   * write through -- so there is exactly one credential-write path, never a
+   * second table or auth model.
+   */
+  @RequireRealms("tenant", "agency", "partner")
+  @Post(":realm/credentials/password")
+  async setAccountPassword(
+    @Param("realm") realmParam: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body()
+    body: { password?: string; currentPassword?: string } | undefined,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const realm = this.assertPasswordLoginRealm(realmParam);
+    if (!identity?.principalId || identity.realm !== realm) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+    validateCsrfHeader(headers);
+
+    const password = body?.password;
+    if (typeof password !== "string" || !password) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "A new password is required.",
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+    const hasher = this.requirePasswordHashingService();
+
+    const totpCredential = await this.totpCredentialRepository?.findCredential(
+      identity.principalId,
+    );
+    const policyResult = this.passwordPolicyService.evaluate(password, {
+      totpEnabled: Boolean(totpCredential?.confirmedAt),
+    });
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+
+    // Session-derived only: `identity.principalId`/`identity.realm` were
+    // verified by `JwtAuthService`, never trusted from the request body
+    // (an `email`/`principalId`/`amr` field on `body` would otherwise let a
+    // caller pick someone else's identity).
+    const principal = await this.identityRepository.findPrincipalById(
+      identity.principalId,
+    );
+    if (!principal || principal.status !== "active") {
+      this.denyCredentialPasswordChange("Active session required.");
+    }
+
+    const membership = identity.membershipId
+      ? await this.identityRepository.findMembershipById(identity.membershipId)
+      : null;
+    if (
+      !membership ||
+      membership.principalId !== principal.principalId ||
+      membership.realm !== realm ||
+      membership.status !== "active"
+    ) {
+      this.denyCredentialPasswordChange("Active session required.");
+    }
+
+    const existingCredential =
+      await this.identityRepository.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+    const action: "created" | "changed" = existingCredential
+      ? "changed"
+      : "created";
+
+    if (existingCredential) {
+      const currentPassword = body?.currentPassword;
+      if (typeof currentPassword === "string" && currentPassword) {
+        const verifyOutcome = await this.verifyPasswordAndLockout(
+          hasher,
+          principal,
+          currentPassword,
+        );
+        if (verifyOutcome !== "ok") {
+          this.recordCredentialPasswordEvent({
+            outcome: "denied",
+            action,
+            realm,
+            reasonCode: `CURRENT_PASSWORD_${verifyOutcome.toUpperCase()}`,
+            principalId: principal.principalId,
+            tenantId: membership.tenantId,
+            partnerId: membership.partnerId,
+          });
+          this.denyCredentialPasswordChange(
+            "The current password is incorrect, or this account is not eligible for this change.",
+          );
+        }
+      } else if (!this.hasQualifyingFreshSessionForChange(identity)) {
+        this.recordCredentialPasswordEvent({
+          outcome: "denied",
+          action,
+          realm,
+          reasonCode: "STEP_UP_REQUIRED",
+          principalId: principal.principalId,
+          tenantId: membership.tenantId,
+          partnerId: membership.partnerId,
+        });
+        throw new ApiRequestError(
+          403,
+          "STEP_UP_REQUIRED",
+          "Changing your password requires your current password or a recent, verified session.",
+        );
+      }
+    } else if (
+      !this.hasQualifyingFreshMfaForRoleSensitiveSetup(identity, realm)
+    ) {
+      this.recordCredentialPasswordEvent({
+        outcome: "denied",
+        action,
+        realm,
+        reasonCode: "MFA_REQUIRED",
+        principalId: principal.principalId,
+        tenantId: membership.tenantId,
+        partnerId: membership.partnerId,
+      });
+      throw new ApiRequestError(
+        403,
+        "MFA_REQUIRED",
+        "Adding a password credential requires a recent, trusted multi-factor authentication proof.",
+      );
+    }
+
+    const hashed = await hasher.hash(password);
+    await this.identityRepository.setPasswordCredentialForPrincipal(
+      principal.principalId,
+      {
+        passwordHash: hashed.hash,
+        passwordAlgo: hashed.algo,
+        pepperVersion: hashed.pepperVersion,
+      },
+    );
+
+    this.recordCredentialPasswordEvent({
+      outcome: "success",
+      action,
+      realm,
+      principalId: principal.principalId,
+      tenantId: membership.tenantId,
+      partnerId: membership.partnerId,
+    });
+
+    return toApiSuccessEnvelope({ action }, requestId);
   }
 
   @OpenRoute()
