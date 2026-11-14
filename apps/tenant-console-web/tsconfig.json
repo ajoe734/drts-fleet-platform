@@ -7,7 +7,10 @@
       "@drts/api-client": ["../../packages/api-client/src/index.ts"],
       "@drts/contracts": ["../../packages/contracts/src/index.ts"],
       "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
-      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
+      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"],
+      "@drts/ui-web/*": ["../../packages/ui-web/src/*"],
+      "@drts/tenant-auth": ["../../packages/tenant-auth/src/route-handlers.ts"],
+      "@drts/tenant-auth/*": ["../../packages/tenant-auth/src/*"]
     }
   },
   "include": ["next-env.d.ts", ".next/types/**/*.ts", "**/*.ts", "**/*.tsx"],

@@ -9,7 +9,8 @@
       "@drts/control-plane-auth": ["../../packages/control-plane-auth/src/index.ts"],
       "@drts/shared-types": ["../../packages/shared-types/src/index.ts"],
       "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
-      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
+      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"],
+      "@drts/ui-web/*": ["../../packages/ui-web/src/*"]
     }
   },
   "include": ["next-env.d.ts", ".next/types/**/*.ts", "**/*.ts", "**/*.tsx"],
