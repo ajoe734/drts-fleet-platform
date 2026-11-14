@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3010",
     "test": "vitest run --config vitest.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
     "@drts/tenant-auth": "workspace:*",
