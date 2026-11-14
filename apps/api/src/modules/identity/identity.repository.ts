@@ -128,6 +128,31 @@ export interface StoredPasswordCredential extends PasswordInvitationCredential {
   updatedAt: string;
 }
 
+/**
+ * Progressive account-dimension lockout for `identity_password_credentials`
+ * (SA/SD §4, docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+ * 5 failures locks 5 minutes, 10 locks 30 minutes, 15 locks 24 hours. Ordered
+ * highest-threshold-first so the first match wins.
+ */
+export const PASSWORD_LOGIN_LOCKOUT_THRESHOLDS = [
+  { attempts: 15, lockMs: 24 * 60 * 60 * 1000 },
+  { attempts: 10, lockMs: 30 * 60 * 1000 },
+  { attempts: 5, lockMs: 5 * 60 * 1000 },
+] as const;
+
+export interface PasswordLoginLockoutState {
+  failedAttempts: number;
+  lockedUntil: string | null;
+}
+
+/** Output of `PasswordHashingService.hash()`, handed to the opportunistic
+ * rehash write below. */
+export interface RehashedPasswordCredential {
+  hash: string;
+  algo: string;
+  pepperVersion: string;
+}
+
 export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -1893,6 +1918,145 @@ export class IdentityRepository implements OnModuleInit {
         credential.passwordAlgo,
         credential.pepperVersion,
         now,
+      ],
+    );
+  }
+
+  /** Read-only view of the lockout columns `verifyPasswordAndLockout` checks
+   * before comparing a submitted password (PWD-LOGIN-005 SA/SD §4). Shares
+   * the same fallback store as `findPasswordCredentialByPrincipalId` rather
+   * than a second in-memory map, so there is exactly one place lockout state
+   * can drift out of sync with the credential it locks. */
+  async getPasswordLoginLockoutState(
+    principalId: string,
+  ): Promise<PasswordLoginLockoutState> {
+    if (!this.isEnabled()) {
+      const credential = this.fallbackPasswordCredentials.get(principalId);
+      return credential
+        ? {
+            failedAttempts: credential.failedAttempts,
+            lockedUntil: credential.lockedUntil,
+          }
+        : { failedAttempts: 0, lockedUntil: null };
+    }
+    const result = await this.databaseService!.query<{
+      failed_attempts: number;
+      locked_until: string | null;
+    }>(
+      `SELECT failed_attempts, locked_until
+         FROM iam.identity_password_credentials
+        WHERE principal_id = $1`,
+      [principalId],
+    );
+    const row = result.rows[0];
+    return row
+      ? { failedAttempts: row.failed_attempts, lockedUntil: row.locked_until }
+      : { failedAttempts: 0, lockedUntil: null };
+  }
+
+  /** Atomic per-row increment; the threshold check reads the post-increment
+   * count so concurrent failures from the same account can never under-lock. */
+  async recordPasswordLoginFailure(
+    principalId: string,
+    now: Date = new Date(),
+  ): Promise<PasswordLoginLockoutState> {
+    if (!this.isEnabled()) {
+      const existing = this.fallbackPasswordCredentials.get(principalId);
+      if (!existing) return { failedAttempts: 0, lockedUntil: null };
+      const failedAttempts = existing.failedAttempts + 1;
+      const threshold = PASSWORD_LOGIN_LOCKOUT_THRESHOLDS.find(
+        (candidate) => failedAttempts >= candidate.attempts,
+      );
+      const lockedUntil = threshold
+        ? new Date(now.getTime() + threshold.lockMs).toISOString()
+        : existing.lockedUntil;
+      this.fallbackPasswordCredentials.set(principalId, {
+        ...existing,
+        failedAttempts,
+        lockedUntil,
+        updatedAt: now.toISOString(),
+      });
+      return { failedAttempts, lockedUntil };
+    }
+
+    const result = await this.databaseService!.query<{
+      failed_attempts: number;
+      locked_until: string | null;
+    }>(
+      `UPDATE iam.identity_password_credentials
+          SET failed_attempts = failed_attempts + 1,
+              locked_until = CASE
+                WHEN failed_attempts + 1 >= 15 THEN $2::timestamptz + interval '24 hours'
+                WHEN failed_attempts + 1 >= 10 THEN $2::timestamptz + interval '30 minutes'
+                WHEN failed_attempts + 1 >= 5 THEN $2::timestamptz + interval '5 minutes'
+                ELSE locked_until
+              END,
+              updated_at = $2::timestamptz
+        WHERE principal_id = $1
+        RETURNING failed_attempts, locked_until`,
+      [principalId, now.toISOString()],
+    );
+    const row = result.rows[0];
+    return row
+      ? { failedAttempts: row.failed_attempts, lockedUntil: row.locked_until }
+      : { failedAttempts: 0, lockedUntil: null };
+  }
+
+  async recordPasswordLoginSuccess(
+    principalId: string,
+    now: Date = new Date(),
+  ): Promise<void> {
+    if (!this.isEnabled()) {
+      const existing = this.fallbackPasswordCredentials.get(principalId);
+      if (existing) {
+        this.fallbackPasswordCredentials.set(principalId, {
+          ...existing,
+          failedAttempts: 0,
+          lockedUntil: null,
+          updatedAt: now.toISOString(),
+        });
+      }
+      return;
+    }
+    await this.databaseService!.query(
+      `UPDATE iam.identity_password_credentials
+          SET failed_attempts = 0, locked_until = NULL, updated_at = $2::timestamptz
+        WHERE principal_id = $1`,
+      [principalId, now.toISOString()],
+    );
+  }
+
+  /** Opportunistic rehash (SA/SD §2): writes a freshly computed hash/pepper
+   * version for a credential that `PasswordHashingService.verify` already
+   * flagged `needsRehash`. Never touches the lockout columns above. */
+  async updatePasswordCredentialHash(
+    principalId: string,
+    credential: RehashedPasswordCredential,
+    now: Date = new Date(),
+  ): Promise<void> {
+    if (!this.isEnabled()) {
+      const existing = this.fallbackPasswordCredentials.get(principalId);
+      if (existing) {
+        this.fallbackPasswordCredentials.set(principalId, {
+          ...existing,
+          passwordHash: credential.hash,
+          passwordAlgo: credential.algo,
+          pepperVersion: credential.pepperVersion,
+          updatedAt: now.toISOString(),
+        });
+      }
+      return;
+    }
+    await this.databaseService!.query(
+      `UPDATE iam.identity_password_credentials
+          SET password_hash = $2, password_algo = $3, pepper_version = $4, updated_at = $5::timestamptz
+        WHERE principal_id = $1`,
+      [
+        principalId,
+        credential.hash,
+        credential.algo,
+        credential.pepperVersion,
+        now.toISOString(),
       ],
     );
   }

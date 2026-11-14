@@ -125,7 +125,7 @@ describe("PWD-LOGIN-005 strict password-login negative controls", () => {
     });
   });
 
-  it("answers account-not-found and wrong-realm the same way across tenant and agency", async () => {
+  it("answers account-not-found the same way across tenant, agency and partner", async () => {
     const identityRepository = new IdentityRepository();
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
@@ -152,9 +152,11 @@ describe("PWD-LOGIN-005 strict password-login negative controls", () => {
 
     let tenantMessage: string | undefined;
     let agencyMessage: string | undefined;
+    let partnerMessage: string | undefined;
     for (const [realm, assign] of [
       ["tenant", (value: string) => (tenantMessage = value)],
       ["agency", (value: string) => (agencyMessage = value)],
+      ["partner", (value: string) => (partnerMessage = value)],
     ] as const) {
       try {
         await attempt(realm);
@@ -170,5 +172,6 @@ describe("PWD-LOGIN-005 strict password-login negative controls", () => {
       }
     }
     expect(agencyMessage).toBe(tenantMessage);
+    expect(partnerMessage).toBe(tenantMessage);
   });
 });

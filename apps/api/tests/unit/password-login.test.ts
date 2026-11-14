@@ -1,10 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { PasswordHashingService } from "../../src/common/auth/password-hashing.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import type { CanonicalIdentityPrincipalRecord } from "@drts/contracts";
+import type {
+  CanonicalIdentityMembershipRecord,
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityRoleBindingRecord,
+  PartnerChannelEntryRecord,
+} from "@drts/contracts";
 import { AgencyDirectoryRepository } from "../../src/modules/agency-access/agency-directory.repository";
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
@@ -156,6 +162,140 @@ function forceSuspendPrincipal(
   });
 }
 
+/** FLEET-ONB-002/003/004 (the invitation-issue/accept flow that will write
+ * these rows in production) haven't shipped yet, so this builds the exact
+ * fleet-staff shape PWD-LOGIN-005's partner password-login path reads
+ * directly: a principal/membership/role-binding trio following the
+ * `jwt_principal:partner:<id>` / `fleet_member:<entrySlug>:<id>` /
+ * `fleet_role:<entrySlug>:<id>` sourceRef conventions `manageFleetHumanRole`
+ * and `exchangePartnerCallbackSession` already use (Fleet269 §2, §3). */
+async function createActiveFleetPartnerPasswordUser(
+  fixture: ReturnType<typeof createFixture>,
+  options: {
+    entrySlug: string;
+    fleetPartnerId: string;
+    email: string;
+    roleCode?: string;
+    password?: string;
+  },
+) {
+  const now = new Date().toISOString();
+  const principalId = `principal_fleet_${randomUUID().replace(/-/g, "")}`;
+  const repo = fixture.identityRepository as unknown as {
+    upsertFallbackPrincipal: (
+      record: CanonicalIdentityPrincipalRecord,
+    ) => CanonicalIdentityPrincipalRecord;
+    fallbackMemberships: Map<string, CanonicalIdentityMembershipRecord>;
+    fallbackRoleBindings: Map<string, CanonicalIdentityRoleBindingRecord>;
+  };
+
+  const principal = repo.upsertFallbackPrincipal({
+    principalId,
+    sourceRef: `jwt_principal:partner:${principalId}`,
+    issuer: "fleet_staff_fixture",
+    subject: principalId,
+    principalType: "human",
+    email: options.email,
+    emailVerified: true,
+    displayName: "Fleet Staff Fixture",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const membershipId = `membership_fleet_${randomUUID().replace(/-/g, "")}`;
+  repo.fallbackMemberships.set(membershipId, {
+    membershipId,
+    sourceRef: `fleet_member:${options.entrySlug}:${principalId}`,
+    principalId,
+    realm: "partner",
+    scopeRef: `fleet:${options.entrySlug}`,
+    tenantId: null,
+    partnerId: options.fleetPartnerId,
+    status: "active",
+    invitedByPrincipalId: null,
+    invitationId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const roleBindingId = `role_binding_fleet_${randomUUID().replace(/-/g, "")}`;
+  repo.fallbackRoleBindings.set(roleBindingId, {
+    roleBindingId,
+    sourceRef: `fleet_role:${options.entrySlug}:${principalId}`,
+    membershipId,
+    roleCode: options.roleCode ?? "fleet_partner_admin",
+    grantedByPrincipalId: null,
+    approvalId: null,
+    validFrom: now,
+    validTo: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const hashed = await new PasswordHashingService().hash(
+    options.password ?? CORRECT_PASSWORD,
+  );
+  await fixture.identityRepository.setPasswordCredentialForPrincipal(
+    principalId,
+    {
+      passwordHash: hashed.hash,
+      passwordAlgo: hashed.algo,
+      pepperVersion: hashed.pepperVersion,
+    },
+  );
+
+  return { principal };
+}
+
+/** Registers a minimal, active `fleet_partner` entry directly in
+ * `TenantPartnerService`'s in-memory seed list (no platform-admin endpoint
+ * exists to create one in a unit test), so `issuePartnerPasswordSession` can
+ * resolve the entry its membership's `scopeRef` points at. */
+function registerFleetPartnerEntry(
+  fixture: ReturnType<typeof createFixture>,
+  options: { entrySlug: string; fleetPartnerId: string },
+) {
+  const now = new Date().toISOString();
+  const entry: PartnerChannelEntryRecord = {
+    partnerId: options.fleetPartnerId,
+    partnerCode: "pwd_login_fleet_fixture",
+    partnerType: "fleet_partner",
+    programId: "program-pwd-login-fleet-fixture",
+    programCode: null,
+    tenantId: "tenant-pwd-login-fleet-fixture",
+    bankCode: null,
+    entrySlug: options.entrySlug,
+    displayName: "Fleet Partner Fixture",
+    businessDispatchSubtype: "enterprise_dispatch",
+    authMode: "partner_api_key",
+    eligibilityMode: "none",
+    entryHost: null,
+    entryPath: `/partner/${options.entrySlug}`,
+    themeAccent: null,
+    brandingMetadata: null,
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: now,
+    updatedAt: now,
+    auditMetadata: {
+      source: "seed_bootstrap",
+      requestId: null,
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  };
+  (
+    fixture.tenantPartnerService as unknown as {
+      partnerEntries: PartnerChannelEntryRecord[];
+    }
+  ).partnerEntries.push(entry);
+}
+
 async function expectUniformDenial(
   promise: Promise<unknown>,
 ): Promise<string> {
@@ -175,10 +315,20 @@ async function expectUniformDenial(
 }
 
 describe("POST /api/auth/:realm/password-login", () => {
-  it("rejects a partner realm request as unsupported before touching any account", async () => {
+  it("accepts a partner realm request and denies it the same uniform way as any other unknown account (Fleet269 §3: partner realm is supported, not routed through AUTH_REALM_INVALID)", async () => {
     const { controller } = createFixture();
     await expect(
       controller.passwordLogin("partner", {
+        email: "someone@example.com",
+        password: CORRECT_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+  });
+
+  it("rejects a realm outside tenant/agency/partner before touching any account", async () => {
+    const { controller } = createFixture();
+    await expect(
+      controller.passwordLogin("platform", {
         email: "someone@example.com",
         password: CORRECT_PASSWORD,
       }),
@@ -407,5 +557,105 @@ describe("POST /api/auth/:realm/password-login", () => {
       }),
     );
     expect(agencyMessage).toBe(tenantMessage);
+  });
+
+  it("issues a partner session for a fleet-staff membership resolved directly via findMembershipsByPrincipalId, not partner_user_identity_links (Fleet269 §3)", async () => {
+    const fixture = createFixture();
+    const entrySlug = "fleet-pwd-login-fixture";
+    const fleetPartnerId = "fleet-partner-pwd-login-fixture";
+    registerFleetPartnerEntry(fixture, { entrySlug, fleetPartnerId });
+    await createActiveFleetPartnerPasswordUser(fixture, {
+      entrySlug,
+      fleetPartnerId,
+      email: "fleet-staff@example.com",
+    });
+
+    const envelope = (await fixture.controller.passwordLogin("partner", {
+      email: "fleet-staff@example.com",
+      password: CORRECT_PASSWORD,
+      partnerId: entrySlug,
+    })) as {
+      data: {
+        accessToken: string;
+        partnerEntry: { entrySlug: string; partnerId: string };
+        identity: { realm: string; roles: string[] };
+      };
+    };
+
+    expect(envelope.data.accessToken).toBeTruthy();
+    expect(envelope.data.partnerEntry.entrySlug).toBe(entrySlug);
+    expect(envelope.data.partnerEntry.partnerId).toBe(fleetPartnerId);
+    expect(envelope.data.identity.realm).toBe("partner");
+    expect(envelope.data.identity.roles).toEqual(["fleet_partner_admin"]);
+  });
+
+  it("answers an unknown partner account the same way as an unknown tenant account", async () => {
+    const fixture = createFixture();
+    const tenantMessage = await expectUniformDenial(
+      fixture.controller.passwordLogin("tenant", {
+        email: "nobody@example.com",
+        password: CORRECT_PASSWORD,
+      }),
+    );
+    const partnerMessage = await expectUniformDenial(
+      fixture.controller.passwordLogin("partner", {
+        email: "nobody@example.com",
+        password: CORRECT_PASSWORD,
+      }),
+    );
+    expect(partnerMessage).toBe(tenantMessage);
+  });
+
+  it("denies a fleet-staff login with the wrong password the same uniform way, and locks after repeated failures", async () => {
+    const fixture = createFixture();
+    const entrySlug = "fleet-pwd-login-lockout";
+    const fleetPartnerId = "fleet-partner-pwd-login-lockout";
+    registerFleetPartnerEntry(fixture, { entrySlug, fleetPartnerId });
+    const { principal } = await createActiveFleetPartnerPasswordUser(fixture, {
+      entrySlug,
+      fleetPartnerId,
+      email: "fleet-staff-lockout@example.com",
+    });
+
+    const unknownMessage = await expectUniformDenial(
+      fixture.controller.passwordLogin("partner", {
+        email: "nobody@example.com",
+        password: CORRECT_PASSWORD,
+      }),
+    );
+    const wrongPasswordMessage = await expectUniformDenial(
+      fixture.controller.passwordLogin("partner", {
+        email: "fleet-staff-lockout@example.com",
+        password: WRONG_PASSWORD,
+        partnerId: entrySlug,
+      }),
+    );
+    expect(wrongPasswordMessage).toBe(unknownMessage);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expectUniformDenial(
+        fixture.controller.passwordLogin("partner", {
+          email: "fleet-staff-lockout@example.com",
+          password: WRONG_PASSWORD,
+          partnerId: entrySlug,
+        }),
+      );
+    }
+
+    const lockedState =
+      await fixture.identityRepository.getPasswordLoginLockoutState(
+        principal.principalId,
+      );
+    expect(lockedState.failedAttempts).toBe(5);
+    expect(lockedState.lockedUntil).toBeTruthy();
+
+    const lockedOutMessage = await expectUniformDenial(
+      fixture.controller.passwordLogin("partner", {
+        email: "fleet-staff-lockout@example.com",
+        password: CORRECT_PASSWORD,
+        partnerId: entrySlug,
+      }),
+    );
+    expect(lockedOutMessage).toBe(unknownMessage);
   });
 });
