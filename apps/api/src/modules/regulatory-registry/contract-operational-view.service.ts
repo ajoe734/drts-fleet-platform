@@ -501,7 +501,11 @@ export class ContractOperationalViewService {
     // 7. Auth Mode
     let authMode: ContractOperationalViewRecord["authMode"] = null;
     let authStatus: ContractOperationalDataStatus = "missing_data";
-    if (partnerEntry) {
+    // A fleet_partner contract's own drivers/vehicles always authenticate
+    // through the fleet partner's portal; a matched partnerEntry's authMode
+    // (e.g. "partner_api_key") describes that channel's service-to-service
+    // credential, an unrelated concept, and must not override this.
+    if (partnerEntry && contract.partnerType !== "fleet_partner") {
       authMode = {
         mode: partnerEntry.authMode,
         eligibilityMode: partnerEntry.eligibilityMode || undefined,
