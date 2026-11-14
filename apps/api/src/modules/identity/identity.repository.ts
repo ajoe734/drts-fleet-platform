@@ -204,6 +204,51 @@ export function parseAgencyScopeRef(scopeRef: string | null | undefined) {
   return match?.[1] ?? null;
 }
 
+/**
+ * FLEET-ONB-002 SA/SD §2 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md):
+ * placeholder issuer of an invited Fleet staff principal, mirroring
+ * `AGENCY_INVITATION_ISSUER`. The principal is rebound to the verified
+ * Google `(issuer, sub)` — or stays at this placeholder for a password-only
+ * accept — only when the invitation is accepted; nobody can authenticate as
+ * this issuer.
+ */
+export const FLEET_INVITATION_ISSUER = "fleet_invitation";
+
+/**
+ * FLEET-ONB-002 SA/SD §0, §2: the `fleet:<entrySlug>` membership scope and
+ * the principal/membership/role-binding `sourceRef` formulas that
+ * `manageFleetHumanRole` (below) and `exchangePartnerCallbackSession`
+ * (`apps/api/src/modules/auth/oidc-pkce.service.ts`, outside this task's
+ * write_scopes) already compare against as inline string literals. These
+ * helpers exist so FLEET-ONB-003/004's invitation-issue/accept code builds
+ * the exact same strings instead of re-deriving the convention; they must
+ * stay byte-identical to those inline literals, or role/session lookups
+ * silently stop recognizing records this task's callers create.
+ */
+export function buildFleetScopeRef(entrySlug: string): string {
+  return `fleet:${entrySlug}`;
+}
+
+export function buildFleetPartnerPrincipalSourceRef(
+  principalId: string,
+): string {
+  return `jwt_principal:partner:${principalId}`;
+}
+
+export function buildFleetMemberSourceRef(
+  entrySlug: string,
+  principalId: string,
+): string {
+  return `fleet_member:${entrySlug}:${principalId}`;
+}
+
+export function buildFleetRoleBindingSourceRef(
+  entrySlug: string,
+  principalId: string,
+): string {
+  return `fleet_role:${entrySlug}:${principalId}`;
+}
+
 @Injectable()
 export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
