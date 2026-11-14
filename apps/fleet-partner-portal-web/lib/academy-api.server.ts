@@ -41,6 +41,7 @@ import {
   extractIapJwtAssertion,
 } from "@drts/control-plane-auth";
 import { cookies as nextCookies, headers as nextHeaders } from "next/headers";
+import { requireAcceptedFleetSession } from "./fleet-session-gate.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const FLEET_PARTNER_ID_HEADER = "x-fleet-partner-id";
@@ -312,6 +313,7 @@ export function appendFleetPartnerQuery(
 export async function getServerFleetTrainingClient(): Promise<ServerFleetTrainingClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
+  await requireAcceptedFleetSession(requestHeaders);
   const explicitFleetPartnerId = resolveExplicitFleetPartnerId(requestHeaders);
 
   const defaultHeaders: Record<string, string> = {};

@@ -2,6 +2,7 @@
 
 import type { FleetPartnerStatementRecord } from "@drts/contracts";
 import { revalidatePath } from "next/cache";
+import { isFleetSessionRedirect } from "../../lib/fleet-session-redirect";
 import { getServerFleetPartnerClient } from "../../lib/api-client.server";
 
 export type StatementDecisionResult =
@@ -37,6 +38,7 @@ export async function submitStatementDecision(
     }
     return { ok: true, statement };
   } catch (error) {
+    if (isFleetSessionRedirect(error)) throw error;
     return {
       ok: false,
       error:

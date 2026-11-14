@@ -47,6 +47,8 @@ const en: Dict = {
     "Use the Google account your fleet invited. Your drivers, vehicles, trips and statements appear after sign-in.",
   "login.google": "Sign in with Google",
   "login.error.title": "Sign-in did not complete.",
+  "login.sessionExpired":
+    "Your sign-in has expired or is no longer valid. Sign in again to continue.",
   "login.securityNote":
     "DRTS never sees your Google password. Only accounts invited to a fleet can sign in.",
   "referral.app.name": "Channel Partner Portal",
@@ -669,6 +671,7 @@ const zh: Dict = {
     "請使用車行邀請的 Google 帳號登入。登入後才會顯示司機、車輛、趟次與對帳單。",
   "login.google": "使用 Google 登入",
   "login.error.title": "登入沒有完成。",
+  "login.sessionExpired": "登入已失效，請重新登入後繼續。",
   "login.securityNote":
     "DRTS 不會取得你的 Google 密碼。只有受車行邀請的帳號可以登入。",
   "referral.app.name": "渠道夥伴入口",

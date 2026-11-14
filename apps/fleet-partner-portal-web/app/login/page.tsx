@@ -11,7 +11,11 @@ const th = buildFleetTheme();
 export default async function FleetLoginPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ redirect_uri?: string; error?: string }>;
+  searchParams?: Promise<{
+    redirect_uri?: string;
+    error?: string;
+    session?: string;
+  }>;
 }) {
   const params = (await searchParams) ?? {};
   const locale = await getServerLocale();
@@ -36,6 +40,24 @@ export default async function FleetLoginPage({
             title={t("login.title", locale)}
             subtitle={t("login.subtitle", locale)}
           />
+
+          {params.session === "expired" && !params.error ? (
+            <div
+              role="status"
+              style={{
+                marginTop: 16,
+                padding: "12px 16px",
+                borderRadius: 8,
+                background: th.warnBg,
+                border: `1px solid ${th.warnBorder}`,
+                color: th.warn,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {t("login.sessionExpired", locale)}
+            </div>
+          ) : null}
 
           {params.error ? (
             <div
