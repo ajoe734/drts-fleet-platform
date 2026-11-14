@@ -1719,3 +1719,163 @@ describe("DriverDetailPage statement generation locale switching coherence", () 
     expect(receiptEn!.textContent).toContain("DRTS-STMT-202607-8801");
   });
 });
+
+describe.each(["en", "zh"] as const)(
+  "DriverDetailPage canonical statement history across fee-plan versions (%s)",
+  (locale) => {
+    it("keeps every real same-month ID in initial history and the complete scoped generation readback without duplicating initial IDs", async () => {
+      const driverId = "DRV-8801";
+      const period = "2026-06";
+      const driver = makeDriverRecord(driverId);
+      const fixtures = makeDriverDetailFixtures(driverId);
+      const first: DriverStatementRecord = {
+        ...makeStatementRecord(driverId, period, "version-1"),
+        statementId: "STMT-DRV-8801-202606-plan-1",
+        feePlanVersion: "2026-06-plan-1",
+      };
+      const second: DriverStatementRecord = {
+        ...makeStatementRecord(driverId, period, "version-2"),
+        statementId: "STMT-DRV-8801-202606-plan-2",
+        feePlanVersion: "2026-06-plan-2",
+      };
+      const third: DriverStatementRecord = {
+        ...makeStatementRecord(driverId, period, "version-3"),
+        statementId: "STMT-DRV-8801-202606-plan-3",
+        feePlanVersion: "2026-06-plan-3",
+      };
+      const fourth: DriverStatementRecord = {
+        ...makeStatementRecord(driverId, period, "version-4"),
+        statementId: "STMT-DRV-8801-202606-plan-4",
+        feePlanVersion: "2026-06-plan-4",
+      };
+      const foreign = makeStatementRecord("DRV-OTHER", period, "foreign");
+      const otherMonth = makeStatementRecord(
+        driverId,
+        "2026-05",
+        "other-month",
+      );
+      let stored = [first, second];
+      const calls: RecordedCall[] = [];
+      const ordinaryReads: Record<string, unknown> = {
+        "/api/regulatory-registry/drivers": { items: [driver] },
+        "/api/regulatory-registry/driver-locations": {
+          items: fixtures.locations,
+        },
+        "/api/platform-presence": fixtures.presence,
+        "/api/forwarder/orders": { items: fixtures.forwardedOrders },
+        "/api/driver/tasks": { items: fixtures.tasks },
+        "/api/incidents": { items: fixtures.incidents },
+        "/api/shift-attendance/shifts": { items: fixtures.shifts },
+        "/api/shift-attendance/attendance": { items: fixtures.attendance },
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(
+            String(input),
+            "http://driver-statement-unit.invalid",
+          );
+          const method = (init?.method ?? "GET").toUpperCase();
+          const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+          calls.push({
+            method,
+            path: url.pathname,
+            search: url.search,
+            body,
+            idempotencyKey: readHeader(init?.headers, "idempotency-key"),
+            realm: readHeader(init?.headers, "x-realm"),
+          });
+          if (method === "GET" && url.pathname in ordinaryReads) {
+            return Response.json(
+              makeSuccessEnvelope(
+                ordinaryReads[url.pathname],
+                "history-normal-read",
+              ),
+            );
+          }
+          if (method === "GET" && url.pathname === "/api/driver-statements") {
+            const requestedPeriod = url.searchParams.get("period");
+            expect(requestedPeriod === null || requestedPeriod === period).toBe(
+              true,
+            );
+            // A generation readback can contain several real committed versions;
+            // only this HTTP port is simulated. The page, panel and SDK are real.
+            const items = requestedPeriod
+              ? [...stored, foreign, otherMonth]
+              : stored;
+            return Response.json(
+              makeSuccessEnvelope({ items }, "history-readback"),
+            );
+          }
+          if (
+            method === "POST" &&
+            url.pathname === "/api/driver-statements/generate"
+          ) {
+            expect(body).toEqual({ driverId, periodMonth: period });
+            stored = [fourth, third, first, second];
+            return Response.json(
+              makeSuccessEnvelope(
+                { acknowledged: true },
+                "history-opaque-generation-ack",
+              ),
+            );
+          }
+          throw new Error(`Unexpected ${method} ${url.pathname}${url.search}`);
+        }),
+      );
+      const container = await mountDriverDetailPage(locale, driverId);
+      const statementTableRows = () =>
+        Array.from(
+          container.querySelectorAll<HTMLTableRowElement>("tbody tr"),
+        ).filter((row) =>
+          row.textContent?.includes("DRTS-STMT-202606-version-"),
+        );
+      const cardTitle = (count: number) =>
+        translate("drivers.detailPage.card.earningsTitle", locale, { count });
+      expect(statementTableRows()).toHaveLength(2);
+      expect(container.textContent).toContain(cardTitle(2));
+      expect(container.textContent).toContain(first.receiptNo);
+      expect(container.textContent).toContain(second.receiptNo);
+      await clickElement(findGenerateStatementCta(container, locale));
+      await setInputValue(
+        container.querySelector<HTMLInputElement>(
+          '[data-testid="driver-statement-period-input"]',
+        )!,
+        period,
+      );
+      await clickElement(
+        container.querySelector<HTMLButtonElement>(
+          '[data-testid="driver-statement-submit-btn"]',
+        )!,
+      );
+      expect(statementTableRows()).toHaveLength(4);
+      expect(container.textContent).toContain(cardTitle(4));
+      for (const record of [first, second, third, fourth]) {
+        expect(
+          statementTableRows().filter((row) =>
+            row.textContent?.includes(record.receiptNo),
+          ),
+        ).toHaveLength(1);
+      }
+      expect(container.textContent).not.toContain(foreign.receiptNo);
+      expect(container.textContent).not.toContain(otherMonth.receiptNo);
+      const receipt = container.querySelector<HTMLElement>(
+        '[data-testid="driver-statement-receipt"]',
+      )!;
+      expect(receipt.textContent).toContain(fourth.statementId);
+      expect(receipt.textContent).toContain(fourth.feePlanVersion);
+      expect(receipt.textContent).toContain(fourth.receiptNo);
+      expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+      expect(
+        calls.filter(
+          (call) =>
+            call.method === "GET" && call.search === `?period=${period}`,
+        ),
+      ).toHaveLength(1);
+      expect(
+        calls.find((call) => call.method === "POST")?.idempotencyKey,
+      ).toEqual(expect.stringMatching(/^ops-driver-stmt-DRV-8801-2026-06-/));
+      expect(navState.refresh).toHaveBeenCalledTimes(1);
+    });
+  },
+);

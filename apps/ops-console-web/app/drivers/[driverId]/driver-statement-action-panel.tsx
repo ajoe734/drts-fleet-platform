@@ -332,19 +332,16 @@ function mergeDriverStatements(
     if (item.driverId.trim() !== normalizedDriver) {
       continue;
     }
-    byStatementKey.set(
-      `${item.driverId.trim()}::${item.periodMonth.trim()}`,
-      item,
-    );
+    byStatementKey.set(item.statementId, item);
   }
 
   for (const item of initialStatements) {
     if (item.driverId.trim() !== normalizedDriver) {
       continue;
     }
-    const periodKey = `${item.driverId.trim()}::${item.periodMonth.trim()}`;
-    if (!byStatementKey.has(periodKey)) {
-      byStatementKey.set(periodKey, item);
+    const statementKey = item.statementId;
+    if (!byStatementKey.has(statementKey)) {
+      byStatementKey.set(statementKey, item);
     }
   }
 
@@ -515,11 +512,12 @@ export function DriverStatementActionPanel({
 
       const monthStatements: DriverStatementRecord[] =
         await client.listDriverStatements(normalizedPeriodMonth);
-      const matched = monthStatements.find(
+      const matchingStatements = monthStatements.filter(
         (statement) =>
           statement.driverId.trim() === normalizedDriverId &&
           statement.periodMonth.trim() === normalizedPeriodMonth,
       );
+      const matched = matchingStatements[0];
 
       if (!matched) {
         setErrorState({
@@ -532,17 +530,9 @@ export function DriverStatementActionPanel({
 
       activeIntentRef.current = null;
       setAcknowledgedStatement(matched);
-      setReadbackStatements((prev) => {
-        const filtered = prev.filter(
-          (item) =>
-            item.statementId !== matched.statementId &&
-            !(
-              item.driverId.trim() === normalizedDriverId &&
-              item.periodMonth.trim() === normalizedPeriodMonth
-            ),
-        );
-        return [matched, ...filtered];
-      });
+      setReadbackStatements((prev) =>
+        mergeDriverStatements(normalizedDriverId, prev, matchingStatements),
+      );
       startTransition(() => {
         try {
           router.refresh();
