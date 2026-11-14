@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
+import type { PoolClient } from "pg";
 
 import type {
   PartnerUserIdentityConsentScope,
@@ -9,6 +10,12 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+
+/** The minimal surface `createForInvitedPrincipal` needs from a caller's own
+ * transaction client, so the insert composes atomically with FLEET-ONB-004's
+ * invitation-accept transaction (SA/SD §3 step 4) instead of only ever
+ * running against the pool directly. */
+type PartnerUserIdentityLinkQueryExecutor = Pick<PoolClient, "query">;
 
 type JsonRecordRow = {
   record: unknown;
@@ -141,12 +148,18 @@ export class PartnerUserIdentityLinkRepository {
    * rolls back the whole accept transaction instead of silently reusing (and
    * rebinding) someone else's link, e.g. one created by a prior referral
    * handoff for the same `(entrySlug, partnerUserRef)`.
+   *
+   * An optional `executor` (the caller's own `PoolClient`) lets this insert
+   * run inside FLEET-ONB-004's invitation-accept transaction, so a conflict
+   * here rolls back that whole transaction rather than only this statement
+   * (SA/SD §3 step 4). Without one, it runs directly against the pool.
    */
   async createForInvitedPrincipal(
     entrySlugInput: string,
     partnerUserRefInput: string,
     drtsPassengerIdInput: string,
     now: string = new Date().toISOString(),
+    executor?: PartnerUserIdentityLinkQueryExecutor,
   ): Promise<PartnerUserIdentityLinkRecord | null> {
     const entrySlug = this.requireNonBlank(entrySlugInput, "entrySlug");
     const partnerUserRef = this.requireNonBlank(
@@ -157,27 +170,6 @@ export class PartnerUserIdentityLinkRepository {
       drtsPassengerIdInput,
       "drtsPassengerId",
     );
-    const key = this.buildKey(entrySlug, partnerUserRef);
-
-    if (!this.isEnabled()) {
-      if (this.fallbackLinks.has(key)) {
-        return null;
-      }
-      const created: PartnerUserIdentityLinkRecord = {
-        entrySlug,
-        partnerUserRef,
-        drtsPassengerId,
-        status: "active",
-        consentScope: "fleet_staff_invitation",
-        linkedAt: now,
-        lastSeenAt: now,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.fallbackLinks.set(key, created);
-      return this.clone(created);
-    }
-
     const record: PartnerUserIdentityLinkRecord = {
       entrySlug,
       partnerUserRef,
@@ -189,7 +181,18 @@ export class PartnerUserIdentityLinkRepository {
       createdAt: now,
       updatedAt: now,
     };
-    const result = await this.databaseService!.query<JsonRecordRow>(
+
+    if (!executor && !this.isEnabled()) {
+      const key = this.buildKey(entrySlug, partnerUserRef);
+      if (this.fallbackLinks.has(key)) {
+        return null;
+      }
+      this.fallbackLinks.set(key, record);
+      return this.clone(record);
+    }
+
+    const exec = executor ?? this.databaseService!;
+    const result = await exec.query<JsonRecordRow>(
       `
         INSERT INTO admin.phase1_partner_user_identity_links (
           entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,

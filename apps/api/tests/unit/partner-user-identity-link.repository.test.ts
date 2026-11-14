@@ -244,5 +244,58 @@ describe("partner user identity link repository", () => {
 
       expect(result).toBeNull();
     });
+
+    it("runs against a caller-supplied transaction executor instead of the pool, so it composes with FLEET-ONB-004's invitation-accept transaction", async () => {
+      const transactionQuery = vi.fn().mockResolvedValue({
+        rows: [
+          {
+            record: {
+              entrySlug: "fleet-demo-001",
+              partnerUserRef: "google-sub-staff-001",
+              drtsPassengerId: "principal_fleet_fixture_001",
+              status: "active",
+              consentScope: "fleet_staff_invitation",
+              linkedAt: "2026-11-14T10:00:00.000Z",
+              lastSeenAt: "2026-11-14T10:00:00.000Z",
+              createdAt: "2026-11-14T10:00:00.000Z",
+              updatedAt: "2026-11-14T10:00:00.000Z",
+            },
+          },
+        ],
+      });
+      const poolQuery = vi.fn();
+      const repository = new PartnerUserIdentityLinkRepository({
+        isEnabled: () => true,
+        query: poolQuery,
+      } as never);
+
+      const result = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-14T10:00:00.000Z",
+        { query: transactionQuery } as never,
+      );
+
+      expect(result?.drtsPassengerId).toBe("principal_fleet_fixture_001");
+      expect(transactionQuery).toHaveBeenCalledTimes(1);
+      expect(poolQuery).not.toHaveBeenCalled();
+    });
+
+    it("runs against a caller-supplied transaction executor even when the repository has no pool at all (fallback-mode construction)", async () => {
+      const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
+      const repository = new PartnerUserIdentityLinkRepository();
+
+      const result = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-14T10:00:00.000Z",
+        { query: transactionQuery } as never,
+      );
+
+      expect(transactionQuery).toHaveBeenCalledTimes(1);
+      expect(result).toBeNull();
+    });
   });
 });
