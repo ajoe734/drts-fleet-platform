@@ -8378,3 +8378,58 @@ export interface AgencyBootstrapSession {
   roleCode: string;
   accessValidTo: string;
 }
+
+// ---------------------------------------------------------------------------
+// FLEET-ONB-003 Fleet staff invitation issue/revoke
+// (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md §1-2, §8)
+// ---------------------------------------------------------------------------
+
+export const FLEET_STAFF_ROLE_CODES = [
+  "fleet_partner_admin",
+  "fleet_partner_ops",
+  "fleet_partner_finance",
+] as const;
+export type FleetStaffRoleCode = (typeof FLEET_STAFF_ROLE_CODES)[number];
+
+export interface InviteFleetStaffCommand {
+  entrySlug: string;
+  email: string;
+  roleCode: FleetStaffRoleCode;
+  /** Optional explicit expiry; null/omitted means no expiry (SA/SD §2). */
+  validTo?: string | null;
+}
+
+export interface FleetStaffMemberView {
+  membershipId: string;
+  principalId: string;
+  fleetPartnerId: string;
+  entrySlug: string;
+  email: string | null;
+  displayName: string | null;
+  status: CanonicalAccountStatus;
+  roleCode: string | null;
+  validTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FleetStaffInvitationView {
+  invitationId: string;
+  membershipId: string;
+  fleetPartnerId: string;
+  entrySlug: string;
+  email: string;
+  roleCode: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface FleetStaffInvitationIssued {
+  invitation: FleetStaffInvitationView;
+  member: FleetStaffMemberView;
+  /** Only "sent" means the mail transport acknowledged the message. */
+  deliveryOutcome: "sent" | "unavailable" | "failed";
+}
