@@ -1,4 +1,5 @@
 import "server-only";
+import { isFleetSessionRedirect } from "./fleet-session-redirect";
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
@@ -376,6 +377,7 @@ async function loadSupplyBundle(): Promise<SupplyBundle> {
     ]);
     return { submissions, readiness, source: "live" };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -579,6 +581,7 @@ export async function loadSupplyRenewalTargets(): Promise<{
     const targets = await client.listFleetPortalSupplyRenewalTargets();
     return { targets, source: "live" };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
