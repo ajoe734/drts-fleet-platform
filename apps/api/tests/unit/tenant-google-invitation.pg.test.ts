@@ -1,9 +1,36 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { TenantUserRoleRecord } from "@drts/contracts";
 import { DatabaseService } from "../../src/common/db";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { TenantPartnerRepository } from "../../src/modules/tenant-partner/tenant-partner.repository";
+import { PasswordHashingService } from "../../src/common/auth/password-hashing.service";
+
+// PWD-LOGIN-004's password branch hashes with PasswordHashingService, which
+// fails closed (Stage 1.5 §15.2) unless a pepper is configured. Test-only
+// values, not a real secret.
+const PRIOR_PEPPER_SECRETS_JSON = process.env.PASSWORD_PEPPER_SECRETS_JSON;
+const PRIOR_PEPPER_CURRENT_VERSION = process.env.PASSWORD_PEPPER_CURRENT_VERSION;
+
+beforeAll(() => {
+  process.env.PASSWORD_PEPPER_SECRETS_JSON = JSON.stringify({
+    v1: "tenant-google-invitation-pg-test-pepper-32chars!",
+  });
+  process.env.PASSWORD_PEPPER_CURRENT_VERSION = "v1";
+});
+
+afterAll(() => {
+  if (PRIOR_PEPPER_SECRETS_JSON === undefined) {
+    delete process.env.PASSWORD_PEPPER_SECRETS_JSON;
+  } else {
+    process.env.PASSWORD_PEPPER_SECRETS_JSON = PRIOR_PEPPER_SECRETS_JSON;
+  }
+  if (PRIOR_PEPPER_CURRENT_VERSION === undefined) {
+    delete process.env.PASSWORD_PEPPER_CURRENT_VERSION;
+  } else {
+    process.env.PASSWORD_PEPPER_CURRENT_VERSION = PRIOR_PEPPER_CURRENT_VERSION;
+  }
+});
 
 // Runs in the existing hosted Product smoke acceptance job after db:migrate.
 // Local VM: skip; do not launch PostgreSQL/Docker to satisfy this suite.
@@ -72,6 +99,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           await database.query(
             "DELETE FROM iam.identity_memberships WHERE membership_id = ANY($1::text[])",
             [memberships],
+          );
+          await database.query(
+            "DELETE FROM iam.identity_password_credentials WHERE principal_id = ANY($1::text[])",
+            [principals],
           );
           await database.query(
             "DELETE FROM iam.identity_principals WHERE principal_id = ANY($1::text[])",
@@ -174,6 +205,49 @@ describe.skipIf(!process.env.DATABASE_URL)(
           second.proof,
         ),
       ).not.toBeNull();
+    });
+
+    // PWD-LOGIN-004: password branch vs Google branch, same token, formal schema.
+    it("only one of a racing password acceptance and Google acceptance consumes the token", async () => {
+      const f = await fixture();
+      const second = new IdentityRepository(f.database);
+      const { hash, algo, pepperVersion } =
+        await new PasswordHashingService().hash("racer-password-value");
+
+      const results = await Promise.allSettled([
+        f.repository.acceptTenantInvitationWithPassword(f.tokenHash, {
+          passwordHash: hash,
+          passwordAlgo: algo,
+          pepperVersion,
+        }),
+        second.acceptTenantOidcInvitation(f.tokenHash, f.proof),
+      ]);
+
+      const fulfilled = results.filter(
+        (result): result is PromiseFulfilledResult<unknown> =>
+          result.status === "fulfilled" && result.value !== null,
+      );
+      expect(fulfilled).toHaveLength(1);
+
+      const invitation = await second.findInvitationByTokenHash(f.tokenHash);
+      expect(invitation?.acceptedAt).not.toBeNull();
+      const principal = await second.findPrincipalById(
+        f.snapshot.principal.principalId,
+      );
+      expect(principal?.status).toBe("active");
+      const credential = await second.findPasswordCredentialByPrincipalId(
+        f.snapshot.principal.principalId,
+      );
+
+      if (credential) {
+        // Password branch won: issuer/subject must stay at their
+        // invitation-time placeholder, never rebound to the Google proof.
+        expect(principal?.issuer).toBe(f.snapshot.principal.issuer);
+        expect(principal?.subject).toBe(f.snapshot.principal.subject);
+      } else {
+        // Google branch won: no password credential row was ever written.
+        expect(principal?.subject).toBe(f.proof.subject);
+      }
     });
   },
 );

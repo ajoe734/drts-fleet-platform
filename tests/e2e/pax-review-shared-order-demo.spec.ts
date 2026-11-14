@@ -11,7 +11,12 @@ import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
-import { signInBookablePassenger } from "./pax-review-shared-order/rehearsal-passenger";
+import {
+  signInBookablePassenger,
+  signInOnReviewPage,
+} from "./pax-review-shared-order/rehearsal-passenger";
+import { roleBrowser } from "./pax-bureau-acceptance/role-browser";
+import { finish as finishExactAssignedTask } from "./pax-review-shared-order/additional-journey";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
 import {
@@ -198,11 +203,10 @@ async function registerDriver(
   driver: Page,
   base: string,
   step: JourneyStep,
+  driverId = "pax-review-driver-a",
 ) {
   const code = await step("Ops invite driver device", async () => {
-    await ops
-      .getByLabel("演練司機", { exact: true })
-      .selectOption("pax-review-driver-a");
+    await ops.getByLabel("演練司機", { exact: true }).selectOption(driverId);
     const invitation = ops.waitForResponse(
       (r) =>
         r.url().endsWith("/auth/driver/device/invite") &&
@@ -280,6 +284,7 @@ async function book(
   page: Page,
   paymentMethodId: string,
   unpaidRejection = false,
+  accessible = false,
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
@@ -308,7 +313,26 @@ async function book(
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   });
   await page.getByLabel("預約時間", { exact: true }).fill(localTime);
-  await page.getByRole("button", { name: "試算車資", exact: true }).click();
+  if (accessible) {
+    await page.getByRole("checkbox", { name: "輪椅需求", exact: true }).check();
+    const [quoted] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/passenger-app/quotes" &&
+          response.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "試算車資", exact: true }).click(),
+    ]);
+    expect(quoted.ok()).toBe(true);
+    expect(camel(quoted.request().postDataJSON()).serviceSelection).toEqual({
+      accessible: true,
+    });
+    expect(camel(await quoted.json()).data.serviceSelection).toEqual({
+      accessible: true,
+    });
+  } else {
+    await page.getByRole("button", { name: "試算車資", exact: true }).click();
+  }
   await expect(page.getByText(/NT\$ (85|105)/).first()).toBeVisible();
   // The existing confirmation sheet owns payment selection. Require the
   // newly bound method itself; selecting another card would change B's PSP case.
@@ -397,6 +421,11 @@ async function submitLostItemForCompletedRide(
   expect(response.status()).toBeLessThan(300);
   const caseNo = camel(await response.json()).data.complaintId as string;
   expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/);
+  await expect(pax.getByTestId("passenger-complaint-id")).toHaveText(caseNo);
+  await expect(pax.getByTestId("passenger-complaint-ack")).toHaveAttribute(
+    "data-order-id",
+    orderId,
+  );
   await expect(
     pax.getByText("我們已收到您的問題", { exact: true }),
   ).toBeVisible();
@@ -1873,4 +1902,227 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     throw error;
   }
   await Promise.all(contexts.map((c) => c.close()));
+});
+
+// External equipment/qualifications, SMS, GPS and meter values are explicitly
+// synthetic. Booking, manual dispatch, device registration, Driver commands and
+// persisted same-order readback use the existing real UI/API/PG paths.
+test("a wheelchair booking keeps its UUID and requirement through ordinary Ops assignment to synthetic review b and real Driver completion with entered fare", async ({
+  browser,
+}, info) => {
+  const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
+  const step = progress.step;
+  const contexts: BrowserContext[] = [];
+  const pax = await roleBrowser(browser, "pax", contexts, progress);
+  const ops = await roleBrowser(browser, "ops", contexts, progress);
+  const driver = await roleBrowser(browser, "driver", contexts, progress);
+  const driverBase = sharedDev ? DRIVER : `${PAX}/review-driver`;
+  const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
+  let interrupted = false;
+  try {
+    await step(
+      "Wheelchair prepare existing synthetic review supply",
+      async () => {
+        await ops.goto(`${OPS}/review`);
+        const [prepared] = await Promise.all([
+          ops.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname.endsWith(
+                "/ops/review-demo/prepare",
+              ) && response.request().method() === "POST",
+          ),
+          ops.getByRole("button", { name: "準備虛構演練車司" }).click(),
+        ]);
+        expect(prepared.ok(), await opsPrepareDiagnostic(prepared)).toBe(true);
+        expect(camel(await prepared.json()).data).toMatchObject({
+          simulated: true,
+          supply: expect.arrayContaining([
+            {
+              driverId: "pax-review-driver-b",
+              vehicleId: "pax-review-vehicle-b",
+              plateNo: "SIM-2001",
+            },
+          ]),
+        });
+        await expect(
+          ops.getByText("已準備兩組合成車司；未建立訂單、派遣或付款。"),
+        ).toBeVisible();
+      },
+    );
+    // Provision before assignment; keep the existing sixty-second acceptance
+    // deadline and select the exact new task when opening Driver Trip.
+    await registerDriver(ops, driver, driverBase, step, "pax-review-driver-b");
+    await step("Wheelchair Passenger real OTP and consent", () =>
+      signInOnReviewPage(pax, 25),
+    );
+    await step("Wheelchair free one card slot through normal UI", () =>
+      freeCardSlots(pax, 1),
+    );
+    const method = await step("Wheelchair bind explicitly simulated PSP", () =>
+      bind(pax, "success"),
+    );
+    const orderId = await step(
+      "Wheelchair Passenger checks requirement, quotes and confirms the original order",
+      () => book(pax, method, false, true),
+    );
+    const booked = await authority(pax, orderId);
+    expect(booked.order).toMatchObject({
+      orderId,
+      serviceSelection: { accessible: true },
+    });
+    const fareSnapshotId = booked.bookingQuote.fareSnapshotId;
+    expect(fareSnapshotId).toMatch(/^[0-9a-f-]{36}$/);
+    await expect(
+      pax.getByTestId("passenger-wheelchair-requirement"),
+    ).toBeVisible();
+    await step(
+      "Wheelchair ordinary Ops creates a dispatch on the original UUID",
+      () => createDispatchInOrdinaryWorkspace(ops, OPS, orderId, info),
+    );
+    await expect(ops.getByText("輪椅需求", { exact: true })).toBeVisible();
+    const assigned = await step(
+      "Wheelchair ordinary Ops manually assigns synthetic accessible review b",
+      () => assignInOrdinaryWorkspace(ops, OPS, orderId, "b", false, info),
+    );
+    expect(assigned.actualPersistedTask).toMatchObject({
+      orderId,
+      driverId: "pax-review-driver-b",
+      vehicleId: "pax-review-vehicle-b",
+      serviceSelection: { accessible: true },
+    });
+    const assignedRide = await authority(pax, orderId);
+    expect(assignedRide.assignment).toMatchObject({
+      driver: { driverId: "pax-review-driver-b" },
+      vehicle: { vehicleId: "pax-review-vehicle-b" },
+    });
+    await finishExactAssignedTask(
+      driver,
+      driverBase,
+      pax,
+      orderId,
+      ops,
+      step,
+      false,
+      assigned.taskId,
+    );
+    await expect(
+      driver.getByText(`${assigned.taskId} · ${orderId}`, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      driver
+        .getByTestId("driver-trip-authority")
+        .getByText("輪椅需求", { exact: true }),
+    ).toBeVisible();
+    await step(
+      "Wheelchair completed order, requirement and entered fare persist across Passenger reload and Ops reads",
+      async () => {
+        await expect
+          .poll(async () => (await authority(pax, orderId)).payment?.status)
+          .toBe("captured");
+        await pax.reload();
+        await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
+        await expect(
+          pax.getByTestId("passenger-wheelchair-requirement"),
+        ).toBeVisible();
+        const completed = await authority(pax, orderId);
+        expect(completed.order).toMatchObject({
+          orderId,
+          status: "completed",
+          serviceSelection: { accessible: true },
+        });
+        expect(completed.bookingQuote.fareSnapshotId).toBe(fareSnapshotId);
+        const minimum = booked.bookingQuote.estimatedMin as number;
+        const baseFare = booked.bookingQuote.tariffSnapshot.baseFare as number;
+        const enteredFare = {
+          startMinor: baseFare * 100,
+          distanceMinor: 0,
+          delayMinor: 0,
+          nightMinor: (minimum - baseFare) * 100,
+        };
+        await expect
+          .poll(
+            async () =>
+              (await authority(pax, orderId)).receipt?.record
+                ?.actualFareBreakdown,
+          )
+          .toEqual(enteredFare);
+        expect(completed.payment.amount.amountMinor).toBe(minimum * 100);
+        const read = await ops.request.get(
+          `${OPS}/control-plane-proxy/orders/${orderId}`,
+        );
+        expect(read.status()).toBe(200);
+        expect(camel(await read.json()).data).toMatchObject({
+          orderId,
+          status: "completed",
+          serviceSelection: { accessible: true },
+        });
+        const tasks = await ops.request.get(
+          `${OPS}/control-plane-proxy/driver/tasks`,
+        );
+        expect(tasks.status()).toBe(200);
+        const ownTasks = camel(await tasks.json()).data.items.filter(
+          (task: any) => task.orderId === orderId,
+        );
+        expect(ownTasks).toHaveLength(1);
+        expect(ownTasks[0]).toMatchObject({
+          taskId: assigned.taskId,
+          assignmentId: assigned.assignmentId,
+          orderId,
+          driverId: "pax-review-driver-b",
+          vehicleId: "pax-review-vehicle-b",
+          status: "completed",
+          serviceSelection: { accessible: true },
+          actualFareBreakdown: enteredFare,
+          fare: { amountMinor: minimum * 100 },
+        });
+        assertCompletedFacts(
+          await recordOrderEvidence(
+            orderId,
+            "wheelchair-review-b-human-Driver-completed",
+            { pax, ops, driver },
+            info,
+          ),
+          orderId,
+        );
+        await info.attach("wheelchair-review-b-same-order-facts", {
+          contentType: "application/json",
+          body: JSON.stringify({
+            orderId,
+            fareSnapshotId,
+            taskId: assigned.taskId,
+            assignmentId: assigned.assignmentId,
+            driverId: "pax-review-driver-b",
+            vehicleId: "pax-review-vehicle-b",
+            enteredFare,
+            enteredTotalMinor: minimum * 100,
+            serviceSelection: completed.order.serviceSelection,
+            simulatedExternalFacts: [
+              "vehicle equipment and qualifications",
+              "SMS",
+              "PSP",
+              "GPS positions",
+              "meter fare values",
+            ],
+            normalUIAndPersistedAPICommands: true,
+            autoTrialAssignmentUsed: false,
+            canonicalRegVehicleOrPhysicalAccessibilityClaimed: false,
+          }),
+        });
+      },
+    );
+  } catch (error) {
+    interrupted = true;
+    throw error;
+  } finally {
+    if (interrupted)
+      await finalizeInterruptedOrders().catch(() =>
+        info
+          .attach("wheelchair-interrupted-finalization-unavailable", {
+            body: "Original wheelchair journey remains failed; its original-owner finalization could not finish.",
+            contentType: "text/plain",
+          })
+          .catch(() => undefined),
+      );
+    for (const context of contexts) await context.close();
+  }
 });

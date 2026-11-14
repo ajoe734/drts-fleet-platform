@@ -1,5 +1,32 @@
 # SR-ENTERPRISE-DATA-001 — 企業首頁／行程真資料及聯絡入口
 
+## 2026-11-11 current driver-contact verification follow-up
+
+The September delivery history below records the earlier disabled placeholder.
+The current product already uses `DriverContactAction`: clicking the button
+queries the existing tenant booking driver-contact API and displays the actual
+assignment/provider result. This follow-up preserves that product behavior.
+
+The real hosted run [43118792731](https://github.com/ajoe734/drts-fleet-platform/actions/runs/43118792731)
+checked out `4c6c78b4f533547d608a8fe94652137f513a9805` and passed five of six
+browser scenarios. The remaining scenario failed because it still expected the
+old initially disabled button. Its existing SQL fixture has an active trip but
+no dispatch assignment; it therefore cannot provide a driver contact.
+
+The corrected scenario clicks the real button and observes the ordinary GET
+for that same booking, requiring HTTP 409 with
+`TENANT_DRIVER_CONTACT_NOT_AVAILABLE` and the visible no-driver message. It also
+requires no driver fallback link and verifies every telephone link uses the
+existing support number. The other five scenarios, six-case zero-skip gate,
+product sources and workflow remain unchanged. No endpoint, login, permission
+or external calling mechanism is added; the test does not dial or send mail.
+
+Local typecheck, lint and format checks cover the changed specification; the
+corrected browser scenario still requires a fresh hosted run on its published
+follow-up SHA. The original five-pass/one-failure run is retained and is not
+reported as success. This follow-up does not prove an assigned-driver proxy
+call, a physical device, Cloud Run deployment or full system acceptance.
+
 ## Current candidate and base
 
 This task's core product change (home/trip real dashboard data, honest 404,
@@ -162,18 +189,18 @@ after the `git merge origin/dev` described above (the prior session's
 no longer present). No product/browser/DB server was started (per this
 task's VM restriction).
 
-| Command | Result |
-| --- | --- |
-| `git diff --check` | exit 0 |
-| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` | `[consistency] OK` (0 findings, all 4 sub-checks) |
-| `python3 tools/ci/check_test_coverage.py` | exit 0 (`all 72 test files yield tests CI runs`) |
-| `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v` | 13/13 passed |
-| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"` | parses; `jobs: ['browser-acceptance']` |
-| `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` | exit 0 |
-| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`) | exit 0 |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` | 13 passed (enterprise-trip-status.test.ts) |
-| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest) | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); same failure as documented in the prior session, unrelated to this task's write_scopes |
-| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`) | exit 0 |
+| Command                                                                                               | Result                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git diff --check`                                                                                    | exit 0                                                                                                                                                                                                                                                                     |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`              | `[consistency] OK` (0 findings, all 4 sub-checks)                                                                                                                                                                                                                          |
+| `python3 tools/ci/check_test_coverage.py`                                                             | exit 0 (`all 72 test files yield tests CI runs`)                                                                                                                                                                                                                           |
+| `python3 -m unittest tools.ci.test_enterprise_data_acceptance_workflow -v`                            | 13/13 passed                                                                                                                                                                                                                                                               |
+| `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/enterprise-data-acceptance.yml'))"`  | parses; `jobs: ['browser-acceptance']`                                                                                                                                                                                                                                     |
+| `node --check tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` | exit 0                                                                                                                                                                                                                                                                     |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` (`tsc --noEmit`)                              | exit 0                                                                                                                                                                                                                                                                     |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`                          | 13 passed (enterprise-trip-status.test.ts)                                                                                                                                                                                                                                 |
+| `pnpm --filter @drts/enterprise-dispatch-web test` (full app vitest)                                  | 30 passed, 1 pre-existing failure (`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`, `ApiClient.listTenantBookings` / `paged.items is not iterable`); same failure as documented in the prior session, unrelated to this task's write_scopes |
+| `pnpm --filter @drts/enterprise-dispatch-web lint` (`eslint . --max-warnings=0`)                      | exit 0                                                                                                                                                                                                                                                                     |
 
 None of these commands exercise the real Postgres/HTTP/Chromium path the
 acceptance workflow drives; that only runs on GitHub-hosted CI (see "CI
@@ -217,11 +244,11 @@ PR #1981's first CI run on `a3800a45b6f1` failed the "Canonical consistency"
 check (`python3 tools/ci/git/check_canonical_consistency.py --ci`): this
 document's `cited-paths` check flagged three backtick-wrapped paths that do
 not exist verbatim in the tree —
-*tests/unit/enterprise-booking-lifecycle.test.ts* (missing the
+_tests/unit/enterprise-booking-lifecycle.test.ts_ (missing the
 `apps/enterprise-dispatch-web/` prefix; the file exists at
 `apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`,
-now corrected above) and *.github/workflows/enterprise-data-acceptance.yml* /
-*tools/ci/test_enterprise_data_acceptance_workflow.py* (genuinely not added
+now corrected above) and _.github/workflows/enterprise-data-acceptance.yml_ /
+_tools/ci/test_enterprise_data_acceptance_workflow.py_ (genuinely not added
 in this pass, per "Explicitly not done" below; switched from backtick to
 italic so the checker's existence gate — correctly — does not read them as a
 claim that they exist). No product code changed in this follow-up; re-run
@@ -235,7 +262,7 @@ follow-up and are unaffected by it.
 ## Acceptance harness added in this recovery pass
 
 Added the real HTTP/browser acceptance runner that was previously listed as
-missing (see "Explicitly not done" below for what it still does *not*
+missing (see "Explicitly not done" below for what it still does _not_
 prove), following `SR-ENTERPRISE-SEARCH-001`'s
 `.github/workflows/enterprise-search-acceptance.yml` pattern:
 
@@ -247,7 +274,7 @@ prove), following `SR-ENTERPRISE-SEARCH-001`'s
 - `tests/e2e/system-remediation/sr-enterprise-data-001/enterprise-data-browser-server.mjs` —
   seeds one real booking by inserting directly into
   `ops.phase1_owned_orders` (the same table the production write path
-  writes) *before* `NestFactory.create(AppModule)` boots. This ordering is
+  writes) _before_ `NestFactory.create(AppModule)` boots. This ordering is
   load-bearing: `OwnedMobilityService` hydrates its in-memory order cache
   from persisted state exactly once, in `onModuleInit`, and
   `GET /api/tenant/bookings/:bookingId` (the booking-detail endpoint) reads

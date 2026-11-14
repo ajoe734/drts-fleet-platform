@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { MapGeofenceObservabilityModule } from "../operational-observability/map-geofence-observability.module";
+import { ServiceAreaModule } from "../service-area/service-area.module";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GeoController } from "./geo.controller";
 import { GEO_PROVIDER } from "./geo.provider";
@@ -11,7 +12,11 @@ import { GoogleGeoProvider } from "./google-geo.provider";
 import { MockGeoProvider } from "./mock-geo.provider";
 
 @Module({
-  imports: [AuditNotificationModule, MapGeofenceObservabilityModule],
+  imports: [
+    AuditNotificationModule,
+    MapGeofenceObservabilityModule,
+    ServiceAreaModule,
+  ],
   controllers: [GeoController],
   providers: [
     GeoProviderConfigService,

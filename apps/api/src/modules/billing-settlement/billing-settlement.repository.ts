@@ -889,6 +889,19 @@ export class BillingSettlementRepository {
     );
   }
 
+  /** Canonical invoice register for the existing cross-tenant operational read. */
+  async listAllInvoices() {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices ORDER BY created_at DESC`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<StoredTenantInvoiceRecord>(
+        row.record,
+        "billing.phase1_tenant_invoices",
+      ),
+    );
+  }
+
   /** Fresh tenant-scoped reads: never resolve mail recipients from process seeds. */
   async listInvoicesForTenant(tenantId: string) {
     const result = await this.databaseService!.query<JsonRecordRow>(

@@ -14,6 +14,7 @@ import {
   readFleetResponse,
   resolveFleetPrincipal,
 } from "./fleet-principal.server";
+import { redirectToLoginIfSessionRejected } from "./fleet-session-gate.server";
 
 type ListEnvelope<T> = { items: T[] };
 
@@ -118,7 +119,14 @@ export interface ServerFleetPartnerClient {
 
 export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerClient> {
   const apiUrl = fleetApiUrl();
-  const principal = await resolveFleetPrincipal(await nextHeaders(), apiUrl);
+  const requestHeaders = await nextHeaders();
+  let principal: Awaited<ReturnType<typeof resolveFleetPrincipal>>;
+  try {
+    principal = await resolveFleetPrincipal(requestHeaders, apiUrl);
+  } catch (error) {
+    redirectToLoginIfSessionRejected(error, requestHeaders);
+    throw error;
+  }
   return {
     client: new FleetPortalApiClient({
       baseUrl: apiUrl,

@@ -1317,15 +1317,21 @@ for (const journey of manifest.journeys) {
     }
 
     if (visit) await observeReferralReturn(page, origin, visit);
-    if (journey.id === "admin-review-approve-readback") {
-      await runOperationalDocumentAcceptance(
-        { request: page.context().request, record },
-        manifest.documentAcceptance,
-        variables,
-      );
-    }
   });
 }
+
+test("c125-document-storage-scan-readback-role-matrix executes its declared document contract", async ({
+  request,
+}) => {
+  const variables: TemplateVariables = {
+    runId: `${manifest.documentAcceptance.id}-${Date.now().toString(36)}`,
+  };
+  await runOperationalDocumentAcceptance(
+    { request, record },
+    manifest.documentAcceptance,
+    variables,
+  );
+});
 
 for (const journey of manifest.journeys) {
   test(`${journey.id} route serves the candidate without fixture fallback`, async ({
@@ -1370,9 +1376,7 @@ for (const journey of manifest.journeys) {
   });
 }
 
-test("paused Partner Booking and retired Concierge remain unreachable", async ({
-  request,
-}) => {
+test("retired Concierge remains unreachable", async ({ request }) => {
   for (const retired of manifest.retiredSurfaces) {
     const response = await request.get(
       new URL(retired.path, requiredOrigin(retired.baseUrlEnv)).toString(),

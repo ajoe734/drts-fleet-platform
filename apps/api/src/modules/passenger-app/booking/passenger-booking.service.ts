@@ -240,6 +240,7 @@ export class PassengerBookingService {
             receipt,
           );
         },
+        snapshot.serviceSelection,
       )
       .catch(async (reason: unknown) => {
         if (!(reason instanceof PassengerBookingReplay)) throw reason;

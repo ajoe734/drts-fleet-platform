@@ -39,6 +39,7 @@ function cloneJson<T>(value: T): T {
 
 function createOwnedMobilityService(
   tenantPartnerService?: TenantPartnerService,
+  serviceAreaService = new ServiceAreaService(),
 ) {
   const regulatoryRegistryService = {
     getEligibleCandidates: () => [],
@@ -117,7 +118,7 @@ function createOwnedMobilityService(
     undefined,
     undefined,
     undefined,
-    new ServiceAreaService(),
+    serviceAreaService,
   );
 
   return {
@@ -184,8 +185,54 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
     );
   expect(partnerVerification.verificationStatus).toBe("eligible");
 
-  const { service, auditLogs, persistedWrites } =
-    createOwnedMobilityService(tenantPartnerService);
+  const serviceAreaService = new ServiceAreaService();
+  const areaContext = {
+    actorId: "map-closeout-area-operator",
+    actorType: "platform_admin" as const,
+  };
+  // External coverage and airport identity are explicit SIM. Use the real
+  // public governance lifecycle; the shared route evaluator is not stubbed.
+  const cityArea = await serviceAreaService.createServiceArea(
+    {
+      areaCode: "MAP_CLOSEOUT_SIM_CITY_AIRPORT_TRANSFER",
+      displayName: "SIM city coverage for map closeout",
+      geometry: serviceAreaService
+        .listServiceAreas()
+        .find((area) => area.areaCode === "TAIPEI_CORE")!.geometry,
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      effectiveFrom: "2020-01-01T00:00:00.000Z",
+      metadata: { externalFacts: "SIM" },
+    },
+    areaContext,
+  );
+  await serviceAreaService.publishServiceArea(
+    cityArea.record.serviceAreaId,
+    {},
+    areaContext,
+  );
+  const airportArea = await serviceAreaService.createServiceArea(
+    {
+      areaCode: "MAP_CLOSEOUT_SIM_AIRPORT_IDENTITY",
+      displayName: "SIM airport identity for map closeout",
+      geometry: serviceAreaService
+        .listServiceAreas()
+        .find((area) => area.areaCode === "TAOYUAN_AIRPORT")!.geometry,
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      effectiveFrom: "2020-01-01T00:00:00.000Z",
+      metadata: { airportIataCode: "TPE", externalFacts: "SIM" },
+    },
+    areaContext,
+  );
+  await serviceAreaService.publishServiceArea(
+    airportArea.record.serviceAreaId,
+    {},
+    areaContext,
+  );
+
+  const { service, auditLogs, persistedWrites } = createOwnedMobilityService(
+    tenantPartnerService,
+    serviceAreaService,
+  );
 
   const tenantServiceable = await service.createTenantBooking(
     {
@@ -282,19 +329,20 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   const partnerServiceable = await service.createTenantBooking(
     {
       businessDispatchSubtype: "credit_card_airport_transfer",
+      direction: "dropoff",
       reservationWindowStart: "2026-07-11T12:00:00.000Z",
       reservationWindowEnd: "2026-07-11T13:00:00.000Z",
       partnerEntrySlug: "acme",
       eligibilityVerificationId: partnerVerification.eligibilityVerificationId,
       pickup: {
-        address: "Taoyuan Airport Terminal 1",
-        lat: 25.0797,
-        lng: 121.2342,
+        address: "No. 1, City Hall Road, Xinyi District, Taipei",
+        lat: 25.037519,
+        lng: 121.56368,
         coordinateProvenance: {
           coordinateSource: "provider_candidate",
           geocodeProvider: "mock-geo",
           geocodeConfidence: "exact",
-          providerCandidateId: "place-taoyuan-airport",
+          providerCandidateId: "place-city-hall",
           selectedByActorId: "partner-api-001",
           selectedAt: "2026-07-11T02:40:00.000Z",
           surface: "partner_booking",
@@ -474,6 +522,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   const partnerCoordinateLess = await service.createTenantBooking(
     {
       businessDispatchSubtype: "credit_card_airport_transfer",
+      direction: "dropoff",
       reservationWindowStart: "2026-07-11T16:00:00.000Z",
       reservationWindowEnd: "2026-07-11T17:00:00.000Z",
       partnerEntrySlug: "acme",

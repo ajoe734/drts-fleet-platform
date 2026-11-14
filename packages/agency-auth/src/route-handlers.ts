@@ -369,6 +369,54 @@ async function getAuth(
 async function postAuth(request: NextRequest, context: AuthRouteContext) {
   const { auth = [] } = await context.params;
   const actionPath = auth.join("/");
+
+  // PWD-LOGIN-004 "set a password" branch (SA/SD §5), agency realm
+  // counterpart of the tenant BFF's accept-with-password forward. Pre-
+  // session: the one-time invitation token authorizes the action, so there
+  // is no CSRF/session cookie to check yet.
+  if (actionPath === "agency/invitation/accept-with-password") {
+    const body = await request.json().catch(() => null);
+    const invitationToken =
+      typeof body?.invitationToken === "string"
+        ? body.invitationToken.trim()
+        : "";
+    const password =
+      typeof body?.password === "string" ? body.password : "";
+    if (!invitationToken || invitationToken.length > 512 || !password) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_INVALID",
+          message: "A valid invitation token and password are required.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const res = await agencyAuthFetch(
+        `${resolveApiUrl()}/api/agency/invitations/accept-with-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitationToken, password }),
+          cache: "no-store",
+        },
+      );
+      const data = await res.json().catch(() => null);
+      return NextResponse.json(data ?? {}, { status: res.status || 502 });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream invitation service unavailable",
+        },
+        { status: 503 },
+      );
+    }
+  }
+
   if (actionPath !== "logout" && actionPath !== "logout-all") {
     return NextResponse.json(
       { error: "AUTH_ENDPOINT_NOT_FOUND" },

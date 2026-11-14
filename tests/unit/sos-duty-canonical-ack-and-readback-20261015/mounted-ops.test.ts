@@ -16,6 +16,7 @@ import { DriverSosVerificationRepository } from "../../../apps/api/src/modules/d
 import { OpsDriverSosController } from "../../../apps/api/src/modules/driver-sos/driver-sos.controller";
 import SosQueuePage from "../../../apps/ops-console-web/app/sos/page";
 import SosDetailPage from "../../../apps/ops-console-web/app/sos/[incidentId]/page";
+import { t as translate } from "../../../apps/ops-console-web/lib/translations";
 
 const state = vi.hoisted(() => ({ client: null as any, incidentId: "" }));
 vi.mock("../../../apps/ops-console-web/lib/api-client", () => ({
@@ -24,7 +25,12 @@ vi.mock("../../../apps/ops-console-web/lib/api-client", () => ({
   createOpsDispatchEventSource: () => ({ addEventListener() {}, close() {} }),
 }));
 vi.mock("../../../apps/ops-console-web/lib/i18n", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    locale: "zh" as const,
+    setLocale: () => {},
+    t: (key: string, params?: Record<string, string | number>) =>
+      translate(key, "zh", params),
+  }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push() {} }),
@@ -151,9 +157,7 @@ describe.each([
   it("awaits the real controller/service durability boundary before showing success", async () => {
     const h = await harness();
     render(createElement(Page));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "sos.action.acknowledge" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "確認接手" }));
     await waitFor(() =>
       expect(
         h.post.mock.calls.some(([path]) => path.endsWith("/duty-ack")),
@@ -185,9 +189,7 @@ describe.each([
   it("keeps duty unclaimed for an existing generic Incident owner, then displays the canonical competing owner", async () => {
     const h = await harness("ops-generic-owner");
     render(createElement(Page));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "sos.action.acknowledge" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "確認接手" }));
     await waitFor(() =>
       expect(
         h.post.mock.calls.some(([path]) => path.endsWith("/duty-ack")),
@@ -215,9 +217,7 @@ describe.each([
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const h = await harness();
     render(createElement(Page));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "sos.action.acknowledge" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "確認接手" }));
     await waitFor(() =>
       expect(
         h.post.mock.calls.some(([path]) => path.endsWith("/duty-ack")),
@@ -236,9 +236,7 @@ describe.each([
 it("mounted detail can still acknowledge an already-closed unclaimed SOS without regressing its lifecycle", async () => {
   const h = await harness(undefined, "closed");
   render(createElement(SosDetailPage));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "sos.action.acknowledge" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "確認接手" }));
   await waitFor(() =>
     expect(h.post.mock.calls.some(([path]) => path.endsWith("/duty-ack"))).toBe(
       true,

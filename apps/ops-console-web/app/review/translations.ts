@@ -12,6 +12,10 @@ const zh = {
   prepared: "已準備兩組合成車司；未建立訂單、派遣或付款。",
   prepare: "準備虛構演練車司",
   driverLabel: "演練司機",
+  trialDriverSuffix: "（試乘・合成）",
+  trialInvitationNotice:
+    "試乘司機由乘客的「派一台測試車」流程準備。選擇該趟行程的司機發出註冊碼，再到司機視窗完成裝置註冊；暫停與恢復供給仍只作用於原有兩組演練司機。",
+  driverWindow: "開啟司機視窗（裝置註冊）",
   invite: "發出既有司機裝置註冊碼",
   registrationNotice: "單次註冊碼（交給本場司機視窗，不納入證據）",
   registrationLabel: "演練裝置註冊碼",
@@ -54,6 +58,10 @@ const en: Record<keyof typeof zh, string> = {
     "Prepared two synthetic driver/vehicle groups. No orders, dispatches or payments were created.",
   prepare: "Prepare synthetic rehearsal drivers and vehicles",
   driverLabel: "Rehearsal driver",
+  trialDriverSuffix: " (synthetic trial)",
+  trialInvitationNotice:
+    'Trial drivers are prepared by the passenger’s "Send a test car" flow. Invite the driver assigned to that ride and register the device in the Driver window. Pause and restore still affect only the original two review drivers.',
+  driverWindow: "Open Driver window (device registration)",
   invite: "Issue an existing driver device registration code",
   registrationNotice:
     "Single-use registration code (share with this rehearsal's driver window; exclude from evidence)",

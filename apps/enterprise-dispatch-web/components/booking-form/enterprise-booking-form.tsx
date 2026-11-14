@@ -532,7 +532,8 @@ export function EnterpriseBookingForm({
   );
   const isReservationWindowInvalid =
     hasReservationWindowInput && !timeValidation.isValid;
-  const costCenterUsed = costCenterMode === "required";
+  const costCenterUsed = costCenterMode !== "not_used";
+  const costCenterRequired = costCenterMode === "required";
   const costCenterFilled = draft.costCenterCode.trim().length > 0;
   const canContinue =
     isEnterpriseDraftComplete(draft, undefined, costCenterMode) &&
@@ -581,6 +582,12 @@ export function EnterpriseBookingForm({
       value: draft.costCenterCode,
       label: draft.costCenterLabel || tr("new.costCenter.hint"),
     });
+  }
+  if (
+    costCenterMode === "optional" &&
+    !costCenterOptions.some((option) => option.value === "")
+  ) {
+    costCenterOptions.unshift({ value: "", label: tr("new.costCenter.hint") });
   }
   const vehicleOptions: {
     value: EnterpriseVehiclePreference;
@@ -1049,7 +1056,7 @@ export function EnterpriseBookingForm({
               <BookingField
                 fieldId={costCenterFieldId}
                 label={tr("new.field.costCenter")}
-                req
+                req={costCenterRequired}
                 full
                 hint={tr("new.costCenter.hint")}
                 hintId={costCenterHintId}
@@ -1057,7 +1064,7 @@ export function EnterpriseBookingForm({
                 {hasCostCenterOptions ? (
                   <SelectControl
                     id={costCenterFieldId}
-                    required
+                    required={costCenterRequired}
                     value={draft.costCenterCode}
                     onChange={setCostCenterCode}
                     options={costCenterOptions}
@@ -1066,7 +1073,7 @@ export function EnterpriseBookingForm({
                 ) : (
                   <TextControl
                     id={costCenterFieldId}
-                    required
+                    required={costCenterRequired}
                     value={draft.costCenterCode}
                     onChange={setCostCenterCode}
                     aria-describedby={costCenterHintId}
@@ -1149,7 +1156,7 @@ export function EnterpriseBookingForm({
           title={tr("new.check.title")}
           sub={tr("card.sub.helperReads")}
         >
-          {costCenterUsed ? (
+          {costCenterRequired || costCenterFilled ? (
             <ERow
               t={t}
               k={tr("new.field.costCenter")}

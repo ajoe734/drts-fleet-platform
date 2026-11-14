@@ -27,6 +27,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/helpers.sh
 source "${SCRIPT_DIR}/lib/helpers.sh"
+# shellcheck source=lib/airport-service-area-fixture.sh
+source "${SCRIPT_DIR}/lib/airport-service-area-fixture.sh"
 
 SCENARIO="E2E-007"
 chain_init
@@ -78,7 +80,8 @@ switch_actor "partner_api_key" "e2e-partner-${PARTNER_ENTRY_SLUG}" "$ENTRY_TENAN
 set_partner_context "$ENTRY_PARTNER_ID" "$ENTRY_PROGRAM_ID" "$PARTNER_ENTRY_SLUG"
 
 VERIFY_FIXTURE=$(mktemp /tmp/drts-e2e-007-eligibility-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE"; cleanup_airport_service_areas' EXIT
+prepare_airport_service_areas
 
 jq -n \
   --arg entrySlug "$PARTNER_ENTRY_SLUG" \
@@ -149,7 +152,7 @@ WINDOW_END=$(date -u -d "+2 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v+2H +"%Y-%m-%dT%H:%M:%SZ")
 
 BOOKING_FIXTURE=$(mktemp /tmp/drts-e2e-007-booking-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE"; cleanup_airport_service_areas' EXIT
 
 jq \
   --arg ws "$WINDOW_START" \
@@ -224,7 +227,7 @@ switch_actor "ops_user" "e2e-ops-001"
 prime_enterprise_dispatch_supply_locations
 
 DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-007-dispatch-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE"; cleanup_airport_service_areas' EXIT
 printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
 
 log_step "3.1 — POST /orders/:orderId/dispatch"
@@ -282,7 +285,7 @@ if [[ -z "$ASSIGN_VEHICLE_ID" || -z "$ASSIGN_DRIVER_ID" ]]; then
 fi
 
 ASSIGN_FIXTURE=$(mktemp /tmp/drts-e2e-007-assign-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE"; cleanup_airport_service_areas' EXIT
 
 jq \
   --arg jobId   "$DISPATCH_JOB_ID" \
@@ -334,7 +337,7 @@ DEPART_FIXTURE=$(mktemp /tmp/drts-e2e-007-depart-XXXXXX.json)
 ARRIVE_FIXTURE=$(mktemp /tmp/drts-e2e-007-arrive-XXXXXX.json)
 START_FIXTURE=$(mktemp /tmp/drts-e2e-007-start-XXXXXX.json)
 COMPLETE_FIXTURE=$(mktemp /tmp/drts-e2e-007-complete-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE"; cleanup_airport_service_areas' EXIT
 
 jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.acceptedAt = $ts' \
   "${SCRIPT_DIR}/fixtures/e2e-driver-accept.json" > "$ACCEPT_FIXTURE"
@@ -400,7 +403,7 @@ PERIOD_END=$(date -u -d "-1 second" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v-1S +"%Y-%m-%dT%H:%M:%SZ")
 
 INVOICE_FIXTURE=$(mktemp /tmp/drts-e2e-007-invoice-XXXXXX.json)
-trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE" "$INVOICE_FIXTURE"' EXIT
+trap 'rm -f "$VERIFY_FIXTURE" "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE" "$INVOICE_FIXTURE"; cleanup_airport_service_areas' EXIT
 jq -n \
   --arg tenantId "$ENTRY_TENANT_ID" \
   --arg periodStart "$PERIOD_START" \

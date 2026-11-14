@@ -12,6 +12,7 @@ import { OpsHealthFooter } from "./ops-health-footer";
 import { getOpsClient, createOpsDispatchEventSource } from "../lib/api-client";
 import { isSosIncident, unwrapListItems } from "../lib/sos-view-model";
 import { resolvePlatformAdminHref } from "../lib/ops-cross-app-links";
+import { useTranslation } from "../lib/i18n";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -57,6 +58,7 @@ export function OpsShell({
   env,
   children,
 }: OpsShellProps) {
+  const { t } = useTranslation();
   const pathname = usePathname() ?? "";
   const [sosBadgeCount, setSosBadgeCount] = useState<number>(0);
 
@@ -129,18 +131,18 @@ export function OpsShell({
   let currentNav = nav;
   if (pathname.startsWith("/sos")) {
     currentNav = [
-      { divider: "智行叫車 · 值班" },
+      { divider: t("sos.nav.duty", { appName: t("app.name") }) },
       {
         key: "board",
         href: "/sos/board",
         icon: "dispatch",
-        label: "派車看板 · Board",
+        label: t("sos.nav.board"),
       },
       {
         key: "sos",
         href: "/sos",
         icon: "incidents",
-        label: "SOS 緊急事件",
+        label: t("sos.nav.sos"),
         badge: sosBadgeCount > 0 ? String(sosBadgeCount) : undefined,
         badgeTone: "danger",
       },
@@ -148,13 +150,13 @@ export function OpsShell({
         key: "trips",
         href: "/sos/trips",
         icon: "reports",
-        label: "行程 · Trips",
+        label: t("sos.nav.trips"),
       },
       {
         key: "records",
         href: "/sos/records",
         icon: "audit",
-        label: "營運紀錄 · Records",
+        label: t("sos.nav.records"),
       },
     ];
   }
@@ -183,11 +185,7 @@ export function OpsShell({
         targetPath = targetPath.slice("/_apps/platform-admin".length) || "/";
       }
       const targetUrl = resolvePlatformAdminHref(targetPath);
-      window.open(
-        targetUrl,
-        anchor.target || "_blank",
-        "noopener,noreferrer",
-      );
+      window.open(targetUrl, anchor.target || "_blank", "noopener,noreferrer");
     }
   };
 
