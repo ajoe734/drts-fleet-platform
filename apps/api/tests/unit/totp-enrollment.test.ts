@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { authenticator } from "otplib";
+import { generate } from "otplib";
 
 import { TotpCredentialRepository } from "../../src/modules/auth/totp-credential.repository";
 import {
@@ -97,7 +97,7 @@ describe("TotpService enrollment", () => {
     const principalId = freshPrincipalId();
     const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
 
-    const validCode = authenticator.generate(enrollment.secret);
+    const validCode = await generate({ secret: enrollment.secret });
     const confirmation = await svc.confirm(principalId, validCode);
 
     expect(confirmation.recoveryCodes).toHaveLength(10);
@@ -112,7 +112,7 @@ describe("TotpService enrollment", () => {
     const svc = new TotpService(repository);
     const principalId = freshPrincipalId();
     const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
-    const validCode = authenticator.generate(enrollment.secret);
+    const validCode = await generate({ secret: enrollment.secret });
     await svc.confirm(principalId, validCode);
 
     await expect(svc.confirm(principalId, validCode)).rejects.toBeInstanceOf(
@@ -128,7 +128,7 @@ describe("TotpService enrollment", () => {
       principalId,
       "tenant:user@example.com",
     );
-    const firstValidCode = authenticator.generate(firstEnrollment.secret);
+    const firstValidCode = await generate({ secret: firstEnrollment.secret });
     await svc.confirm(principalId, firstValidCode);
 
     const secondEnrollment = await svc.enroll(

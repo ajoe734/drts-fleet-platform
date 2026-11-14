@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { authenticator } from "otplib";
+import { generate } from "otplib";
 
 import { TotpCredentialRepository } from "../../src/modules/auth/totp-credential.repository";
 import {
@@ -40,7 +40,7 @@ async function enrollAndConfirm(
   principalId: string,
 ): Promise<{ secret: string; recoveryCodes: string[] }> {
   const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
-  const validCode = authenticator.generate(enrollment.secret);
+  const validCode = await generate({ secret: enrollment.secret });
   const confirmation = await svc.confirm(principalId, validCode);
   return {
     secret: enrollment.secret,
@@ -62,7 +62,7 @@ describe("TotpService login verification", () => {
     const principalId = freshPrincipalId();
     const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
 
-    const code = authenticator.generate(enrollment.secret);
+    const code = await generate({ secret: enrollment.secret });
     await expect(svc.verifyLoginCode(principalId, code)).rejects.toBeInstanceOf(
       TotpSecretNotConfirmedError,
     );
@@ -79,7 +79,7 @@ describe("TotpService login verification", () => {
     vi.useFakeTimers();
     try {
       vi.advanceTimersByTime(31_000);
-      const code = authenticator.generate(secret);
+      const code = await generate({ secret });
       await expect(
         svc.verifyLoginCode(principalId, code),
       ).resolves.toBeUndefined();
@@ -108,7 +108,7 @@ describe("TotpService login verification", () => {
     vi.useFakeTimers();
     try {
       vi.advanceTimersByTime(31_000);
-      const code = authenticator.generate(secret);
+      const code = await generate({ secret });
 
       await svc.verifyLoginCode(principalId, code);
       await expect(
@@ -124,7 +124,7 @@ describe("TotpService login verification", () => {
     const svc = new TotpService(repository);
     const principalId = freshPrincipalId();
     const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
-    const confirmCode = authenticator.generate(enrollment.secret);
+    const confirmCode = await generate({ secret: enrollment.secret });
     await svc.confirm(principalId, confirmCode);
 
     await expect(

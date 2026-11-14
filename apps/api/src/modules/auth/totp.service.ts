@@ -1,18 +1,33 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import { authenticator } from "otplib";
+import { generate, generateSecret } from "otplib";
 
 import { TotpCredentialRepository } from "./totp-credential.repository";
 import { TotpSecretCipher } from "./totp-secret-cipher";
 
-// RFC 6238 defaults (30s step, 6 digits); window=1 tolerates one step of
-// clock drift in either direction, matching the "TOTP code 時間窗驗證" line
-// in SA/SD §7. otplib's `authenticator` is a shared singleton and this is
-// the only module in the repo that touches it, so setting these options
-// once at import time is safe.
-authenticator.options = { step: 30, digits: 6, window: 1 };
-
+// otplib >=13 replaced the v10-12 `authenticator` singleton class with a
+// functional API (`generateSecret`, `generate`, `verify`); the old
+// `authenticator.checkDelta`/`authenticator.keyuri` calls this file used
+// before do not exist on otplib@13.6.0 (the version pinned in
+// apps/api/package.json) without the separate @otplib/v12-adapter package,
+// which is not a declared dependency. This file therefore:
+//  - never imports `authenticator`;
+//  - builds the otpauth:// URI by hand (RFC 6238 / Google Authenticator
+//    format is a stable, simple string spec, so this has no otplib-version
+//    dependency at all) instead of relying on an uncertain `generateURI`
+//    signature;
+//  - implements its own window + anti-replay step matching via
+//    `generate({ secret, epoch })` rather than otplib's `verify`, so it does
+//    not depend on whether `verify` exposes a matched-step/delta (the old
+//    `checkDelta`) or only a boolean.
+// `generate({ secret, epoch })`'s exact option name for the point-in-time
+// override (`epoch`, matching every otplib major version back to v10) could
+// not be confirmed against a real otplib@13.6.0 install in this worker's
+// environment (otplib is not resolvable here -- see the handoff note on
+// this task). Reviewer: please check the hosted CI run for this PR for any
+// otplib-related runtime/type error before approving.
 const TOTP_STEP_SECONDS = 30;
+const TOTP_WINDOW_STEPS = 1; // tolerates +/-1 step (~30s) of clock drift.
 const TOTP_ISSUER = "DRTS";
 const RECOVERY_CODE_COUNT = 10;
 const RECOVERY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars (excludes 0/O/1/I); 256 % 32 === 0 so byte % 32 is unbiased.
@@ -94,6 +109,65 @@ function currentStep(): number {
   return Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
 }
 
+function buildOtpauthUri(
+  accountLabel: string,
+  issuer: string,
+  secret: string,
+): string {
+  const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(accountLabel)}`;
+  const query = new URLSearchParams({
+    secret,
+    issuer,
+    algorithm: "SHA1",
+    digits: "6",
+    period: String(TOTP_STEP_SECONDS),
+  });
+  return `otpauth://totp/${label}?${query.toString()}`;
+}
+
+function constantTimeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Checks `code` against every step in the [-TOTP_WINDOW_STEPS,
+ * +TOTP_WINDOW_STEPS] window around now, each generated independently via
+ * `generate({ secret, epoch })`. Returns the absolute step number the code
+ * matched, or null if it matched none of them. This is the anti-replay
+ * primitive: callers persist the returned step and reject any future code
+ * whose matched step is <= the last one used.
+ */
+async function matchTotpStep(
+  secret: string,
+  code: string,
+): Promise<number | null> {
+  const normalizedCode = code.trim();
+  if (!/^\d{6}$/.test(normalizedCode)) {
+    return null;
+  }
+  const nowStep = currentStep();
+  for (
+    let offset = -TOTP_WINDOW_STEPS;
+    offset <= TOTP_WINDOW_STEPS;
+    offset++
+  ) {
+    const step = nowStep + offset;
+    const candidate = await generate({
+      secret,
+      epoch: step * TOTP_STEP_SECONDS * 1000,
+    });
+    if (constantTimeEquals(candidate, normalizedCode)) {
+      return step;
+    }
+  }
+  return null;
+}
+
 /**
  * TOTP enrollment, login-time verification, and recovery-code consumption
  * (SA/SD docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md
@@ -114,14 +188,14 @@ export class TotpService {
     accountLabel: string,
   ): Promise<TotpEnrollmentResult> {
     const cipher = new TotpSecretCipher();
-    const secret = authenticator.generateSecret();
+    const secret = generateSecret();
     const envelope = cipher.encrypt(secret, principalId);
     await this.repository.upsertPendingSecret(
       principalId,
       envelope,
       cipher.currentKeyVersion,
     );
-    const otpauthUri = authenticator.keyuri(accountLabel, TOTP_ISSUER, secret);
+    const otpauthUri = buildOtpauthUri(accountLabel, TOTP_ISSUER, secret);
     return { otpauthUri, secret };
   }
 
@@ -145,12 +219,11 @@ export class TotpService {
 
     const cipher = new TotpSecretCipher();
     const secret = cipher.decrypt(credential.secretCiphertext, principalId);
-    const delta = authenticator.checkDelta(code, secret);
-    if (delta === null) {
+    const matchedStep = await matchTotpStep(secret, code);
+    if (matchedStep === null) {
       throw new TotpInvalidCodeError("Invalid TOTP confirmation code.");
     }
 
-    const matchedStep = currentStep() + delta;
     const confirmedAtIso = new Date().toISOString();
     await this.repository.confirmCredential(
       principalId,
@@ -186,12 +259,11 @@ export class TotpService {
 
     const cipher = new TotpSecretCipher();
     const secret = cipher.decrypt(credential.secretCiphertext, principalId);
-    const delta = authenticator.checkDelta(code, secret);
-    if (delta === null) {
+    const matchedStep = await matchTotpStep(secret, code);
+    if (matchedStep === null) {
       throw new TotpInvalidCodeError();
     }
 
-    const matchedStep = currentStep() + delta;
     if (
       credential.lastUsedStep !== null &&
       matchedStep <= credential.lastUsedStep
