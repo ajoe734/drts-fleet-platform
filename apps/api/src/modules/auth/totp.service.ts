@@ -6,26 +6,22 @@ import { TotpCredentialRepository } from "./totp-credential.repository";
 import { TotpSecretCipher } from "./totp-secret-cipher";
 
 // otplib >=13 replaced the v10-12 `authenticator` singleton class with a
-// functional API (`generateSecret`, `generate`, `verify`); the old
+// functional API (confirmed against the published v13.6.0 source,
+// packages/otplib/src/index.ts: generateSecret/generateURI/generate/
+// generateSync/verify/verifySync -- no `authenticator` export). The old
 // `authenticator.checkDelta`/`authenticator.keyuri` calls this file used
-// before do not exist on otplib@13.6.0 (the version pinned in
-// apps/api/package.json) without the separate @otplib/v12-adapter package,
+// before do not exist without the separate @otplib/v12-adapter package,
 // which is not a declared dependency. This file therefore:
 //  - never imports `authenticator`;
 //  - builds the otpauth:// URI by hand (RFC 6238 / Google Authenticator
-//    format is a stable, simple string spec, so this has no otplib-version
-//    dependency at all) instead of relying on an uncertain `generateURI`
-//    signature;
-//  - implements its own window + anti-replay step matching via
-//    `generate({ secret, epoch })` rather than otplib's `verify`, so it does
-//    not depend on whether `verify` exposes a matched-step/delta (the old
-//    `checkDelta`) or only a boolean.
-// `generate({ secret, epoch })`'s exact option name for the point-in-time
-// override (`epoch`, matching every otplib major version back to v10) could
-// not be confirmed against a real otplib@13.6.0 install in this worker's
-// environment (otplib is not resolvable here -- see the handoff note on
-// this task). Reviewer: please check the hosted CI run for this PR for any
-// otplib-related runtime/type error before approving.
+//    format is a stable, simple string spec, independent of otplib's
+//    internal API) instead of calling `generateURI`;
+//  - implements its own window + anti-replay step matching by calling
+//    `generate({ secret, epoch })` once per candidate step (`epoch` is in
+//    seconds in v13, per packages/otplib/src/types.ts, unlike v10-12's
+//    millisecond `authenticator.options.epoch`) rather than using v13's
+//    own `verify`/`epochTolerance`, so the exact `{valid, delta}` result
+//    shape of `verify` doesn't matter here.
 const TOTP_STEP_SECONDS = 30;
 const TOTP_WINDOW_STEPS = 1; // tolerates +/-1 step (~30s) of clock drift.
 const TOTP_ISSUER = "DRTS";
@@ -157,9 +153,12 @@ async function matchTotpStep(
     offset++
   ) {
     const step = nowStep + offset;
+    // otplib@13's `epoch` option is in seconds (confirmed against the
+    // published v13.6.0 source, packages/otplib/src/types.ts), unlike the
+    // v10-12 `authenticator.options.epoch`, which was milliseconds.
     const candidate = await generate({
       secret,
-      epoch: step * TOTP_STEP_SECONDS * 1000,
+      epoch: step * TOTP_STEP_SECONDS,
     });
     if (constantTimeEquals(candidate, normalizedCode)) {
       return step;
