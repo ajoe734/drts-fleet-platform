@@ -786,7 +786,10 @@ printf '%s' "$MOCK_HTTP_STATUS"
 printf '%s\\n' "$*" >> "$COMMAND_LOG"
 if [[ "$*" == *'services describe drts-dev-partner-booking-web'* ]]; then printf '%s' 'https://partner.example.test';
 elif [[ "$*" == *'services describe drts-dev-api'* ]]; then printf '%s' "$MOCK_API_JSON";
-elif [[ "$*" == *'run deploy drts-dev-api'* ]]; then exit 0;
+elif [[ "$*" == *'run services update drts-dev-api'* ]]; then exit 0;
+elif [[ "$*" == *'run deploy drts-dev-api'* && "$*" != *'--image'* ]]; then
+  # Real gcloud: "Missing required argument [--image]" (deploy-dev run 43546207471).
+  exit 91;
 else exit 90; fi
 `,
       );
@@ -822,9 +825,14 @@ else exit 90; fi
         dir,
       );
       expect(result.status, result.stderr).toBe(0);
-      const writes = readFileSync(log, "utf8")
-        .split("\n")
-        .filter((line) => line.includes("run deploy drts-dev-api"));
+      const commands = readFileSync(log, "utf8").split("\n");
+      // An env-only origin change must not redeploy the API without an image.
+      expect(
+        commands.filter((line) => line.includes("run deploy drts-dev-api")),
+      ).toEqual([]);
+      const writes = commands.filter((line) =>
+        line.includes("run services update drts-dev-api"),
+      );
       expect(writes).toHaveLength(alreadyPresent ? 0 : 1);
       if (!alreadyPresent)
         expect(writes[0]).toContain(
