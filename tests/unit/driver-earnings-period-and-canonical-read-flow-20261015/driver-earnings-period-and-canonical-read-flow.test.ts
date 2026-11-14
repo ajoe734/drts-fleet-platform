@@ -994,7 +994,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       });
 
       // Own-driver statement list, detail, and PDF download metadata remain intact
-      const statementList = billingController.listDriverOwnStatements(
+      const statementList = await billingController.listDriverOwnStatements(
         demoDriverIdentity,
         undefined,
         "2026-03",
@@ -1015,7 +1015,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
         }),
       );
 
-      const statementDetail = billingController.getDriverOwnStatement(
+      const statementDetail = await billingController.getDriverOwnStatement(
         firstStatement.statementId,
         demoDriverIdentity,
         "req-own-stmt-detail",
