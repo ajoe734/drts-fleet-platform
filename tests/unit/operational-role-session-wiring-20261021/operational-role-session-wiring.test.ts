@@ -2316,19 +2316,37 @@ process.exit(99);
       // PARTNER_ENTRY_SEED, used by the fleet BFF login route). This harness
       // owns its own canonical own-Fleet binding below (or deliberately
       // leaves none when skipOwnSourceEntry), so the readback must not also
-      // carry that default-seed row through as a second, ambiguous source.
-      for (const seededEntry of tenantPartnerService
-        .listPlatformPartnerEntries()
-        .filter((entry) => entry.partnerId !== OPERATIONAL_OWN_FLEET_PARTNER_ID)) {
+      // carry that default-seed row through as a second, active, ambiguous
+      // source. Omitting it from the persisted table (as a prior revision of
+      // this harness did) does not suppress it: TenantPartnerService.
+      // loadCanonicalPartnerEntries() only ever supersedes a static in-memory
+      // entry with a *persisted* row of the same entrySlug, so an entrySlug
+      // with no persisted counterpart just survives reconciliation untouched
+      // and keeps leaking through as a second active entry for this
+      // partnerId. Persist it explicitly as revoked instead, matching how a
+      // real retirement of that entry would read back.
+      for (const seededEntry of tenantPartnerService.listPlatformPartnerEntries()) {
+        const persistedEntry =
+          seededEntry.entrySlug === OPERATIONAL_OWN_FLEET_PARTNER_ID
+            ? {
+                ...seededEntry,
+                status: "revoked" as const,
+                activeFlag: false,
+                revokedAt: "2026-01-01T00:00:00.000Z",
+                revokedBy: "system:test-harness",
+                revokeReason:
+                  "superseded by harness-owned canonical own-Fleet entry",
+              }
+            : seededEntry;
         sqlTables
           .get("admin.phase1_partner_channel_entries")!
-          .set(seededEntry.entrySlug, {
-            entry_slug: seededEntry.entrySlug,
-            tenant_id: seededEntry.tenantId,
-            partner_id: seededEntry.partnerId,
-            program_id: seededEntry.programId,
-            status: seededEntry.status,
-            record: structuredClone(seededEntry),
+          .set(persistedEntry.entrySlug, {
+            entry_slug: persistedEntry.entrySlug,
+            tenant_id: persistedEntry.tenantId,
+            partner_id: persistedEntry.partnerId,
+            program_id: persistedEntry.programId,
+            status: persistedEntry.status,
+            record: structuredClone(persistedEntry),
           });
       }
       // The owned-fixture source must be a real canonical own-Fleet binding,
