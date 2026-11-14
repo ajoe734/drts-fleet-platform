@@ -1,4 +1,11 @@
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -426,5 +433,237 @@ describe("production rail password login plan/freeze integration (PWD-LOGIN-010)
     expect(secretsArg).toContain(
       "PASSWORD_PEPPER_SECRETS_JSON=drts-prod-password-pepper:7,TOTP_ENCRYPTION_KEYS_JSON=drts-prod-totp-encryption-key:7",
     );
+  });
+});
+
+// Execute the actual initial env/deploy run scalars and existing deploy wrapper.
+// Only the external gcloud metadata/deploy port is replaced; the later password
+// reconcile step is deliberately never executed by this first-revision test.
+function firstPasswordApiDeployment(options: {
+  present: boolean;
+  rollout?: string;
+  pepperVersion?: string;
+}) {
+  const gate = runSecretGate({
+    pepperPresent: options.present,
+    totpPresent: options.present,
+  });
+  expect(gate.result.status, gate.result.stderr).toBe(0);
+  const lines = gate.values.trim().split("\n");
+  const presence = lines
+    .find((line) => line.startsWith("password_login_enabled="))
+    ?.split("=")[1];
+  const mounts = lines.at(-1);
+  if (presence === undefined || mounts === undefined)
+    throw new Error("Missing actual password secret-gate output");
+  function step(name: string) {
+    const marker = `      - name: ${name}\n`;
+    const start = workflow.indexOf(marker);
+    if (start < 0) throw new Error(`Missing workflow step ${name}`);
+    const end = workflow.indexOf("\n      - name:", start + marker.length);
+    return workflow.slice(start, end < 0 ? undefined : end);
+  }
+  function runScalar(block: string) {
+    const run = block.split("        run: |\n")[1];
+    if (!run) throw new Error("Missing original workflow run scalar");
+    return run
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n");
+  }
+  const outputs: Record<string, string> = {
+    "needs.prepare.outputs.project_id": "synthetic-project",
+    "needs.prepare.outputs.registry": "example.invalid/synthetic",
+    "needs.prepare.outputs.region": "us-central1",
+    "needs.prepare.outputs.cloudsql":
+      "synthetic-project:us-central1:synthetic-db",
+    "needs.prepare.outputs.runtime_service_account": "runtime@example.invalid",
+    "needs.prepare.outputs.api_service": "synthetic-api",
+    "needs.prepare.outputs.api_exposure_flag": "--allow-unauthenticated",
+    "needs.prepare.outputs.tenant_console_service": "synthetic-tenant",
+    "needs.prepare.outputs.enterprise_dispatch_service": "synthetic-dispatch",
+    "needs.prepare.outputs.agency_portal_service": "synthetic-agency",
+    "needs.prepare.outputs.agency_portal_origin":
+      "https://agency.example.invalid",
+    "needs.prepare.outputs.tenant_console_origin":
+      "https://tenant.example.invalid",
+    "needs.prepare.outputs.enterprise_dispatch_origin":
+      "https://dispatch.example.invalid",
+    "needs.prepare.outputs.passenger_app_service": "synthetic-passenger",
+    "needs.prepare.outputs.ops_console_origin": "https://ops.example.invalid",
+    "needs.build-push.outputs.image_tag": "synthetic-image",
+    "needs.build-push.outputs.candidate_sha":
+      "1234567890abcdef1234567890abcdef12345678",
+    "steps.api_secrets.outputs.api": mounts,
+    "steps.api_secrets.outputs.password_login_enabled": presence,
+    "steps.api_secrets.outputs.jwt_issuer": "synthetic-issuer",
+    "steps.api_secrets.outputs.jwt_audience": "synthetic-audience",
+    "steps.api_secrets.outputs.llm_provider": "mock",
+    "steps.api_secrets.outputs.llm_chat_model": "synthetic",
+    "steps.api_secrets.outputs.llm_summarizer_model": "synthetic",
+    "steps.api_secrets.outputs.map_provider_mode": "mock",
+    "steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock'":
+      "mock",
+    "steps.api_secrets.outputs.oidc_enabled": "false",
+    "steps.api_secrets.outputs.notification_outbox_type": "memory",
+    "steps.api_secrets.outputs.llm_base_url": "",
+    "steps.api_secrets.outputs.openclaw_auth_provider": "",
+    "steps.api_secrets.outputs.openclaw_home": "",
+    "steps.api_secrets.outputs.regulatory_alert_recipient_secret_mounted":
+      "false",
+    "steps.artifact_providers.outputs.env_suffix":
+      "@ARTIFACT_PROVIDER=synthetic",
+    "steps.passenger_secrets.outputs.api": "",
+    "steps.passenger_secrets.outputs.otp_mounts_complete": "false",
+    "steps.passenger_secrets.outputs.payment_mounts_complete": "false",
+  };
+  const render = (script: string) =>
+    script.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, key: string) => {
+      const value = outputs[key];
+      if (value === undefined)
+        throw new Error(`Missing expression fixture ${key}`);
+      return value;
+    });
+  const dir = mkdtempSync(join(tmpdir(), "drts-password-first-api-"));
+  try {
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, "operations/deployment"), { recursive: true });
+    const wrapper = join(
+      dir,
+      "operations/deployment/deploy-cloud-run-service.sh",
+    );
+    writeFileSync(
+      wrapper,
+      readFileSync(
+        new URL(
+          "../../operations/deployment/deploy-cloud-run-service.sh",
+          import.meta.url,
+        ),
+      ),
+    );
+    chmodSync(wrapper, 0o755);
+    const gcloud = join(dir, "bin/gcloud");
+    writeFileSync(
+      gcloud,
+      `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
+  if (args.includes('--format=json')) process.exit(1);
+  console.log('https://' + args[3] + '.example.invalid');
+} else if (args[0] === 'run' && args[1] === 'deploy') {
+  fs.appendFileSync(process.env.DEPLOY_LOG, JSON.stringify(args) + '\\n');
+} else { throw new Error('Unexpected cloud port ' + args.join(' ')); }
+`,
+    );
+    chmodSync(gcloud, 0o755);
+    const env: NodeJS.ProcessEnv = {
+      PATH: `${join(dir, "bin")}:${process.env.PATH ?? ""}`,
+      DEPLOY_LOG: join(dir, "deploys.jsonl"),
+      DEV_PAX_REVIEW_DEMO_ENABLED: "false",
+      DEV_WORKLOAD_IDENTITY_ISSUER: "synthetic-issuer",
+      DEV_WORKLOAD_IDENTITY_AUDIENCE: "synthetic-audience",
+    };
+    if (options.rollout !== undefined)
+      env.DEV_PASSWORD_LOGIN_ENABLED = options.rollout;
+    if (options.pepperVersion !== undefined)
+      env.DEV_PASSWORD_PEPPER_CURRENT_VERSION = options.pepperVersion;
+    const envStep = step("Build API env vars");
+    for (const match of envStep
+      .split("        run: |\n")[0]!
+      .matchAll(/^ {10}([A-Z_]+): (.*)$/gm)) {
+      const name = match[1];
+      const value = match[2];
+      if (name === undefined || value === undefined)
+        throw new Error("Malformed actual step env binding");
+      env[name] = render(value);
+    }
+    function execute(script: string, output: string) {
+      env.GITHUB_OUTPUT = join(dir, output);
+      const result = spawnSync(
+        "bash",
+        ["--noprofile", "--norc", "-euo", "pipefail", "-c", render(script)],
+        { cwd: dir, env, encoding: "utf8", timeout: 10000 },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+    }
+    execute(runScalar(envStep), "api-env");
+    const payload = readFileSync(env.GITHUB_OUTPUT!, "utf8")
+      .trim()
+      .replace(/^vars=/, "");
+    outputs["steps.api_env.outputs.vars"] = payload;
+    const deployStep = step("Deploy — api");
+    const binding = deployStep.match(/^ {10}API_ENV_VARS: (.*)$/m)?.[1];
+    if (binding === undefined)
+      throw new Error("Missing actual API_ENV_VARS binding");
+    env.API_ENV_VARS = render(binding);
+    execute(runScalar(deployStep), "api-deploy");
+    const deployments: string[][] = readFileSync(env.DEPLOY_LOG!, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    expect(deployments).toHaveLength(1);
+    const args = deployments[0];
+    if (args === undefined) throw new Error("No initial API deploy");
+    expect(args.filter((arg) => arg === "--set-env-vars")).toHaveLength(1);
+    const transported = args[args.indexOf("--set-env-vars") + 1];
+    if (transported === undefined)
+      throw new Error("Missing initial --set-env-vars");
+    expect(transported).toBe(payload);
+    expect(transported.startsWith("^@^")).toBe(true);
+    const firstEnv = Object.fromEntries(
+      transported
+        .slice(3)
+        .split("@")
+        .map((entry) => {
+          const separator = entry.indexOf("=");
+          if (separator <= 0) throw new Error("Malformed initial env entry");
+          return [entry.slice(0, separator), entry.slice(separator + 1)];
+        }),
+    );
+    return { firstEnv, args };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("initial API revision password configuration", () => {
+  it.each([
+    { rollout: "false", expected: "false", pepperVersion: "v2" },
+    { rollout: "true", expected: "true", pepperVersion: "v2" },
+    { rollout: undefined, expected: "true", pepperVersion: undefined },
+  ])(
+    "sets the first revision to rollout=$expected and current pepper=$pepperVersion",
+    ({ rollout, expected, pepperVersion }) => {
+      const { firstEnv, args } = firstPasswordApiDeployment({
+        present: true,
+        ...(rollout === undefined ? {} : { rollout }),
+        ...(pepperVersion === undefined ? {} : { pepperVersion }),
+      });
+      expect(firstEnv.PASSWORD_PEPPER_CURRENT_VERSION).toBe(
+        pepperVersion ?? "v1",
+      );
+      expect(firstEnv.PASSWORD_LOGIN_ENABLED).toBe(expected);
+      const secrets = args[args.indexOf("--set-secrets") + 1];
+      expect(secrets).toContain(
+        "PASSWORD_PEPPER_SECRETS_JSON=drts-dev-password-pepper:latest",
+      );
+      expect(secrets).toContain(
+        "TOTP_ENCRYPTION_KEYS_JSON=drts-dev-totp-encryption-key:latest",
+      );
+    },
+  );
+
+  it("sets the first revision disabled with no password mounts when the pair is absent", () => {
+    const { firstEnv, args } = firstPasswordApiDeployment({
+      present: false,
+      rollout: "false",
+    });
+    expect(firstEnv.PASSWORD_LOGIN_ENABLED ?? "false").toBe("false");
+    expect(firstEnv.PASSWORD_PEPPER_CURRENT_VERSION).toBeUndefined();
+    const secrets = args[args.indexOf("--set-secrets") + 1];
+    expect(secrets).not.toContain("PASSWORD_PEPPER_SECRETS_JSON");
+    expect(secrets).not.toContain("TOTP_ENCRYPTION_KEYS_JSON");
   });
 });
