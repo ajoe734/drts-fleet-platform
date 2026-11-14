@@ -222,6 +222,7 @@ Task boundary note:
 - 登入錯誤回應不得透露 email 是否存在、是否屬於某 tenant 或是否被邀請；詳細原因只進 security log。
 - invitation token 必須至少 128-bit entropy、hash-only storage、單次使用、24 小時到期；resend 會使舊 invitation 失效。
 - account recovery 不得只靠客服人工改 email；必須由 IdP recovery 或雙人核准的 identity re-verification 流程處理。
+- 2026-11-13 使用者決定（選項 C）：僅對租戶後台、企業派車、交通局機關入口、車行入口四個外部 realm，新增帳號密碼登入與 Google 並存，取代本節「不存本地密碼」的限制，其餘條款不變；詳見 [SD-DP-20261113-001](../01-decisions/SD-DP-20261113-001-portal-password-login.md)。
 
 ### 7.2 MFA requirement
 

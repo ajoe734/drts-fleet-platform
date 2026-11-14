@@ -94,7 +94,9 @@ export class ReminderSqlTransport extends ExpirySqlTransport {
       /SELECT record\s+FROM reg\.phase1_registry_(vehicles|supply_pairs|contracts|policies|exclusivities)\s+ORDER BY/.test(
         sql,
       ) ||
-      /SELECT vehicle_id, license_class\s+FROM reg\.vehicles/.test(sql) ||
+      /SELECT vehicle_id, license_class, vehicle_form\s+FROM reg\.vehicles/.test(
+        sql,
+      ) ||
       /SELECT \*\s+FROM reg\.(vehicle_passenger_disclosure_profiles|driver_public_registration_credentials)\s+ORDER BY/.test(
         sql,
       ) ||

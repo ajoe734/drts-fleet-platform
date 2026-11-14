@@ -309,11 +309,23 @@ export function BookingScreen({
         destinationLat: draft.destination.lat!,
         destinationLng: draft.destination.lng!,
         scheduledAt: time,
+        ...(draft.serviceSelection
+          ? { serviceSelection: draft.serviceSelection }
+          : {}),
       });
       if (result.serviceAreaResult === "not_serviceable") {
         setQuote(undefined);
         setMode("form");
         setError(T.notServiceable);
+        return;
+      }
+      if (
+        draft.serviceSelection?.accessible &&
+        !result.serviceSelection?.accessible
+      ) {
+        setQuote(undefined);
+        setMode("form");
+        setError("無法確認輪椅需求，請重新試算。");
         return;
       }
       if (result.fareVersion !== fare?.version) {
@@ -559,6 +571,9 @@ export function BookingScreen({
       [T.sheetPickup, draft.origin?.address ?? "", false],
       [T.sheetDropoff, draft.destination?.address ?? "", false],
       [T.time, scheduleLabel(draft.localTime), true],
+      ...(current.serviceSelection?.accessible
+        ? [["乘車需求", "輪椅需求", false] as [string, ReactNode, boolean]]
+        : []),
       [
         T.estimatedFare,
         `NT$ ${current.estimatedMin}–${current.estimatedMax}`,
@@ -959,7 +974,11 @@ export function BookingScreen({
             client={client}
             settings={settings}
             draft={draft}
-            onChange={setDraft}
+            onChange={(update) => {
+              setDraft(update);
+              setQuote(undefined);
+              setChecked(false);
+            }}
             busy={busy}
             onQuote={() => void getQuote()}
           />

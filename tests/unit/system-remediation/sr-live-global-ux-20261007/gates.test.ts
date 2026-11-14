@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   automatedChecks,
   cases,
@@ -386,6 +386,14 @@ describe("origin token and role boundaries", () => {
 });
 
 describe("locale intent and source mapping", () => {
+  let authoringInventory: Inventory;
+  beforeAll(() => {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    // The two authoring cases share one real immutable source inventory. No role/session evidence is synthesized.
+    authoringInventory = inventoryAt(head);
+  });
   it("uses explicit timezone across UTC midnight and preserves currency/branding Latin text", () => {
     expect(
       expectedFormat("date", "2026-10-06T18:00:00Z", "en-US", {
@@ -467,10 +475,17 @@ describe("locale intent and source mapping", () => {
     }
     expect(manifest.excluded).not.toHaveProperty("passenger-app-web");
     expect(manifest.excluded).not.toHaveProperty("agency-portal-web");
-    for (const app of ["passenger-web", "partner-booking-web"])
-      expect(manifest.excluded).toHaveProperty(app);
+    expect(manifest.excluded).toHaveProperty("passenger-web");
+    expect(manifest.excluded).not.toHaveProperty("partner-booking-web");
+    expect(manifest.surfaces).toContainEqual({
+      app: "partner-booking-web",
+      service: "drts-dev-partner-booking-web",
+      roles: ["referral_passenger"],
+      roleSource:
+        "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+    });
     const plan = scaffoldPlan(manifest);
-    expect(Object.keys(plan.recipes)).toHaveLength(4);
+    expect(Object.keys(plan.recipes)).toHaveLength(10);
     expect(() => validatePlan(plan, manifest)).toThrow("missing/expired");
     validatePlan(
       {
@@ -518,6 +533,38 @@ describe("locale intent and source mapping", () => {
     expect(
       cases(manifest).filter((c) => c.screen.app === "passenger-app-web"),
     ).toHaveLength(passengerPages.length * 8 * 2 * 3);
+    const partnerPages = pages.filter((file) =>
+      file.startsWith("apps/partner-booking-web/app/"),
+    );
+    const partnerScreens = manifest.screens.filter(
+      (screen) => screen.app === "partner-booking-web",
+    );
+    expect(partnerPages.length).toBeGreaterThan(0);
+    expect(partnerScreens.map((screen) => screen.source).sort()).toEqual(
+      partnerPages.sort(),
+    );
+    expect(
+      partnerScreens.every(
+        (screen) => screen.roles.join() === "referral_passenger",
+      ),
+    ).toBe(true);
+    expect(
+      cases(manifest).filter(
+        (item) => item.screen.app === "partner-booking-web",
+      ),
+    ).toHaveLength(partnerPages.length * 8 * 2 * 3);
+    const partnerTranslations = translationSourceAt(
+      head,
+      "partner-booking-web",
+    );
+    expect(partnerTranslations.kind).toBe("dictionary");
+    expect(partnerTranslations.locales).toEqual(["zh-TW", "en-US"]);
+    expect(
+      translationKeysForCase(partnerTranslations, "zh-TW").length,
+    ).toBeGreaterThan(0);
+    expect(
+      translationKeysForCase(partnerTranslations, "en-US").length,
+    ).toBeGreaterThan(0);
     const agencyPages = pages.filter((file) =>
       file.startsWith("apps/agency-portal-web/app/"),
     );
@@ -547,6 +594,186 @@ describe("locale intent and source mapping", () => {
     // Full git page/blob discovery can exceed the default 5s on a busy VM.
     // Keep all pages and checks; bound only this complete inventory probe.
   }, 30_000);
+  it("retains the historical Partner exclusion when the requested deployment source does not activate it", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const active = inventoryAt(head);
+    alterSource(head, ".github/workflows/deploy-dev.yml", (source) =>
+      source.replace(
+        /^.*assert_exact_active_service partner-booking-web .*$/m,
+        "",
+      ),
+    );
+    const paused = inventoryAt(head);
+    expect(paused.surfaces).toEqual(
+      active.surfaces.filter(
+        (surface) => surface.app !== "partner-booking-web",
+      ),
+    );
+    expect(paused.screens).toEqual(
+      active.screens.filter((screen) => screen.app !== "partner-booking-web"),
+    );
+    expect(paused.excluded["partner-booking-web"]).toBe(
+      ".github/workflows/deploy-dev.yml: paused-partner-booking-cleanup",
+    );
+    expect(paused.surfaces.flatMap((surface) => surface.roles)).toHaveLength(
+      21,
+    );
+  }, 30_000);
+  it.each([
+    ['actorType: "referral_passenger"', 'actorType: "tenant_admin"'],
+    ['realm: "partner"', 'realm: "tenant"'],
+    ['roles: ["referral_passenger"]', 'roles: ["partner_user"]'],
+  ])(
+    "rejects drift in the requested normal Partner ingress identity %s",
+    (before, after) => {
+      const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      alterSource(
+        head,
+        "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+        (source) => {
+          const start = source.indexOf("  async issuePartnerIngressHandoff(");
+          const end = source.indexOf(
+            "  async issueReferralEmbedHandoffArtifact(",
+            start,
+          );
+          expect(start).toBeGreaterThanOrEqual(0);
+          expect(end).toBeGreaterThan(start);
+          const method = source.slice(start, end);
+          expect(method).toContain(before);
+          return (
+            source.slice(0, start) +
+            method.replace(before, after) +
+            source.slice(end)
+          );
+        },
+      );
+      expect(() => inventoryAt(head)).toThrow(
+        "partner ingress identity source changed",
+      );
+    },
+  );
+  it("authors real Agency login and missing-invitation recipes without claiming runtime or authentication", () => {
+    const manifest = authoringInventory;
+    const plan = scaffoldPlan(manifest);
+    const agencyKeys = Object.keys(plan.recipes).filter((key) =>
+      key.startsWith("agency-portal-web:"),
+    );
+    expect(agencyKeys.sort()).toEqual(
+      ["agency_exporter", "agency_viewer"]
+        .flatMap((role) => [
+          `agency-portal-web:/login|${role}|default`,
+          `agency-portal-web:/login|${role}|error`,
+          `agency-portal-web:/invite|${role}|error`,
+        ])
+        .sort(),
+    );
+    for (const role of ["agency_viewer", "agency_exporter"]) {
+      const login = plan.recipes[`agency-portal-web:/login|${role}|default`]!;
+      expect(login).toMatchObject({
+        route: "/login",
+        finalPath: "/login",
+        ready: "main h1",
+        expectedStatus: 200,
+        stateProof: {
+          selector: "main h1",
+          source: "apps/agency-portal-web/app/login/page.tsx",
+          text: {
+            "zh-TW": "主管機關唯讀查詢",
+            "en-US": "Regulatory Agency Read-Only Portal",
+          },
+        },
+      });
+      const error = plan.recipes[`agency-portal-web:/login|${role}|error`]!;
+      expect(error).toMatchObject({
+        route: "/login?error=AUTH_STATE_MISMATCH",
+        finalPath: "/login",
+        stateProof: {
+          selector: 'main [role="alert"]',
+          text: {
+            "zh-TW": "登入狀態不符，請重新登入。",
+            "en-US": "Authentication state mismatch. Please sign in again.",
+          },
+        },
+      });
+      const invite = plan.recipes[`agency-portal-web:/invite|${role}|error`]!;
+      expect(invite).toMatchObject({
+        route: "/invite",
+        finalPath: "/invite",
+        stateProof: {
+          selector: 'main [role="alert"]',
+          source: "apps/agency-portal-web/app/invite/page.tsx",
+          text: {
+            "zh-TW": "邀請連結無效。請向平台管理者確認。",
+            "en-US":
+              "Invalid invitation link. Please contact the platform administrator.",
+          },
+        },
+      });
+      for (const recipe of [login, error, invite]) {
+        for (const locale of ["zh-TW", "en-US"] as const) {
+          expect(recipe.steps[locale].some((step) => step.kind === "tab")).toBe(
+            true,
+          );
+          expect(
+            recipe.steps[locale].some(
+              (step) => step.kind === "press" || step.kind === "type",
+            ),
+          ).toBe(false);
+          expect(recipe.formats[locale]).toEqual([]);
+        }
+        expect(recipe.noFormatsReason).toBeTruthy();
+        expect(recipe.mask).toEqual([]);
+      }
+    }
+    expect(Object.keys(plan.recipes)).toHaveLength(10);
+    expect(cases(manifest)).toHaveLength(24048);
+    const required = new Set(cases(manifest).map(recipeKey));
+    expect(required.size).toBe(4008);
+    expect([...required].filter((key) => !plan.recipes[key])).toHaveLength(
+      3998,
+    );
+    expect(plan.approvalRef).toBe("");
+    expect(plan.expiresAt).toBe("1970-01-01T00:00:00Z");
+    expect(() => validatePlan(plan, manifest)).toThrow("missing/expired");
+    validatePlan(
+      {
+        ...plan,
+        approvalRef: "unit-only-not-live-approval",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      manifest,
+    );
+  });
+  it("leaves Agency recipes pending when their actual source selector is absent", () => {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const manifest = authoringInventory;
+    alterSource(head, "apps/agency-portal-web/app/login/page.tsx", (source) =>
+      source.replace("<h1 ", "<h2 ").replace("</h1>", "</h2>"),
+    );
+    const plan = scaffoldPlan(manifest);
+    expect(
+      Object.keys(plan.recipes).filter((key) =>
+        key.startsWith("agency-portal-web:/login|"),
+      ),
+    ).toEqual([]);
+    expect(
+      Object.keys(plan.recipes).filter((key) =>
+        key.startsWith("agency-portal-web:/invite|"),
+      ),
+    ).toHaveLength(2);
+    expect(
+      Object.keys(plan.recipes).filter((key) =>
+        key.startsWith("enterprise-dispatch-web:"),
+      ),
+    ).toHaveLength(4);
+  });
+
   it("binds tenant role discovery to the requested catalog SHA and rejects Fleet/Agency roles", () => {
     const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",

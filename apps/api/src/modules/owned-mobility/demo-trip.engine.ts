@@ -185,6 +185,9 @@ export abstract class DemoTripEngine<
     }
     let assigned: DemoTripSupplyPair | null = null;
     try {
+      await this.registry.prepareOperatingAuthorizationOperator?.(
+        order.operatingAuthorizationId,
+      );
       const eligible = idle.filter((pair) => this.isAssignable(order, pair));
       // Dispatching without an eligible pair would push the passenger's order
       // into the no-supply exception path, so refuse before dispatching.

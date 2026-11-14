@@ -143,6 +143,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.exclusivity_operator_binding_allocations || []),
         ...(content.regulatory_agency_access_allocations || []),
         ...(content.callcenter_ai_assist_allocations || []),
+        ...(content.portal_password_login_allocations || []),
       ];
 
       // No duplicate versions across all allocations
@@ -187,6 +188,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.exclusivity_operator_binding_allocations || []),
         ...(content.regulatory_agency_access_allocations || []),
         ...(content.callcenter_ai_assist_allocations || []),
+        ...(content.portal_password_login_allocations || []),
       ];
       const diskFiles = fs.existsSync(migrationsDir)
         ? fs.readdirSync(migrationsDir)
@@ -232,6 +234,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.exclusivity_operator_binding_allocations || []),
         ...(content.regulatory_agency_access_allocations || []),
         ...(content.callcenter_ai_assist_allocations || []),
+        ...(content.portal_password_login_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
