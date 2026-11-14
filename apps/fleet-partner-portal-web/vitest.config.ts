@@ -26,6 +26,10 @@ export default defineConfig({
         __dirname,
         "../../packages/ui-tokens/src/index.ts",
       ),
+      "@drts/ui-web/client": path.resolve(
+        __dirname,
+        "../../packages/ui-web/src/client.tsx",
+      ),
       "@drts/ui-web": path.resolve(
         __dirname,
         "../../packages/ui-web/src/index.tsx",
