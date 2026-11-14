@@ -60,7 +60,7 @@ export default defineConfig({
           },
           {
             command:
-              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901 NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable DRTS_NEXT_DIST_DIR=.next-outage pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && AUTH_MODE=test DRTS_API_URL=http://127.0.0.1:3901/outage NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE=unavailable DRTS_NEXT_DIST_DIR=.next-outage pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3008",
             url: "http://127.0.0.1:3008",
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

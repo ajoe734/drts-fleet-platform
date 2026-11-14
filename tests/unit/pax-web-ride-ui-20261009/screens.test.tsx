@@ -460,6 +460,14 @@ describe("P5 and A04 Screens validation", () => {
 
     expect(fetchCalls[0].body.category).toBe("lost_item");
     expect(fetchCalls[0].body.lostItemDescription).toBe("my wallet");
+    expect(screen.getByTestId("passenger-complaint-id").textContent).toBe(
+      "complaint-uuid",
+    );
+    expect(
+      screen
+        .getByTestId("passenger-complaint-ack")
+        .getAttribute("data-order-id"),
+    ).toBe("order-uuid");
   });
 
   it("A04 Quote Anomaly", async () => {

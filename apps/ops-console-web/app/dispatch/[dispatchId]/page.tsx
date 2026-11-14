@@ -258,6 +258,75 @@ function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
 }
 
+// Use only the already loaded same-order booking facts. These labels do not
+// represent an issuer, insurance, travel-roster or vehicle-eligibility decision.
+function getOwnedFulfillmentItems(
+  order: OwnedOrderRecord,
+  locale: Locale,
+): { k: string; v: string }[] | null {
+  if (order.serviceBucket !== "business_dispatch") return null;
+  const label = (key: string) =>
+    tr(locale, `dispatch.detail.fulfillment.${key}`);
+  const missing = label("notProvided");
+  const text = (value: string | null | undefined) =>
+    typeof value === "string" && value.trim() ? value.trim() : missing;
+  const count = (value: number | null | undefined) =>
+    value == null ? missing : String(value);
+  const timestamp = (value: string | null | undefined) =>
+    value && Number.isFinite(Date.parse(value))
+      ? formatLongDateTime(locale, value)
+      : missing;
+  const row = (key: string, value: string) => ({ k: label(key), v: value });
+  switch (order.businessDispatchSubtype) {
+    case "credit_card_airport_transfer":
+      return [
+        row(
+          "direction",
+          order.direction === "pickup"
+            ? label("pickup")
+            : order.direction === "dropoff"
+              ? label("dropoff")
+              : missing,
+        ),
+        row("flightNo", text(order.flightNo)),
+        row("terminal", text(order.terminal)),
+        row("luggageCount", count(order.luggageCount)),
+      ];
+    case "travel_agency_transfer": {
+      const details =
+        order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row("groupCode", text(details?.groupCode)),
+        row("groupSize", count(details?.groupSize)),
+        row("meetingPoint", text(details?.meetingPoint)),
+        row("itineraryLink", text(details?.itineraryLink)),
+        row(
+          "rosterPassengers",
+          text((details?.rosterPassengers ?? []).join("、")),
+        ),
+      ];
+    }
+    case "insurance_replacement_vehicle": {
+      const details =
+        order.partnerBookingDetails?.subtype === "insurance_replacement_vehicle"
+          ? order.partnerBookingDetails
+          : null;
+      return [
+        row("claimNumber", text(details?.claimNumber)),
+        row("claimantName", text(details?.claimantName)),
+        row("replacementVehicleClass", text(details?.replacementVehicleClass)),
+        row("replacementStart", timestamp(details?.replacementStart)),
+        row("replacementEnd", timestamp(details?.replacementEnd)),
+        row("caseHandler", text(details?.caseHandler)),
+      ];
+    }
+    default:
+      return null;
+  }
+}
+
 function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
   const start = readForwardedValue(order, [
     "reservationWindowStart",
@@ -2171,6 +2240,7 @@ async function renderOwnedWorkspace({
   ];
 
   const queueSemantics = resolveQueueSemantics(order, locale);
+  const fulfillmentItems = getOwnedFulfillmentItems(order, locale);
 
   return (
     <>
@@ -2275,6 +2345,9 @@ async function renderOwnedWorkspace({
                   v: order.orderId,
                   mono: true,
                 },
+                ...(order.serviceSelection?.accessible
+                  ? [{ k: "乘車需求", v: "輪椅需求" }]
+                  : []),
                 {
                   k: tr(locale, "dispatch.queue.serviceTypeLabel"),
                   v: queueSemantics.serviceTypeText,
@@ -2298,6 +2371,20 @@ async function renderOwnedWorkspace({
               ]}
             />
           </Card>
+
+          {fulfillmentItems ? (
+            <Card
+              theme={theme}
+              title={tr(locale, "dispatch.detail.fulfillment.title")}
+            >
+              <div
+                data-ops-fulfillment-order-id={order.orderId}
+                data-ops-fulfillment-subtype={order.businessDispatchSubtype}
+              >
+                <DL theme={theme} cols={2} items={fulfillmentItems} />
+              </div>
+            </Card>
+          ) : null}
 
           {currentTask ? (
             <Card

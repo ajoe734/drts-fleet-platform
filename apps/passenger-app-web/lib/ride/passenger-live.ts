@@ -444,6 +444,9 @@ export function mapPassengerRideAuthorityToFixture(
   return {
     token,
     orderNo: view.order.orderNo,
+    ...(view.order.serviceSelection
+      ? { serviceSelection: view.order.serviceSelection }
+      : {}),
     screenId,
     title:
       view.order.status === "cancelled"

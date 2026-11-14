@@ -24,6 +24,9 @@ export const REVIEW_SUPPLY = ["a", "b"].map((suffix, index) => ({
   plateNo: `SIM-${index + 1}001`,
 }));
 
+const ACCESSIBLE_REVIEW_VEHICLE_ID = REVIEW_SUPPLY[1]!.vehicleId;
+const ACCESSIBLE_REVIEW_MODEL = "輪椅展示車（合成）";
+
 /** External qualification/supply fixtures only. Existing registry/native
  * repositories persist them and the normal dispatch eligibility still runs.
  * No booking, assignment, task, payment or rating is seeded here.
@@ -145,6 +148,10 @@ export class ReviewSupplyService {
             {
               ...structuredClone(template),
               ...fixture,
+              vehicleForm:
+                fixture.vehicleId === ACCESSIBLE_REVIEW_VEHICLE_ID
+                  ? "accessible"
+                  : "sedan",
               operatingArea: "taipei",
               supportedServiceBuckets: ["standard_taxi"],
               dispatchableFlag: true,
@@ -203,7 +210,10 @@ export class ReviewSupplyService {
             {
               vehicleId: fixture.vehicleId,
               make: "演練車廠",
-              model: "虛構展示車",
+              model:
+                fixture.vehicleId === ACCESSIBLE_REVIEW_VEHICLE_ID
+                  ? ACCESSIBLE_REVIEW_MODEL
+                  : "虛構展示車",
               modelYear: 2026,
               doorCount: 4,
               color: "白",
@@ -264,6 +274,40 @@ export class ReviewSupplyService {
         ],
       });
     }
+    // Upgrade a previously prepared synthetic pair without resetting its live
+    // availability or replacing unrelated registry records.
+    const refreshedSupply = await repository.loadState();
+    const accessibleVehicle = refreshedSupply.vehicles.find(
+      (vehicle) => vehicle.vehicleId === ACCESSIBLE_REVIEW_VEHICLE_ID,
+    );
+    const accessibleDisclosure = (
+      refreshedSupply.disclosureProfiles ?? []
+    ).find((profile) => profile.vehicleId === ACCESSIBLE_REVIEW_VEHICLE_ID);
+    await repository.persistChanges({
+      ...(accessibleVehicle?.vehicleForm !== "accessible" && accessibleVehicle
+        ? {
+            vehicles: [
+              {
+                ...accessibleVehicle,
+                vehicleForm: "accessible",
+                updatedAt: now,
+              },
+            ],
+          }
+        : {}),
+      ...(accessibleDisclosure &&
+      accessibleDisclosure.model !== ACCESSIBLE_REVIEW_MODEL
+        ? {
+            disclosureProfiles: [
+              {
+                ...accessibleDisclosure,
+                model: ACCESSIBLE_REVIEW_MODEL,
+                updatedAt: now,
+              },
+            ],
+          }
+        : {}),
+    });
     const authorizations = await taxi.loadState();
     if (
       !authorizations.authorizations.some(

@@ -130,7 +130,7 @@ describe("C073 actual controller canonical publication", () => {
     );
     await hold.entered;
     expect(x.live()).toEqual(initial);
-    expect(await x.durable()).toEqual(initial);
+    expect(await x.durable()).toEqual({ ...initial, vehicleForm: null });
     expect(x.events).toHaveLength(0);
     expect(x.service.getVehicleDispatchability(VEHICLE)).toBe(true);
     expect(
@@ -144,7 +144,7 @@ describe("C073 actual controller canonical publication", () => {
     hold.reject(error);
     await expect(rejected).resolves.toEqual({ error });
     expect(x.live()).toEqual(initial);
-    expect(await x.durable()).toEqual(initial);
+    expect(await x.durable()).toEqual({ ...initial, vehicleForm: null });
     expect(x.events).toHaveLength(0);
     const response = await x.controller.initiateVehicleOffboarding(
       VEHICLE,
@@ -185,12 +185,12 @@ describe("C073 actual controller canonical publication", () => {
     );
     await hold.entered;
     expect(x.live()).toEqual(initial);
-    expect(await x.durable()).toEqual(initial);
+    expect(await x.durable()).toEqual({ ...initial, vehicleForm: null });
     expect(x.events).toHaveLength(0);
     hold.reject(error);
     await expect(rejected).resolves.toEqual({ error });
     expect(x.live()).toEqual(initial);
-    expect(await x.durable()).toEqual(initial);
+    expect(await x.durable()).toEqual({ ...initial, vehicleForm: null });
     const response = await x.controller.completeVehicleDebranding(VEHICLE, {});
     expect(response.data.supplyLifecycle.offboarding).toMatchObject({
       status: "completed",

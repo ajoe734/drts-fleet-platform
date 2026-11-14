@@ -1556,6 +1556,9 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 40
     services:
       postgres:
@@ -1573,6 +1576,20 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+      # Normal isolated tenant/session authority, sharing this exact database.
+      DRTS_UAT_ENV: sandbox
+      DRTS_UAT_API_URL: http://127.0.0.1:3001
+      AUTH_MODE: test
+      DRTS_ENV: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      DRTS_DEV_MFA_WAIVED: "true"
+      PAX_REVIEW_SHARED_DEV_SMOKE: "false"
+      CANDIDATE_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      WORKLOAD_IDENTITY_GOOGLE_AUDIENCE: https://tenant-uat-acceptance.drts.internal
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -1587,7 +1604,59 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build API
         run: pnpm --filter @drts/api build
-      - name: Run the real three-role shared-order journeys
+      - name: Mint Google workload identity token for hosted normal Partner handoff
+        id: id_token_noncore_handoff
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.WORKLOAD_IDENTITY_GOOGLE_AUDIENCE }}
+          id_token_include_email: true
+
+      - name: Derive Google workload identity registry for hosted normal Partner
+        env:
+          ID_TOKEN: ${{ steps.id_token_noncore_handoff.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${ID_TOKEN}"
+          if [[ -z "${ID_TOKEN:-}" ]]; then
+            echo "::error::ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
+          payload_b64url="$(cut -d. -f2 <<<"$ID_TOKEN" | tr '_-' '/+')"
+          case $(( ${#payload_b64url} % 4 )) in
+            2) payload_b64url="${payload_b64url}==" ;;
+            3) payload_b64url="${payload_b64url}=" ;;
+          esac
+          email="$(base64 -d <<<"$payload_b64url" | jq -er '.email')"
+          registry_json="$(jq -nc \
+            --arg email "$email" \
+            --arg aud "$WORKLOAD_IDENTITY_GOOGLE_AUDIENCE" \
+            '[{
+              serviceAccountEmail: $email,
+              principalId: "shared-order-ci-deployer",
+              allowedTokenAudiences: [$aud],
+              routeScopes: [
+                "GET partner/entries/*",
+                "POST partner/ingress/handoff",
+                "POST partner/ingress/referral-embed-handoff",
+                "POST partner/ingress/referral-embed-handoff/consume",
+                "POST partner/ingress/referral-embed-handoff/consent"
+              ]
+            }]')"
+          {
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON<<WIF_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_REGISTRY_EOF"
+            # Base API servers read the native registry variable directly.
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS<<WIF_NATIVE_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_NATIVE_REGISTRY_EOF"
+          } >> "$GITHUB_ENV"
+          echo "DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN=${ID_TOKEN}" >> "$GITHUB_ENV"
+
+      - name: Prepare the real three-role shared-order journeys
         run: |
           PGPASSWORD=postgres psql \
             postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1596,6 +1665,7 @@ jobs:
             -c 'CREATE DATABASE drts_route_suite;'
           pnpm db:migrate
           pnpm db:seed
+          mkdir -p .artifacts/pax-review-shared-order
           sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
             \( -iname "*google*" -o -iname "*chrome*" \) \
             -exec mv "{}" "{}.disabled" \; || true
@@ -1608,12 +1678,22 @@ jobs:
           mkdir -p apps/passenger-app-web/public/review-driver
           cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
           pnpm --filter @drts/passenger-app-web... build
+          DRTS_API_URL=http://127.0.0.1:3001 pnpm --filter @drts/partner-booking-web... build
+          DRTS_API_URL=http://127.0.0.1:3001 NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm --filter @drts/tenant-console-web... build
           EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
             EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
             pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
           pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
           pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
-          pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      # GITHUB_ENV is applied only to subsequent Actions steps, not the
+      # shell that just ran the seed. Keep setup fresh and visible to Playwright.
+      - name: Seed normal tenant sessions immediately before shared-order acceptance
+        run: |
+          # Same authoritative normal tenant/admin fixture used by Tenant UAT.
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts
+      - name: Run the real three-role shared-order journeys
+        run: |
+          pnpm exec playwright test -c playwright.pax-review-noncore-shared-order.config.ts
       - name: Run additional real booking, accepted-cancellation and no-contact rating branches
         run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
       - name: Upload additional passenger branch evidence
@@ -1731,6 +1811,160 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Airport completion has its own original-size budget and isolated PG.
+  # Keep the existing main and additional journeys in their original job.
+  ui-airport-shared-order-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+      # Normal isolated tenant/session authority, sharing this exact database.
+      DRTS_UAT_ENV: sandbox
+      DRTS_UAT_API_URL: http://127.0.0.1:3001
+      AUTH_MODE: test
+      DRTS_ENV: test
+      JWT_SECRET: ci-e2e-secret
+      JWT_ISSUER: drts-local
+      JWT_AUDIENCE: drts-api
+      DRTS_DEV_MFA_WAIVED: "true"
+      PAX_REVIEW_SHARED_DEV_SMOKE: "false"
+      CANDIDATE_SHA: ${{ github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ github.sha }}
+      WORKFLOW_SHA: ${{ github.sha }}
+      WORKLOAD_IDENTITY_GOOGLE_AUDIENCE: https://tenant-uat-acceptance.drts.internal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Mint Google workload identity token for hosted normal Partner handoff
+        id: id_token_noncore_handoff
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.WORKLOAD_IDENTITY_GOOGLE_AUDIENCE }}
+          id_token_include_email: true
+
+      - name: Derive Google workload identity registry for hosted normal Partner
+        env:
+          ID_TOKEN: ${{ steps.id_token_noncore_handoff.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${ID_TOKEN}"
+          if [[ -z "${ID_TOKEN:-}" ]]; then
+            echo "::error::ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
+          payload_b64url="$(cut -d. -f2 <<<"$ID_TOKEN" | tr '_-' '/+')"
+          case $(( ${#payload_b64url} % 4 )) in
+            2) payload_b64url="${payload_b64url}==" ;;
+            3) payload_b64url="${payload_b64url}=" ;;
+          esac
+          email="$(base64 -d <<<"$payload_b64url" | jq -er '.email')"
+          registry_json="$(jq -nc \
+            --arg email "$email" \
+            --arg aud "$WORKLOAD_IDENTITY_GOOGLE_AUDIENCE" \
+            '[{
+              serviceAccountEmail: $email,
+              principalId: "shared-order-ci-deployer",
+              allowedTokenAudiences: [$aud],
+              routeScopes: [
+                "GET partner/entries/*",
+                "POST partner/ingress/handoff",
+                "POST partner/ingress/referral-embed-handoff",
+                "POST partner/ingress/referral-embed-handoff/consume",
+                "POST partner/ingress/referral-embed-handoff/consent"
+              ]
+            }]')"
+          {
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON<<WIF_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_REGISTRY_EOF"
+            # Base API servers read the native registry variable directly.
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS<<WIF_NATIVE_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_NATIVE_REGISTRY_EOF"
+          } >> "$GITHUB_ENV"
+          echo "DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN=${ID_TOKEN}" >> "$GITHUB_ENV"
+
+      - name: Prepare the normal airport same-order journeys
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_route_suite;' \
+            -c 'CREATE DATABASE drts_route_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          mkdir -p .artifacts/pax-review-airport-shared-order
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          # Build the exact production Driver mount plus the existing standalone
+          # Driver Web surface. Neither export starts a dev server on this VM.
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
+          pnpm --filter @drts/passenger-app-web... build
+          DRTS_API_URL=http://127.0.0.1:3001 pnpm --filter @drts/partner-booking-web... build
+          DRTS_API_URL=http://127.0.0.1:3001 NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm --filter @drts/tenant-console-web... build
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
+          pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+      # GITHUB_ENV is applied only to subsequent Actions steps, not the
+      # shell that just ran the seed. Keep setup fresh and visible to Playwright.
+      - name: Seed normal tenant sessions immediately before shared-order acceptance
+        run: |
+          # Same authoritative normal tenant/admin fixture used by Tenant UAT.
+          ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-qa-tenant-001/appmodule-acceptance-seed.ts
+      - name: Run both normal airport same-order directions
+        run: |
+          pnpm exec playwright test -c playwright.pax-review-airport-shared-order.config.ts
+      - name: Upload normal airport same-order evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-airport-shared-order-${{ github.run_id }}
+          path: .artifacts/pax-review-airport-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   e2e:
     needs:
       [
@@ -1739,6 +1973,7 @@ jobs:
         cross-surface-e2e,
         ui-route-e2e,
         ui-shared-order-e2e,
+        ui-airport-shared-order-e2e,
         ui-bureau-acceptance-e2e,
       ]
     runs-on: ubuntu-latest
@@ -1752,7 +1987,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}' '${{ needs.ui-bureau-acceptance-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}' '${{ needs.ui-airport-shared-order-e2e.result }}' '${{ needs.ui-bureau-acceptance-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;

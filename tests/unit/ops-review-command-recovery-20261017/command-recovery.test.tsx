@@ -192,3 +192,131 @@ it.each([
     dispatchJobId,
   );
 });
+
+// Use the actual Ops page and SDK. Only the upstream transport is simulated;
+// backend device-session behavior remains in the existing companion wholefiles.
+function trialInvitationPage() {
+  const posts: { path: string; body: unknown; key: string | null }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const path = new URL(
+        String(input),
+        "https://ops.example",
+      ).pathname.replace(/^\/control-plane-proxy/, "/api");
+      if (path === "/api/ops/review-demo/config")
+        return Response.json({ success: true, data: { enabled: true } });
+      if (init?.method === "POST") {
+        posts.push({
+          path,
+          body: JSON.parse(String(init.body)),
+          key: new Headers(init.headers).get("Idempotency-Key"),
+        });
+        if (path === "/api/auth/driver/device/invite")
+          return Response.json({
+            success: true,
+            data: { registrationCode: "SIM-unit-single-use-registration" },
+          });
+        if (
+          /^\/api\/regulatory-registry\/drivers\/[^/]+\/work-state$/.test(path)
+        )
+          return Response.json({ success: true, data: {} });
+      }
+      throw new Error(`Unexpected fixture request: ${path}`);
+    }),
+  );
+  render(
+    <LanguageProvider defaultLocale="zh">
+      <OpsReview />
+    </LanguageProvider>,
+  );
+  return posts;
+}
+
+it.each(["pax-trial-driver-1", "pax-trial-driver-3"])(
+  "real Ops page issues an existing device invitation for %s",
+  async (driverId) => {
+    const posts = trialInvitationPage();
+    const select = await screen.findByLabelText("演練司機");
+    const option = await screen.findByRole("option", {
+      name: `${driverId}（試乘・合成）`,
+    });
+    expect((option as HTMLOptionElement).value).toBe(driverId);
+    fireEvent.change(select, { target: { value: driverId } });
+    expect((select as HTMLSelectElement).value).toBe(driverId);
+    fireEvent.click(
+      screen.getByRole("button", { name: "發出既有司機裝置註冊碼" }),
+    );
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({
+      path: "/api/auth/driver/device/invite",
+      body: { driverId },
+    });
+    expect(posts[0]!.key).toMatch(/^[0-9a-f-]{36}$/);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("演練裝置註冊碼") as HTMLInputElement).value,
+      ).toBe("SIM-unit-single-use-registration"),
+    );
+  },
+);
+
+it("keeps the original review driver default and exposes all three explicitly synthetic trial identities and the real Driver entry", async () => {
+  const posts = trialInvitationPage();
+  const select = await screen.findByLabelText("演練司機");
+  expect((select as HTMLSelectElement).value).toBe("pax-review-driver-a");
+  expect(
+    screen.getAllByRole("option").map((option) => ({
+      value: (option as HTMLOptionElement).value,
+      label: option.textContent,
+    })),
+  ).toEqual([
+    { value: "pax-review-driver-a", label: "pax-review-driver-a" },
+    { value: "pax-review-driver-b", label: "pax-review-driver-b" },
+    { value: "pax-trial-driver-1", label: "pax-trial-driver-1（試乘・合成）" },
+    { value: "pax-trial-driver-2", label: "pax-trial-driver-2（試乘・合成）" },
+    { value: "pax-trial-driver-3", label: "pax-trial-driver-3（試乘・合成）" },
+  ]);
+  expect(
+    screen
+      .getByRole("link", { name: "開啟司機視窗（裝置註冊）" })
+      .getAttribute("href"),
+  ).toBe("/review-driver/onboarding");
+  fireEvent.click(
+    screen.getByRole("button", { name: "發出既有司機裝置註冊碼" }),
+  );
+  await waitFor(() => expect(posts).toHaveLength(1));
+  expect(posts[0]).toMatchObject({
+    path: "/api/auth/driver/device/invite",
+    body: { driverId: "pax-review-driver-a" },
+  });
+});
+
+it("keeps pause and restore limited to the original review pairs after selecting the accessible trial driver", async () => {
+  const posts = trialInvitationPage();
+  const select = await screen.findByLabelText("演練司機");
+  fireEvent.change(select, { target: { value: "pax-trial-driver-3" } });
+  expect((select as HTMLSelectElement).value).toBe("pax-trial-driver-3");
+  fireEvent.click(screen.getByRole("button", { name: "暫停演練供給" }));
+  await screen.findByText("演練供給已離線；新派遣走真正無車流程。");
+  fireEvent.click(screen.getByRole("button", { name: "恢復演練供給" }));
+  await screen.findByText("演練供給已恢復；請依原流程重新派遣。");
+  expect(posts.map(({ path, body }) => ({ path, body }))).toEqual([
+    {
+      path: "/api/regulatory-registry/drivers/pax-review-driver-a/work-state",
+      body: { workState: "offline" },
+    },
+    {
+      path: "/api/regulatory-registry/drivers/pax-review-driver-b/work-state",
+      body: { workState: "offline" },
+    },
+    {
+      path: "/api/regulatory-registry/drivers/pax-review-driver-a/work-state",
+      body: { workState: "available" },
+    },
+    {
+      path: "/api/regulatory-registry/drivers/pax-review-driver-b/work-state",
+      body: { workState: "available" },
+    },
+  ]);
+});
