@@ -11,6 +11,7 @@ import {
   getOidcStateCookieOptions,
   getSessionCookieOptions,
   isSecureEnvironment,
+  resolveBrowserOrigin,
   sanitizeReturnPath,
   verifyCsrfToken,
   verifySameOrigin,
@@ -130,8 +131,11 @@ async function startLogin(request: NextRequest) {
     request.nextUrl.searchParams.get("redirect_uri") ||
     request.nextUrl.searchParams.get("return_url") ||
     "/";
-  const returnUrl = sanitizeReturnPath(rawReturnUrl, request.nextUrl.origin);
-  const callbackUrl = `${request.nextUrl.origin}${AGENCY_AUTH_CALLBACK_PATH}`;
+  const returnUrl = sanitizeReturnPath(
+    rawReturnUrl,
+    resolveBrowserOrigin(request),
+  );
+  const callbackUrl = `${resolveBrowserOrigin(request)}${AGENCY_AUTH_CALLBACK_PATH}`;
   const invitationToken = request.nextUrl.searchParams.get("token")?.trim();
   const agencyId = request.nextUrl.searchParams.get("agency_id")?.trim();
 
@@ -226,7 +230,7 @@ async function completeCallback(
   }
   const { stateToken, returnUrl } = statePayload;
   if (state !== (statePayload.state || stateToken)) {
-    const loginUrl = new URL(loginFailurePath, request.nextUrl.origin);
+    const loginUrl = new URL(loginFailurePath, resolveBrowserOrigin(request));
     loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
     return NextResponse.redirect(loginUrl);
   }
@@ -242,7 +246,7 @@ async function completeCallback(
         },
         body: JSON.stringify({
           provider: "oidc",
-          callbackUrl: `${request.nextUrl.origin}${AGENCY_AUTH_CALLBACK_PATH}`,
+          callbackUrl: `${resolveBrowserOrigin(request)}${AGENCY_AUTH_CALLBACK_PATH}`,
           code,
           state,
         }),
@@ -253,7 +257,7 @@ async function completeCallback(
     const payload = data && data.data ? data.data : data;
     const accessToken = payload?.access_token;
     if (!exchangeRes.ok || typeof accessToken !== "string" || !accessToken) {
-      const loginUrl = new URL(loginFailurePath, request.nextUrl.origin);
+      const loginUrl = new URL(loginFailurePath, resolveBrowserOrigin(request));
       loginUrl.searchParams.set(
         "error",
         data?.error?.code || "AUTH_SESSION_EXCHANGE_DENIED",
@@ -270,8 +274,8 @@ async function completeCallback(
     const isSecure = isSecureEnvironment(request);
     const response = NextResponse.redirect(
       new URL(
-        sanitizeReturnPath(returnUrl, request.nextUrl.origin),
-        request.nextUrl.origin,
+        sanitizeReturnPath(returnUrl, resolveBrowserOrigin(request)),
+        resolveBrowserOrigin(request),
       ),
     );
     response.cookies.set(

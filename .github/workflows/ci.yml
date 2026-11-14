@@ -340,10 +340,48 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Run existing workspace package unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p workspace-unit-test-results
+          result=0
+          for package in \
+            @drts/channel-partner-portal-web \
+            @drts/concierge-portal-web \
+            @drts/driver-app \
+            @drts/enterprise-dispatch-web \
+            @drts/fleet-partner-portal-web \
+            @drts/ops-console-web \
+            @drts/partner-booking-web \
+            @drts/passenger-web \
+            @drts/platform-admin-web \
+            @drts/referral-embed-web \
+            @drts/tenant-console-web \
+            @drts/shared-test-fixtures \
+            @drts/ui-web \
+            @drts/passenger-client; do
+            pnpm --filter "$package" test --maxWorkers=1 \
+              --reporter=default --reporter=json \
+              --outputFile.json="$GITHUB_WORKSPACE/workspace-unit-test-results/${package#@drts/}.json" || result=1
+          done
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-fast-checks-workspace-units-${{ github.sha }}-${{ github.run_id }}
+          path: workspace-unit-test-results/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
   product_root_unit:
     name: Product root unit tests (shard ${{ matrix.shard }}/4)
     needs: scope
-    if: needs.scope.outputs.product == 'true'
+    # Same delegation as dependency-security/i18n-guard: a non-draft PR to dev
+    # runs the identical root suite once, in CI (integration trunk) "Unit
+    # tests", which also enforces the PostgreSQL report gates below. PRs to
+    # main, drafts and pushes still run it here.
+    if: needs.scope.outputs.product == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -497,9 +535,13 @@ jobs:
   product_smoke_acceptance:
     name: Product smoke acceptance
     needs: [scope, product_fast_checks, product_root_unit, product_api_unit]
-    if: needs.scope.outputs.product == 'true'
+    # !cancelled(): still runs when product_root_unit was skipped by design
+    # (delegated to ci-integ); every upstream result is checked explicitly.
+    if: ${{ !cancelled() && needs.scope.outputs.product == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ROOT_UNIT_DELEGATED: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -507,9 +549,15 @@ jobs:
       - name: Require every upstream stage to have actually succeeded
         run: |
           [ '${{ needs.product_fast_checks.result }}' = 'success' ] || { echo "product_fast_checks: ${{ needs.product_fast_checks.result }}"; exit 1; }
-          [ '${{ needs.product_root_unit.result }}' = 'success' ] || { echo "product_root_unit: ${{ needs.product_root_unit.result }}"; exit 1; }
+          if [ "$ROOT_UNIT_DELEGATED" = "true" ]; then
+            [ '${{ needs.product_root_unit.result }}' = 'skipped' ] || { echo "product_root_unit should be delegated to ci-integ for a non-draft PR to dev but was: ${{ needs.product_root_unit.result }}"; exit 1; }
+            echo "Root unit tests and their PostgreSQL gates run once, in CI (integration trunk) 'Unit tests'."
+          else
+            [ '${{ needs.product_root_unit.result }}' = 'success' ] || { echo "product_root_unit: ${{ needs.product_root_unit.result }}"; exit 1; }
+          fi
           [ '${{ needs.product_api_unit.result }}' = 'success' ] || { echo "product_api_unit: ${{ needs.product_api_unit.result }}"; exit 1; }
       - uses: actions/download-artifact@v4
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         with:
           pattern: product-root-unit-shard-*-${{ github.run_id }}
           path: product-root-unit-shards
@@ -524,6 +572,7 @@ jobs:
           name: product-fast-checks-native-passenger-${{ github.run_id }}
           path: apps/passenger-app
       - name: Verify root unit shard partition coverage and merge reports
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         run: |
           python3 tools/ci/verify_unit_partition_coverage.py \
             --root . \
@@ -552,16 +601,20 @@ jobs:
             --shard-report product-api-unit-shards/api-test-results-shard-2.json \
             --merged-output apps/api/api-test-results.json
       - name: Verify partner notification PostgreSQL gate (root + API)
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         run: python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json
       - name: Verify passenger App PostgreSQL and HTTP test counts
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         run: |
           python3 -m unittest tools/ci/test_passenger_app_postgres_gate.py
           python3 tools/ci/verify_passenger_app_postgres_gate.py unit-test-results.json
       - name: Verify passenger push PostgreSQL and regression gates
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         run: |
           python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py
           python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
       - name: Verify voice checkpoint PostgreSQL gate (four cases, zero skips)
+        if: env.ROOT_UNIT_DELEGATED != 'true'
         run: |
           python3 - <<'PY'
           import json

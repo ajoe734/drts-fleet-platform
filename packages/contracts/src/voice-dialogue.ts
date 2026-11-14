@@ -73,6 +73,9 @@ export const voiceToolProposalSchema = z.discriminatedUnion("name", [
             "service_unsupported",
             "urgent_safety",
             "provider_unavailable",
+            // CALLCENTER-AI-ASSIST-20261111: two consecutive turns the AI
+            // could not understand hand the caller to a human.
+            "speech_not_understood",
           ]),
         })
         .strict(),
@@ -81,6 +84,23 @@ export const voiceToolProposalSchema = z.discriminatedUnion("name", [
 ]);
 // Mutations are deliberately absent: only the trusted confirmation coordinator
 // may submit them with durable proof, versions and an idempotent action key.
+/**
+ * CALLCENTER-AI-ASSIST-20261111 (owner decision 2026-11-11): the dialogue
+ * model's `text` is spoken to the caller in ordinary conversation turns, so
+ * every voice model (text LLM or speech-to-speech) gets the same rules.
+ * The media worker still checks each reply before speaking it and keeps
+ * the verified read-back script for booking confirmation.
+ */
+export const VOICE_SPOKEN_REPLY_RULES: readonly string[] = [
+  "`text` is spoken to the caller as your next turn. Write it in natural Taiwan Mandarin (繁體中文), polite and patient: many callers are elderly.",
+  "Keep it short: one or two sentences, under 60 characters, and ask only one thing at a time.",
+  "Use context.collected and context.missing to ask for the next missing detail; do not ask again for something already collected unless the caller corrects it.",
+  "Never state a fare or price, a driver arrival time, that a booking is made, confirmed or dispatched, a refund, a discount or any promise; the system says those itself.",
+  "Never say an address, phone number or number the caller did not say in this call. Do not mention stored or previous trips.",
+  "When you propose tools, `text` may be a brief acknowledgement such as 「好的，我幫您查一下。」.",
+  "If you did not understand, apologise briefly and ask the caller to repeat or rephrase.",
+];
+
 export const voiceDialogueOutputSchema = z
   .object({
     intent: voiceIntentSchema,
@@ -244,6 +264,8 @@ export const voiceDialogueSnapshotContentSchema = z
       .object({ reason: z.string().max(200), intent: z.string().max(100) })
       .strict()
       .nullable(),
+    /** Consecutive turns with nothing understood (absent in older rows). */
+    unclearTurns: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type VoiceDialogueSnapshotContent = z.infer<

@@ -14,6 +14,7 @@ import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ReportingModule } from "../reporting/reporting.module";
+import { ControlledDownloadModule } from "../controlled-download/controlled-download.module";
 import { ReportingService } from "../reporting/reporting.service";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -24,6 +25,7 @@ import { ReportingFilingService } from "./reporting-filing.service";
 @Module({
   imports: [
     DatabaseModule,
+    ControlledDownloadModule,
     IdempotencyModule,
     AuditNotificationModule,
     ComplaintModule,

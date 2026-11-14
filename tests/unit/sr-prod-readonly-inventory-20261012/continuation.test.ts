@@ -51,8 +51,8 @@ describe("actual configured shared registry continuation", () => {
     const f = fixture(shared, c);
     const report = await c.collect(f.env, SHA, f.transport);
     expect(report.collection).toBe("incomplete");
-    expect(report.requests).toBe(62);
-    expect(f.calls).toHaveLength(62);
+    expect(report.requests).toBe(65);
+    expect(f.calls).toHaveLength(65);
     for (const call of f.calls) {
       expect(call.method).toBe("GET");
       expect(call.url).toContain(c.TARGET.project);
@@ -68,10 +68,10 @@ describe("actual configured shared registry continuation", () => {
       });
     expect(
       report.records.filter((r: any) => r.kind === "service"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(
       report.records.filter((r: any) => r.kind === "revision"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(
       report.records.find((r: any) => r.id === "api").data.template
         .containers[0].image,
@@ -221,7 +221,7 @@ describe("safe real main guard diagnostic", () => {
       expect(report.collection).toBe(
         mode === "shared" ? "incomplete" : "complete",
       );
-      expect(report.requests).toBe(mode === "shared" ? 62 : 64);
+      expect(report.requests).toBe(mode === "shared" ? 65 : 67);
       expect(
         f.calls.every(
           (d: any) => d.method === "GET" && d.url.includes(c.TARGET.project),

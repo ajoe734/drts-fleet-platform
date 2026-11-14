@@ -34,7 +34,7 @@ describe("independently anchored observed Cloud Run names", () => {
     const f = ownedNumeric();
     const report = await c.collect(f.env, SHA, f.transport);
     expect(report.collection).toBe("complete");
-    expect(report.requests).toBe(64);
+    expect(report.requests).toBe(67);
     for (const r of report.records.filter((r: any) =>
       ["service", "job", "revision"].includes(r.kind),
     )) {
@@ -543,7 +543,7 @@ describe("all resource consumers retain ownership and request authority", () => 
     });
     const report = await c.collect(f.env, SHA, f.transport);
     expect(report.collection).toBe("incomplete");
-    expect(report.requests).toBe(62);
+    expect(report.requests).toBe(65);
     expect(record(report, "artifact-images").code).toBe(
       "SHARED_REGISTRY_NOT_AUTHORIZED",
     );
@@ -564,7 +564,7 @@ describe("all resource consumers retain ownership and request authority", () => 
       c.TARGET.project,
     );
     const report = await c.collect(f.env, SHA, f.transport);
-    expect(report.requests).toBe(64);
+    expect(report.requests).toBe(67);
     expect(record(report).data.latestCreatedRevision).toContain(
       c.TARGET.project,
     );

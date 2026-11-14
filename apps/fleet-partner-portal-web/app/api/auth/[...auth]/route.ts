@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const SESSION_COOKIE_NAME = "drts_session";
 const CSRF_COOKIE_NAME = "drts_csrf";
 
@@ -9,6 +8,62 @@ function isSecureEnvironment(req: NextRequest): boolean {
   return (
     process.env.NODE_ENV === "production" || req.nextUrl.protocol === "https:"
   );
+}
+
+// The browser's origin, as in this app's control-plane-proxy: the public
+// runtime wrapper strips any caller copy of x-drts-runtime-origin and rebuilds
+// it from the ingress authority. The loopback child's own URL is
+// http://127.0.0.1:3107, which Google and the API reject as a redirect URI.
+function browserOrigin(request: NextRequest): string {
+  return request.headers.get("x-drts-runtime-origin") ?? request.nextUrl.origin;
+}
+
+// Server-side calls go straight to the API, in @drts/tenant-auth's order.
+// NEXT_PUBLIC_API_URL is the browser base (/control-plane-proxy on Cloud Run),
+// not an absolute URL here: using it failed every login with "Invalid URL".
+function apiUrl(path: string): string {
+  const browserBase = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const base =
+    process.env.DRTS_API_URL?.trim() ||
+    process.env.API_URL?.trim() ||
+    (browserBase && /^https?:\/\//i.test(browserBase) ? browserBase : "") ||
+    "http://localhost:3001";
+  return `${base.replace(/\/+$/, "")}${path}`;
+}
+
+// A private Cloud Run API needs the invoker proof in x-serverless-authorization
+// (never Authorization, which carries the user's session), as in
+// app/host/lib/host-auth.server.ts.
+async function apiFetch(
+  path: string,
+  init: Omit<RequestInit, "headers"> & {
+    headers?: Record<string, string>;
+  } = {},
+) {
+  const url = apiUrl(path);
+  const headers: Record<string, string> = { ...init.headers };
+  const audience =
+    process.env.DRTS_API_AUTH_AUDIENCE?.trim() ||
+    (new URL(url).hostname.endsWith(".a.run.app") ? new URL(url).origin : "");
+  if (audience) {
+    const metadata = new URL(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity",
+    );
+    metadata.searchParams.set("audience", audience);
+    metadata.searchParams.set("format", "full");
+    try {
+      const proof = await fetch(metadata, {
+        cache: "no-store",
+        headers: { "Metadata-Flavor": "Google" },
+      });
+      if (proof.ok) {
+        headers["x-serverless-authorization"] = `Bearer ${await proof.text()}`;
+      }
+    } catch {
+      // A public dev API needs no proof; a private one rejects the call.
+    }
+  }
+  return fetch(url, { ...init, headers, cache: "no-store" });
 }
 
 function sanitizeReturnPath(rawReturnUrl: string, origin: string): string {
@@ -44,13 +99,12 @@ export async function GET(
   if (action === "login") {
     const returnUrl = request.nextUrl.searchParams.get("redirect_uri") || "/";
     const partnerId = request.nextUrl.searchParams.get("partner_id") || "";
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
+    const callbackUrl = `${browserOrigin(request)}/api/auth/callback`;
 
-    const backendUrl = new URL(`${API_URL}/api/auth/partner/login`);
-    backendUrl.searchParams.set("redirect_uri", callbackUrl);
-    if (partnerId) backendUrl.searchParams.set("partner_id", partnerId);
+    const query = new URLSearchParams({ redirect_uri: callbackUrl });
+    if (partnerId) query.set("partner_id", partnerId);
 
-    const res = await fetch(backendUrl.toString());
+    const res = await apiFetch(`/api/auth/partner/login?${query}`);
     const data = await res.json();
 
     if (!res.ok || !data.data?.authorization_url) {
@@ -109,25 +163,22 @@ export async function GET(
       stateToken = stateCookie;
     }
 
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
+    const callbackUrl = `${browserOrigin(request)}/api/auth/callback`;
 
-    const exchangeRes = await fetch(
-      `${API_URL}/api/auth/partner/callback-session`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-oidc-state-token": stateToken,
-        },
-        body: JSON.stringify({
-          provider: "oidc",
-          callbackUrl,
-          code,
-          state,
-          ...(pkceVerifier ? { pkceVerifier } : {}),
-        }),
+    const exchangeRes = await apiFetch("/api/auth/partner/callback-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-oidc-state-token": stateToken,
       },
-    );
+      body: JSON.stringify({
+        provider: "oidc",
+        callbackUrl,
+        code,
+        state,
+        ...(pkceVerifier ? { pkceVerifier } : {}),
+      }),
+    });
 
     const data = await exchangeRes.json();
     if (!exchangeRes.ok || !data.data?.access_token) {
@@ -145,10 +196,10 @@ export async function GET(
     const csrfToken = randomBytes(32).toString("base64url");
     const targetRedirect = sanitizeReturnPath(
       returnUrl,
-      request.nextUrl.origin,
+      browserOrigin(request),
     );
     const response = NextResponse.redirect(
-      new URL(targetRedirect, request.nextUrl.origin),
+      new URL(targetRedirect, browserOrigin(request)),
     );
 
     response.cookies.set(SESSION_COOKIE_NAME, session.access_token, {
@@ -180,7 +231,7 @@ export async function GET(
       );
     }
 
-    const sessionRes = await fetch(`${API_URL}/api/auth/session`, {
+    const sessionRes = await apiFetch("/api/auth/session", {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await sessionRes.json();

@@ -3,7 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as contracts from "@drts/contracts";
@@ -48,7 +55,9 @@ function createClientLoader(mocks: Record<string, unknown>) {
 
     let targetPath: string;
     if (specifier.startsWith("@/")) {
-      targetPath = resolveSourceFile(path.resolve(APP_ROOT, specifier.slice(2)));
+      targetPath = resolveSourceFile(
+        path.resolve(APP_ROOT, specifier.slice(2)),
+      );
     } else if (specifier === "@drts/ui-web") {
       targetPath = resolveSourceFile(
         path.resolve(APP_ROOT, "../../packages/ui-web/src/index.tsx"),
@@ -56,7 +65,9 @@ function createClientLoader(mocks: Record<string, unknown>) {
     } else if (specifier.startsWith(".")) {
       targetPath = resolveSourceFile(path.resolve(fromDir, specifier));
     } else {
-      throw new Error(`Unmocked external module in client loader: ${specifier}`);
+      throw new Error(
+        `Unmocked external module in client loader: ${specifier}`,
+      );
     }
 
     const existing = cache.get(targetPath);
@@ -248,9 +259,7 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
 
     // URL and filter query remain unchanged
     expect(window.location.pathname).toBe("/qualifications/drivers");
-    expect(window.location.search).toBe(
-      "?status=expired&windowDays=30&page=2",
-    );
+    expect(window.location.search).toBe("?status=expired&windowDays=30&page=2");
 
     // Displayed copy updates to English
     expect(
@@ -306,6 +315,49 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
     });
   });
 
+  it("keeps R11 export inputs inactive before client attachment, then previews the exact entered record", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { record_count: 1 } }), {
+        status: 200,
+      }),
+    );
+    global.fetch = fetchMock;
+    const props = { locale: "en" as const };
+    const serverHost = document.createElement("div");
+    serverHost.innerHTML = renderToString(
+      React.createElement(TripExportPanel, props),
+    );
+    const serverControls = serverHost.querySelectorAll(
+      "input, textarea, button",
+    );
+    expect(serverControls.length).toBeGreaterThan(0);
+    for (const control of serverControls)
+      expect(control.matches(":disabled")).toBe(true);
+    within(serverHost)
+      .getByRole("button", { name: "Preview Record Count" })
+      .click();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    render(React.createElement(TripExportPanel, props));
+    const record = screen.getByLabelText("Record ID (Exact)", { exact: true });
+    const preview = screen.getByRole("button", {
+      name: "Preview Record Count",
+    });
+    expect(record.matches(":disabled")).toBe(false);
+    expect(preview.matches(":disabled")).toBe(false);
+    const recordId = "mtr-client-ready-001";
+    fireEvent.change(record, { target: { value: recordId } });
+    fireEvent.click(preview);
+    expect(
+      await screen.findByText("Retained records matching scope: 1"),
+    ).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/agency/trip-records/export-jobs/preview");
+    expect(request.method).toBe("POST");
+    expect(JSON.parse(request.body).scope).toEqual({ recordId });
+  });
+
   it("localizes R11 TripExportPanel preview, create, status refresh, download link, and 403 permission error across zh and en", async () => {
     const fetchMock = vi
       .fn()
@@ -347,7 +399,9 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
       // 5. preview 403 forbidden
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ error: { code: "FORBIDDEN", message: "Forbidden" } }),
+          JSON.stringify({
+            error: { code: "FORBIDDEN", message: "Forbidden" },
+          }),
           { status: 403 },
         ),
       );

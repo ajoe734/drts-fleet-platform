@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import type { CreatePassengerComplaintCommand } from "@drts/contracts";
+import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
 import { PassengerLoginScreen } from "../auth/passenger-login-screen";
 import { NativeBookingScreen } from "../booking/native-booking-screen";
 import { NativePaymentMethodsScreen } from "../payment/native-payment-methods-screen";
@@ -51,6 +52,28 @@ export function useNativePassengerRuntime() {
     runtime.getSnapshot,
   );
   return { runtime, state };
+}
+function NativePassengerPaymentRoute({
+  runtime,
+}: {
+  runtime: NativePassengerRuntime;
+}) {
+  const [managedFields, setManagedFields] =
+    useState<PassengerPaymentFieldsAvailability>({ status: "unavailable" });
+  const { options, payment: client } = runtime;
+  const renderer = options.renderPaymentFields;
+  const hostedFieldsView = renderer
+    ? renderer({ client, onReady: setManagedFields })
+    : options.paymentFieldsView;
+  return (
+    <NativePaymentMethodsScreen
+      client={client}
+      fields={renderer ? managedFields : options.paymentFields}
+      hostedFieldsView={hostedFieldsView}
+      browser={options.paymentBrowser}
+      onSupport={() => runtime.contactSupport()}
+    />
+  );
 }
 function Action({
   id,
@@ -356,11 +379,9 @@ function ApplicationBody() {
           />
         )}
         {state.route.kind === "payment" && (
-          <NativePaymentMethodsScreen
-            client={runtime.payment}
-            fields={options.paymentFields}
-            browser={options.paymentBrowser}
-            onSupport={() => runtime.contactSupport()}
+          <NativePassengerPaymentRoute
+            key={state.identityVersion}
+            runtime={runtime}
           />
         )}
         {state.route.kind === "account" && (

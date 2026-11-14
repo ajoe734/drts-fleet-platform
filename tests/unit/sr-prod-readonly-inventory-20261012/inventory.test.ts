@@ -22,13 +22,87 @@ describe("protected production inventory actual exported boundaries", () => {
     expect(report.effectiveIamPermissions).toBe("unverified");
     expect(
       report.records.filter((r: any) => r.kind === "service"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(
       report.records.filter((r: any) => r.kind === "revision"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(report.records.filter((r: any) => r.kind === "iap")).toHaveLength(
       10,
     );
+    const serviceIds = [
+      "api",
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "bank-console-web",
+      "referral-embed-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+      "passenger-app-web",
+      "agency-portal-web",
+    ];
+    expect(
+      report.records
+        .filter((r: any) => r.kind === "service")
+        .map((r: any) => r.id)
+        .sort(),
+    ).toEqual([...serviceIds].sort());
+    for (const id of serviceIds) {
+      for (const [kind, recordId] of [
+        ["service", id],
+        ["revision", `${id}:prod-${id}-00001`],
+        ["policy", `${id}-policy`],
+      ])
+        expect(
+          report.records.find((r: any) => r.id === recordId),
+        ).toMatchObject({ kind, status: "observed" });
+      if (id !== "agency-portal-web")
+        expect(
+          report.records.find((r: any) => r.id === `${id}-iap`),
+        ).toMatchObject({ kind: "iap", status: "observed" });
+    }
+    const agencyImage = `${f.plan.registry}/agency-portal-web@sha256:${"c".repeat(64)}`;
+    expect(
+      report.records.find((r: any) => r.id === "agency-portal-web").data
+        .template.containers[0].image,
+    ).toBe(agencyImage);
+    expect(
+      report.records.find(
+        (r: any) => r.id === "agency-portal-web:prod-agency-portal-web-00001",
+      ).data.containers[0].image,
+    ).toBe(agencyImage);
+    expect(report.requests).toBe(67);
+    expect(f.calls).toHaveLength(67);
+    expect(
+      f.calls.filter((call: any) =>
+        new URL(call.url).pathname.includes("/services/prod-agency-portal-web"),
+      ),
+    ).toHaveLength(3);
+    const agencyRecords = [
+      ["service", "agency-portal-web"],
+      ["revision", "agency-portal-web:prod-agency-portal-web-00001"],
+      ["policy", "agency-portal-web-policy"],
+    ];
+    for (const [kind, id] of agencyRecords) {
+      expect(report.records.find((r: any) => r.id === id)).toMatchObject({
+        kind,
+        status: "observed",
+      });
+      expect(() =>
+        c.serialize({
+          ...report,
+          records: report.records.filter((r: any) => r.id !== id),
+        }),
+      ).toThrow("INSUFFICIENT_OBSERVATION");
+    }
+    expect(
+      report.records.find((r: any) => r.id === "agency-portal-web").data
+        .ingress,
+    ).toBe("INGRESS_TRAFFIC_ALL");
+    expect(
+      report.records.some((r: any) => r.id === "agency-portal-web-iap"),
+    ).toBe(false);
     expect(
       report.records.find((r: any) => r.id === "api-policy").data
         .unconditionalDeployerInvoker,
@@ -270,6 +344,12 @@ describe("protected production inventory actual exported boundaries", () => {
           },
         ],
       },
+      ...["service", "revision", "policy"].map((kind) => ({
+        ...report,
+        records: report.records.filter(
+          (r: any) => r.kind !== kind || !r.id.startsWith("agency-portal-web"),
+        ),
+      })),
     ])
       expect(() => c.serialize(changed)).toThrow();
   });
@@ -311,7 +391,7 @@ describe("official Google HTTP method boundary", () => {
     ).toBe(false);
     expect(
       f.plan.operations.filter((op: any) => op.kind === "policy"),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
   });
 });
 describe("actual parsed workflow protection", () => {

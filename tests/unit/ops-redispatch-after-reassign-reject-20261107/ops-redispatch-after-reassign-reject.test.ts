@@ -115,7 +115,6 @@ async function actualPage(snapshot: Snapshot) {
   const requestPaths: string[] = [];
   const authorityBeforePage = JSON.stringify(snapshot);
   const lists = new Map<string, unknown[]>([
-    ["/api/orders", [snapshot.order]],
     ["/api/dispatch/tasks", snapshot.jobs],
     ["/api/driver/tasks", snapshot.tasks],
     ["/api/regulatory-registry/drivers", []],
@@ -206,11 +205,10 @@ async function actualPage(snapshot: Snapshot) {
   documents.push(dom);
   expect(JSON.stringify(snapshot)).toBe(authorityBeforePage);
   expect(unexpected).toEqual([]);
-  for (const path of [
-    `/api/orders/${snapshot.order.orderId}`,
-    "/api/dispatch/tasks",
-    "/api/driver/tasks",
-  ])
+  const orderPath = `/api/orders/${snapshot.order.orderId}`;
+  expect(requestPaths.filter((path) => path === orderPath)).toHaveLength(1);
+  expect(requestPaths).not.toContain("/api/orders");
+  for (const path of ["/api/dispatch/tasks", "/api/driver/tasks"])
     expect(requestPaths).toContain(path);
   expect(requestPaths).toContain(
     `/api/dispatch/tasks/${snapshot.jobs[0]!.dispatchJobId}/candidates`,
