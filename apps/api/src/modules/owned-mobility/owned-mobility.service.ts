@@ -2759,9 +2759,14 @@ export class OwnedMobilityService
   }
 
   /** Refresh only the target aggregate before entering the unchanged command
-   * implementation. Its row/resource locks and ownership checks remain authoritative. */
+   * implementation. Its row/resource locks and ownership checks remain authoritative.
+   *
+   * `preparedServiceBuckets` is for batch reads that refresh many orders in one
+   * request (the Fleet case list): each service bucket's dispatch supply is
+   * prepared once per batch instead of once per order. Commands omit it. */
   async prepareOrderAction(
     key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+    options: { preparedServiceBuckets?: Set<string> } = {},
   ) {
     if (!this.ownedMobilityRepository?.isEnabled()) return;
     const context =
@@ -2786,9 +2791,13 @@ export class OwnedMobilityService
       );
     }
     const orderId = context.orders[0]!.orderId;
-    await this.regulatoryRegistryService.prepareDispatchSupply?.(
-      context.orders[0]!.serviceBucket,
-    );
+    const serviceBucket = context.orders[0]!.serviceBucket;
+    if (!options.preparedServiceBuckets?.has(serviceBucket)) {
+      await this.regulatoryRegistryService.prepareDispatchSupply?.(
+        serviceBucket,
+      );
+      options.preparedServiceBuckets?.add(serviceBucket);
+    }
     const replace = <T extends { orderId: string }>(
       current: T[],
       committed: T[],
