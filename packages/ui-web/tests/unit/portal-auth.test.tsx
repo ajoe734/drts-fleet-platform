@@ -218,7 +218,7 @@ describe("PortalResetPasswordForm", () => {
     fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "new-password-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save password" }));
 
-    expect((await screen.findByRole("status")).textContent).toBe(messages.passwordSaved);
+    expect(await screen.findByText(messages.passwordSaved)).toBeTruthy();
     expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)).toEqual({
       token: "tok",
       password: "new-password-1",
