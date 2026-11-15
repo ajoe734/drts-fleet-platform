@@ -58,3 +58,22 @@ export type {
   GeoResolutionSurface,
   ServiceAreaEvaluationResult,
 } from "./address-map-picker-core";
+export {
+  PortalAccountSecurityPanel,
+  PortalForgotPasswordForm,
+  PortalInvitationPasswordForm,
+  PortalPasswordLoginForm,
+  PortalResetPasswordForm,
+  PortalTotpSetupPanel,
+} from "./portal-auth";
+export type {
+  PortalAccountSecurityPanelProps,
+  PortalAuthBaseProps,
+  PortalAuthEndpoints,
+  PortalAuthMessages,
+  PortalForgotPasswordFormProps,
+  PortalInvitationPasswordFormProps,
+  PortalPasswordLoginFormProps,
+  PortalResetPasswordFormProps,
+  PortalTotpSetupPanelProps,
+} from "./portal-auth.types";

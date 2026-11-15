@@ -1,6 +1,8 @@
 import { Card, CardBody, CardHeader } from "@drts/ui-web";
+import { PortalPasswordLoginForm } from "@drts/ui-web/client";
 
 import { LanguageSwitch } from "@/components/language-switch";
+import { buildPortalAuthMessages } from "@/lib/portal-auth-messages";
 import { getServerLocale } from "@/lib/server-locale";
 import { firstParam } from "@/lib/session.server";
 import { type Locale, type TranslationKey, t } from "@/lib/translations";
@@ -65,6 +67,18 @@ export default async function LoginPage({
           >
             {t("login.cta", undefined, locale)}
           </a>
+
+          <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #E4E7EC" }}>
+            <p style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.7 }}>
+              {t("login.password.divider", undefined, locale)}
+            </p>
+            <PortalPasswordLoginForm
+              messages={buildPortalAuthMessages(locale)}
+              endpoint="/api/auth/agency/password-login"
+              forgotPasswordHref="/forgot-password"
+              successHref={redirectUri}
+            />
+          </div>
         </CardBody>
       </Card>
     </main>

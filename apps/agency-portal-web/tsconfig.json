@@ -6,7 +6,12 @@
       "@/*": ["./*"],
       "@drts/contracts": ["../../packages/contracts/src/index.ts"],
       "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
-      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
+      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"],
+      "@drts/ui-web/*": ["../../packages/ui-web/src/*"],
+      "@drts/tenant-auth": ["../../packages/tenant-auth/src/route-handlers.ts"],
+      "@drts/tenant-auth/*": ["../../packages/tenant-auth/src/*"],
+      "@drts/agency-auth": ["../../packages/agency-auth/src/route-handlers.ts"],
+      "@drts/agency-auth/*": ["../../packages/agency-auth/src/*"]
     },
     "types": ["vitest/globals"]
   },
