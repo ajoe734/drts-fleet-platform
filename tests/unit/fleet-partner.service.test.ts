@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import type { CreateSecurityEventInput } from "../../apps/api/src/common/audit/security-event-sanitizer";
 import { FleetPartnerRepository } from "../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type {
@@ -485,7 +486,9 @@ describe("FleetPartnerService Fleet staff invitations", () => {
     };
     const audit = {
       isEnabled: () => true,
-      recordEventRequired: vi.fn(async () => undefined),
+      recordEventRequired: vi.fn<
+        (input: CreateSecurityEventInput) => Promise<undefined>
+      >(async () => undefined),
     };
     const invitationDelivery = {
       send: vi.fn(async () => ({
@@ -664,7 +667,15 @@ describe("FleetPartnerService Fleet staff invitations", () => {
       invitationDelivery: {
         send: vi.fn(async (request: FleetInvitationDeliveryRequest) => {
           deliveredRawTokens.push(request.rawToken);
-          return { status: "sent" as const, attemptedAt: new Date().toISOString() };
+          return {
+            invitationId: request.invitationId,
+            fleetPartnerId: request.fleetPartnerId,
+            entrySlug: request.entrySlug,
+            recipientEmail: request.recipientEmail,
+            expiresAt: request.expiresAt,
+            status: "sent" as const,
+            attemptedAt: new Date().toISOString(),
+          };
         }),
       },
     });
