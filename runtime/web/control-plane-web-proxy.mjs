@@ -204,10 +204,20 @@ async function applyUpstreamAuth(headers, req, targetUrl) {
 
 function writeResponse(res, upstream) {
   for (const [key, value] of upstream.headers.entries()) {
-    if (REQUEST_HEADER_BLOCKLIST.has(key.toLowerCase())) {
+    const name = key.toLowerCase();
+    if (REQUEST_HEADER_BLOCKLIST.has(name) || name === "set-cookie") {
       continue;
     }
     res.setHeader(key, value);
+  }
+  // Headers iteration yields every Set-Cookie as its own entry, and setHeader
+  // replaces, so copying them one by one kept only the last cookie. The OIDC
+  // callbacks set the session and CSRF cookies and then clear the state
+  // cookie, so the browser only ever received the clear and the login was
+  // lost. Forward all of them as one multi-value header.
+  const setCookies = upstream.headers.getSetCookie();
+  if (setCookies.length > 0) {
+    res.setHeader("set-cookie", setCookies);
   }
 
   res.statusCode = upstream.status;
