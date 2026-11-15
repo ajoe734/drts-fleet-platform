@@ -2311,33 +2311,15 @@ process.exit(99);
         fleetPartnerRepository,
       );
       tenantPartnerService.onModuleDestroy();
-      // FLEET-ONB-001 added a default-seed fleet_partner entry for
-      // OPERATIONAL_OWN_FLEET_PARTNER_ID (apps/api's in-memory
-      // PARTNER_ENTRY_SEED, used by the fleet BFF login route). This harness
-      // owns its own canonical own-Fleet binding below (or deliberately
-      // leaves none when skipOwnSourceEntry), so the readback must not also
-      // carry that default-seed row through as a second, active, ambiguous
-      // source. Omitting it from the persisted table (as a prior revision of
-      // this harness did) does not suppress it: TenantPartnerService.
-      // loadCanonicalPartnerEntries() only ever supersedes a static in-memory
-      // entry with a *persisted* row of the same entrySlug, so an entrySlug
-      // with no persisted counterpart just survives reconciliation untouched
-      // and keeps leaking through as a second active entry for this
-      // partnerId. Persist it explicitly as revoked instead, matching how a
-      // real retirement of that entry would read back.
-      for (const seededEntry of tenantPartnerService.listPlatformPartnerEntries()) {
-        const persistedEntry =
-          seededEntry.entrySlug === OPERATIONAL_OWN_FLEET_PARTNER_ID
-            ? {
-                ...seededEntry,
-                status: "revoked" as const,
-                activeFlag: false,
-                revokedAt: "2026-01-01T00:00:00.000Z",
-                revokedBy: "system:test-harness",
-                revokeReason:
-                  "superseded by harness-owned canonical own-Fleet entry",
-              }
-            : seededEntry;
+      // Persist every default seed row exactly as the API's seed
+      // reconciliation does on shared dev, including FLEET-ONB-001's ACTIVE
+      // `fleet-demo-001` fleet_partner entry for OPERATIONAL_OWN_FLEET_PARTNER_ID
+      // (own demo tenant and programme). A prior revision persisted that row
+      // as revoked, which hid the real dev state: deploy-dev v2026.11.15.0 and
+      // .1 then failed with "ambiguous canonical (tenantId, programId)
+      // bindings" next to the normal onboarding binding. The precondition now
+      // ignores seed rows, and every scenario here runs with that row active.
+      for (const persistedEntry of tenantPartnerService.listPlatformPartnerEntries()) {
         sqlTables
           .get("admin.phase1_partner_channel_entries")!
           .set(persistedEntry.entrySlug, {
@@ -4119,6 +4101,7 @@ process.exit(99);
       "no-own-source",
       "inactive-own-source",
       "revoked-own-source",
+      "seed-own-source-only",
       "missing-tenant",
       "missing-program",
       "manifest-source",
@@ -4167,6 +4150,21 @@ process.exit(99);
           unrelated,
           { ...own, revokedAt: "2026-10-29T00:00:00Z" },
         ],
+        // FLEET-ONB-001's API seed row for the own Fleet is not a normal
+        // onboarding binding, so on its own it supplies no source pair.
+        "seed-own-source-only": [
+          unrelated,
+          {
+            ...own,
+            entrySlug: "fleet-demo-001",
+            partnerCode: "fleet_demo",
+            programId: "program-fleet-demo",
+            auditMetadata: {
+              source: "seed_bootstrap",
+              createdBy: "system:seed",
+            },
+          },
+        ],
         "missing-tenant": [unrelated, { ...own, tenantId: " " }],
         "missing-program": [unrelated, { ...own, programId: null }],
         "manifest-source": [
@@ -4208,6 +4206,7 @@ process.exit(99);
         "no-own-source",
         "inactive-own-source",
         "revoked-own-source",
+        "seed-own-source-only",
       ].includes(scenario);
       const harness = await createOwnedForeignFleetRealServiceHarness({
         partnerEntriesOverride: cases[scenario]!,
