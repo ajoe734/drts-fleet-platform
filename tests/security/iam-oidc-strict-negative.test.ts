@@ -309,6 +309,54 @@ describe("FLEET-ONB-004 Fleet staff invitation Google-bind: strict negative cont
         invitationsByTokenHash.set(record.tokenHash, record);
         return { rows: [{ record }] };
       }
+      if (text.includes("INSERT INTO iam.identity_sessions")) {
+        const [
+          sessionId,
+          sourceRef,
+          principalId,
+          membershipId,
+          realm,
+          status,
+          authTime,
+          authMethods,
+          tokenVersion,
+          idleExpiresAt,
+          absoluteExpiresAt,
+          revokedAt,
+          revokedByPrincipalId,
+          revokeReason,
+          deviceSummary,
+          riskSummary,
+          createdAt,
+          updatedAt,
+          record,
+        ] = params;
+        return {
+          rows: [
+            {
+              session_id: sessionId,
+              source_ref: sourceRef,
+              principal_id: principalId,
+              membership_id: membershipId,
+              realm,
+              status,
+              auth_time: authTime,
+              auth_methods: authMethods,
+              token_version: tokenVersion,
+              idle_expires_at: idleExpiresAt,
+              absolute_expires_at: absoluteExpiresAt,
+              revoked_at: revokedAt,
+              revoked_by_principal_id: revokedByPrincipalId,
+              revoke_reason: revokeReason,
+              device_summary: JSON.parse(deviceSummary as string),
+              risk_summary: JSON.parse(riskSummary as string),
+              created_at: createdAt,
+              updated_at: updatedAt,
+              record: JSON.parse(record as string),
+            },
+          ],
+        };
+      }
       throw new Error(`Unmocked Fleet invitation query: ${text}`);
     });
 
