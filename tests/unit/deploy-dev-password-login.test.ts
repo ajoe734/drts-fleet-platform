@@ -485,6 +485,8 @@ function firstPasswordApiDeployment(options: {
     "needs.prepare.outputs.agency_portal_service": "synthetic-agency",
     "needs.prepare.outputs.agency_portal_origin":
       "https://agency.example.invalid",
+    "steps.fleet_invitation_url.outputs.base":
+      "https://fleet.example.invalid/invite",
     "needs.prepare.outputs.tenant_console_origin":
       "https://tenant.example.invalid",
     "needs.prepare.outputs.enterprise_dispatch_origin":
