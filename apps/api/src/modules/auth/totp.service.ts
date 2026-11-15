@@ -245,6 +245,40 @@ export class TotpService {
   }
 
   /**
+   * Regenerates the complete recovery-code set for an already-confirmed TOTP
+   * credential (account-security "regenerate recovery codes" action, not
+   * part of original007's enroll/confirm/consume contract). Rejects a
+   * missing or still-pending (unconfirmed) credential -- this action can
+   * never be used to bypass enroll()/confirm(). It never touches the
+   * secret ciphertext or last_used_step, so confirmed-login and anti-replay
+   * state are unaffected; it reuses the exact same atomic
+   * replaceRecoveryCodes() replace that confirm() uses, so a half-issued set
+   * is impossible and every previously issued code (including unused ones)
+   * is invalidated together with the new batch taking effect.
+   */
+  async regenerateRecoveryCodes(
+    principalId: string,
+  ): Promise<TotpConfirmationResult> {
+    const credential = await this.repository.findCredential(principalId);
+    if (!credential || !credential.confirmedAt) {
+      throw new TotpSecretNotConfirmedError();
+    }
+
+    const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, () =>
+      generateRecoveryCode(),
+    );
+    await this.repository.replaceRecoveryCodes(
+      principalId,
+      recoveryCodes.map((recoveryCode) => ({
+        recoveryCodeId: randomBytes(16).toString("hex"),
+        codeHash: hashRecoveryCode(recoveryCode),
+      })),
+    );
+
+    return { recoveryCodes };
+  }
+
+  /**
    * Verifies a 6-digit TOTP code at login time. Rejects an unconfirmed or
    * missing secret (SA/SD §7: "未確認的 secret 不能用於登入") and rejects
    * replay of an already-consumed time step, including the exact step just

@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { generate } from "otplib";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../src/common/auth";
+import { TotpController } from "../../src/modules/auth/totp.controller";
 import { TotpCredentialRepository } from "../../src/modules/auth/totp-credential.repository";
 import {
   TotpCodeReplayedError,
@@ -46,6 +49,44 @@ async function enrollAndConfirm(
     secret: enrollment.secret,
     recoveryCodes: confirmation.recoveryCodes,
   };
+}
+
+function buildIdentity(
+  principalId: string,
+  overrides: Partial<BootstrapRequestIdentity> = {},
+): BootstrapRequestIdentity {
+  return {
+    authMode: "bootstrap_headers",
+    actorType: "tenant_admin",
+    actorId: principalId,
+    principalId,
+    realm: "tenant",
+    tenantId: "tenant-1",
+    sessionId: `session-${principalId}`,
+    authTime: new Date().toISOString(),
+    amr: ["totp"],
+    roleFamilies: [],
+    roles: [],
+    scopes: [],
+    requestId: null,
+    ...overrides,
+  };
+}
+
+async function expectApiError(
+  promise: Promise<unknown>,
+  status: number,
+  code: string,
+): Promise<void> {
+  await expect(promise).rejects.toBeInstanceOf(ApiRequestError);
+  try {
+    await promise;
+    throw new Error("expected the call to be rejected");
+  } catch (error) {
+    const apiError = error as ApiRequestError;
+    expect(apiError.getStatus()).toBe(status);
+    expect(apiError.code).toBe(code);
+  }
 }
 
 describe("TotpService login verification", () => {
@@ -171,5 +212,130 @@ describe("TotpService recovery codes", () => {
     await expect(
       svc.verifyRecoveryCode(principalId, otherUnusedCode),
     ).rejects.toBeInstanceOf(TotpRecoveryCodeInvalidError);
+  });
+});
+
+describe("POST /api/auth/:realm/mfa/totp/recovery-codes/regenerate", () => {
+  it("returns a fresh set of 10 codes for a confirmed, freshly-MFA'd session and invalidates the old set", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    const { recoveryCodes: oldCodes } = await enrollAndConfirm(
+      svc,
+      principalId,
+    );
+
+    const identity = buildIdentity(principalId);
+    const response = await controller.regenerateRecoveryCodes(
+      "tenant",
+      identity,
+      {},
+    );
+
+    expect(response.data.recoveryCodes).toHaveLength(10);
+    expect(
+      response.data.recoveryCodes.some((code) => oldCodes.includes(code)),
+    ).toBe(false);
+
+    await expect(
+      svc.verifyRecoveryCode(principalId, oldCodes[0]),
+    ).rejects.toBeInstanceOf(TotpRecoveryCodeInvalidError);
+  });
+
+  it("rejects when there is no active session identity at all", async () => {
+    const svc = new TotpService(new TotpCredentialRepository());
+    const controller = new TotpController(svc);
+
+    await expectApiError(
+      controller.regenerateRecoveryCodes("tenant", null, {}),
+      401,
+      "AUTHENTICATION_REQUIRED",
+    );
+  });
+
+  it("rejects a session bound to a different realm than the route", async () => {
+    const svc = new TotpService(new TotpCredentialRepository());
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    const identity = buildIdentity(principalId, { realm: "agency" });
+
+    await expectApiError(
+      controller.regenerateRecoveryCodes("tenant", identity, {}),
+      401,
+      "AUTHENTICATION_REQUIRED",
+    );
+  });
+
+  it("rejects a session without a trusted MFA assertion, never trusting a body claim instead", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    await enrollAndConfirm(svc, principalId);
+    const identity = buildIdentity(principalId, { amr: [] });
+
+    await expectApiError(
+      controller.regenerateRecoveryCodes("tenant", identity, {}),
+      403,
+      "MFA_REQUIRED",
+    );
+  });
+
+  it("rejects a trusted-MFA session whose auth_time is stale", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    await enrollAndConfirm(svc, principalId);
+    const staleAuthTime = new Date(
+      Date.now() - 20 * 60 * 1000,
+    ).toISOString();
+    const identity = buildIdentity(principalId, { authTime: staleAuthTime });
+
+    await expectApiError(
+      controller.regenerateRecoveryCodes("tenant", identity, {}),
+      403,
+      "STEP_UP_REQUIRED",
+    );
+  });
+
+  it("rejects an unconfirmed (pending) credential even with a fresh trusted-MFA session", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    await svc.enroll(principalId, "tenant:user@example.com");
+    const identity = buildIdentity(principalId);
+
+    await expectApiError(
+      controller.regenerateRecoveryCodes("tenant", identity, {}),
+      400,
+      "TOTP_NOT_CONFIRMED",
+    );
+  });
+
+  it("never discloses the secret or the old codes in the regenerated response", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    const { secret, recoveryCodes: oldCodes } = await enrollAndConfirm(
+      svc,
+      principalId,
+    );
+    const identity = buildIdentity(principalId);
+
+    const response = await controller.regenerateRecoveryCodes(
+      "tenant",
+      identity,
+      {},
+    );
+
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain(secret);
+    for (const oldCode of oldCodes) {
+      expect(serialized).not.toContain(oldCode);
+    }
   });
 });
