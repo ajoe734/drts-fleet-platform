@@ -8,7 +8,8 @@
     "./constants": "./src/constants.ts",
     "./session": "./src/session.ts",
     "./api-fetch": "./src/api-fetch.ts",
-    "./verified-tenant-session.server": "./src/verified-tenant-session.server.ts"
+    "./verified-tenant-session.server": "./src/verified-tenant-session.server.ts",
+    "./credential-handlers": "./src/credential-handlers.ts"
   },
   "peerDependencies": {
     "next": ">=16.0.0 <17"

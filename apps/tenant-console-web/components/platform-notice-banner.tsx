@@ -15,6 +15,14 @@ type Notice = {
     readAt: string | null;
   };
 };
+function isUnauthenticated(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === 401
+  );
+}
+
 export function PlatformNoticeBanner() {
   const { t } = useTranslation();
   const client = useMemo(() => createBrowserApiClient(), []);
@@ -46,7 +54,16 @@ export function PlatformNoticeBanner() {
       } catch (e) {
         if (!disposed && current === generation && !request.signal.aborted) {
           setNotices([]);
-          setError(e instanceof Error ? e.message : String(e));
+          // The root layout also mounts this banner on signed-out pages such
+          // as /login, where the proxy answers 401. There are no notices to
+          // show there, and the raw API error must not be put on the page.
+          setError(
+            isUnauthenticated(e)
+              ? null
+              : e instanceof Error
+                ? e.message
+                : String(e),
+          );
         }
       } finally {
         if (current === generation) active = null;
