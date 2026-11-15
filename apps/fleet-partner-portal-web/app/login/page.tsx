@@ -1,6 +1,8 @@
 import { CanvasCard, CanvasPageHeader } from "@drts/ui-web";
+import { PortalPasswordLoginForm } from "@drts/ui-web/client";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { loginReturnPath } from "@/lib/login-return-path";
+import { buildPortalAuthMessages } from "@/lib/portal-auth-messages";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -103,6 +105,18 @@ export default async function FleetLoginPage({
               {t("login.google", locale)}
             </button>
           </form>
+
+          <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${th.border}` }}>
+            <p style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.7 }}>
+              {t("login.password.divider", locale)}
+            </p>
+            <PortalPasswordLoginForm
+              messages={buildPortalAuthMessages(locale)}
+              endpoint="/api/auth/password-login"
+              forgotPasswordHref="/forgot-password"
+              successHref={loginReturnPath(params.redirect_uri)}
+            />
+          </div>
 
           <p
             style={{

@@ -28,6 +28,7 @@ import type {
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
   FleetPartnerRecord,
+  InviteFleetStaffCommand,
   ManageFleetHumanRoleCommand,
   SupplyReviewActionCommand,
   UpdateFleetPartnerCommand,
@@ -415,6 +416,82 @@ export class FleetPartnerController {
       await this.fleetPartnerService.manageFleetHumanRole(
         fleetPartnerId,
         command,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("admin/fleet-partners/:fleetPartnerId/invitations")
+  @RequireRealms("platform", "ops")
+  async listFleetStaffInvitations(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Query("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        await this.fleetPartnerService.listFleetStaffInvitations(
+          fleetPartnerId,
+          entrySlug,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Post("admin/fleet-partners/:fleetPartnerId/invitations")
+  @RequireRealms("platform", "ops")
+  async inviteFleetStaff(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Body() command: InviteFleetStaffCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.inviteFleetStaff(
+        fleetPartnerId,
+        command,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("admin/fleet-partners/:fleetPartnerId/invitations/:invitationId/revoke")
+  @RequireRealms("platform", "ops")
+  async revokeFleetStaffInvitation(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Param("invitationId") invitationId: string,
+    @Query("entrySlug") entrySlug: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.revokeFleetStaffInvitation(
+        fleetPartnerId,
+        entrySlug,
+        invitationId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("admin/fleet-partners/:fleetPartnerId/members/:membershipId/deactivate")
+  @RequireRealms("platform", "ops")
+  async deactivateFleetStaffMember(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Param("membershipId") membershipId: string,
+    @Query("entrySlug") entrySlug: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.deactivateFleetStaffMember(
+        fleetPartnerId,
+        entrySlug,
+        membershipId,
         identity,
       ),
       requestId,

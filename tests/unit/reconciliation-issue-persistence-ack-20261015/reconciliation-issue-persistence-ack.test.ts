@@ -19,11 +19,35 @@ import { BillingSettlementService } from "../../../apps/api/src/modules/billing-
  */
 class FlakyReconciliationIssueRepository {
   private readonly rows = new Map<string, ReconciliationIssueRecord>();
+  private readonly locks = new Map<string, Promise<void>>();
   failNextPersist = false;
   private pendingHold: Promise<void> | null = null;
 
   isEnabled() {
     return true;
+  }
+
+  private async withLock<T>(
+    key: string,
+    execute: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.locks.get(key);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.locks.set(key, current);
+    try {
+      if (previous) {
+        await previous;
+      }
+      return await execute();
+    } finally {
+      if (this.locks.get(key) === current) {
+        this.locks.delete(key);
+      }
+      release();
+    }
   }
 
   async loadState(): Promise<BillingSettlementState> {
@@ -33,10 +57,84 @@ class FlakyReconciliationIssueRepository {
       driverFeePlans: [],
       driverStatements: [],
       reimbursementBatches: [],
-      reconciliationIssues: [...this.rows.values()],
+      reconciliationIssues: [...this.rows.values()].map((issue) =>
+        structuredClone(issue),
+      ),
       fulfillmentSegments: [],
       sandboxBillingTreatments: [],
     };
+  }
+
+  private getRowClone(issueId: string): ReconciliationIssueRecord | null {
+    const row = this.rows.get(issueId);
+    return row ? structuredClone(row) : null;
+  }
+
+  async listCommittedReconciliationIssues(): Promise<
+    ReconciliationIssueRecord[]
+  > {
+    return [...this.rows.values()].map((issue) => structuredClone(issue));
+  }
+
+  async findCommittedReconciliationIssue(
+    issueId: string,
+  ): Promise<ReconciliationIssueRecord | null> {
+    return this.getRowClone(issueId);
+  }
+
+  async withReconciliationIssueTarget<T>(
+    issueId: string,
+    execute: (target: {
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    return this.withLock(`reconciliation-issue:${issueId}`, async () =>
+      execute({
+        issue: this.getRowClone(issueId),
+        persist: (changes) => this.persistChanges(changes),
+      }),
+    );
+  }
+
+  async withDerivedReconciliationIssueTarget<T>(
+    identity: {
+      mirrorOrderId: string;
+      reconciliationJobId: string;
+      defaultIssueId: string;
+    },
+    execute: (target: {
+      issueId: string;
+      issue: ReconciliationIssueRecord | null;
+      persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    return this.withLock(
+      `reconciliation-mirror:${identity.mirrorOrderId}`,
+      async () => {
+        const matched = [...this.rows.values()]
+          .filter(
+            (issue) =>
+              issue.source === "forwarder_auto" &&
+              (issue.mirrorOrderId === identity.mirrorOrderId ||
+                issue.linkedReconciliationJobId ===
+                  identity.reconciliationJobId),
+          )
+          .sort(
+            (left, right) =>
+              right.updatedAt.localeCompare(left.updatedAt) ||
+              left.issueId.localeCompare(right.issueId),
+          )[0];
+        const issueId = matched?.issueId ?? identity.defaultIssueId;
+        return this.withLock(`reconciliation-issue:${issueId}`, async () =>
+          execute({
+            issueId,
+            issue: this.getRowClone(issueId),
+            persist: (changes) => this.persistChanges(changes),
+          }),
+        );
+      },
+    );
   }
 
   holdNextPersist(): () => void {
@@ -58,7 +156,7 @@ class FlakyReconciliationIssueRepository {
       throw new Error("reconciliation issue persistence rejected");
     }
     for (const issue of changes.reconciliationIssues ?? []) {
-      this.rows.set(issue.issueId, { ...issue });
+      this.rows.set(issue.issueId, structuredClone(issue));
     }
   }
 
@@ -126,8 +224,7 @@ async function codeOf(call: () => unknown): Promise<string> {
 describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required before shared read-visible publication", () => {
   describe("createReconciliationIssue", () => {
     it("exposes no phantom issue when persistence is rejected; a healthy retry publishes the exact result and a fresh reload agrees", async () => {
-      const { repository, auditNotificationService, service } =
-        createHarness();
+      const { repository, auditNotificationService, service } = createHarness();
       const before = service.listReconciliationIssues();
 
       repository.failNextPersist = true;
@@ -192,8 +289,7 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
 
   describe("assignReconciliationIssue", () => {
     it("rejected persistence leaves ownerId/status/comments unchanged; ACK publishes the exact staged result without a duplicate note", async () => {
-      const { repository, auditNotificationService, service } =
-        createHarness();
+      const { repository, auditNotificationService, service } = createHarness();
       const issue = await seedIssue(service);
       const beforeSnapshot = service
         .listReconciliationIssues()
@@ -268,8 +364,7 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
 
   describe("addReconciliationIssueComment", () => {
     it("rejected persistence leaves comments/evidence unchanged; ACK publishes the exact staged comment and evidence, no duplicate", async () => {
-      const { repository, auditNotificationService, service } =
-        createHarness();
+      const { repository, auditNotificationService, service } = createHarness();
       const issue = await seedIssue(service);
 
       repository.failNextPersist = true;
@@ -320,8 +415,7 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
 
   describe("resolveReconciliationIssue", () => {
     it("rejected persistence leaves status/resolution unchanged; ACK publishes the exact staged resolution", async () => {
-      const { repository, auditNotificationService, service } =
-        createHarness();
+      const { repository, auditNotificationService, service } = createHarness();
       const issue = await seedIssue(service);
 
       repository.failNextPersist = true;
@@ -349,15 +443,12 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
         ),
       ).toBe(0);
 
-      const resolved = await service.resolveReconciliationIssue(
-        issue.issueId,
-        {
-          actorId: "settlement-specialist-ack-04",
-          resolutionCode: "sponsor_corrected",
-          resolutionSummary: "Partner re-issued ledger matching figures.",
-          artifactIds: ["art-ack-resolve-1"],
-        },
-      );
+      const resolved = await service.resolveReconciliationIssue(issue.issueId, {
+        actorId: "settlement-specialist-ack-04",
+        resolutionCode: "sponsor_corrected",
+        resolutionSummary: "Partner re-issued ledger matching figures.",
+        artifactIds: ["art-ack-resolve-1"],
+      });
       expect(resolved.status).toBe("resolved");
       expect(resolved.resolutionCode).toBe("sponsor_corrected");
       expect(resolved.resolvedAt).not.toBeNull();
@@ -381,8 +472,7 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
 
   describe("reopenReconciliationIssue", () => {
     it("rejected persistence leaves status/reopenCount unchanged; ACK publishes the exact staged reopen without double counting", async () => {
-      const { repository, auditNotificationService, service } =
-        createHarness();
+      const { repository, auditNotificationService, service } = createHarness();
       const issue = await seedIssue(service);
       await service.resolveReconciliationIssue(issue.issueId, {
         actorId: "settlement-specialist-ack-05",
@@ -413,14 +503,11 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
         ),
       ).toBe(0);
 
-      const reopened = await service.reopenReconciliationIssue(
-        issue.issueId,
-        {
-          actorId: "fin-manager-ack-05",
-          reason: "Customer disputed the closure.",
-          artifactIds: ["art-ack-reopen-1"],
-        },
-      );
+      const reopened = await service.reopenReconciliationIssue(issue.issueId, {
+        actorId: "fin-manager-ack-05",
+        reason: "Customer disputed the closure.",
+        artifactIds: ["art-ack-reopen-1"],
+      });
       expect(reopened.status).toBe("reopened");
       expect(reopened.reopenCount).toBe(1);
       expect(reopened.resolutionCode).toBeNull();
@@ -458,13 +545,10 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
       const issueA = await seedIssue(service, "Concurrency issue A");
 
       const release = repository.holdNextPersist();
-      const assignPromise = service.assignReconciliationIssue(
-        issueA.issueId,
-        {
-          assigneeId: "specialist-concurrent-01",
-          actorId: "manager-concurrent-01",
-        },
-      );
+      const assignPromise = service.assignReconciliationIssue(issueA.issueId, {
+        assigneeId: "specialist-concurrent-01",
+        actorId: "manager-concurrent-01",
+      });
 
       const issueB = await service.createReconciliationIssue({
         issueType: "partner_sponsor_mismatch",
@@ -500,7 +584,10 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
       const release = repository.holdNextPersist();
       const firstCommentPromise = service.addReconciliationIssueComment(
         issue.issueId,
-        { actorId: "specialist-serial-01", message: "First concurrent comment" },
+        {
+          actorId: "specialist-serial-01",
+          message: "First concurrent comment",
+        },
       );
       const secondCommentPromise = service.addReconciliationIssueComment(
         issue.issueId,
@@ -541,10 +628,10 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
       });
       expect(issue.status).toBe("open");
 
-      const assigned = await service.assignReconciliationIssue(
-        issue.issueId,
-        { assigneeId: "specialist-nodb-01", actorId: "manager-nodb-01" },
-      );
+      const assigned = await service.assignReconciliationIssue(issue.issueId, {
+        assigneeId: "specialist-nodb-01",
+        actorId: "manager-nodb-01",
+      });
       expect(assigned.status).toBe("assigned");
 
       const commented = await service.addReconciliationIssueComment(
@@ -553,20 +640,17 @@ describe("RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015: canonical ACK required 
       );
       expect(commented.comments).toHaveLength(1);
 
-      const resolved = await service.resolveReconciliationIssue(
-        issue.issueId,
-        {
-          actorId: "specialist-nodb-01",
-          resolutionCode: "no_action_required",
-          resolutionSummary: "Resolved in noDB mode.",
-        },
-      );
+      const resolved = await service.resolveReconciliationIssue(issue.issueId, {
+        actorId: "specialist-nodb-01",
+        resolutionCode: "no_action_required",
+        resolutionSummary: "Resolved in noDB mode.",
+      });
       expect(resolved.status).toBe("resolved");
 
-      const reopened = await service.reopenReconciliationIssue(
-        issue.issueId,
-        { actorId: "manager-nodb-01", reason: "Reopening in noDB mode." },
-      );
+      const reopened = await service.reopenReconciliationIssue(issue.issueId, {
+        actorId: "manager-nodb-01",
+        reason: "Reopening in noDB mode.",
+      });
       expect(reopened.status).toBe("reopened");
       expect(reopened.reopenCount).toBe(1);
     });

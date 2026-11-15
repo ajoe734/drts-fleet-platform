@@ -1189,6 +1189,47 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
       updatedBy: "system:seed",
     },
   },
+  {
+    // partnerId equals FLEET_PARTNER_SEED's fleetPartnerId ("fleet-demo-001",
+    // fleet-partner.service.ts), and entrySlug is the same value, so both the
+    // `e.entrySlug === entrySlug` and `e.partnerId === entrySlug` branches of
+    // oidc-pkce.service.ts's partner-entry lookup match DRTS_FLEET_PARTNER_ID.
+    partnerId: "fleet-demo-001",
+    partnerCode: "fleet_demo",
+    partnerType: "fleet_partner",
+    programId: "program-fleet-demo",
+    programCode: "FLEET_DEMO",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: null,
+    entrySlug: "fleet-demo-001",
+    displayName: "Demo Fleet",
+    businessDispatchSubtype: "enterprise_dispatch",
+    authMode: "partner_api_key",
+    eligibilityMode: "none",
+    entryHost: null,
+    entryPath: null,
+    themeAccent: null,
+    brandingMetadata: {
+      displayName: "Demo Fleet",
+      themeAccent: null,
+      supportEmail: null,
+      supportPhone: "+886-2-5550-0001",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-11-14T00:00:00.000Z",
+    updatedAt: "2026-11-14T00:00:00.000Z",
+    auditMetadata: {
+      source: "seed_bootstrap",
+      requestId: null,
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
 ];
 
 const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBootstrap[] =

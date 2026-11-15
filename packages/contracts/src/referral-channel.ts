@@ -47,6 +47,10 @@ export const PARTNER_USER_IDENTITY_CONSENT_SCOPES = [
   "referral_attribution",
   "referral_settlement",
   "passenger_identity_link",
+  // FLEET-ONB-002 SA/SD §2: an identity link created by accepting a Fleet
+  // staff invitation, distinct from the referral-passenger consent scopes
+  // above for audit and future query filtering.
+  "fleet_staff_invitation",
 ] as const;
 export type PartnerUserIdentityConsentScope =
   (typeof PARTNER_USER_IDENTITY_CONSENT_SCOPES)[number];
