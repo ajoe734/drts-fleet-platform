@@ -12,7 +12,7 @@
 - 日期：2026-11-15
 - Write scope：僅本檔。未改 `ai-status.json`、`.orchestrator/`、`ai-activity-log.jsonl`、任何產品程式碼或測試。
 
-> 本文件是**診斷與交接文件**，不是驗收結果，也不是對 PR #3301 的正式 review。本 helper 已獨立重新驗證 §1 的技術結論（程式碼、diff、CI、PR 狀態），但依任務分派規則不得在本次 dispatch 中寫入 parent task 的 machine truth（§3），且本 session 的 `ai-status.sh`／`orchestrator_approval_broker` 本身整段 outage（§4），所以 parent 的實際狀態轉換（`blocked`→`review`→merge）需要 Supervisor 在本機另開（非本 dispatch）的特權 session 執行 §5 的單一指令。
+> 本文件是**診斷與交接文件**，不是驗收結果，也不是對 PR #3301 的正式 review。本 helper 已獨立重新驗證 §1 的技術結論（程式碼、diff、CI、PR 狀態），但依任務分派規則不得在本次 dispatch 中寫入 parent task 的 machine truth（§3），且本 session 的 `ai-status.sh`／`orchestrator_approval_broker` 本身整段 outage（§4），所以 parent 的實際狀態轉換（`blocked`→`review`→merge）需要 Supervisor 在本機另開（非本 dispatch）的特權 session 執行 §5 的兩個指令（步驟 A：先在本 helper 自己身上寫入 `resolved_parent_*` 安全網；步驟 B：對 parent 做實際的 `blocked`→`review` handoff）。
 
 ## 1. 根因：v2 task-spec 的「SA10 creation gate」前提已獨立驗證為假前提，且已被訂正回 v1
 
@@ -60,10 +60,23 @@ PR #3301 的 CI 於 2026-11-14T21:28:48Z（`ci-integ` 收尾 job）全綠完成�
 
 ## 5. 給 Supervisor 的指令（本 helper 未執行，請於本機、非本 dispatch 的 session 執行）
 
-本 helper 看不到完整 `ai-status.json`（整段 outage，§4），以下 `CANDIDATE_SHA`／`CANDIDATE_BRANCH`／`PR_URL` 取自 §2 已獨立驗證的 PR #3301 本身，執行前請先用 `AI_NAME=Claude ai-status.sh show PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-20261114` 確認 parent 當時仍是 `status=blocked`、`owner=Claude`、`reviewer=Claude2`，且尚未有其他路徑把它轉走（若已被其他路徑處理，此指令會因 owner/reviewer 不符或已非 blocked 而自然失敗或變成 no-op，不會覆蓋別人的進度）：
+**本節為 Claude2 2026-11-15T10:58:41Z reopen 後的修正版**：原版只有下方步驟 B（直接對 parent 呼叫 `handoff`），遺漏 `skills/candidate-lifecycle.md:73-78` 要求的安全網——本 helper merge 時會自動觸發 `apply_unblock_parent_resolution`（`ai_status.py:733-739`），若本 helper 當時仍未設定 `resolved_parent_status`，`unblock_parent_resolution_fields`（`ai_status.py:1156-1192`）會把 `resume_status` 預設成 `"todo"`，於 parent 仍是 `status=blocked` 時把它直接覆寫成 `status=todo`＋泛用 next 文字＋清掉 `waiting_for`（`ai_status.py:1223-1229`）。本 helper 用 `ai-status.sh show` 確認過自己完全沒有 `resolved_parent_status`/`resolved_parent_next`/`resolved_parent_waiting_for` 三個欄位。這個自動覆寫跟步驟 B 之間沒有既定順序保證：若 github bus 在 Supervisor 手動執行步驟 B 之前就先把本 helper 自己的候選（PR #3320）判定可 merge，parent 會被提前覆寫成一個看起來可派工、但其實沒有 `candidate_sha`/`pr_url` 的 `todo`，dispatcher 很可能重派 owner `Claude` 從頭做一次，晾著 PR #3301 既有的 CI 全綠候選。
+
+因此步驟 A（寫入 `resolved_parent_*` metadata）必須先做，而且**只有 Supervisor 能做**：本 helper 目前的 dispatch 帶 `ORCH_DISPATCH_ROLE=owner`／`ORCH_RUN_ID`，`TaskBoardCommandExecutor._guard_worker_command`（`task_board_commands.py:82-94`）把 dispatched owner/reviewer 可用指令限制在 `{start, progress, note, handoff, approve, reopen, blocker, system-block, record-acceptance, request-acceptance-review, decline-acceptance-review}`——`assign` 不在其中，本 helper 自己呼叫 `assign` 會被擋下「Dispatched workers must use their assigned task lifecycle commands」。只有非 dispatch（`ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID` 都未設）的 Supervisor 特權 session 能跑 `assign`。這與既有記錄 [[project-unblock-helper-dispatch-guard-parent-writes]] 的既定模式一致。
 
 ```bash
 CLI="/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-ebfc0cf70173/tools/development-orchestrator/bin/ai-status.sh"
+
+# 步驟 A（先做，安全網）：把 resolved_parent_* 寫進「本 helper 自己」的 task metadata（不是 parent）。
+# 即使之後本 helper 的候選（PR #3320）比步驟 B 先被判定 merge，apply_unblock_parent_resolution
+# 也會用這裡的 "blocked"/訊息/waiting_for，而不是預設的 "todo"，保住 parent 的正確 next 與 waiting_for。
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Claude2","resolved_parent_next":"v2 task-spec 的 PASSWORD_LOGIN_ENABLED beforeAll 前提已獨立驗證為 no-op（apps/api/src、packages 無任何 runtime 讀取者，唯一消費者是 deploy-dev.yml/deploy-prod.yml 部署旗標），task-spec 已訂正回 v1。候選 ea1dfdf78 本就是 v1 寫法，未改動。PR #3301 CI 全綠（ci-integ 2026-11-14T21:28:48Z 完成），mergeable=MERGEABLE/mergeStateStatus=CLEAN。請 Claude2 依一般 review 流程核對 diff（僅 2 個測試檔 next-step epoch 算式，見 support/unblock/PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-20261114/...-UNBLOCK-MANUAL-UNBLOCK.md §2）後 approve。"}' \
+  AI_NAME=Supervisor "$CLI" assign PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-20261114-UNBLOCK-MANUAL-UNBLOCK Claude Claude2
+
+# 步驟 B（原§5既有內容，實際解除 parent 卡住）：執行前請先用
+# AI_NAME=Claude ai-status.sh show PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-20261114
+# 確認 parent 當時仍是 status=blocked、owner=Claude、reviewer=Claude2、尚未被其他路徑轉走
+# （若已被其他路徑處理，此指令會因 owner/reviewer 不符或已非 blocked 而自然失敗或變成 no-op，不會覆蓋別人的進度）。
 CANDIDATE_SHA="ea1dfdf78cd9d8cc0d49726d727d22ca730a4a4f" \
 CANDIDATE_BRANCH="claude/pwd-login-totp-test-next-step-followthrough-20261114" \
 PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/3301" \
@@ -73,8 +86,10 @@ AI_NAME=Claude "$CLI" handoff PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-202611
 
 注意：
 
+- 步驟 A、B 都是 Supervisor 特權 session（非本 dispatch）才能跑；本 helper（owner `Claude`、dispatched）兩者都不能自己執行——`assign` 被 guard 擋（上述），對 parent task id 的任何 `note`/`handoff` 也被 guard 擋（"Dispatched worker cannot mutate a different task"，見 §3）。
+- 步驟 A、B 做完之後兩者順序已不重要：若 B 先做完（parent 轉成 `review`），本 helper merge 時 `unblock_parent_resolution_fields` 看到 `parent.get("status") != "blocked"` 會直接跳過，不會覆寫；若 A 先做完但 B 還沒做、本 helper 候選先被 merge，parent 會維持 `status=blocked` 但換上正確的 next／`waiting_for=Claude2`，之後再補做 B 即可，不會被預設覆寫成 `todo`。**只要 A 沒做，順序就有風險**——所以務必先做 A。
 - `command_handoff` 不檢查來源 status，從 `blocked` 直接呼叫即可轉成 `review` 並清掉 `waiting_for`（見 §3）；不需要先 `resume-blocked`（那是 `Supervisor` 專用且條件更嚴格的另一條路，本案不需要）。
-- 若執行時 `ai-status.sh`／broker 仍處於 §4 的 outage，此指令會重現同樣的 hang／defer；屆時請先確認 `orchestrator_approval_broker` MCP 連線本身是否健康（重啟該 MCP server 或清查 `.orchestrator/approval-queue.json` 堆積的 pending 項目），而不是反覆重試這條指令。
+- 若執行時 `ai-status.sh`／broker 仍處於 §4 的 outage，這些指令會重現同樣的 hang／defer；屆時請先確認 `orchestrator_approval_broker` MCP 連線本身是否健康（重啟該 MCP server 或清查 `.orchestrator/approval-queue.json` 堆積的 pending 項目），而不是反覆重試。
 - 本 helper 不提供、也不建議任何 `record-acceptance`／`approve`／`reconcile-candidate` 指令：approve 是 reviewer `Claude2` 的職權，不是本 unblock helper 的範圍。
 
 ## 6. 驗收對照表
@@ -84,4 +99,4 @@ AI_NAME=Claude "$CLI" handoff PWD-LOGIN-TOTP-TEST-NEXT-STEP-FOLLOWTHROUGH-202611
 | Diagnose why the dependency-ready parent remains blocked | §1：v2 task-spec 的 `PASSWORD_LOGIN_ENABLED` beforeAll 前提已獨立驗證為假前提（repo 內無 runtime 讀取者），且已被訂正回 v1；§3：剩下的純粹是機器真相交接（`blocked`→`review`），不是程式碼問題 | §1 三條 `git grep` 皆於本 helper worktree 內重新執行；GitHub ops issue #3302、chair `chair_unblock_task_created` 事件（`ai-activity-log.jsonl`，唯讀）引用為已存在的機器真相，非本 helper 編造 | 依賴 `PWD-LOGIN-008` 的 `done` 狀態、parent 目前仍為 `blocked` 的即時狀態，本 helper 皆因 §4 outage 無法直接 `ai-status.sh show` 確認，改以 `gh pr view 3291` 的 `MERGED` 狀態與 ops issue #3302 的最新同步內容交叉引用 |
 | Make only the task-scoped change needed to unblock or document the remaining blocker | 只新增本檔；未改任何產品程式碼、測試或 `ai-status.json` | `git status`／`git diff --stat` 將顯示僅此一檔新增 | 無法在本 session 內完成實際的狀態轉換（§4 outage + §3 guard），已把可直接執行的單一指令寫入 §5 |
 | Produce task-scoped commit/push/PR evidence for any canonical change | 本檔以普通 commit 推送至 `claude/pwd-login-totp-test-next-step-followthrough-20261114-unblock-manual-unblock`，並開一個 PR | commit SHA 與 PR URL 見本 helper 在聊天中的回報 | — |
-| Update the parent task with the concrete unblocked next step | 本 session 的 dispatch guard 不允許對 parent task id 做任何寫入（§3），且 `ai-status.sh` 本身整段 outage（§4），故改以 §5 的完整可執行指令交給 Supervisor 執行，而非自行宣稱已更新 | 本檔 §5 | 需 Supervisor 以 `AI_NAME=Claude`（parent 的 owner 身分）在非本 dispatch 的 session 實際執行；本 helper 未執行、也不宣稱 parent 已轉為 `review` |
+| Update the parent task with the concrete unblocked next step | 本 session 的 dispatch guard 不允許對 parent task id 做任何寫入，也不允許本 helper 自己呼叫 `assign`（§3、§5）；且 `ai-status.sh` 本身整段 outage（§4），故改以 §5 的完整可執行指令交給 Supervisor 執行，而非自行宣稱已更新。本輪依 Claude2 2026-11-15T10:58:41Z 的 reopen 補上步驟 A（`resolved_parent_status`/`resolved_parent_next`/`resolved_parent_waiting_for` 安全網，防止本 helper merge 時 `apply_unblock_parent_resolution` 預設把 parent 覆寫成 `todo`），原步驟 B（parent 的 `blocked`→`review` handoff）不變 | 本檔 §5（含 `skills/candidate-lifecycle.md:73-78`、`ai_status.py:717-739,1156-1229`、`task_board_commands.py:82-94` 的逐行引用） | 需 Supervisor 以 `AI_NAME=Supervisor`（步驟 A）與 `AI_NAME=Claude`（步驟 B，parent 的 owner 身分）在非本 dispatch 的 session 實際執行；本 helper 未執行、也不宣稱 parent 已轉為 `review` 或 `resolved_parent_*` 已寫入 |
