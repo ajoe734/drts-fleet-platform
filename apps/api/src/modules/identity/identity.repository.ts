@@ -249,6 +249,53 @@ export function buildFleetRoleBindingSourceRef(
   return `fleet_role:${entrySlug}:${principalId}`;
 }
 
+export function parseFleetScopeRef(scopeRef: string | null | undefined) {
+  const match = /^fleet:(.+)$/.exec(scopeRef ?? "");
+  return match?.[1] ?? null;
+}
+
+/**
+ * FLEET-ONB-004 SA/SD §3: the verified Google proof handed to
+ * `acceptFleetStaffOidcInvitation`. `entrySlug`, when given, is the entry
+ * named by the login state (mirrors `AgencyOidcProof.agencyId`) and must
+ * equal the invitation's own entry -- an unrelated valid entry slug must
+ * never let an attacker probe or consume a different entry's invitation.
+ */
+export interface FleetOidcProof {
+  issuer: string;
+  subject: string;
+  email: string;
+  entrySlug?: string | null;
+}
+
+export interface FleetMembershipSnapshot {
+  principal: CanonicalIdentityPrincipalRecord;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBindings: CanonicalIdentityRoleBindingRecord[];
+  entrySlug: string;
+  fleetPartnerId: string;
+}
+
+/** The minimal surface `acceptFleetStaffOidcInvitation` needs from a
+ * `PartnerUserIdentityLinkRepository` to create the `(entrySlug, sub)` link
+ * inside its own transaction (SA/SD §3 step 4), without this file importing
+ * the whole class as a constructor dependency. A real
+ * `PartnerUserIdentityLinkRepository` instance satisfies this structurally. */
+export interface FleetStaffIdentityLinkWriter {
+  createForInvitedPrincipal(
+    entrySlug: string,
+    partnerUserRef: string,
+    drtsPassengerId: string,
+    now?: string,
+    executor?: {
+      query<T extends QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rows: T[] }>;
+    },
+  ): Promise<unknown>;
+}
+
 /**
  * FLEET-ONB-003 SA/SD §2: unlike `issueAgencyInvitation`, the Fleet
  * principal/membership/role-binding sourceRef formulas above are keyed by
@@ -5965,6 +6012,420 @@ export class IdentityRepository implements OnModuleInit {
         membership: activatedMembership,
         roleBindings: bindings,
         agencyId,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * FLEET-ONB-004 SA/SD §3: one transaction owns Fleet invitation
+   * consumption, the (issuer, sub) Google binding, the
+   * `admin.phase1_partner_user_identity_links` row this (entrySlug, sub)
+   * pair has never had before (step 4 -- never through `resolveOrCreate`,
+   * see the decision record §3), and activation. Any failed check -- wrong
+   * email, wrong entry, revoked/expired/already-used invitation, an
+   * inactive fleet partner, an already-linked (entrySlug, sub), or an
+   * (issuer, sub) already bound elsewhere -- rolls back the whole
+   * transaction without consuming the invitation or creating a link.
+   *
+   * Unlike `acceptAgencyOidcInvitation`'s `hasActiveAccess`, a Fleet role
+   * binding's `validTo` may be `null` ("does not expire", SA/SD §2); the
+   * check below mirrors `exchangePartnerCallbackSession`/
+   * `manageFleetHumanRole`'s existing "validFrom <= now <= validTo-or-unset"
+   * rule instead of requiring an explicit future `validTo`.
+   */
+  async acceptFleetStaffOidcInvitation(
+    tokenHash: string,
+    proof: FleetOidcProof,
+    partnerUserIdentityLinkRepo: FleetStaffIdentityLinkWriter,
+  ): Promise<FleetMembershipSnapshot | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    if (!proof.issuer || !proof.subject || !proof.email) return null;
+    const email = proof.email.trim().toLowerCase();
+
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined | null,
+    ) => {
+      const entrySlug = parseFleetScopeRef(invitation?.scopeRef);
+      return Boolean(
+        invitation &&
+          entrySlug &&
+          invitation.realm === "partner" &&
+          !invitation.acceptedAt &&
+          !invitation.revokedAt &&
+          Date.parse(invitation.expiresAt) > nowMs &&
+          invitation.email.toLowerCase() === email &&
+          (!proof.entrySlug || proof.entrySlug === entrySlug),
+      );
+    };
+    const validMembership = (
+      membership: CanonicalIdentityMembershipRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        membership &&
+          membership.realm === "partner" &&
+          membership.status === "invited" &&
+          membership.scopeRef === invitation.scopeRef &&
+          membership.membershipId === invitation.membershipId,
+      );
+    const validPrincipal = (
+      principal: CanonicalIdentityPrincipalRecord | undefined | null,
+    ) =>
+      Boolean(
+        principal &&
+          principal.status === "invited" &&
+          principal.issuer === FLEET_INVITATION_ISSUER &&
+          principal.email?.toLowerCase() === email,
+      );
+    const hasActiveAccess = (
+      entrySlug: string,
+      principalId: string,
+      bindings: CanonicalIdentityRoleBindingRecord[],
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      bindings.some(
+        (binding) =>
+          binding.roleCode === invitation.roleCode &&
+          binding.sourceRef === buildFleetRoleBindingSourceRef(entrySlug, principalId) &&
+          Number.isFinite(Date.parse(binding.validFrom)) &&
+          Date.parse(binding.validFrom) <= nowMs &&
+          (!binding.validTo ||
+            (Number.isFinite(Date.parse(binding.validTo)) &&
+              nowMs < Date.parse(binding.validTo))),
+      );
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations
+          WHERE token_hash = $1 AND realm = 'partner'
+            AND accepted_at IS NULL AND revoked_at IS NULL
+            AND expires_at > $2::timestamptz
+          FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation = invitationRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+            invitationRows.rows[0].record,
+            "iam.identity_invitations",
+          )
+        : null;
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const entrySlug = parseFleetScopeRef(invitation.scopeRef)!;
+      const fleetPartnerId = invitation.partnerId;
+      if (!fleetPartnerId) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const fleetPartnerRows = await client.query<{ active: boolean }>(
+        `SELECT active FROM admin.phase1_fleet_partners WHERE fleet_partner_id = $1 FOR SHARE`,
+        [fleetPartnerId],
+      );
+      if (fleetPartnerRows.rows[0]?.active !== true) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership || !validMembership(membership, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      if (!principal || !validPrincipal(principal)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE membership_id = $1 FOR UPDATE`,
+        [membership.membershipId],
+      );
+      const bindings = bindingRows.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          row.record,
+          "iam.identity_role_bindings",
+        ),
+      );
+      if (!hasActiveAccess(entrySlug, principal.principalId, bindings, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      // SA/SD §3 step 4: an (entrySlug, sub) link that already exists --
+      // whether created by a prior referral handoff or another employee
+      // record -- must never be silently reused or overwritten.
+      const link = await partnerUserIdentityLinkRepo.createForInvitedPrincipal(
+        entrySlug,
+        proof.subject,
+        principal.principalId,
+        now,
+        client,
+      );
+      if (!link) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          issuer: proof.issuer,
+          subject: proof.subject,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query("COMMIT");
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings,
+        entrySlug,
+        fleetPartnerId,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      // (issuer, sub) already bound to another principal: full rollback.
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Password-branch counterpart of `acceptFleetStaffOidcInvitation`,
+   * locking the same invitation row so a password acceptance and a Google
+   * acceptance racing the same Fleet invitation token can only have one
+   * winner (SA/SD §3). `issuer`/`subject` stay at the
+   * `FLEET_INVITATION_ISSUER` placeholder -- never rebound, since there is
+   * no verified Google `sub` -- and no `partner_user_identity_links` row is
+   * created, since that table's semantics are a Google `sub` ->
+   * `drtsPassengerId` mapping the password branch has nothing to populate
+   * it with (SA/SD §3 password branch).
+   */
+  async acceptFleetStaffInvitationWithPassword(
+    tokenHash: string,
+    credential: PasswordInvitationCredential,
+  ): Promise<FleetMembershipSnapshot | null> {
+    if (!this.isEnabled())
+      throw new Error("Canonical Fleet invitation storage is unavailable.");
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined | null,
+    ) => {
+      const entrySlug = parseFleetScopeRef(invitation?.scopeRef);
+      return Boolean(
+        invitation &&
+          entrySlug &&
+          invitation.realm === "partner" &&
+          !invitation.acceptedAt &&
+          !invitation.revokedAt &&
+          Date.parse(invitation.expiresAt) > nowMs,
+      );
+    };
+    const validMembership = (
+      membership: CanonicalIdentityMembershipRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        membership &&
+          membership.realm === "partner" &&
+          membership.status === "invited" &&
+          membership.scopeRef === invitation.scopeRef &&
+          membership.membershipId === invitation.membershipId,
+      );
+    const validPrincipal = (
+      principal: CanonicalIdentityPrincipalRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        principal &&
+          principal.status === "invited" &&
+          principal.issuer === FLEET_INVITATION_ISSUER &&
+          principal.email?.toLowerCase() === invitation.email.toLowerCase(),
+      );
+    const hasActiveAccess = (
+      entrySlug: string,
+      principalId: string,
+      bindings: CanonicalIdentityRoleBindingRecord[],
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      bindings.some(
+        (binding) =>
+          binding.roleCode === invitation.roleCode &&
+          binding.sourceRef === buildFleetRoleBindingSourceRef(entrySlug, principalId) &&
+          Number.isFinite(Date.parse(binding.validFrom)) &&
+          Date.parse(binding.validFrom) <= nowMs &&
+          (!binding.validTo ||
+            (Number.isFinite(Date.parse(binding.validTo)) &&
+              nowMs < Date.parse(binding.validTo))),
+      );
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations
+          WHERE token_hash = $1 AND realm = 'partner'
+            AND accepted_at IS NULL AND revoked_at IS NULL
+            AND expires_at > $2::timestamptz
+          FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation = invitationRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+            invitationRows.rows[0].record,
+            "iam.identity_invitations",
+          )
+        : null;
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const entrySlug = parseFleetScopeRef(invitation.scopeRef)!;
+      const fleetPartnerId = invitation.partnerId;
+      if (!fleetPartnerId) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const fleetPartnerRows = await client.query<{ active: boolean }>(
+        `SELECT active FROM admin.phase1_fleet_partners WHERE fleet_partner_id = $1 FOR SHARE`,
+        [fleetPartnerId],
+      );
+      if (fleetPartnerRows.rows[0]?.active !== true) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership || !validMembership(membership, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      if (!principal || !validPrincipal(principal, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE membership_id = $1 FOR UPDATE`,
+        [membership.membershipId],
+      );
+      const bindings = bindingRows.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          row.record,
+          "iam.identity_role_bindings",
+        ),
+      );
+      if (!hasActiveAccess(entrySlug, principal.principalId, bindings, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query(
+        `INSERT INTO iam.identity_password_credentials (
+           principal_id, password_hash, password_algo, pepper_version, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $5)
+         ON CONFLICT (principal_id) DO UPDATE SET
+           password_hash = EXCLUDED.password_hash,
+           password_algo = EXCLUDED.password_algo,
+           pepper_version = EXCLUDED.pepper_version,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          principal.principalId,
+          credential.passwordHash,
+          credential.passwordAlgo,
+          credential.pepperVersion,
+          now,
+        ],
+      );
+      await client.query("COMMIT");
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings,
+        entrySlug,
+        fleetPartnerId,
       };
     } catch (error) {
       await client.query("ROLLBACK");

@@ -113,7 +113,7 @@ import {
   isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PasswordPolicyService } from "../../common/auth/password-policy.service";
 import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
@@ -1727,6 +1727,148 @@ export class AuthController {
     } catch (error) {
       throw toPublicPartnerAuthError(error);
     }
+  }
+
+  /** FLEET-ONB-004 (fleet-staff-onboarding-20261114 SA/SD §3): Fleet staff
+   * invitation Google-bind login binds the state to the proof, same as
+   * `agency/invitation-login`. The callback still lands on the existing
+   * `partner/callback-session` endpoint above -- `exchangePartnerCallbackSession`
+   * branches on the login state's `invitationTokenHash` itself. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/invitation-login")
+  getPartnerInvitationLoginUrl(
+    @Body()
+    command: {
+      invitationToken: string;
+      redirectUri: string;
+      partnerId?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      typeof command?.invitationToken !== "string" ||
+      !command.invitationToken.trim() ||
+      command.invitationToken.length > 512
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      "partner",
+      {
+        redirectUri: command.redirectUri,
+        invitationToken: command.invitationToken.trim(),
+        partnerId:
+          typeof command.partnerId === "string" ? command.partnerId : null,
+      },
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  /** Password branch of Fleet staff invitation acceptance (SA/SD §3). Mirrors
+   * `TenantPartnerController.acceptAgencyInvitationWithPassword`'s hash +
+   * validate + delegate shape, but `acceptFleetStaffInvitationWithPassword`
+   * lives on `IdentityRepository` directly (this task's write_scopes), so
+   * this controller calls it without a `TenantPartnerService` detour. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/invitation/accept-with-password")
+  async acceptFleetStaffInvitationWithPassword(
+    @Body() command: { invitationToken?: string; password?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const invitationToken = command?.invitationToken?.trim();
+    if (!invitationToken || invitationToken.length > 512) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    if (
+      typeof command?.password !== "string" ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "A password is required.",
+      );
+    }
+    // Same policy evaluation as :realm/password-reset/confirm: there is no
+    // confirmed-TOTP lookup available before an account even exists yet, so
+    // the stricter single-factor minimum applies.
+    const policyResult = this.passwordPolicyService.evaluate(
+      command.password,
+      { totpEnabled: false },
+    );
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(command.password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based invitation acceptance is not available.",
+        );
+      }
+      throw error;
+    }
+    const tokenHash = createHash("sha256")
+      .update(invitationToken)
+      .digest("hex");
+    const accepted =
+      await this.identityRepository.acceptFleetStaffInvitationWithPassword(
+        tokenHash,
+        {
+          passwordHash: hashed.hash,
+          passwordAlgo: hashed.algo,
+          pepperVersion: hashed.pepperVersion,
+        },
+      );
+    if (!accepted) {
+      throw new ApiRequestError(
+        403,
+        "FLEET_STAFF_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
+    }
+    const role = accepted.roleBindings.find(
+      (binding) =>
+        binding.sourceRef ===
+        `fleet_role:${accepted.entrySlug}:${accepted.principal.principalId}`,
+    );
+    return toApiSuccessEnvelope(
+      {
+        accepted: true,
+        entrySlug: accepted.entrySlug,
+        fleetPartnerId: accepted.fleetPartnerId,
+        principalId: accepted.principal.principalId,
+        membershipId: accepted.membership.membershipId,
+        roleCode: role?.roleCode ?? accepted.roleBindings[0]?.roleCode ?? "",
+      },
+      requestId,
+    );
   }
 
   private buildMeta(

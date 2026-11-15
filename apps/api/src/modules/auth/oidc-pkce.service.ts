@@ -286,7 +286,8 @@ export class OidcPkceService {
       redirectUri: validatedRedirectUri,
       tenantId: options?.tenantId?.trim() || null,
       partnerId: options?.partnerId?.trim() || null,
-      ...((realm === "tenant" || realm === "agency") && options?.invitationToken
+      ...((realm === "tenant" || realm === "agency" || realm === "partner") &&
+      options?.invitationToken
         ? {
             invitationTokenHash: createHash("sha256")
               .update(options.invitationToken)
@@ -1091,6 +1092,25 @@ export class OidcPkceService {
       meta,
     );
 
+    // FLEET-ONB-004 SA/SD §3: a login state carrying an invitationTokenHash
+    // is always a Fleet staff invitation Google-bind in progress, never an
+    // ordinary login -- the ordinary body below requires a pre-existing
+    // `partner_user_identity_links` row, which this branch is what creates.
+    if (stateRecord.invitationTokenHash) {
+      return this.issueVerifiedFleetSession(
+        claims,
+        {
+          entrySlug:
+            command.partnerId?.trim() ||
+            claims.partner_id?.trim() ||
+            stateRecord?.partnerId?.trim() ||
+            null,
+          invitationTokenHash: stateRecord.invitationTokenHash,
+        },
+        meta,
+      );
+    }
+
     if (claims.email_verified !== true) {
       const fallbackPartner =
         command.partnerId?.trim() ||
@@ -1425,6 +1445,247 @@ export class OidcPkceService {
     });
 
     return session;
+  }
+
+  private denyFleetStaffSession(
+    reasonCode: string,
+    entrySlug: string | null,
+    claims: Pick<OidcClaims, "sub">,
+    meta:
+      | { sourceIp?: string; userAgent?: string; requestId?: string }
+      | undefined,
+    message: string,
+  ): never {
+    this.recordSecurityEvent({
+      eventType: "partner_oidc_session.denied",
+      outcome: "denied",
+      realm: "partner",
+      partnerId: entrySlug,
+      subjectId: claims.sub ?? null,
+      reasonCode,
+      meta,
+    });
+    throw new ApiRequestError(403, "AUTH_SESSION_EXCHANGE_DENIED", message);
+  }
+
+  /**
+   * FLEET-ONB-004 SA/SD §3 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md):
+   * Google-branch acceptance of a Fleet staff invitation, mirroring
+   * `issueVerifiedAgencySession`'s `invitationTokenHash` branch. This is
+   * only ever called by `exchangePartnerCallbackSession` when the login
+   * state carries an `invitationTokenHash` (see the branch above); every
+   * other partner login -- including a Fleet staff member's *next* login
+   * after this one succeeds -- still goes through
+   * `exchangePartnerCallbackSession`'s own `partner_user_identity_links`
+   * lookup, which `acceptFleetStaffOidcInvitation` below is what populates
+   * (SA/SD §3 step 4).
+   */
+  private async issueVerifiedFleetSession(
+    claims: OidcClaims,
+    options: { entrySlug: string | null; invitationTokenHash: string },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<PartnerBootstrapSession> {
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+    if (
+      typeof claims.email !== "string" ||
+      !claims.email.trim() ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim() ||
+      typeof claims.iss !== "string" ||
+      !claims.iss.trim()
+    ) {
+      this.denyFleetStaffSession(
+        "OIDC_CLAIMS_MISSING",
+        options.entrySlug,
+        claims,
+        meta,
+        "OIDC issuer, subject and email are required.",
+      );
+    }
+    if (claims.email_verified !== true) {
+      this.denyFleetStaffSession(
+        "EMAIL_NOT_VERIFIED",
+        options.entrySlug,
+        claims,
+        meta,
+        "Subject email is not verified by OIDC provider.",
+      );
+    }
+    const subject = claims.sub.trim();
+    const issuer = claims.iss.trim();
+    const email = claims.email.trim().toLowerCase();
+    const entrySlug = options.entrySlug?.trim();
+    if (!entrySlug) {
+      this.denyFleetStaffSession(
+        "PARTNER_ENTRY_NOT_FOUND",
+        options.entrySlug,
+        claims,
+        meta,
+        "Subject does not correspond to an active partner entry.",
+      );
+    }
+
+    // Same HARD ACCEPTANCE RULE as exchangePartnerCallbackSession/SA/SD §3
+    // step 2: the partner entry named by the login state must be an active
+    // Fleet entry before the invitation itself is even locked.
+    const matchedEntry = this.tenantPartnerService
+      .listPartnerEntries(entrySlug)
+      .find((e) => e.entrySlug === entrySlug || e.partnerId === entrySlug);
+    if (
+      !matchedEntry ||
+      matchedEntry.partnerType !== "fleet_partner" ||
+      matchedEntry.status !== "active" ||
+      !matchedEntry.activeFlag
+    ) {
+      this.denyFleetStaffSession(
+        "PARTNER_ENTRY_NOT_FOUND",
+        entrySlug,
+        claims,
+        meta,
+        "Subject does not correspond to an active partner entry.",
+      );
+    }
+
+    const accepted = await this.identityRepository.acceptFleetStaffOidcInvitation(
+      options.invitationTokenHash,
+      { issuer, subject, email, entrySlug: matchedEntry.entrySlug },
+      this.partnerUserIdentityLinkRepo,
+    );
+    if (!accepted) {
+      this.denyFleetStaffSession(
+        "FLEET_STAFF_INVITATION_INVALID",
+        matchedEntry.entrySlug,
+        claims,
+        meta,
+        "The Fleet staff invitation cannot be accepted.",
+      );
+    }
+    this.recordSecurityEvent({
+      eventType: "partner_oidc_invitation.bound",
+      outcome: "success",
+      realm: "partner",
+      partnerId: matchedEntry.entrySlug,
+      actorType: "partner_user",
+      actorId: accepted.principal.principalId,
+      subjectId: subject,
+      meta,
+    });
+
+    const now = Date.now();
+    const activeRoles = accepted.roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${accepted.entrySlug}:${accepted.principal.principalId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
+    const [role] = activeRoles;
+    if (!role || activeRoles.length !== 1) {
+      this.denyFleetStaffSession(
+        "IAM_MEMBERSHIP_NOT_ACTIVE",
+        matchedEntry.entrySlug,
+        claims,
+        meta,
+        "Subject has no active Fleet staff role.",
+      );
+    }
+    const scopes = [...getIamFleetRoleScopes(role.roleCode)!];
+    const roles = [role.roleCode];
+
+    const amr = claims.amr ?? [];
+    const acr = claims.acr ?? "";
+    const authTime = claims.auth_time ?? Math.floor(now / 1000);
+
+    const tokenVersion = Math.max(
+      ...[
+        accepted.principal.updatedAt,
+        accepted.membership.updatedAt,
+        role.updatedAt,
+        matchedEntry.updatedAt,
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "partner_user",
+        actorId: accepted.principal.principalId,
+        principalId: accepted.principal.principalId,
+        membershipId: accepted.membership.membershipId,
+        subject: accepted.principal.principalId,
+        realm: "partner",
+        tenantId: matchedEntry.tenantId ?? null,
+        partnerId: matchedEntry.partnerId,
+        partnerEntrySlug: matchedEntry.entrySlug,
+        roleFamilies: ["partner"],
+        roles,
+        scopes,
+        tokenVersion,
+        authTime: new Date(authTime * 1000).toISOString(),
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta?.requestId ?? null,
+      },
+      { expiresIn: "8h", tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "partner_user",
+      actorId: accepted.principal.principalId,
+      principalId: accepted.principal.principalId,
+      membershipId: accepted.membership.membershipId,
+      realm: "partner",
+      tenantId: matchedEntry.tenantId ?? null,
+      partnerId: matchedEntry.partnerId,
+      partnerEntrySlug: matchedEntry.entrySlug,
+      roleFamilies: ["partner"],
+      roles,
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordSecurityEvent({
+      eventType: "partner_oidc_session.issued",
+      outcome: "success",
+      realm: "partner",
+      partnerId: matchedEntry.entrySlug,
+      actorId: accepted.principal.principalId,
+      actorType: "partner_user",
+      subjectId: subject,
+      tokenId: issued.tokenId,
+      afterSummary: { sub: subject, amr },
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      partnerEntry: matchedEntry,
+      identity,
+    };
   }
 
   /**
