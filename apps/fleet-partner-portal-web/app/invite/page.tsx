@@ -21,13 +21,15 @@ function firstParam(value: string | string[] | undefined): string | undefined {
  * resolves the Fleet entry from the invitation itself (FLEET-ONB-008); the
  * password branch posts to /api/auth/invitation/accept-with-password and
  * then signs in through the ordinary password-login endpoint. */
+type SearchParams = Record<string, string | string[] | undefined>;
+
 export default async function FleetInvitePage({
   searchParams,
 }: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  searchParams?: Promise<SearchParams>;
 }) {
   const [params, locale] = await Promise.all([
-    searchParams ?? Promise.resolve({}),
+    searchParams ?? Promise.resolve<SearchParams>({}),
     getServerLocale(),
   ]);
   const token = firstParam(params.token)?.trim() ?? "";
