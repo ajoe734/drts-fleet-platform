@@ -1,7 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../src/common/auth/auth.types";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { PasswordHashingService } from "../../src/common/auth/password-hashing.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -123,7 +132,8 @@ async function createActiveTenantPasswordUser(
   const invitation = fixture.identityRepository
     .listInvitations()
     .find(
-      (candidate) => candidate.email.toLowerCase() === options.email.toLowerCase(),
+      (candidate) =>
+        candidate.email.toLowerCase() === options.email.toLowerCase(),
     )!;
   const rawToken = fixture.delivery.tokens.get(invitation.invitationId)!;
   await fixture.tenantPartnerService.acceptTenantInvitationWithPassword({
@@ -133,7 +143,8 @@ async function createActiveTenantPasswordUser(
   const principal = fixture.identityRepository
     .listPrincipals()
     .find(
-      (candidate) => candidate.email?.toLowerCase() === options.email.toLowerCase(),
+      (candidate) =>
+        candidate.email?.toLowerCase() === options.email.toLowerCase(),
     )!;
   return { principal };
 }
@@ -296,9 +307,94 @@ function registerFleetPartnerEntry(
   ).partnerEntries.push(entry);
 }
 
-async function expectUniformDenial(
-  promise: Promise<unknown>,
-): Promise<string> {
+/** PWD-LOGIN-SESSION-ADD-PASSWORD-20261114 (SA/SD §1): builds a tenant
+ * principal/membership that is active via the *Google* invitation-accept
+ * branch (`acceptTenantOidcInvitation`), so it has no password credential at
+ * all -- the exact "Google-only" starting state `POST
+ * /api/auth/:realm/credentials/password` exists to add a first password to. */
+async function createActiveTenantGoogleOnlyUser(
+  fixture: ReturnType<typeof createFixture>,
+  options: { tenantId: string; email: string; roleCode?: string },
+) {
+  await fixture.tenantPartnerService.createTenantUser(options.tenantId, {
+    email: options.email,
+    displayName: "Google Only Fixture",
+    roleCode: options.roleCode ?? "tenant_viewer",
+  });
+  const invitation = fixture.identityRepository
+    .listInvitations()
+    .find(
+      (candidate) =>
+        candidate.email.toLowerCase() === options.email.toLowerCase(),
+    )!;
+  const rawToken = fixture.delivery.tokens.get(invitation.invitationId)!;
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  await fixture.tenantPartnerService.acceptTenantOidcInvitation(tokenHash, {
+    issuer: "https://accounts.google.com",
+    subject: `google-sub-${randomUUID()}`,
+    email: options.email,
+    tenantId: options.tenantId,
+  });
+  const principal = fixture.identityRepository
+    .listPrincipals()
+    .find(
+      (candidate) =>
+        candidate.email?.toLowerCase() === options.email.toLowerCase(),
+    )!;
+  const memberships =
+    await fixture.identityRepository.findMembershipsByPrincipalId(
+      principal.principalId,
+    );
+  const membership = memberships.find(
+    (candidate) =>
+      candidate.realm === "tenant" && candidate.tenantId === options.tenantId,
+  )!;
+  return { principal, membership };
+}
+
+/** A minimal, directly-constructed session identity for calling
+ * `AuthController.setAccountPassword` the same way the real
+ * `BootstrapAuthGuard` would populate `request.identity` from a verified
+ * Bearer token -- never anything the test (or an attacker) could instead
+ * smuggle through the request body. */
+function buildAccountSecurityIdentity(options: {
+  realm: "tenant" | "agency" | "partner";
+  principalId: string;
+  membershipId: string;
+  roles?: string[];
+  amr?: string[];
+  acr?: string | null;
+  authTime?: string | null;
+}): BootstrapRequestIdentity {
+  return {
+    authMode: "jwt_bearer",
+    actorType:
+      options.realm === "agency"
+        ? "agency_user"
+        : options.realm === "partner"
+          ? "partner_user"
+          : "tenant_admin",
+    actorId: options.principalId,
+    principalId: options.principalId,
+    membershipId: options.membershipId,
+    subject: options.principalId,
+    realm: options.realm,
+    tenantId: null,
+    sessionId: `session_${options.principalId}`,
+    tokenId: `token_${options.principalId}`,
+    tokenVersion: 1,
+    authTime: options.authTime ?? new Date().toISOString(),
+    amr: options.amr ?? [],
+    acr: options.acr ?? "aal1",
+    policyVersion: "v1",
+    roleFamilies: [options.realm],
+    roles: options.roles ?? [],
+    scopes: [],
+    requestId: null,
+  };
+}
+
+async function expectUniformDenial(promise: Promise<unknown>): Promise<string> {
   await expect(promise).rejects.toBeInstanceOf(ApiRequestError);
   try {
     await promise;
@@ -657,5 +753,525 @@ describe("POST /api/auth/:realm/password-login", () => {
       }),
     );
     expect(lockedOutMessage).toBe(unknownMessage);
+  });
+});
+
+// PWD-LOGIN-SESSION-ADD-PASSWORD-20261114 (SA/SD §1:34, §9:169, §12:193,
+// docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+// the original-accepted-SA follow-up to PWD-LOGIN-005/007/008 -- a
+// logged-in session adding a first password to a Google-only principal, or
+// changing an existing one. `identity` (never the request body) supplies
+// `principalId`/`realm`/`amr`/`authTime`; the route must not trust a
+// body-asserted identity or MFA claim.
+describe("POST /api/auth/:realm/credentials/password", () => {
+  const NEW_PASSWORD = "a brand new sufficiently long password!";
+  const ANOTHER_NEW_PASSWORD = "yet another sufficiently long password!";
+
+  it("adds a first password credential to a Google-only tenant_viewer session, which then logs in with it", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-add-google-only";
+    const { principal, membership } = await createActiveTenantGoogleOnlyUser(
+      fixture,
+      { tenantId, email: "google-only@example.com" },
+    );
+    expect(
+      await fixture.identityRepository.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      ),
+    ).toBeNull();
+
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+
+    const envelope = (await fixture.controller.setAccountPassword(
+      "tenant",
+      identity,
+      { password: NEW_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("created");
+
+    const envelopeLogin = (await fixture.controller.passwordLogin("tenant", {
+      email: "google-only@example.com",
+      password: NEW_PASSWORD,
+      tenantId,
+    })) as { data: { accessToken: string } };
+    expect(envelopeLogin.data.accessToken).toBeTruthy();
+  });
+
+  it("denies adding a first password for a tenant_admin session without a fresh, trusted MFA proof, and allows it once that proof is present", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-add-mfa-required";
+    const { principal, membership } = await createActiveTenantGoogleOnlyUser(
+      fixture,
+      {
+        tenantId,
+        email: "google-only-admin@example.com",
+        roleCode: "tenant_admin",
+      },
+    );
+
+    const staleIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_admin"],
+      amr: ["otp"],
+      authTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        staleIdentity,
+        { password: NEW_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+
+    const noMfaIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_admin"],
+      amr: [],
+    });
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        noMfaIdentity,
+        { password: NEW_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+
+    const freshMfaIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_admin"],
+      amr: ["otp"],
+    });
+    const envelope = (await fixture.controller.setAccountPassword(
+      "tenant",
+      freshMfaIdentity,
+      { password: NEW_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("created");
+  });
+
+  it("a body-asserted amr/mfa/principalId claim never substitutes for the verified session's own evidence", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-add-body-spoof";
+    const { principal, membership } = await createActiveTenantGoogleOnlyUser(
+      fixture,
+      {
+        tenantId,
+        email: "google-only-spoof@example.com",
+        roleCode: "tenant_admin",
+      },
+    );
+    const staleNoMfaIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_admin"],
+      amr: [],
+      authTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        staleNoMfaIdentity,
+        {
+          password: NEW_PASSWORD,
+          // Deliberately smuggling fields the real body type never
+          // declares, to prove they are never read; `as never` below lets
+          // this literal carry them without a type error.
+          amr: ["otp"],
+          mfa: true,
+          principalId: "someone-elses-principal",
+          email: "someone-else@example.com",
+        } as never,
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+  });
+
+  it("changes an existing password credential given the correct current password, and the old password stops working", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-change-current-password";
+    const { principal } = await createActiveTenantPasswordUser(fixture, {
+      tenantId,
+      email: "change-with-current@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === "tenant" && candidate.tenantId === tenantId,
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+      authTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+
+    const envelope = (await fixture.controller.setAccountPassword(
+      "tenant",
+      identity,
+      { password: NEW_PASSWORD, currentPassword: CORRECT_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("changed");
+
+    await expectUniformDenial(
+      fixture.controller.passwordLogin("tenant", {
+        email: "change-with-current@example.com",
+        password: CORRECT_PASSWORD,
+        tenantId,
+      }),
+    );
+    const loginEnvelope = (await fixture.controller.passwordLogin("tenant", {
+      email: "change-with-current@example.com",
+      password: NEW_PASSWORD,
+      tenantId,
+    })) as { data: { accessToken: string } };
+    expect(loginEnvelope.data.accessToken).toBeTruthy();
+  });
+
+  it("denies a password change with the wrong current password, even with an otherwise-fresh session", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-change-wrong-current-password";
+    const { principal } = await createActiveTenantPasswordUser(fixture, {
+      tenantId,
+      email: "wrong-current@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === "tenant" && candidate.tenantId === tenantId,
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        identity,
+        { password: NEW_PASSWORD, currentPassword: WRONG_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+
+    const loginEnvelope = (await fixture.controller.passwordLogin("tenant", {
+      email: "wrong-current@example.com",
+      password: CORRECT_PASSWORD,
+      tenantId,
+    })) as { data: { accessToken: string } };
+    expect(loginEnvelope.data.accessToken).toBeTruthy();
+  });
+
+  it("changes an existing password credential without a current password when the session is qualifyingly fresh, and denies it when the session is stale", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-change-fresh-session";
+    const { principal } = await createActiveTenantPasswordUser(fixture, {
+      tenantId,
+      email: "fresh-session-change@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === "tenant" && candidate.tenantId === tenantId,
+    )!;
+
+    const staleIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+      authTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        staleIdentity,
+        { password: NEW_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "STEP_UP_REQUIRED" });
+
+    const freshIdentity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+    const envelope = (await fixture.controller.setAccountPassword(
+      "tenant",
+      freshIdentity,
+      { password: ANOTHER_NEW_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("changed");
+  });
+
+  it("denies an unauthenticated (null identity) request", async () => {
+    const fixture = createFixture();
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        null,
+        { password: NEW_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
+  });
+
+  it("denies a session whose realm does not match the :realm route segment", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-wrong-realm";
+    const { principal, membership } = await createActiveTenantGoogleOnlyUser(
+      fixture,
+      { tenantId, email: "wrong-realm@example.com" },
+    );
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "agency",
+        identity,
+        { password: NEW_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
+  });
+
+  it("denies a session for a principal that has since been disabled", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-disabled-account";
+    const { principal } = await createActiveTenantPasswordUser(fixture, {
+      tenantId,
+      email: "disabled-change@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === "tenant" && candidate.tenantId === tenantId,
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+
+    forceSuspendPrincipal(fixture.identityRepository, principal.principalId);
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        identity,
+        { password: NEW_PASSWORD, currentPassword: CORRECT_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
+  });
+
+  it("rejects a password that fails the policy (too short for a session with no confirmed TOTP)", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-policy-violation";
+    const { principal, membership } = await createActiveTenantGoogleOnlyUser(
+      fixture,
+      { tenantId, email: "policy-violation@example.com" },
+    );
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        identity,
+        { password: "too-short" },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "PASSWORD_POLICY_VIOLATION" });
+  });
+
+  it("never writes the submitted new or current password into a security event", async () => {
+    const fixture = createFixture();
+    const tenantId = "tenant-pwd-no-plaintext";
+    const { principal } = await createActiveTenantPasswordUser(fixture, {
+      tenantId,
+      email: "no-plaintext-change@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === "tenant" && candidate.tenantId === tenantId,
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "tenant",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["tenant_viewer"],
+    });
+    const recordEvent = vi.spyOn(fixture.securityEventsService, "recordEvent");
+
+    await expect(
+      fixture.controller.setAccountPassword(
+        "tenant",
+        identity,
+        { password: NEW_PASSWORD, currentPassword: WRONG_PASSWORD },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+    await fixture.controller.setAccountPassword(
+      "tenant",
+      identity,
+      { password: NEW_PASSWORD, currentPassword: CORRECT_PASSWORD },
+      {},
+    );
+
+    expect(recordEvent).toHaveBeenCalled();
+    const serialized = JSON.stringify(recordEvent.mock.calls);
+    expect(serialized).not.toContain(NEW_PASSWORD);
+    expect(serialized).not.toContain(CORRECT_PASSWORD);
+    expect(serialized).not.toContain(WRONG_PASSWORD);
+  });
+
+  it("changes an existing agency password credential given the correct current password", async () => {
+    const fixture = createFixture();
+    const now = new Date().toISOString();
+    await fixture.agencyDirectoryRepository.create({
+      agencyId: "agency_pwd_credentials_change",
+      agencyCode: "PWD-CRED-CHANGE",
+      displayName: "Password Credentials Change Agency",
+      status: "active",
+      createdByPrincipalId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const rawToken = "agency-invite-raw-token-for-credentials-change";
+    await fixture.identityRepository.issueAgencyInvitation({
+      agencyId: "agency_pwd_credentials_change",
+      email: "agency-change@example.com",
+      roleCode: "agency_viewer",
+      accessValidTo: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      issuerPrincipalId: null,
+    });
+    await fixture.tenantPartnerService.acceptAgencyInvitationWithPassword({
+      invitationToken: rawToken,
+      password: CORRECT_PASSWORD,
+    });
+    const principal = fixture.identityRepository
+      .listPrincipals()
+      .find(
+        (candidate) =>
+          candidate.email?.toLowerCase() === "agency-change@example.com",
+      )!;
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) => candidate.realm === "agency",
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "agency",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["agency_viewer"],
+    });
+
+    const envelope = (await fixture.controller.setAccountPassword(
+      "agency",
+      identity,
+      { password: NEW_PASSWORD, currentPassword: CORRECT_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("changed");
+
+    const loginEnvelope = (await fixture.controller.passwordLogin("agency", {
+      email: "agency-change@example.com",
+      password: NEW_PASSWORD,
+    })) as { data: { accessToken: string } };
+    expect(loginEnvelope.data.accessToken).toBeTruthy();
+  });
+
+  it("changes an existing fleet partner password credential given the correct current password", async () => {
+    const fixture = createFixture();
+    const entrySlug = "fleet-pwd-credentials-change";
+    const fleetPartnerId = "fleet-partner-pwd-credentials-change";
+    registerFleetPartnerEntry(fixture, { entrySlug, fleetPartnerId });
+    const { principal } = await createActiveFleetPartnerPasswordUser(fixture, {
+      entrySlug,
+      fleetPartnerId,
+      email: "fleet-staff-change@example.com",
+    });
+    const memberships =
+      await fixture.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) => candidate.realm === "partner",
+    )!;
+    const identity = buildAccountSecurityIdentity({
+      realm: "partner",
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      roles: ["fleet_partner_admin"],
+    });
+
+    const envelope = (await fixture.controller.setAccountPassword(
+      "partner",
+      identity,
+      { password: NEW_PASSWORD, currentPassword: CORRECT_PASSWORD },
+      {},
+    )) as { data: { action: string } };
+    expect(envelope.data.action).toBe("changed");
+
+    const loginEnvelope = (await fixture.controller.passwordLogin("partner", {
+      email: "fleet-staff-change@example.com",
+      password: NEW_PASSWORD,
+      partnerId: entrySlug,
+    })) as { data: { accessToken: string } };
+    expect(loginEnvelope.data.accessToken).toBeTruthy();
   });
 });
