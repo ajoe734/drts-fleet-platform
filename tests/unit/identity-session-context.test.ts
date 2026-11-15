@@ -151,13 +151,8 @@ async function enrollAndConfirmTotp(
 /** Advances past the step `confirm()` already consumed so the next
  * generated code lands on a fresh, unused 30s step. */
 async function freshLoginCode(secret: string): Promise<string> {
-  vi.useFakeTimers();
-  try {
-    vi.advanceTimersByTime(31_000);
-    return await generate({ secret });
-  } finally {
-    vi.useRealTimers();
-  }
+  const nextStepEpoch = (Math.floor(Date.now() / 30_000) + 1) * 30;
+  return generate({ secret, epoch: nextStepEpoch });
 }
 
 type PasswordLoginEnvelope = {
