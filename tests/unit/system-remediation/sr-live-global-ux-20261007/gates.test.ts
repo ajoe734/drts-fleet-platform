@@ -730,11 +730,11 @@ describe("locale intent and source mapping", () => {
       }
     }
     expect(Object.keys(plan.recipes)).toHaveLength(10);
-    expect(cases(manifest)).toHaveLength(26736);
+    expect(cases(manifest)).toHaveLength(26832);
     const required = new Set(cases(manifest).map(recipeKey));
-    expect(required.size).toBe(4456);
+    expect(required.size).toBe(4472);
     expect([...required].filter((key) => !plan.recipes[key])).toHaveLength(
-      4446,
+      4462,
     );
     expect(plan.approvalRef).toBe("");
     expect(plan.expiresAt).toBe("1970-01-01T00:00:00Z");

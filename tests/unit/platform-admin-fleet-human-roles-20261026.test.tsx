@@ -552,7 +552,10 @@ describe("manager UI -> Fleet staff invitation issue/list/revoke/resend and memb
           call.url.includes("entrySlug=entry-ui"),
       ),
     ).toBe(true);
-    expect(screen.getByText("Disabled")).toBeTruthy();
+    const disabledStatusBadges = screen
+      .getAllByText("Disabled")
+      .filter((el) => el.tagName !== "OPTION");
+    expect(disabledStatusBadges).toHaveLength(1);
     expect(screen.queryByText("Disable member")).toBeNull();
   });
 });
