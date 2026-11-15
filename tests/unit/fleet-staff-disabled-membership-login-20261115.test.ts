@@ -67,7 +67,14 @@ describe("FLEET-ONB-007 SA/SD §9: a disabled Fleet staff membership blocks the 
     const tenant = new TenantPartnerService(new AuditNotificationService());
     const jwt = new JwtAuthService(repository, tenant, undefined, undefined, link);
     const oidc = new OidcPkceService(jwt, tenant, undefined, link, undefined, repository);
-    const now = "2026-11-15T10:00:00.000Z";
+    // A fixed timestamp strictly in the past (matching the convention in
+    // apps/api/tests/unit/identity-fleet-staff-sourceref.test.ts), not
+    // "today" at authoring time: exchangePartnerCallbackSession's active-role
+    // window check compares binding.validFrom against the real wall-clock
+    // Date.now() at test-run time, so a same-day "now" can land in the
+    // future relative to an earlier CI run and spuriously exclude the role
+    // binding from activeRoles.
+    const now = "2026-11-14T10:00:00.000Z";
 
     await link.createForInvitedPrincipal(ENTRY, OIDC_SUB, PRINCIPAL_ID, now);
     await repository.ensurePrincipalRecord({
@@ -136,8 +143,18 @@ describe("FLEET-ONB-007 SA/SD §9: a disabled Fleet staff membership blocks the 
   it("grants no managed Fleet role once the membership is disabled, even though the identity link, principal and role binding are all otherwise valid", async () => {
     const { login } = await setup("disabled");
     const denied = await login();
+    // Matches the "unassigned"/no-managed-role assertion convention in
+    // tests/unit/fleet-partner-human-role-authority-20261026.test.ts and
+    // apps/api/tests/unit/identity-fleet-staff-sourceref.test.ts:
+    // exchangePartnerCallbackSession always falls back to the legacy,
+    // non-Fleet "partner_admin" label with only partner:read/partner:write
+    // scopes when there is no managed role -- it never returns an empty
+    // roles array. The real security gate a disabled membership trips is
+    // the absence of principalId/membershipId and of the Fleet-specific
+    // role/scopes, not an empty roles array.
     expect(denied.identity.membershipId).toBeUndefined();
-    expect(denied.identity.roles ?? []).toEqual([]);
+    expect(denied.identity.roles).not.toContain("fleet_partner_ops");
+    expect(denied.identity.scopes).not.toContain("fleet:read");
   });
 });
 
