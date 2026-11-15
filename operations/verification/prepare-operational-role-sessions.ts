@@ -2813,10 +2813,18 @@ export async function prepareOperationalRoleSessions(
       );
       // Only an own-Fleet binding can authorize the source pair. Unrelated
       // historical entries must neither supply a fallback nor block this run.
+      // API seed rows are such entries: FLEET-ONB-001's static
+      // `fleet-demo-001` login entry is persisted on non-strict environments
+      // by the API's seed reconciliation, with its own demo tenant and
+      // programme. It is not the normal onboarding binding, so it must not
+      // stand in for that binding or make it ambiguous (deploy-dev
+      // v2026.11.15.0 and .1 failed here on exactly that pair).
       const ownSourceEntries = activeEntries.filter(
         (item) =>
           (nonEmptyTrimmed(item.partnerId) ??
-            nonEmptyTrimmed(item.fleetPartnerId)) === config.expectedOwnFleetId,
+            nonEmptyTrimmed(item.fleetPartnerId)) ===
+            config.expectedOwnFleetId &&
+          objectRecord(item.auditMetadata).createdBy !== "system:seed",
       );
       if (ownSourceEntries.length === 0) {
         evidence.foreign_fleet_precondition = "missing-external-fixture";
@@ -2866,7 +2874,9 @@ export async function prepareOperationalRoleSessions(
         ) {
           evidence.foreign_fleet_precondition = "invalid-external-fixture";
           throw new OperationalForeignFleetFixturePreconditionError(
-            "Active own Fleet source entries have ambiguous canonical (tenantId, programId) bindings",
+            `Active own Fleet source entries have ambiguous canonical (tenantId, programId) bindings: ${ownSourceEntries
+              .map((entry) => nonEmptyTrimmed(entry.entrySlug) ?? "(no slug)")
+              .join(", ")}`,
           );
         }
       }
