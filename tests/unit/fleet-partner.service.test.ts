@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import type { CreateSecurityEventInput } from "../../apps/api/src/common/audit/security-event-sanitizer";
 import { FleetPartnerRepository } from "../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type {
@@ -425,6 +428,17 @@ describe("FleetPartnerService Fleet staff invitations", () => {
           }
           return { rows: [] };
         }
+        if (sql.includes("token_hash = $1") && sql.includes("LIMIT 1")) {
+          // findInvitationByTokenHash: a resend's old (revoked) token must
+          // keep returning its row here -- "unusable" is decided by the
+          // accepted_at/revoked_at/expires_at state on the row, not by this
+          // lookup itself -- while the new token must resolve to a distinct
+          // invitationId with no revokedAt/acceptedAt yet.
+          const hit = [...invitations.values()].find(
+            (inv) => inv.tokenHash === params[0],
+          );
+          return { rows: hit ? [{ record: hit }] : [] };
+        }
         // list by entry scope
         const matches = [...invitations.values()]
           .filter(
@@ -472,7 +486,9 @@ describe("FleetPartnerService Fleet staff invitations", () => {
     };
     const audit = {
       isEnabled: () => true,
-      recordEventRequired: vi.fn(async () => undefined),
+      recordEventRequired: vi.fn<
+        (input: CreateSecurityEventInput) => Promise<undefined>
+      >(async () => undefined),
     };
     const invitationDelivery = {
       send: vi.fn(async () => ({
@@ -643,6 +659,82 @@ describe("FleetPartnerService Fleet staff invitations", () => {
         manager,
       ),
     ).rejects.toMatchObject({ code: "FLEET_INVITATION_NOT_FOUND" });
+  });
+
+  it("resend (SA/SD §8: revoke + reissue) makes the old token unusable and the new token usable, with a security event per state transition", async () => {
+    const deliveredRawTokens: string[] = [];
+    const { service, audit, repo } = createInvitationService({
+      invitationDelivery: {
+        send: vi.fn(async (request: FleetInvitationDeliveryRequest) => {
+          deliveredRawTokens.push(request.rawToken);
+          return {
+            invitationId: request.invitationId,
+            fleetPartnerId: request.fleetPartnerId,
+            entrySlug: request.entrySlug,
+            recipientEmail: request.recipientEmail,
+            expiresAt: request.expiresAt,
+            status: "sent" as const,
+            attemptedAt: new Date().toISOString(),
+          };
+        }),
+      },
+    });
+
+    const first = await service.inviteFleetStaff(
+      FLEET_PARTNER_ID,
+      { entrySlug: ENTRY, email: "resend-me@fleet.example.org", roleCode: "fleet_partner_ops" },
+      manager,
+    );
+
+    await service.revokeFleetStaffInvitation(
+      FLEET_PARTNER_ID,
+      ENTRY,
+      first.invitation.invitationId,
+      manager,
+    );
+
+    // UI "resend" = revoke, then re-issue the same email/roleCode (SA/SD §8
+    // -- there is no separate resend endpoint).
+    const second = await service.inviteFleetStaff(
+      FLEET_PARTNER_ID,
+      { entrySlug: ENTRY, email: "resend-me@fleet.example.org", roleCode: "fleet_partner_ops" },
+      manager,
+    );
+    const [firstRawToken, secondRawToken] = deliveredRawTokens as [
+      string,
+      string,
+    ];
+
+    expect(second.invitation.invitationId).not.toBe(
+      first.invitation.invitationId,
+    );
+    expect(secondRawToken).not.toBe(firstRawToken);
+
+    const oldInvitation = await repo.findInvitationByTokenHash(
+      createHash("sha256").update(firstRawToken).digest("hex"),
+    );
+    expect(oldInvitation?.revokedAt).not.toBeNull();
+
+    const newInvitation = await repo.findInvitationByTokenHash(
+      createHash("sha256").update(secondRawToken).digest("hex"),
+    );
+    expect(newInvitation?.invitationId).toBe(second.invitation.invitationId);
+    expect(newInvitation?.revokedAt).toBeNull();
+    expect(newInvitation?.acceptedAt).toBeNull();
+
+    // Every state transition (issue, revoke, re-issue) recorded its own
+    // security event, in order, and none leaked the plaintext token.
+    const recordedEventTypes = audit.recordEventRequired.mock.calls.map(
+      (call) => (call[0] as { eventType: string }).eventType,
+    );
+    expect(recordedEventTypes).toEqual([
+      "fleet_staff_invitation.issued",
+      "fleet_staff_invitation.revoked",
+      "fleet_staff_invitation.issued",
+    ]);
+    const serializedEvents = JSON.stringify(audit.recordEventRequired.mock.calls);
+    expect(serializedEvents).not.toContain(firstRawToken);
+    expect(serializedEvents).not.toContain(secondRawToken);
   });
 
   it("lists invitations for the entry newest first", async () => {
