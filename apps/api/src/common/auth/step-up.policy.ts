@@ -546,6 +546,20 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
       /^admin\/fleet-partners\/[^/]+\/members\/[^/]+\/deactivate$/,
     ),
   },
+  // FLEET-ONB-005 SA/SD §1: the existing `manageFleetHumanRole` endpoint
+  // grants/revokes a Fleet staff role binding, the same authority model as
+  // the invitation/revoke/deactivate rules above, but was missing a step-up
+  // rule entirely (no PUT rule existed, so this route never matched).
+  {
+    actionId: "platform:users:role:update",
+    description: "Fleet partner staff human role grant/revoke",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "PUT",
+      /^admin\/fleet-partners\/[^/]+\/human-roles$/,
+    ),
+  },
 ] as const;
 
 export function resolveRouteStepUpPolicy(
