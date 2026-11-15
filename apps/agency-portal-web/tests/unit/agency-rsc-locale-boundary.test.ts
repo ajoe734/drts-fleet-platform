@@ -209,6 +209,10 @@ function createRscBoundaryServerLoader(options: {
       targetPath = resolveSourceFile(
         path.resolve(APP_ROOT, "../../packages/ui-web/src/index.tsx"),
       );
+    } else if (specifier === "@drts/ui-web/client") {
+      targetPath = resolveSourceFile(
+        path.resolve(APP_ROOT, "../../packages/ui-web/src/client.tsx"),
+      );
     } else if (specifier.startsWith(".")) {
       targetPath = resolveSourceFile(path.resolve(fromDir, specifier));
     } else {

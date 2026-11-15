@@ -150,6 +150,62 @@ describe("hourly publish promotion safety", () => {
     expect(source).toContain("steps.deployed.outputs.skip != 'true'");
   });
 
+  it("starts promotion when the latest publish's dev deploy succeeds", () => {
+    // CI-PROMOTE-AFTER-DEV-DEPLOY-20261114: GitHub skipped the hourly
+    // schedule for seven hours, so green publishes waited most of a day.
+    const source = workflow();
+    const trigger = source.slice(
+      source.indexOf("\non:\n"),
+      source.indexOf("\njobs:\n"),
+    );
+    const deployDevName = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    ).match(/^name: (.+)$/m)?.[1];
+
+    expect(deployDevName).toBe("Deploy — Dev");
+    expect(trigger).toContain("workflow_run:");
+    expect(trigger).toContain(`workflows: ["${deployDevName}"]`);
+    expect(trigger).toContain("types: [completed]");
+    expect(trigger).toContain('cron: "15 * * * *"');
+
+    const promoteJob = source.slice(
+      source.indexOf("  promote:"),
+      source.indexOf("    steps:"),
+    );
+    expect(promoteJob).toContain(
+      "github.event.workflow_run.conclusion == 'success'",
+    );
+    expect(promoteJob).toContain(
+      "startsWith(github.event.workflow_run.head_branch, 'publish/v')",
+    );
+    expect(promoteJob).toContain(
+      "TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}",
+    );
+
+    // Only the publish that deploy verified may be promoted; an older one
+    // finishing late is skipped before any gate runs.
+    const pick = source.slice(
+      source.indexOf("- name: Find publish to promote"),
+      source.indexOf("- name: Soak period check"),
+    );
+    const guard = pick.indexOf(
+      'if [ "$TRIGGER_EVENT" = "workflow_run" ] && [ "$sha" != "$TRIGGER_SHA" ]',
+    );
+    expect(guard).toBeGreaterThan(
+      pick.indexOf('sha=$(git rev-parse "origin/$branch")'),
+    );
+    expect(guard).toBeLessThan(pick.lastIndexOf('echo "skip=false"'));
+    expect(pick.slice(guard)).toMatch(
+      /echo "skip=true" >> "\$GITHUB_OUTPUT"\s+exit 0/,
+    );
+
+    // tag-on-merge must stay push-only.
+    expect(source).toContain(
+      "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
+    );
+  });
+
   it("migrates the smoke database before unit tests and preserves every check", () => {
     const source = workflow();
     const publishChecks = source.slice(

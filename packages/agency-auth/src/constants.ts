@@ -15,6 +15,8 @@ export const AGENCY_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
 export const AGENCY_LOGIN_PATH = "/login";
 export const AGENCY_INVITE_PATH = "/invite";
+export const AGENCY_FORGOT_PASSWORD_PATH = "/forgot-password";
+export const AGENCY_RESET_PASSWORD_PATH = "/reset-password";
 export const AGENCY_AUTH_CALLBACK_PATH = "/api/auth/agency/callback";
 export const AGENCY_AUTH_API_PREFIX = "/api/auth";
 export const HEALTHCHECK_PATH = "/healthz";
@@ -22,6 +24,8 @@ export const HEALTHCHECK_PATH = "/healthz";
 export const PUBLIC_AGENCY_PATHS = [
   AGENCY_LOGIN_PATH,
   AGENCY_INVITE_PATH,
+  AGENCY_FORGOT_PASSWORD_PATH,
+  AGENCY_RESET_PASSWORD_PATH,
   AGENCY_AUTH_API_PREFIX,
   HEALTHCHECK_PATH,
 ] as const;

@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE_NAME = "drts_session";
 const CSRF_COOKIE_NAME = "drts_csrf";
-const PUBLIC_PATHS = ["/login", "/api/auth"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth",
+  "/forgot-password",
+  "/reset-password",
+];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

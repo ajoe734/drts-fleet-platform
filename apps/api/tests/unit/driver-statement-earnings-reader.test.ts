@@ -100,6 +100,7 @@ async function fixture() {
     sandboxBillingTreatments: [],
   }));
   const repository = {
+    isEnabled: () => false,
     loadState,
     persistChanges: vi.fn(async () => {}),
   } as unknown as BillingSettlementRepository;
@@ -189,7 +190,7 @@ describe("actual driver bearer + driver earnings statement routes", () => {
       "listDriverOwnStatements",
     );
     expect(identity.scopes).toEqual(standardDriverScopes);
-    const response = f.controller.listDriverOwnStatements(
+    const response = await f.controller.listDriverOwnStatements(
       identity,
       undefined,
       "2026-10",
@@ -209,7 +210,11 @@ describe("actual driver bearer + driver earnings statement routes", () => {
       "getDriverOwnStatement",
     );
     expect(
-      f.controller.getDriverOwnStatement("own", identity, "detail-request"),
+      await f.controller.getDriverOwnStatement(
+        "own",
+        identity,
+        "detail-request",
+      ),
     ).toMatchObject({
       data: {
         statementId: "own",
@@ -234,21 +239,25 @@ describe("actual driver bearer + driver earnings statement routes", () => {
       "driver/profile/statements",
       "listDriverOwnStatements",
     );
-    expect(() =>
+    await expect(
       f.controller.listDriverStatements(
         identity,
         undefined,
         undefined,
         "drv-statement-002",
       ),
-    ).toThrow(expect.objectContaining({ code: "DRIVER_IDENTITY_MISMATCH" }));
-    expect(() => f.controller.getDriverOwnStatement("other", identity)).toThrow(
+    ).rejects.toThrow(
+      expect.objectContaining({ code: "DRIVER_IDENTITY_MISMATCH" }),
+    );
+    await expect(
+      f.controller.getDriverOwnStatement("other", identity),
+    ).rejects.toThrow(
       expect.objectContaining({ code: "DRIVER_IDENTITY_MISMATCH" }),
     );
     expect(
-      f.controller
-        .listDriverOwnStatements(identity)
-        .data.items.map((x) => x.statementId),
+      (await f.controller.listDriverOwnStatements(identity)).data.items.map(
+        (x) => x.statementId,
+      ),
     ).toEqual(["own", "prior"]);
   });
   it("does not grant ops a new all-statements route through driver read scope", async () => {
@@ -282,12 +291,12 @@ describe("actual driver bearer + driver earnings statement routes", () => {
       false,
     );
     expect(
-      f.controller
-        .listDriverStatements(ops, undefined, "2026-10")
-        .data.items.map((x) => x.statementId),
+      (
+        await f.controller.listDriverStatements(ops, undefined, "2026-10")
+      ).data.items.map((x) => x.statementId),
     ).toEqual(["own", "other"]);
     expect(
-      f.controller.getDriverStatement("other", ops).data.netAmount,
+      (await f.controller.getDriverStatement("other", ops)).data.netAmount,
     ).toEqual(money(97000));
   });
 });

@@ -4,15 +4,21 @@ import { Module } from "@nestjs/common";
 
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
 import { DatabaseModule } from "../../common/db";
+import { DatabaseService } from "../../common/db/database.service";
 import { IdempotencyModule } from "../../common/idempotency";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { FleetPartnerController } from "./fleet-partner.controller";
 import { FleetStatementDecisionRepository } from "./fleet-statement-decision.repository";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
+import {
+  FLEET_INVITATION_MAIL_DELIVERY,
+  FleetInvitationDeliveryService,
+} from "./fleet-invitation-delivery.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { IdentityModule } from "../identity/identity.module";
@@ -57,6 +63,13 @@ import { SupplySubmissionService } from "./supply-submission.service";
     SupplyReviewService,
     SupplyReadinessService,
     SupplyDocumentService,
+    FleetInvitationDeliveryService,
+    {
+      provide: FLEET_INVITATION_MAIL_DELIVERY,
+      inject: [DatabaseService],
+      useFactory: (database: DatabaseService) =>
+        createNotificationDeliveryServiceFromEnv(process.env, database),
+    },
   ],
   exports: [
     FleetPartnerService,

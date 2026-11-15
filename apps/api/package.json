@@ -6,6 +6,7 @@
   "scripts": {
     "prebuild": "pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build",
     "build": "tsc -p tsconfig.json",
+    "postbuild": "node -e \"require('node:fs').cpSync('src/common/auth/data','dist/common/auth/data',{recursive:true})\"",
     "dev": "node --watch -r ts-node/register src/main.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",

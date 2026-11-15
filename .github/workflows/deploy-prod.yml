@@ -105,6 +105,8 @@ jobs:
           ./operations/verification/check-map-provider-config.sh
       - name: Resolve API secret mounts
         id: registry
+        env:
+          PROD_PASSWORD_LOGIN_ENABLED: ${{ vars.PROD_PASSWORD_LOGIN_ENABLED }}
         run: |
           set -euo pipefail
           workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"
@@ -116,9 +118,49 @@ jobs:
           # the plan is emitted. No deploy uses the mutable latest reference.
           secret_args="WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
           echo "GOOGLE_REGISTRY_REFERENCE=$secret_args" >> "$GITHUB_ENV"
+
+          # Password login (Argon2id pepper + TOTP envelope-encryption key) is
+          # all-or-nothing (PWD-LOGIN-010, SA/SD portal-password-login-20261113
+          # §10), mirroring dev's Google OIDC gate: fails here, before any
+          # build/migrate/deploy job runs, when the two secrets are partially
+          # configured. Only check existence; never read either secret's
+          # value. The actual mount is resolved by rail.cjs/preflight.cjs's
+          # existing plan->freeze->deploy chain below, like every other
+          # service secret -- never a post-deploy :latest mount.
+          password_pepper_secret="${SECRET_PREFIX}-password-pepper"
+          totp_encryption_key_secret="${SECRET_PREFIX}-totp-encryption-key"
+          password_pepper_present=false
+          totp_encryption_key_present=false
+          gcloud secrets describe "$password_pepper_secret" --project "$PROJECT_ID" >/dev/null 2>&1 && password_pepper_present=true
+          gcloud secrets describe "$totp_encryption_key_secret" --project "$PROJECT_ID" >/dev/null 2>&1 && totp_encryption_key_present=true
+          if [[ "$password_pepper_present" != "$totp_encryption_key_present" ]]; then
+            echo "::error::Password login configuration is partial: ${password_pepper_secret} present=${password_pepper_present}, ${totp_encryption_key_secret} present=${totp_encryption_key_present}. Both or neither must exist."
+            exit 1
+          fi
+          password_login_secrets_present="$password_pepper_present"
+          # PASSWORD_LOGIN_ENABLED (SA/SD §10) is a separate global rollout
+          # input for staged deploys (backend support first, frontend entry
+          # later); it must never be inferred from secret presence, but
+          # turning it on before the backend secrets exist is an ordering
+          # mistake worth failing fast on.
+          password_login_rollout="${PROD_PASSWORD_LOGIN_ENABLED:-false}"
+          if [[ "$password_login_rollout" == "true" && "$password_login_secrets_present" != "true" ]]; then
+            echo "::error::PROD_PASSWORD_LOGIN_ENABLED=true requires ${password_pepper_secret} and ${totp_encryption_key_secret} to exist first."
+            exit 1
+          fi
+          echo "password_login_secrets_present=${password_login_secrets_present}" >> "$GITHUB_OUTPUT"
       - name: Validate public-entry policies and strict startup; freeze secret versions
         id: plan
-        run: node operations/verification/production-release-rail/preflight.cjs
+        env:
+          PASSWORD_LOGIN_SECRETS_PRESENT: ${{ steps.registry.outputs.password_login_secrets_present }}
+        run: |
+          set -euo pipefail
+          MERGED_PROD_VARIABLES_JSON="$(node -e '
+            const vars = JSON.parse(process.env.PROD_VARIABLES_JSON);
+            vars.PROD_PASSWORD_LOGIN_SECRETS_PRESENT = process.env.PASSWORD_LOGIN_SECRETS_PRESENT;
+            process.stdout.write(JSON.stringify(vars));
+          ')"
+          PROD_VARIABLES_JSON="$MERGED_PROD_VARIABLES_JSON" node operations/verification/production-release-rail/preflight.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: production-plan-${{ env.SOURCE_SHA }}

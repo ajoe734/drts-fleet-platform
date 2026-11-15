@@ -1,8 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  handlePartnerListSessions,
+  handlePartnerPasswordLogin,
+  handlePartnerPasswordResetConfirm,
+  handlePartnerPasswordResetRequest,
+  handlePartnerRevokeSession,
+  handlePartnerTotpConfirm,
+  handlePartnerTotpEnroll,
+  type FleetCredentialConfig,
+} from "../../../../lib/portal-credential-handlers";
+
 const SESSION_COOKIE_NAME = "drts_session";
 const CSRF_COOKIE_NAME = "drts_csrf";
+const CSRF_HEADER_NAME = "x-csrf-token";
 
 function isSecureEnvironment(req: NextRequest): boolean {
   return (
@@ -66,6 +78,34 @@ async function apiFetch(
   return fetch(url, { ...init, headers, cache: "no-store" });
 }
 
+function verifySameOrigin(request: NextRequest): boolean {
+  const targetOrigin = browserOrigin(request);
+  const originHeader = request.headers.get("origin")?.trim();
+  if (originHeader) {
+    return originHeader === targetOrigin;
+  }
+  const refererHeader = request.headers.get("referer")?.trim();
+  if (refererHeader) {
+    try {
+      return new URL(refererHeader).origin === targetOrigin;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function credentialConfig(): FleetCredentialConfig {
+  return {
+    sessionCookieName: SESSION_COOKIE_NAME,
+    csrfCookieName: CSRF_COOKIE_NAME,
+    csrfHeaderName: CSRF_HEADER_NAME,
+    apiFetch,
+    isSecureEnvironment,
+    verifySameOrigin,
+  };
+}
+
 function sanitizeReturnPath(rawReturnUrl: string, origin: string): string {
   if (typeof rawReturnUrl !== "string" || rawReturnUrl.length === 0) {
     return "/";
@@ -97,23 +137,63 @@ export async function GET(
   const action = auth[0] ?? "";
 
   if (action === "login") {
+    // entrySlug is never taken from the client's partner_id query parameter:
+    // this service's deployment configuration is the only authority over
+    // which fleet entry a login can resolve to. Letting a caller supply its
+    // own partner_id would let any unauthenticated subject probe for the
+    // existence of other fleet entrySlug values (a PARTNER_ENTRY_MISMATCH
+    // side channel), even though the identity-link check downstream would
+    // ultimately still deny an unbound subject.
+    const partnerId = process.env.DRTS_FLEET_PARTNER_ID?.trim() || "";
     const returnUrl = request.nextUrl.searchParams.get("redirect_uri") || "/";
-    const partnerId = request.nextUrl.searchParams.get("partner_id") || "";
     const callbackUrl = `${browserOrigin(request)}/api/auth/callback`;
+    // FLEET-ONB-008: a one-time Fleet staff invitation token (SA/SD §2/§9)
+    // resolves its own fleet entry server-side from the invitation record,
+    // so it never requires DRTS_FLEET_PARTNER_ID -- unlike the ordinary
+    // login path above, which is scoped to exactly this deployment's fleet.
+    const invitationToken = request.nextUrl.searchParams.get("token")?.trim();
 
-    const query = new URLSearchParams({ redirect_uri: callbackUrl });
-    if (partnerId) query.set("partner_id", partnerId);
-
-    const res = await apiFetch(`/api/auth/partner/login?${query}`);
+    let res: Response;
+    if (invitationToken) {
+      res = await apiFetch("/api/auth/partner/invitation-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invitationToken,
+          redirectUri: callbackUrl,
+          ...(partnerId ? { partnerId } : {}),
+        }),
+      });
+    } else {
+      if (!partnerId) {
+        return NextResponse.json(
+          {
+            error: "FLEET_SELECTOR_REQUIRED",
+            message:
+              "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID is required.",
+          },
+          { status: 503 },
+        );
+      }
+      const query = new URLSearchParams({
+        redirect_uri: callbackUrl,
+        partner_id: partnerId,
+      });
+      res = await apiFetch(`/api/auth/partner/login?${query}`);
+    }
     const data = await res.json();
 
     if (!res.ok || !data.data?.authorization_url) {
       return NextResponse.json(
         {
-          error: "AUTH_LOGIN_FAILED",
-          message: "Could not generate partner login URL",
+          error: data.error?.code || "AUTH_LOGIN_FAILED",
+          message:
+            data.error?.message ||
+            (invitationToken
+              ? "Could not generate invitation login URL"
+              : "Could not generate partner login URL"),
         },
-        { status: res.status },
+        { status: res.status && res.status >= 400 ? res.status : 500 },
       );
     }
 
@@ -238,6 +318,11 @@ export async function GET(
     return NextResponse.json(data, { status: sessionRes.status });
   }
 
+  // PWD-LOGIN-009: self-service session inventory (SA/SD §9).
+  if (action === "sessions") {
+    return handlePartnerListSessions(request, credentialConfig());
+  }
+
   return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 }
 
@@ -254,6 +339,100 @@ export async function POST(
     response.cookies.delete(CSRF_COOKIE_NAME);
     response.cookies.delete("drts_oidc_state");
     return response;
+  }
+
+  // PWD-LOGIN-009: sign out every session on this account (SA/SD §9 account
+  // security "sign out of all devices"), not just this browser's cookie.
+  if (action === "logout-all") {
+    const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+    if (token) {
+      try {
+        const revoked = await apiFetch("/api/auth/logout-all", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (!revoked.ok) throw new Error("Session revocation failed.");
+      } catch {
+        return NextResponse.json(
+          { error: "AUTH_LOGOUT_ALL_UNAVAILABLE" },
+          { status: 503 },
+        );
+      }
+    }
+    const response = NextResponse.json({ loggedOutAll: true });
+    response.cookies.delete(SESSION_COOKIE_NAME);
+    response.cookies.delete(CSRF_COOKIE_NAME);
+    response.cookies.delete("drts_oidc_state");
+    return response;
+  }
+
+  // PWD-LOGIN-009: password-login, password-reset and TOTP forwarding
+  // for the partner realm (SA/SD §4/§6/§7).
+  if (action === "password-login") {
+    return handlePartnerPasswordLogin(request, credentialConfig());
+  }
+  if (action === "password-reset" && auth[1] === "request") {
+    return handlePartnerPasswordResetRequest(request, credentialConfig());
+  }
+  if (action === "password-reset" && auth[1] === "confirm") {
+    return handlePartnerPasswordResetConfirm(request, credentialConfig());
+  }
+  if (action === "mfa" && auth[1] === "totp" && auth[2] === "enroll") {
+    return handlePartnerTotpEnroll(request, credentialConfig());
+  }
+  if (action === "mfa" && auth[1] === "totp" && auth[2] === "confirm") {
+    return handlePartnerTotpConfirm(request, credentialConfig());
+  }
+  if (action === "sessions" && auth[1] && auth[2] === "revoke") {
+    return handlePartnerRevokeSession(request, auth[1], credentialConfig());
+  }
+
+  // FLEET-ONB-008 "set a password" branch (SA/SD §5), mirrors the
+  // agency realm's agency/invitation/accept-with-password forward. This is
+  // pre-session: the one-time invitation token authorizes the action, so
+  // there is no CSRF/session cookie to check yet.
+  if (action === "invitation" && auth[1] === "accept-with-password") {
+    const body = await request.json().catch(() => null);
+    const invitationToken =
+      typeof body?.invitationToken === "string"
+        ? body.invitationToken.trim()
+        : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    if (!invitationToken || invitationToken.length > 512 || !password) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_INVALID",
+          message: "A valid invitation token and password are required.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const res = await apiFetch(
+        "/api/auth/partner/invitation/accept-with-password",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitationToken, password }),
+        },
+      );
+      const data = await res.json().catch(() => null);
+      return NextResponse.json(data ?? {}, { status: res.status || 502 });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream invitation service unavailable",
+        },
+        { status: 503 },
+      );
+    }
   }
 
   return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });

@@ -466,6 +466,11 @@ export class IncidentService implements OnModuleInit {
       }
     }
 
+    if (command.category !== undefined) {
+      this.assertValidCategory(command.category);
+      updated.category = command.category;
+    }
+
     if (command.escalationTarget !== undefined) {
       if (
         command.escalationTarget !== null &&
