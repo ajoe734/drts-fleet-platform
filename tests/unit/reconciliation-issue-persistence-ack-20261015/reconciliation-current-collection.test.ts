@@ -13,6 +13,7 @@ import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth
 class SqlBoundary {
   rows = new Map<string, ReconciliationIssueRecord>();
   writes: Array<{ sql: string; parameters: unknown[] }> = [];
+  locks = new Map<string, Promise<void>>();
   next:
     | {
         id: string | null;
@@ -36,6 +37,57 @@ class SqlBoundary {
     this.next = { id, entered, gate, reject };
     return { release, started };
   }
+  async connect() {
+    const held: Array<{
+      key: string;
+      current: Promise<void>;
+      release: () => void;
+    }> = [];
+    const unlockKey = (key: string) => {
+      const index = held.findIndex((entry) => entry.key === key);
+      if (index < 0) {
+        return;
+      }
+      const [entry] = held.splice(index, 1);
+      if (entry && this.locks.get(entry.key) === entry.current) {
+        this.locks.delete(entry.key);
+      }
+      entry?.release();
+    };
+    return {
+      query: async (sql: string, parameters: unknown[] = []) => {
+        if (sql.includes("pg_advisory_lock")) {
+          const key = String(parameters[0] ?? "");
+          const previous = this.locks.get(key);
+          let release!: () => void;
+          const current = new Promise<void>((done) => {
+            release = done;
+          });
+          this.locks.set(key, current);
+          if (previous) {
+            await previous;
+          }
+          held.push({ key, current, release });
+          return { rows: [{ pg_advisory_lock: "" }], rowCount: 1 };
+        }
+        if (sql.includes("pg_advisory_unlock")) {
+          const key = String(parameters[0] ?? "");
+          unlockKey(key);
+          return { rows: [{ pg_advisory_unlock: true }], rowCount: 1 };
+        }
+        return this.query(sql, parameters);
+      },
+      release: () => {
+        while (held.length > 0) {
+          const entry = held.pop()!;
+          if (this.locks.get(entry.key) === entry.current) {
+            this.locks.delete(entry.key);
+          }
+          entry.release();
+        }
+      },
+    };
+  }
   async query(sql: string, parameters: unknown[] = []) {
     if (sql.includes("INSERT INTO billing.phase1_reconciliation_issues")) {
       this.writes.push({ sql, parameters: structuredClone(parameters) });
@@ -55,12 +107,40 @@ class SqlBoundary {
       this.rows.set(issue.issueId, structuredClone(issue));
       return { rows: [], rowCount: 1 };
     }
-    if (sql.includes("FROM billing.phase1_reconciliation_issues"))
+    if (sql.includes("FROM billing.phase1_reconciliation_issues")) {
+      if (sql.includes("WHERE issue_id = $1")) {
+        const record = this.rows.get(String(parameters[0] ?? ""));
+        return {
+          rows: record ? [{ record: structuredClone(record) }] : [],
+          rowCount: record ? 1 : 0,
+        };
+      }
+      if (sql.includes("mirrorOrderId")) {
+        const mirrorOrderId = String(parameters[0] ?? "");
+        const reconciliationJobId = String(parameters[1] ?? "");
+        const match = [...this.rows.values()]
+          .filter(
+            (record) =>
+              record.source === "forwarder_auto" &&
+              (record.mirrorOrderId === mirrorOrderId ||
+                record.linkedReconciliationJobId === reconciliationJobId),
+          )
+          .sort(
+            (left, right) =>
+              right.updatedAt.localeCompare(left.updatedAt) ||
+              left.issueId.localeCompare(right.issueId),
+          )[0];
+        return {
+          rows: match ? [{ record: structuredClone(match) }] : [],
+          rowCount: match ? 1 : 0,
+        };
+      }
       return {
         rows: [...this.rows.values()].map((record) => ({
           record: structuredClone(record),
         })),
       };
+    }
     return { rows: [] };
   }
 }
@@ -87,10 +167,15 @@ function fixture(withForwarder = false) {
     withForwarder ? forwarder : undefined,
   );
   const controller = new BillingSettlementController(service);
-  const read = (id: string) =>
-    controller
-      .listReconciliationIssues(undefined, undefined, undefined, identity)
-      .data.items.find((issue) => issue.issueId === id);
+  const read = async (id: string) =>
+    (
+      await controller.listReconciliationIssues(
+        undefined,
+        undefined,
+        undefined,
+        identity,
+      )
+    ).data.items.find((issue) => issue.issueId === id);
   return { sql, audit, repo, forwarder, service, controller, read };
 }
 const command = {
@@ -167,7 +252,7 @@ it.each(["create", "assign", "comment", "resolve", "reopen"])(
     const f = fixture();
     const id = kind === "create" ? null : await seed(f, kind);
     const old = id
-      ? structuredClone(f.read(id))
+      ? structuredClone(await f.read(id))
       : f.service.listReconciliationIssues();
     const durableOld = id
       ? structuredClone(f.sql.rows.get(id))
@@ -183,7 +268,9 @@ it.each(["create", "assign", "comment", "resolve", "reopen"])(
       (error) => ({ value: null, error: error.message }),
     );
     await hold.started;
-    expect(id ? f.read(id) : f.service.listReconciliationIssues()).toEqual(old);
+    expect(
+      id ? await f.read(id) : f.service.listReconciliationIssues(),
+    ).toEqual(old);
     expect(id ? f.sql.rows.get(id) : [...f.sql.rows.values()]).toEqual(
       durableOld,
     );
@@ -191,7 +278,9 @@ it.each(["create", "assign", "comment", "resolve", "reopen"])(
     hold.release();
     const rejected = await caught;
     expect(rejected.error).toBe("controlled actual SQL rejection");
-    expect(id ? f.read(id) : f.service.listReconciliationIssues()).toEqual(old);
+    expect(
+      id ? await f.read(id) : f.service.listReconciliationIssues(),
+    ).toEqual(old);
     expect(id ? f.sql.rows.get(id) : [...f.sql.rows.values()]).toEqual(
       durableOld,
     );
@@ -201,7 +290,7 @@ it.each(["create", "assign", "comment", "resolve", "reopen"])(
         ? f.controller.createReconciliationIssue({ ...command }, identity)
         : update(f, kind, id!))
     ).data;
-    expect(f.read(accepted.issueId)).toEqual(accepted);
+    expect(await f.read(accepted.issueId)).toEqual(accepted);
     expect(f.sql.rows.get(accepted.issueId)).toEqual(accepted);
     const fresh = new BillingSettlementService(
       new AuditNotificationService(),
@@ -213,11 +302,11 @@ it.each(["create", "assign", "comment", "resolve", "reopen"])(
         .listReconciliationIssues()
         .find((issue) => issue.issueId === accepted.issueId),
     ).toEqual(accepted);
-    const external = f.read(accepted.issueId)!;
+    const external = (await f.read(accepted.issueId))!;
     external.evidenceArtifactIds.push("external-mutation");
     if (external.comments[0])
       external.comments[0].artifactIds.push("external-nested-mutation");
-    expect(f.read(accepted.issueId)).toEqual(accepted);
+    expect(await f.read(accepted.issueId)).toEqual(accepted);
   },
 );
 it.each(["assign", "comment", "resolve", "reopen"])(
@@ -225,11 +314,11 @@ it.each(["assign", "comment", "resolve", "reopen"])(
   async (kind) => {
     const f = fixture(true);
     const id = await seed(f, kind);
-    const before = structuredClone(f.read(id));
+    const before = structuredClone(await f.read(id));
     const hold = f.sql.hold(id);
     const pending = update(f, kind, id);
     await hold.started;
-    expect(f.read(id)).toEqual(before);
+    expect(await f.read(id)).toEqual(before);
     const mirror = await f.forwarder.ingestExternalOrder({
       platformCode: "grab_taiwan",
       externalOrderId: `external-probe-${kind}`,
@@ -239,11 +328,13 @@ it.each(["assign", "comment", "resolve", "reopen"])(
       errorMessage: "original controlled external sync failure",
       retryable: true,
     });
-    const pendingList = f.controller.listReconciliationIssues(
-      undefined,
-      undefined,
-      undefined,
-      identity,
+    const pendingList = (
+      await f.controller.listReconciliationIssues(
+        undefined,
+        undefined,
+        undefined,
+        identity,
+      )
     ).data.items;
     expect(
       pendingList.some(
@@ -254,7 +345,7 @@ it.each(["assign", "comment", "resolve", "reopen"])(
     ).toBe(true);
     hold.release();
     const acknowledged = (await pending).data;
-    const after = f.read(id);
+    const after = await f.read(id);
     const durable = f.sql.rows.get(id);
     const fresh = new BillingSettlementService(
       new AuditNotificationService(),
@@ -282,10 +373,16 @@ it("a delayed derived issue SQL write uses the same issue queue and cannot arriv
     retryable: true,
   });
   const hold = f.sql.hold(null);
-  const derived = f.controller
-    .listReconciliationIssues(undefined, undefined, undefined, identity)
-    .data.items.find((issue) => issue.mirrorOrderId === mirror.mirrorOrderId)!;
+  const listPromise = f.controller.listReconciliationIssues(
+    undefined,
+    undefined,
+    undefined,
+    identity,
+  );
   await hold.started;
+  const derived = f.service
+    .listReconciliationIssues()
+    .find((issue) => issue.mirrorOrderId === mirror.mirrorOrderId)!;
   let commandSettled = false;
   const command = f.controller
     .assignReconciliationIssue(
@@ -304,12 +401,13 @@ it("a delayed derived issue SQL write uses the same issue queue and cannot arriv
   await new Promise<void>((done) => setImmediate(done));
   const settledBeforeDerivedAck = commandSettled;
   hold.release();
+  await listPromise;
   const acknowledged = (await command).data;
   await new Promise<void>((done) => setImmediate(done));
   expect(settledBeforeDerivedAck).toBe(false);
   expect(acknowledged.ownerId).toBe("explicit-assignee");
   expect(acknowledged.comments.at(-1)?.message).toBe("explicit command note");
-  expect(f.read(derived.issueId)).toEqual(acknowledged);
+  expect(await f.read(derived.issueId)).toEqual(acknowledged);
   expect(f.sql.rows.get(derived.issueId)).toEqual(acknowledged);
   const fresh = new BillingSettlementService(
     new AuditNotificationService(),

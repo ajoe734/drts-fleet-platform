@@ -7,12 +7,18 @@ export const TENANT_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8 hours
 export const TENANT_OIDC_STATE_MAX_AGE_SECONDS = 10 * 60; // 10 minutes
 
 export const TENANT_LOGIN_PATH = "/login";
+export const TENANT_INVITE_PATH = "/invite";
+export const TENANT_FORGOT_PASSWORD_PATH = "/forgot-password";
+export const TENANT_RESET_PASSWORD_PATH = "/reset-password";
 export const TENANT_AUTH_CALLBACK_PATH = "/api/auth/tenant/callback";
 export const TENANT_AUTH_API_PREFIX = "/api/auth";
 export const HEALTHCHECK_PATH = "/healthz";
 
 export const PUBLIC_AUTH_PATHS = [
   TENANT_LOGIN_PATH,
+  TENANT_INVITE_PATH,
+  TENANT_FORGOT_PASSWORD_PATH,
+  TENANT_RESET_PASSWORD_PATH,
   TENANT_AUTH_API_PREFIX,
   HEALTHCHECK_PATH,
 ] as const;

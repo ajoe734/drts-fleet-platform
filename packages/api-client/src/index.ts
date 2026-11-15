@@ -72,6 +72,10 @@ import type {
   CreateFleetPartnerCommand,
   ManageFleetHumanRoleCommand,
   FleetHumanRoleRecord,
+  InviteFleetStaffCommand,
+  FleetStaffInvitationView,
+  FleetStaffInvitationIssued,
+  FleetStaffMemberView,
   CreateFleetPartnerRevenueShareRuleCommand,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
@@ -4622,6 +4626,47 @@ export class ApiClient {
     return this.put<FleetHumanRoleRecord>(
       `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles`,
       { body: command },
+    );
+  }
+
+  /** FLEET-ONB-008: Fleet staff invitation issue/list/revoke, SA/SD §2/§8. */
+  async listFleetStaffInvitations(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetStaffInvitationView[]> {
+    return this.getList<FleetStaffInvitationView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  async inviteFleetStaff(
+    fleetPartnerId: string,
+    command: InviteFleetStaffCommand,
+  ): Promise<FleetStaffInvitationIssued> {
+    return this.post<FleetStaffInvitationIssued>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations`,
+      { body: command },
+    );
+  }
+
+  async revokeFleetStaffInvitation(
+    fleetPartnerId: string,
+    entrySlug: string,
+    invitationId: string,
+  ): Promise<FleetStaffInvitationView> {
+    return this.post<FleetStaffInvitationView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations/${encodeURIComponent(invitationId)}/revoke?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  /** FLEET-ONB-008: disables an active Fleet staff membership, SA/SD §8. */
+  async deactivateFleetStaffMember(
+    fleetPartnerId: string,
+    entrySlug: string,
+    membershipId: string,
+  ): Promise<FleetStaffMemberView> {
+    return this.post<FleetStaffMemberView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/members/${encodeURIComponent(membershipId)}/deactivate?entrySlug=${encodeURIComponent(entrySlug)}`,
     );
   }
 

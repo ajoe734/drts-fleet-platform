@@ -97,6 +97,9 @@ importers:
       next:
         specifier: ^16.4.1
         version: 16.4.2(@playwright/test@1.59.1)(@types/node@24.12.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      otplib:
+        specifier: ^13.6.0
+        version: 13.6.0
       pdfjs-dist:
         specifier: 6.3.289
         version: 6.3.289
