@@ -11,7 +11,7 @@ import {
 import {
   THROTTLER_LIMIT,
   THROTTLER_TTL,
-} from "@nestjs/throttler/dist/throttler.constants";
+} from "../../apps/api/node_modules/@nestjs/throttler/dist/throttler.constants";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
