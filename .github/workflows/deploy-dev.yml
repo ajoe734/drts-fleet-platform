@@ -1136,6 +1136,22 @@ jobs:
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
           node operations/verification/verify-google-map-provider-live.mjs
 
+      - name: Resolve Fleet invitation accept URL
+        id: fleet_invitation_url
+        run: |
+          set -euo pipefail
+          fleet_login_origin="${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"
+          if [[ -z "$fleet_login_origin" ]]; then
+            echo "::error::Fleet staff invitations require DEV_FLEET_PARTNER_PORTAL_ORIGIN before deploying the API."
+            exit 1
+          fi
+          # Use the same bare-HTTPS origin already consumed by Fleet login.
+          if [[ ! "$fleet_login_origin" =~ ^https://[^/[:space:]]+$ ]]; then
+            echo "::error::Fleet Partner Portal origin must be a bare HTTPS origin: $fleet_login_origin"
+            exit 1
+          fi
+          echo "base=${fleet_login_origin}/invite" >> "$GITHUB_OUTPUT"
+
       - name: Build API env vars
         id: api_env
         env:
@@ -1144,6 +1160,7 @@ jobs:
           REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: ${{ steps.api_secrets.outputs.regulatory_alert_recipient_secret_mounted }}
           AGENCY_PORTAL_SERVICE: ${{ needs.prepare.outputs.agency_portal_service }}
           AGENCY_PORTAL_ORIGIN: ${{ needs.prepare.outputs.agency_portal_origin }}
+          FLEET_INVITATION_ACCEPT_URL_BASE: ${{ steps.fleet_invitation_url.outputs.base }}
         run: |
           set -euo pipefail
 
@@ -1304,6 +1321,9 @@ jobs:
           agency_login_origin="${agency_portal_configured_origin:-$agency_portal_cloud_run_origin}"
           if [[ -n "$agency_login_origin" ]]; then
             env_vars="${env_vars}@AGENCY_INVITATION_ACCEPT_URL_BASE=${agency_login_origin}/invite"
+          fi
+          if [[ -n "${FLEET_INVITATION_ACCEPT_URL_BASE:-}" ]]; then
+            env_vars="${env_vars}@FLEET_INVITATION_ACCEPT_URL_BASE=${FLEET_INVITATION_ACCEPT_URL_BASE}"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
