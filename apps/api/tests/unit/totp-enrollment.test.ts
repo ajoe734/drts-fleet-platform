@@ -4,9 +4,12 @@ import { generate } from "otplib";
 
 import { TotpCredentialRepository } from "../../src/modules/auth/totp-credential.repository";
 import {
+  TotpCodeReplayedError,
   TotpEnrollmentNotFoundError,
   TotpInvalidCodeError,
+  TotpRecoveryCodeInvalidError,
   TotpSecretAlreadyConfirmedError,
+  TotpSecretNotConfirmedError,
   TotpService,
 } from "../../src/modules/auth/totp.service";
 
@@ -145,5 +148,77 @@ describe("TotpService enrollment", () => {
     await expect(
       svc.confirm(principalId, firstValidCode),
     ).rejects.toBeInstanceOf(TotpInvalidCodeError);
+  });
+});
+
+describe("TotpService regenerateRecoveryCodes", () => {
+  it("rejects a principal with no credential at all", async () => {
+    const svc = service();
+    await expect(
+      svc.regenerateRecoveryCodes(freshPrincipalId()),
+    ).rejects.toBeInstanceOf(TotpSecretNotConfirmedError);
+  });
+
+  it("rejects a still-pending (unconfirmed) credential", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const principalId = freshPrincipalId();
+    await svc.enroll(principalId, "tenant:user@example.com");
+
+    await expect(
+      svc.regenerateRecoveryCodes(principalId),
+    ).rejects.toBeInstanceOf(TotpSecretNotConfirmedError);
+  });
+
+  it("issues a fresh 10-code set for a confirmed credential and invalidates every old code", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const principalId = freshPrincipalId();
+    const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
+    const validCode = await generate({ secret: enrollment.secret });
+    const confirmation = await svc.confirm(principalId, validCode);
+
+    const regenerated = await svc.regenerateRecoveryCodes(principalId);
+
+    expect(regenerated.recoveryCodes).toHaveLength(10);
+    expect(new Set(regenerated.recoveryCodes).size).toBe(10);
+    expect(
+      regenerated.recoveryCodes.some((code) =>
+        confirmation.recoveryCodes.includes(code),
+      ),
+    ).toBe(false);
+
+    const [staleCode] = confirmation.recoveryCodes;
+    await expect(
+      svc.verifyRecoveryCode(principalId, staleCode),
+    ).rejects.toBeInstanceOf(TotpRecoveryCodeInvalidError);
+
+    const [freshCode] = regenerated.recoveryCodes;
+    await expect(
+      svc.verifyRecoveryCode(principalId, freshCode),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not alter the confirmed secret or last-used login step", async () => {
+    const repository = new TotpCredentialRepository();
+    const svc = new TotpService(repository);
+    const principalId = freshPrincipalId();
+    const enrollment = await svc.enroll(principalId, "tenant:user@example.com");
+    const validCode = await generate({ secret: enrollment.secret });
+    await svc.confirm(principalId, validCode);
+
+    const before = await repository.findCredential(principalId);
+    await svc.regenerateRecoveryCodes(principalId);
+    const after = await repository.findCredential(principalId);
+
+    expect(after!.secretCiphertext).toEqual(before!.secretCiphertext);
+    expect(after!.lastUsedStep).toEqual(before!.lastUsedStep);
+    expect(after!.confirmedAt).toEqual(before!.confirmedAt);
+
+    // The code already consumed by confirm() above must still be rejected
+    // as replayed, not newly accepted because of the regeneration call.
+    await expect(
+      svc.verifyLoginCode(principalId, validCode),
+    ).rejects.toBeInstanceOf(TotpCodeReplayedError);
   });
 });
