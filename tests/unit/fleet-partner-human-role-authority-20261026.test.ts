@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { StepUpProofService } from "../../apps/api/src/common/auth/step-up-proof.service";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { PartnerUserIdentityLinkRepository } from "../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
@@ -907,5 +908,64 @@ describe("manager producer through production repository SQL (transactional fake
         ?.status,
     ).toBe("disabled");
     expect(query).toHaveBeenCalledWith("ROLLBACK");
+  });
+});
+
+describe("FLEET-ONB-005 step-up gate on manageFleetHumanRole's route", () => {
+  it("denies PUT admin/fleet-partners/:id/human-roles without a fresh step-up proof, then admits it once one is issued", async () => {
+    const jwtService = new JwtAuthService();
+    const proofs = new StepUpProofService();
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      proofs,
+    );
+    const issued = await jwtService.issueSessionToken({
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId: "fleet-role-manager",
+      principalId: "fleet-role-manager",
+      realm: "platform",
+      partnerId: null,
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: ["foundation:write"],
+      amr: ["totp"],
+      acr: "aal2",
+    });
+    const path = "/api/admin/fleet-partners/fleet-test-001/human-roles";
+    const activate = (headers: Record<string, string>) =>
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "PUT",
+            url: path,
+            headers,
+          }),
+        }),
+        getHandler: () => FleetPartnerController.prototype.manageFleetHumanRole,
+        getClass: () => FleetPartnerController,
+      } as never);
+    await expect(
+      activate({ authorization: `Bearer ${issued.token}` }),
+    ).rejects.toMatchObject({ code: "STEP_UP_REQUIRED" });
+    const identity = jwtService.toRequestIdentity(
+      (await jwtService.verifyAccessToken(issued.token))!,
+    );
+    const proof = proofs.createProof(identity, {
+      actionId: "platform:users:role:update",
+    });
+    expect(proof.stepUpReference).toBeTruthy();
+    await expect(
+      activate({
+        authorization: `Bearer ${issued.token}`,
+        "x-drts-step-up-reference": proof.stepUpReference!,
+      }),
+    ).resolves.toBe(true);
   });
 });
