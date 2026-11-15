@@ -4,11 +4,20 @@ import type { ApiClient } from "@drts/api-client";
 import type {
   FleetHumanRoleRecord,
   ManageFleetHumanRoleCommand,
+  FleetStaffInvitationView,
+  FleetStaffInvitationIssued,
+  FleetStaffMemberView,
+  InviteFleetStaffCommand,
 } from "@drts/contracts";
 export type {
   FleetHumanRoleRecord,
   ManageFleetHumanRoleCommand,
+  FleetStaffInvitationView,
+  FleetStaffInvitationIssued,
+  FleetStaffMemberView,
+  InviteFleetStaffCommand,
 } from "@drts/contracts";
+export { FLEET_STAFF_ROLE_CODES } from "@drts/contracts";
 
 export type FleetPartnershipType =
   | "driver_recruitment"
@@ -392,6 +401,48 @@ export async function manageFleetHumanRole(
   command: ManageFleetHumanRoleCommand,
 ): Promise<FleetHumanRoleRecord> {
   return client.manageFleetHumanRole(fleetPartnerId, command);
+}
+
+export async function listFleetStaffInvitations(
+  client: ApiClient,
+  fleetPartnerId: string,
+  entrySlug: string,
+): Promise<FleetStaffInvitationView[]> {
+  return client.listFleetStaffInvitations(fleetPartnerId, entrySlug);
+}
+
+export async function inviteFleetStaff(
+  client: ApiClient,
+  fleetPartnerId: string,
+  command: InviteFleetStaffCommand,
+): Promise<FleetStaffInvitationIssued> {
+  return client.inviteFleetStaff(fleetPartnerId, command);
+}
+
+export async function revokeFleetStaffInvitation(
+  client: ApiClient,
+  fleetPartnerId: string,
+  entrySlug: string,
+  invitationId: string,
+): Promise<FleetStaffInvitationView> {
+  return client.revokeFleetStaffInvitation(
+    fleetPartnerId,
+    entrySlug,
+    invitationId,
+  );
+}
+
+export async function deactivateFleetStaffMember(
+  client: ApiClient,
+  fleetPartnerId: string,
+  entrySlug: string,
+  membershipId: string,
+): Promise<FleetStaffMemberView> {
+  return client.deactivateFleetStaffMember(
+    fleetPartnerId,
+    entrySlug,
+    membershipId,
+  );
 }
 
 export async function listFleetPartnerDrivers(

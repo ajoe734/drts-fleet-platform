@@ -653,9 +653,11 @@ const en: Dict = {
   "login.password.useAuthenticatorCode": "Authenticator app code",
   "login.password.useRecoveryCode": "Use a recovery code",
   "login.password.totpCodeLabel": "Authenticator code",
-  "login.password.totpCodeHint": "Enter the 6-digit code from your authenticator app.",
+  "login.password.totpCodeHint":
+    "Enter the 6-digit code from your authenticator app.",
   "login.password.recoveryCodeLabel": "Recovery code",
-  "login.password.recoveryCodeHint": "Enter one of the one-time recovery codes you saved during setup.",
+  "login.password.recoveryCodeHint":
+    "Enter one of the one-time recovery codes you saved during setup.",
   "login.password.busy": "Signing in...",
   "login.password.genericError":
     "The email or password is incorrect, or the account is not available. If your account uses two-factor authentication, enter your code above and try again.",
@@ -666,7 +668,8 @@ const en: Dict = {
     "Use at least 15 characters, or at least 8 if two-factor authentication is enabled on this account.",
   "passwordSetup.save": "Save password",
   "passwordSetup.mismatch": "The two passwords you entered do not match.",
-  "passwordSetup.saved": "Your password has been saved. All existing sessions on this account have been signed out.",
+  "passwordSetup.saved":
+    "Your password has been saved. All existing sessions on this account have been signed out.",
   "passwordSetup.backToLogin": "Back to sign-in",
 
   "forgotPassword.title": "Forgot your password",
@@ -679,7 +682,8 @@ const en: Dict = {
   "resetPassword.title": "Reset your password",
   "resetPassword.description":
     "Choose a new password. Signing in again will require it; all other sessions on this account will be signed out.",
-  "resetPassword.invalidLink": "This reset link is missing a token. Request a new one from the forgot-password page.",
+  "resetPassword.invalidLink":
+    "This reset link is missing a token. Request a new one from the forgot-password page.",
 
   // ── TOTP two-factor setup (PWD-LOGIN-009) ──
   "totp.enrollTitle": "Set up two-factor authentication",
@@ -690,7 +694,8 @@ const en: Dict = {
   "totp.manualSecretHint":
     "If you cannot scan a code, enter this key manually as a text/time-based (TOTP) account in your authenticator app.",
   "totp.otpauthUriLabel": "Setup link",
-  "totp.otpauthUriHint": "Some authenticator apps can add this account directly if you open or paste this link on the same device.",
+  "totp.otpauthUriHint":
+    "Some authenticator apps can add this account directly if you open or paste this link on the same device.",
   "totp.confirmCodeLabel": "Enter the 6-digit code from your app",
   "totp.confirm": "Confirm and enable",
   "totp.recoveryCodesTitle": "Save your recovery codes",
@@ -698,7 +703,8 @@ const en: Dict = {
     "These one-time recovery codes are shown only once. Save them somewhere safe; each can be used once if you lose access to your authenticator app.",
   "totp.copy": "Copy codes",
   "totp.copied": "Codes copied to clipboard.",
-  "totp.copyFailed": "Could not copy automatically. Please select and copy the codes manually.",
+  "totp.copyFailed":
+    "Could not copy automatically. Please select and copy the codes manually.",
   "totp.download": "Download codes",
   "totp.dismiss": "I have saved these codes",
 
@@ -719,6 +725,15 @@ const en: Dict = {
   "accountSecurity.revokeSession": "Sign out this device",
   "accountSecurity.revokeAllSessions": "Sign out of all devices",
   "accountSecurity.sessionRevoked": "That device has been signed out.",
+
+  // ── Fleet staff invitation acceptance (FLEET-ONB-008) ──
+  "invite.title": "Accept Fleet Staff Invitation",
+  "invite.description":
+    "Your fleet invited you to the Fleet Partner Portal. Bind your Google account, or set a password below.",
+  "invite.cta": "Accept invitation with Google",
+  "invite.invalidLink":
+    "This invitation link is invalid or missing. Please check with your fleet administrator.",
+  "invite.passwordSectionTitle": "Or set a password",
 };
 
 const zh: Dict = {
@@ -1307,36 +1322,45 @@ const zh: Dict = {
   "login.password.totpCodeLabel": "驗證器驗證碼",
   "login.password.totpCodeHint": "請輸入驗證器 App 顯示的 6 位數驗證碼。",
   "login.password.recoveryCodeLabel": "復原碼",
-  "login.password.recoveryCodeHint": "請輸入您設定時保存的其中一組一次性復原碼。",
+  "login.password.recoveryCodeHint":
+    "請輸入您設定時保存的其中一組一次性復原碼。",
   "login.password.busy": "登入中…",
   "login.password.genericError":
     "電子郵件或密碼不正確，或此帳號目前無法使用。若此帳號已啟用兩步驟驗證，請在上方輸入驗證碼後再試一次。",
 
   "passwordSetup.newPasswordLabel": "新密碼",
   "passwordSetup.confirmPasswordLabel": "確認新密碼",
-  "passwordSetup.passwordHint": "至少 15 個字元；若此帳號已啟用兩步驟驗證，則至少 8 個字元即可。",
+  "passwordSetup.passwordHint":
+    "至少 15 個字元；若此帳號已啟用兩步驟驗證，則至少 8 個字元即可。",
   "passwordSetup.save": "儲存密碼",
   "passwordSetup.mismatch": "您輸入的兩次密碼不一致。",
   "passwordSetup.saved": "密碼已儲存。此帳號所有既有登入 session 均已登出。",
   "passwordSetup.backToLogin": "回到登入頁",
 
   "forgotPassword.title": "忘記密碼",
-  "forgotPassword.description": "請輸入您帳號的電子郵件。若該帳號已設定密碼，我們會寄送重設連結。",
+  "forgotPassword.description":
+    "請輸入您帳號的電子郵件。若該帳號已設定密碼，我們會寄送重設連結。",
   "forgotPassword.requestReset": "寄送重設連結",
-  "forgotPassword.accepted": "若該電子郵件對應的帳號已設定密碼，重設連結已寄出，請查看您的收件匣。",
+  "forgotPassword.accepted":
+    "若該電子郵件對應的帳號已設定密碼，重設連結已寄出，請查看您的收件匣。",
 
   "resetPassword.title": "重設密碼",
-  "resetPassword.description": "請設定新密碼。重設後需以新密碼重新登入；此帳號其他所有 session 將被登出。",
-  "resetPassword.invalidLink": "此重設連結缺少驗證用的 token，請從忘記密碼頁重新申請。",
+  "resetPassword.description":
+    "請設定新密碼。重設後需以新密碼重新登入；此帳號其他所有 session 將被登出。",
+  "resetPassword.invalidLink":
+    "此重設連結缺少驗證用的 token，請從忘記密碼頁重新申請。",
 
   // ── TOTP two-factor setup (PWD-LOGIN-009) ──
   "totp.enrollTitle": "設定兩步驟驗證",
-  "totp.enrollDescription": "加入驗證器 App（例如 Google Authenticator 或 Authy），為登入加上一道額外驗證。",
+  "totp.enrollDescription":
+    "加入驗證器 App（例如 Google Authenticator 或 Authy），為登入加上一道額外驗證。",
   "totp.start": "開始設定",
   "totp.manualSecretLabel": "手動設定金鑰",
-  "totp.manualSecretHint": "若無法掃描，可在驗證器 App 中以文字／時間制（TOTP）帳號手動輸入此金鑰。",
+  "totp.manualSecretHint":
+    "若無法掃描，可在驗證器 App 中以文字／時間制（TOTP）帳號手動輸入此金鑰。",
   "totp.otpauthUriLabel": "設定連結",
-  "totp.otpauthUriHint": "部分驗證器 App 若在同一裝置開啟或貼上此連結，可直接新增此帳號。",
+  "totp.otpauthUriHint":
+    "部分驗證器 App 若在同一裝置開啟或貼上此連結，可直接新增此帳號。",
   "totp.confirmCodeLabel": "請輸入 App 顯示的 6 位數驗證碼",
   "totp.confirm": "確認並啟用",
   "totp.recoveryCodesTitle": "請保存您的復原碼",
@@ -1353,7 +1377,8 @@ const zh: Dict = {
   "accountSecurity.totpSectionTitle": "兩步驟驗證",
   "accountSecurity.totpCta": "設定兩步驟驗證",
   "accountSecurity.passwordSectionTitle": "密碼",
-  "accountSecurity.passwordSectionBody": "若要變更密碼，請至忘記密碼頁申請以電子郵件寄送重設連結。",
+  "accountSecurity.passwordSectionBody":
+    "若要變更密碼，請至忘記密碼頁申請以電子郵件寄送重設連結。",
   "accountSecurity.passwordCta": "申請密碼重設信",
   "accountSecurity.sessionsTitle": "已登入裝置",
   "accountSecurity.sessionsEmpty": "目前沒有找到任何有效 session。",
@@ -1364,6 +1389,14 @@ const zh: Dict = {
   "accountSecurity.revokeSession": "登出此裝置",
   "accountSecurity.revokeAllSessions": "登出所有裝置",
   "accountSecurity.sessionRevoked": "該裝置已登出。",
+
+  // ── 車行人員接受邀請（FLEET-ONB-008） ──
+  "invite.title": "接受車行人員邀請",
+  "invite.description":
+    "您的車行邀請您加入車行夥伴入口。您可以綁定 Google 帳號，或於下方設定密碼。",
+  "invite.cta": "以 Google 帳號接受邀請",
+  "invite.invalidLink": "邀請連結無效或缺少參數，請向車行管理者確認。",
+  "invite.passwordSectionTitle": "或設定密碼",
 };
 
 export const translations: Record<Locale, Dict> = { en, zh };
