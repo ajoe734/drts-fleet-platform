@@ -1456,8 +1456,12 @@ export class OidcPkceService {
       | undefined,
     message: string,
   ): never {
+    // Every call site is inside issueVerifiedFleetSession, which only runs
+    // for the Fleet staff invitation Google-bind branch (see its docstring),
+    // so every denial here is an invitation-acceptance state transition, not
+    // a generic partner OIDC session failure.
     this.recordSecurityEvent({
-      eventType: "partner_oidc_session.denied",
+      eventType: "fleet_staff_invitation.denied",
       outcome: "denied",
       realm: "partner",
       partnerId: entrySlug,
@@ -1567,7 +1571,7 @@ export class OidcPkceService {
       );
     }
     this.recordSecurityEvent({
-      eventType: "partner_oidc_invitation.bound",
+      eventType: "fleet_staff_invitation.accepted",
       outcome: "success",
       realm: "partner",
       partnerId: matchedEntry.entrySlug,
