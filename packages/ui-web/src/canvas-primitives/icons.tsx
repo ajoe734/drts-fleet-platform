@@ -58,6 +58,7 @@ export const CANVAS_ICONS = {
   car: "M3 17h18M5 17l2-7h10l2 7M7 17v2H5v-2M19 17v2h-2v-2",
   phone: "M3 5c0 9 7 16 16 16v-4l-4-2-2 2a12 12 0 01-6-6l2-2-2-4z",
   clock: "M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  refresh: "M20 11a8 8 0 00-14.9-4M4 4v4h4M4 13a8 8 0 0014.9 4M20 20v-4h-4",
 } as const;
 
 export type CanvasIconName = keyof typeof CANVAS_ICONS;
