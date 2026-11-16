@@ -731,8 +731,106 @@ export function buildEnterpriseBookingCommand(
 export function buildEnterpriseBookingUpdateCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
-  options?: { validateTime?: boolean },
+  options?: { validateTime?: boolean; originalBooking?: BookingRecord },
 ): UpdateTenantBookingCommand {
+  if (options?.originalBooking) {
+    const original = options.originalBooking;
+    const previous = createEnterpriseBookingDraftFromRecord(original);
+    const update: UpdateTenantBookingCommand = {};
+    // This editor has no service/program selector. In particular, its create
+    // defaults must never turn an existing Partner booking into enterprise.
+    for (const endpoint of ["pickup", "dropoff"] as const) {
+      const id = endpoint === "pickup" ? "pickupAddressId" : "dropoffAddressId";
+      const textChanged = draft[endpoint].trim() !== previous[endpoint].trim();
+      if (textChanged || draft[id] !== previous[id]) {
+        update[endpoint] = {
+          address: draft[endpoint],
+          addressName: inferAddressName(draft[endpoint]),
+        };
+        // The real form clears IDs on text edits. Keep the same semantics if
+        // an existing review URL still carries the previous master ID.
+        update[id] =
+          textChanged && draft[id] === previous[id]
+            ? null
+            : (draft[id] ?? null);
+      }
+    }
+    if (
+      draft.reservationDate !== previous.reservationDate ||
+      draft.reservationTime !== previous.reservationTime
+    ) {
+      const duration =
+        Date.parse(original.reservationWindowEnd) -
+        Date.parse(original.reservationWindowStart);
+      if (options.validateTime) {
+        const validation = validateReservationWindow(
+          draft.reservationDate,
+          draft.reservationTime,
+          now,
+        );
+        if (!validation.isValid)
+          throw new Error(
+            validation.errorMessage ?? "Reservation time is invalid.",
+          );
+      }
+      update.reservationWindowStart = getReservationStart(
+        draft.reservationDate,
+        draft.reservationTime,
+        now,
+      ).toISOString();
+      update.reservationWindowEnd = new Date(
+        Date.parse(update.reservationWindowStart) + duration,
+      ).toISOString();
+    }
+    const passengerName =
+      draft.passengerMode === "self"
+        ? draft.bookedBy.trim()
+        : draft.passenger.trim();
+    if (
+      passengerName !== original.passenger.name ||
+      draft.passengerId !== previous.passengerId
+    ) {
+      update.passengerId = draft.passengerId ?? null;
+      update.passenger = {
+        name: passengerName,
+        phone: original.passenger.phone,
+      };
+    }
+    if (draft.bookedBy.trim() !== previous.bookedBy.trim()) {
+      update.bookedBy = {
+        name: draft.bookedBy.trim(),
+        email: original.bookedBy?.email ?? "enterprise-dispatch-web@drts.local",
+      };
+    }
+    if (
+      draft.onsiteContactPhone.trim() !== previous.onsiteContactPhone.trim()
+    ) {
+      update.onsiteContact = {
+        name: original.onsiteContact?.name ?? original.passenger.name,
+        phone: draft.onsiteContactPhone.trim(),
+      };
+    }
+    if (draft.costCenterCode.trim() !== previous.costCenterCode.trim())
+      update.costCenter = draft.costCenterCode.trim() || null;
+    if (draft.vehicle !== previous.vehicle)
+      update.vehiclePreference = draft.vehicle;
+    if (draft.airportDirection !== previous.airportDirection)
+      update.direction = draft.airportDirection;
+    if (draft.flight.trim() !== previous.flight.trim())
+      update.flightNo = draft.flight.trim() || null;
+    if (draft.terminal.trim() !== previous.terminal.trim())
+      update.terminal = draft.terminal.trim() || null;
+    if (draft.luggageCount.trim() !== previous.luggageCount.trim()) {
+      const luggageCount = Number.parseInt(draft.luggageCount, 10);
+      update.luggageCount = Number.isNaN(luggageCount) ? null : luggageCount;
+    }
+    const notes = formatBookingNotesWithPlacard(
+      draft.notes,
+      isCustomPlacard(draft) ? draft.placard?.trim() : undefined,
+    );
+    if ((notes ?? "") !== (original.notes ?? "")) update.notes = notes ?? null;
+    return update;
+  }
   const command = buildEnterpriseBookingCommand(draft, now, {
     validateTime: options?.validateTime ?? false,
   });
@@ -802,11 +900,13 @@ function inferAddressName(address: string) {
  * (product decision 2026-11-13):
  * - `not_used`: the tenant has no active cost center. The field is hidden
  *   and not required; the API accepts a booking without one.
+ * - `optional`: editing an existing booking preserves an empty cost center;
+ *   the field remains available without imposing a creation requirement.
  * - `required`: the tenant has active cost centers (a single one is
  *   preselected), or the directory could not be read, so the form cannot
  *   tell and keeps asking.
  */
-export type EnterpriseCostCenterMode = "required" | "not_used";
+export type EnterpriseCostCenterMode = "required" | "not_used" | "optional";
 
 export function resolveCostCenterMode(
   activeCostCenterCount: number | null,

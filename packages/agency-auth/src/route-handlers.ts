@@ -18,6 +18,17 @@ import {
 } from "@drts/tenant-auth/session";
 
 import {
+  handleListSessions,
+  handlePasswordLogin,
+  handlePasswordResetConfirm,
+  handlePasswordResetRequest,
+  handleRevokeSession,
+  handleTotpConfirm,
+  handleTotpEnroll,
+  type PortalCredentialConfig,
+} from "@drts/tenant-auth/credential-handlers";
+
+import {
   AGENCY_AUTH_CALLBACK_PATH,
   AGENCY_CSRF_COOKIE_NAME,
   AGENCY_CSRF_HEADER_NAME,
@@ -26,6 +37,27 @@ import {
   AGENCY_SESSION_COOKIE_NAME,
 } from "./constants";
 import { verifyAgencySession } from "./verified-agency-session.server";
+
+function agencyCredentialConfig(): PortalCredentialConfig {
+  return {
+    realm: "agency",
+    sessionCookieName: AGENCY_SESSION_COOKIE_NAME,
+    csrfCookieName: AGENCY_CSRF_COOKIE_NAME,
+    csrfHeaderName: AGENCY_CSRF_HEADER_NAME,
+    apiBaseUrl: resolveApiUrl(),
+    fetchImpl: agencyAuthFetch,
+    onPasswordLoginSuccess: (response, payload, isSecure) => {
+      const profile = encodeAgencyProfile(payload);
+      if (profile) {
+        response.cookies.set(
+          AGENCY_PROFILE_COOKIE_NAME,
+          profile,
+          getSessionCookieOptions(isSecure),
+        );
+      }
+    },
+  };
+}
 
 type AuthRouteContext = { params: Promise<{ auth: string[] }> };
 
@@ -360,6 +392,9 @@ async function getAuth(
   if (actionPath === "session") {
     return readSession(request);
   }
+  if (actionPath === "sessions") {
+    return handleListSessions(request, agencyCredentialConfig());
+  }
   return NextResponse.json(
     { error: "AUTH_ENDPOINT_NOT_FOUND" },
     { status: 404 },
@@ -369,6 +404,76 @@ async function getAuth(
 async function postAuth(request: NextRequest, context: AuthRouteContext) {
   const { auth = [] } = await context.params;
   const actionPath = auth.join("/");
+
+  // PWD-LOGIN-009: password-login, password-reset and TOTP forwarding
+  // (SA/SD §4/§6/§7), agency realm counterpart of the tenant BFF.
+  if (actionPath === "agency/password-login") {
+    return handlePasswordLogin(request, agencyCredentialConfig());
+  }
+  if (actionPath === "agency/password-reset/request") {
+    return handlePasswordResetRequest(request, agencyCredentialConfig());
+  }
+  if (actionPath === "agency/password-reset/confirm") {
+    return handlePasswordResetConfirm(request, agencyCredentialConfig());
+  }
+  if (actionPath === "agency/mfa/totp/enroll") {
+    return handleTotpEnroll(request, agencyCredentialConfig());
+  }
+  if (actionPath === "agency/mfa/totp/confirm") {
+    return handleTotpConfirm(request, agencyCredentialConfig());
+  }
+  const revokeMatch = actionPath.match(/^sessions\/([^/]+)\/revoke$/);
+  if (revokeMatch && revokeMatch[1]) {
+    return handleRevokeSession(request, revokeMatch[1], agencyCredentialConfig());
+  }
+
+  // PWD-LOGIN-004 "set a password" branch (SA/SD §5), agency realm
+  // counterpart of the tenant BFF's accept-with-password forward. Pre-
+  // session: the one-time invitation token authorizes the action, so there
+  // is no CSRF/session cookie to check yet.
+  if (actionPath === "agency/invitation/accept-with-password") {
+    const body = await request.json().catch(() => null);
+    const invitationToken =
+      typeof body?.invitationToken === "string"
+        ? body.invitationToken.trim()
+        : "";
+    const password =
+      typeof body?.password === "string" ? body.password : "";
+    if (!invitationToken || invitationToken.length > 512 || !password) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_INVALID",
+          message: "A valid invitation token and password are required.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const res = await agencyAuthFetch(
+        `${resolveApiUrl()}/api/agency/invitations/accept-with-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitationToken, password }),
+          cache: "no-store",
+        },
+      );
+      const data = await res.json().catch(() => null);
+      return NextResponse.json(data ?? {}, { status: res.status || 502 });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream invitation service unavailable",
+        },
+        { status: 503 },
+      );
+    }
+  }
+
   if (actionPath !== "logout" && actionPath !== "logout-all") {
     return NextResponse.json(
       { error: "AUTH_ENDPOINT_NOT_FOUND" },

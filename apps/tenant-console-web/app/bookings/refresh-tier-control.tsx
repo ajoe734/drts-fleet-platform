@@ -82,7 +82,7 @@ export function RefreshTierControl({
           whiteSpace: "nowrap",
         }}
       >
-        {`T5 / ${tier} · ${getFreshnessLabel(metadata, t)}`}
+        {getFreshnessLabel(metadata, t)}
       </span>
       <CanvasBtn
         theme={theme}

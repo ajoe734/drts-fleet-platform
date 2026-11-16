@@ -539,4 +539,63 @@ describe("mounted production forms and observers through local typed transport",
       mounted.unmount();
     },
   );
+
+  it.each([
+    [401, false],
+    [500, true],
+  ] as const)(
+    "mounted tenant banner when the notice read fails with HTTP %i shows an error: %s",
+    async (statusCode, showsError) => {
+      // The root layout mounts the banner on /login too, where the proxy
+      // middleware answers 401 AUTHENTICATION_REQUIRED.
+      const bannerPath =
+        "apps/tenant-console-web/components/platform-notice-banner.tsx";
+      const failure = Object.assign(
+        new Error(
+          `API error ${statusCode}: {"error":"AUTHENTICATION_REQUIRED"}`,
+        ),
+        { statusCode },
+      );
+      const client = {
+        getList: vi.fn(async () => {
+          throw failure;
+        }),
+        post: vi.fn(),
+      };
+      const load = sourceModuleLoader(
+        {
+          react: React,
+          "react/jsx-runtime": jsxRuntime,
+          "../lib/browser-api-client": { createBrowserApiClient: () => client },
+          "../lib/i18n": {
+            useTranslation: () => ({
+              locale: "en",
+              t: (key: string) =>
+                tenantTranslate(
+                  key as Parameters<typeof tenantTranslate>[0],
+                  "en",
+                ),
+            }),
+          },
+        },
+        [bannerPath],
+      );
+      const Banner = load<{ PlatformNoticeBanner: React.ComponentType }>(
+        resolve(bannerPath),
+      ).PlatformNoticeBanner;
+      render(<Banner />);
+      await waitFor(() => expect(client.getList).toHaveBeenCalled());
+      await act(async () => {
+        await client.getList.mock.results[0]!.value.catch(() => undefined);
+        await new Promise((settle) => setTimeout(settle, 0));
+      });
+      if (showsError) {
+        expect(screen.getByRole("alert").textContent).toContain(
+          `API error ${statusCode}`,
+        );
+      } else {
+        expect(screen.queryByRole("alert")).toBeNull();
+      }
+    },
+  );
 });

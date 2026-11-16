@@ -61,8 +61,8 @@ export default async function ReviewBookingPage({
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   let verifiedTenantId: string | undefined;
-  // Null when the directory cannot be read: the page then keeps requiring a
-  // cost center, as the new-booking form does.
+  // Creation still requires a cost center when its directory cannot be read.
+  // Existing-booking edits preserve their original optional value.
   let activeCostCenterCount: number | null = null;
   try {
     const cookieStore = await cookies();
@@ -81,13 +81,17 @@ export default async function ReviewBookingPage({
     // A failed cost-center read must not unset an already verified tenant.
     activeCostCenterCount = null;
   }
-  const costCenterMode = resolveCostCenterMode(activeCostCenterCount);
-  const costCenterUsed = costCenterMode === "required";
   const resolvedSearchParams = (await searchParams) ?? {};
   const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
     ? resolvedSearchParams.bookingId[0]
     : resolvedSearchParams.bookingId;
+  const costCenterMode = bookingId
+    ? "optional"
+    : resolveCostCenterMode(activeCostCenterCount);
+  const costCenterUsed =
+    costCenterMode === "required" ||
+    (costCenterMode === "optional" && draft.costCenterCode.trim().length > 0);
 
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
@@ -199,7 +203,9 @@ export default async function ReviewBookingPage({
                   </div>
                 </div>
                 <EPill t={t} tone={costCenterFilled ? "success" : "warn"} dot>
-                  {tr(costCenterFilled ? "new.check.valid" : "new.check.pending")}
+                  {tr(
+                    costCenterFilled ? "new.check.valid" : "new.check.pending",
+                  )}
                 </EPill>
               </div>
             ) : null}
@@ -319,11 +325,7 @@ export default async function ReviewBookingPage({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard
-            t={t}
-            title={tr("detail.card.trip")}
-            sub={tr("card.sub.trip")}
-          >
+          <ECard t={t} title={tr("detail.card.trip")} sub={tr("card.sub.trip")}>
             <EntRoute
               t={t}
               from={draft.pickup}

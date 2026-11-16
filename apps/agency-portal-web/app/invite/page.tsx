@@ -1,6 +1,8 @@
 import { Card, CardBody, CardHeader } from "@drts/ui-web";
+import { PortalInvitationPasswordForm } from "@drts/ui-web/client";
 
 import { LanguageSwitch } from "@/components/language-switch";
+import { buildPortalAuthMessages } from "@/lib/portal-auth-messages";
 import { getServerLocale } from "@/lib/server-locale";
 import { firstParam } from "@/lib/session.server";
 import { t } from "@/lib/translations";
@@ -51,6 +53,17 @@ export default async function InvitePage({
               >
                 {t("invite.cta", undefined, locale)}
               </a>
+
+              <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #E4E7EC" }}>
+                <h2 style={{ fontSize: 15 }}>{t("invite.passwordSectionTitle", undefined, locale)}</h2>
+                <PortalInvitationPasswordForm
+                  messages={buildPortalAuthMessages(locale)}
+                  endpoint="/api/auth/agency/invitation/accept-with-password"
+                  loginEndpoint="/api/auth/agency/password-login"
+                  token={token}
+                  successHref="/"
+                />
+              </div>
             </>
           ) : (
             <p role="alert">{t("invite.invalidLink", undefined, locale)}</p>

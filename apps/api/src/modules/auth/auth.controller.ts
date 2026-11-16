@@ -13,6 +13,9 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AgencyBootstrapSession,
+  CanonicalIdentityMembershipRecord,
+  CanonicalIdentityPrincipalRecord,
   CanonicalIdentitySessionRecord,
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
@@ -43,10 +46,12 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import {
+  getAgencyRoleScopes,
   getTenantRoleScopes,
   AUTH_SCOPE_PRESETS,
   AUTH_TENANT_ROLE_SCOPE_PRESETS,
 } from "../../common/auth/auth.constants";
+import { getIamFleetRoleScopes } from "@drts/contracts";
 import {
   toPublicPartnerAuthError,
   toPublicTenantAuthError,
@@ -69,16 +74,30 @@ import {
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
   DEV_MFA_WAIVED_AMR,
+  hasTrustedMfa,
   isDevWorkforceMfaWaiverEnabled,
 } from "../../common/auth/trusted-mfa.policy";
-import { detectAuthEnvironment } from "../../config/auth-startup-config";
+import {
+  detectAuthEnvironment,
+  isOrdinaryLoginMfaRequired,
+} from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
+import { DatabaseService } from "../../common/db/database.service";
+import {
+  PasswordHashingService,
+  PasswordPepperNotConfiguredError,
+} from "../../common/auth/password-hashing.service";
+import { PASSWORD_MAX_LENGTH } from "../../common/auth/password-policy.service";
+import { AgencyDirectoryRepository } from "../agency-access/agency-directory.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
-import { IdentityRepository } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  type OidcBoundTenantUser,
+} from "../identity/identity.repository";
 import {
   maskSessionRecord,
   validateCsrfHeader,
@@ -98,6 +117,19 @@ import {
   isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
+import { createHash, randomUUID } from "node:crypto";
+import { PasswordPolicyService } from "../../common/auth/password-policy.service";
+import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
+import type { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import { TotpCredentialRepository } from "./totp-credential.repository";
+import {
+  TotpCodeReplayedError,
+  TotpInvalidCodeError,
+  TotpRecoveryCodeInvalidError,
+  TotpSecretNotConfirmedError,
+  TotpService,
+} from "./totp.service";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -159,6 +191,18 @@ function isStrictAuthEnvironment(): boolean {
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
+  // Lazily built, not DI-provided: this controller only has IdentityRepository
+  // injected, not a wired NotificationDeliveryService/TenantInvitationDeliveryService.
+  // Built the same way PasswordHashingService is used elsewhere in this
+  // codebase -- a direct `new`, reading live env on first use -- rather than
+  // widening the module's provider graph for one feature.
+  private passwordResetDelivery?: TenantInvitationDeliveryService;
+
+  // PasswordPolicyService.constructor synchronously reads the bundled
+  // common/breached password list from disk; one instance per controller
+  // lifetime instead of per request.
+  private readonly passwordPolicyService = new PasswordPolicyService();
+
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
@@ -182,6 +226,24 @@ export class AuthController {
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
     @Optional()
     private readonly idempotencyService?: IdempotencyService,
+    // Appended, and optional, for the same reason as `oidcPkceService` above
+    // (PWD-LOGIN-005). `DatabaseService` and `AgencyDirectoryRepository` are
+    // both `@Global()`-provided, so no `AuthModule` wiring is needed for
+    // Nest to supply them here.
+    @Optional()
+    private readonly databaseService?: DatabaseService,
+    @Optional()
+    private readonly agencyDirectoryRepository?: AgencyDirectoryRepository,
+    // Appended, and optional, for the same reason as `oidcPkceService` above
+    // (PWD-LOGIN-008). Both are always provided by `AuthModule`; `@Optional`
+    // only lets existing fixtures that construct this controller with the
+    // pre-PWD-LOGIN-008 positional argument list keep compiling, in which
+    // case `resolvePasswordLoginAmr` below falls back to the pre-TOTP
+    // password-only `amr`.
+    @Optional()
+    private readonly totpService?: TotpService,
+    @Optional()
+    private readonly totpCredentialRepository?: TotpCredentialRepository,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -204,6 +266,980 @@ export class AuthController {
       );
     }
     return this.idempotencyService;
+  }
+
+  /**
+   * PWD-LOGIN-005 (SA/SD §4,
+   * docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+   * account-not-found, wrong-password, not-yet-invited and disabled all
+   * deny through this single path so every response carries the exact same
+   * code/message/status. Only `security_events.password_login.denied`
+   * (reasonCode, never persisted to the client) distinguishes them.
+   *
+   * `partner` is supported for the `fleet_partner` business type (Fleet269,
+   * `FLEET-STAFF-ONBOARDING-20261114` SA/SD §3): role/scope resolution goes
+   * directly through `findMembershipsByPrincipalId` (same query shape as
+   * `manageFleetHumanRole`), never through `exchangePartnerCallbackSession`'s
+   * `partner_user_identity_links` lookup, since a password-login principal
+   * has no Google `sub` to link. No production invitation-acceptance branch
+   * writes a partner-realm `identity_password_credentials` row yet (that is
+   * `FLEET-ONB-004`, which depends on this task); until it ships, a
+   * partner-realm attempt simply finds no matching membership and falls
+   * through to the same uniform denial as every other realm.
+   */
+  private denyPasswordLogin(): never {
+    throw new ApiRequestError(
+      401,
+      "AUTHENTICATION_FAILED",
+      "The email or password is incorrect, or the account is not available.",
+    );
+  }
+
+  private recordPasswordLoginEvent(params: {
+    outcome: "success" | "denied";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    actorId?: string | null;
+    tokenId?: string | null;
+    tenantId?: string | null;
+    partnerId?: string | null;
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.actorId ?? null,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.actorId ?? null,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType:
+        params.outcome === "success"
+          ? "password_login.issued"
+          : "password_login.denied",
+      eventFamily: "auth",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "password_login",
+      targetId: null,
+      sessionId: null,
+      tokenId: params.tokenId ?? null,
+      authMethods: ["password"],
+      sourceIp: params.meta.sourceIp ?? null,
+      userAgent: params.meta.userAgent ?? null,
+      requestId: params.meta.requestId ?? null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  private requirePasswordHashingService(): PasswordHashingService {
+    try {
+      return new PasswordHashingService();
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password login is not available on this deployment.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * SA/SD §4 (docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md:116)
+   * requires `totp.verified`/`totp.denied`/`totp.recovery_used` alongside the
+   * `password_login.*` events; this is the single seam `resolvePasswordLoginAmr`
+   * routes all three realms' TOTP outcomes through.
+   */
+  private recordTotpEvent(params: {
+    outcome: "success" | "denied";
+    eventType: "totp.verified" | "totp.denied" | "totp.recovery_used";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    actorId: string;
+    authMethod: "totp" | "recovery_code";
+    tenantId?: string | null | undefined;
+    partnerId?: string | null | undefined;
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.actorId,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.actorId,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType: params.eventType,
+      eventFamily: "auth",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "totp",
+      targetId: null,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [params.authMethod],
+      sourceIp: params.meta.sourceIp ?? null,
+      userAgent: params.meta.userAgent ?? null,
+      requestId: params.meta.requestId ?? null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  /**
+   * PWD-LOGIN-008 (SA/SD §7/§8): the password-login session's `amr` must
+   * reflect what the server itself verified, never a client-asserted
+   * boolean. Returns `["pwd"]` when the principal has no *confirmed* TOTP
+   * credential (SA/SD §7: login still succeeds; the UI is responsible for
+   * forcing enrollment for roles that require it -- PWD-LOGIN-009's scope,
+   * not this one). Once a confirmed credential exists, a bypass of the
+   * second factor must be rejected outright (SA/SD §11 "MFA 繞過"): returns
+   * `null` if no code (or an invalid/replayed one) was presented, which the
+   * caller turns into the same uniform `denyPasswordLogin()` response used
+   * for every other password-login failure.
+   */
+  private async resolvePasswordLoginAmr(
+    principalId: string,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    context: {
+      realm: "tenant" | "agency" | "partner";
+      tenantId?: string | null | undefined;
+      partnerId?: string | null | undefined;
+      meta: { sourceIp?: string; userAgent?: string; requestId?: string };
+    },
+  ): Promise<string[] | null> {
+    if (!this.totpService || !this.totpCredentialRepository) {
+      return ["pwd"];
+    }
+    const credential =
+      await this.totpCredentialRepository.findCredential(principalId);
+    if (!credential?.confirmedAt) {
+      return ["pwd"];
+    }
+    try {
+      if (mfa.recoveryCode) {
+        await this.totpService.verifyRecoveryCode(
+          principalId,
+          mfa.recoveryCode,
+        );
+        this.recordTotpEvent({
+          outcome: "success",
+          eventType: "totp.recovery_used",
+          realm: context.realm,
+          actorId: principalId,
+          authMethod: "recovery_code",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
+      } else if (mfa.totpCode) {
+        await this.totpService.verifyLoginCode(principalId, mfa.totpCode);
+        this.recordTotpEvent({
+          outcome: "success",
+          eventType: "totp.verified",
+          realm: context.realm,
+          actorId: principalId,
+          authMethod: "totp",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
+      } else {
+        return null;
+      }
+    } catch (error) {
+      if (
+        error instanceof TotpSecretNotConfirmedError ||
+        error instanceof TotpInvalidCodeError ||
+        error instanceof TotpCodeReplayedError ||
+        error instanceof TotpRecoveryCodeInvalidError
+      ) {
+        this.recordTotpEvent({
+          outcome: "denied",
+          eventType: "totp.denied",
+          realm: context.realm,
+          reasonCode: this.totpDenialReasonCode(error),
+          actorId: principalId,
+          authMethod: mfa.recoveryCode ? "recovery_code" : "totp",
+          tenantId: context.tenantId,
+          partnerId: context.partnerId,
+          meta: context.meta,
+        });
+        return null;
+      }
+      throw error;
+    }
+    return ["pwd", "otp"];
+  }
+
+  private totpDenialReasonCode(error: unknown): string {
+    if (error instanceof TotpSecretNotConfirmedError) {
+      return "TOTP_NOT_CONFIRMED";
+    }
+    if (error instanceof TotpCodeReplayedError) {
+      return "TOTP_CODE_REPLAYED";
+    }
+    if (error instanceof TotpRecoveryCodeInvalidError) {
+      return "TOTP_RECOVERY_CODE_INVALID";
+    }
+    return "TOTP_INVALID_CODE";
+  }
+
+  private async issueTenantPasswordSession(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    existingUser: OidcBoundTenantUser,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession | null> {
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa, {
+      realm: "tenant",
+      tenantId: existingUser.tenantId,
+      meta,
+    });
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "tenant",
+        reasonCode: "MFA_REQUIRED",
+        actorId: existingUser.userId,
+        tenantId: existingUser.tenantId,
+        meta,
+      });
+      return null;
+    }
+
+    const scopes = [...(getTenantRoleScopes(existingUser.roleCode) ?? [])];
+    const tokenVersion = Date.parse(existingUser.updatedAt);
+    const authTimeIso = new Date().toISOString();
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: existingUser.userId,
+        principalId: principal.principalId,
+        membershipId: membership.membershipId,
+        subject: principal.principalId,
+        realm: "tenant",
+        tenantId: existingUser.tenantId,
+        roleFamilies: ["tenant"],
+        roles: [existingUser.roleCode],
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "tenant_admin",
+      actorId: existingUser.userId,
+      realm: "tenant",
+      tenantId: existingUser.tenantId,
+      roleFamilies: ["tenant"],
+      roles: [existingUser.roleCode],
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "tenant",
+      actorId: existingUser.userId,
+      tokenId: issued.tokenId,
+      tenantId: existingUser.tenantId,
+      meta,
+    });
+
+    const profile: TenantPortalProfile = {
+      id: existingUser.userId,
+      tenantId: existingUser.tenantId,
+      fullName: existingUser.displayName,
+      email: existingUser.email,
+      roleCode: existingUser.roleCode,
+    };
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      profile,
+      identity,
+    };
+  }
+
+  private async issueAgencyPasswordSession(
+    snapshot: NonNullable<
+      Awaited<
+        ReturnType<IdentityRepository["findAgencyMembershipForPrincipal"]>
+      >
+    >,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<AgencyBootstrapSession | null> {
+    const now = Date.now();
+    const binding = snapshot.roleBindings.find(
+      (candidate) =>
+        Boolean(getAgencyRoleScopes(candidate.roleCode)) &&
+        Boolean(candidate.validTo) &&
+        Date.parse(candidate.validFrom) <= now &&
+        now < Date.parse(candidate.validTo!),
+    );
+    if (!binding) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
+
+    const agency = await this.agencyDirectoryRepository?.findById(
+      snapshot.agencyId,
+    );
+    if (!agency || agency.status !== "active") {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "AGENCY_ACCESS_NOT_ACTIVE",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
+
+    const amr = await this.resolvePasswordLoginAmr(
+      snapshot.principal.principalId,
+      mfa,
+      { realm: "agency", meta },
+    );
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "agency",
+        reasonCode: "MFA_REQUIRED",
+        actorId: snapshot.principal.principalId,
+        meta,
+      });
+      return null;
+    }
+
+    const scopes = [...(getAgencyRoleScopes(binding.roleCode) ?? [])];
+    const tokenVersion = Math.max(
+      ...[
+        snapshot.principal.updatedAt,
+        snapshot.membership.updatedAt,
+        ...snapshot.roleBindings.map((candidate) => candidate.updatedAt),
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+    const authTimeIso = new Date().toISOString();
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "agency_user",
+        actorId: snapshot.principal.principalId,
+        principalId: snapshot.principal.principalId,
+        membershipId: snapshot.membership.membershipId,
+        subject: snapshot.principal.principalId,
+        realm: "agency",
+        tenantId: null,
+        agencyId: snapshot.agencyId,
+        roleFamilies: ["agency"],
+        roles: [binding.roleCode],
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", ensurePrincipal: false, tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "agency_user",
+      actorId: snapshot.principal.principalId,
+      principalId: snapshot.principal.principalId,
+      membershipId: snapshot.membership.membershipId,
+      realm: "agency",
+      tenantId: null,
+      agencyId: snapshot.agencyId,
+      roleFamilies: ["agency"],
+      roles: [binding.roleCode],
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "agency",
+      actorId: snapshot.principal.principalId,
+      tokenId: issued.tokenId,
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      identity,
+      agency: { agencyId: agency.agencyId, displayName: agency.displayName },
+      roleCode: binding.roleCode,
+      accessValidTo: binding.validTo!,
+    };
+  }
+
+  private async verifyPasswordAndLockout(
+    hasher: PasswordHashingService,
+    principal: CanonicalIdentityPrincipalRecord,
+    password: string,
+  ): Promise<"locked" | "no_credential" | "mismatch" | "ok"> {
+    if (principal.status !== "active") {
+      return "no_credential";
+    }
+    const credential =
+      await this.identityRepository!.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+    if (!credential) {
+      return "no_credential";
+    }
+    const state = await this.identityRepository!.getPasswordLoginLockoutState(
+      principal.principalId,
+    );
+    if (state.lockedUntil && Date.parse(state.lockedUntil) > Date.now()) {
+      return "locked";
+    }
+    const verification = await hasher.verify(password, {
+      hash: credential.passwordHash,
+      pepperVersion: credential.pepperVersion,
+    });
+    if (!verification.valid) {
+      await this.identityRepository!.recordPasswordLoginFailure(
+        principal.principalId,
+      );
+      return "mismatch";
+    }
+    await this.identityRepository!.recordPasswordLoginSuccess(
+      principal.principalId,
+    );
+    if (verification.needsRehash) {
+      const rehashed = await hasher.hash(password);
+      await this.identityRepository!.updatePasswordCredentialHash(
+        principal.principalId,
+        rehashed,
+      );
+    }
+    return "ok";
+  }
+
+  private async attemptTenantPasswordLogin(
+    email: string,
+    password: string,
+    tenantId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      const memberships =
+        await this.identityRepository!.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      const membership = memberships.find(
+        (candidate) =>
+          candidate.realm === "tenant" &&
+          (!tenantId || candidate.tenantId === tenantId),
+      );
+      if (!membership || !membership.tenantId) continue;
+      const userId = /^tenant_user_role:(.+):membership$/.exec(
+        membership.sourceRef ?? "",
+      )?.[1];
+      if (!userId) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "tenant",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          tenantId: membership.tenantId,
+          meta,
+        });
+        return null;
+      }
+
+      const existingUser =
+        await this.tenantPartnerService.findTenantUserForAuthentication(
+          membership.tenantId,
+          userId,
+        );
+      if (!existingUser || existingUser.status !== "active") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "tenant",
+          reasonCode: "TENANT_USER_NOT_ACTIVE",
+          actorId: principal.principalId,
+          tenantId: membership.tenantId,
+          meta,
+        });
+        return null;
+      }
+
+      return this.issueTenantPasswordSession(
+        principal,
+        membership,
+        existingUser,
+        mfa,
+        meta,
+      );
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "tenant",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  private async attemptAgencyPasswordLogin(
+    email: string,
+    password: string,
+    agencyId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<AgencyBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      const snapshot =
+        await this.identityRepository!.findAgencyMembershipForPrincipal(
+          principal.principalId,
+        );
+      if (!snapshot) continue;
+      if (agencyId && agencyId !== snapshot.agencyId) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "agency",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          meta,
+        });
+        return null;
+      }
+
+      // `issueAgencyPasswordSession` records its own denial event (with the
+      // specific reason: inactive access or failed MFA) before returning
+      // null; it must not be re-recorded here with a generic reason.
+      return this.issueAgencyPasswordSession(snapshot, mfa, meta);
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "agency",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  /** Fleet269 §3 (FLEET-STAFF-ONBOARDING-20261114 SA/SD): a partner-realm
+   * password login has no Google `sub`, so it cannot go through
+   * `exchangePartnerCallbackSession`'s `partner_user_identity_links` lookup.
+   * It resolves the fleet-staff membership directly, the same way
+   * `manageFleetHumanRole` does: `realm === "partner"` and
+   * `scopeRef === "fleet:" + entrySlug` on a membership whose `sourceRef`
+   * follows the `fleet_member:<entrySlug>:<principalId>` convention. */
+  private async attemptPartnerPasswordLogin(
+    email: string,
+    password: string,
+    partnerId: string | undefined,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<PartnerBootstrapSession | null> {
+    const hasher = this.requirePasswordHashingService();
+    const principals =
+      await this.identityRepository!.findPrincipalsByEmail(email);
+    for (const principal of principals) {
+      if (
+        principal.sourceRef !== `jwt_principal:partner:${principal.principalId}`
+      ) {
+        continue;
+      }
+      const memberships =
+        await this.identityRepository!.findMembershipsByPrincipalId(
+          principal.principalId,
+        );
+      const membership = memberships.find((candidate) => {
+        if (candidate.realm !== "partner") return false;
+        const entrySlug = /^fleet:(.+)$/.exec(candidate.scopeRef ?? "")?.[1];
+        if (!entrySlug) return false;
+        if (
+          candidate.sourceRef !==
+          `fleet_member:${entrySlug}:${principal.principalId}`
+        ) {
+          return false;
+        }
+        return (
+          !partnerId ||
+          entrySlug === partnerId ||
+          candidate.partnerId === partnerId
+        );
+      });
+      if (!membership) continue;
+
+      const verifyOutcome = await this.verifyPasswordAndLockout(
+        hasher,
+        principal,
+        password,
+      );
+      if (verifyOutcome !== "ok") {
+        this.recordPasswordLoginEvent({
+          outcome: "denied",
+          realm: "partner",
+          reasonCode: verifyOutcome.toUpperCase(),
+          actorId: principal.principalId,
+          partnerId: membership.partnerId,
+          meta,
+        });
+        return null;
+      }
+
+      // `issuePartnerPasswordSession` records its own denial event (with the
+      // specific reason: inactive access or failed MFA) before returning
+      // null; it must not be re-recorded here with a generic reason.
+      return this.issuePartnerPasswordSession(principal, membership, mfa, meta);
+    }
+
+    this.recordPasswordLoginEvent({
+      outcome: "denied",
+      realm: "partner",
+      reasonCode: "USER_NOT_FOUND",
+      meta,
+    });
+    return null;
+  }
+
+  /** Mirrors `exchangePartnerCallbackSession`'s fleet-staff session shape
+   * (same `actorType`/`realm`/`roleFamilies`, same single-active-role rule)
+   * but starting from an already-resolved membership instead of a
+   * `partner_user_identity_links` row. */
+  private async issuePartnerPasswordSession(
+    principal: CanonicalIdentityPrincipalRecord,
+    membership: CanonicalIdentityMembershipRecord,
+    mfa: { totpCode?: string; recoveryCode?: string },
+    meta: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<PartnerBootstrapSession | null> {
+    const denyPartnerAccessNotActive = () => {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "partner",
+        reasonCode: "PARTNER_ACCESS_NOT_ACTIVE",
+        actorId: principal.principalId,
+        partnerId: membership.partnerId,
+        meta,
+      });
+      return null;
+    };
+    if (membership.status !== "active") return denyPartnerAccessNotActive();
+    const entrySlug = /^fleet:(.+)$/.exec(membership.scopeRef)?.[1];
+    if (!entrySlug) return denyPartnerAccessNotActive();
+    const matchedEntry = this.tenantPartnerService
+      .listPartnerEntries(entrySlug)
+      .find(
+        (entry) =>
+          entry.entrySlug === entrySlug &&
+          entry.partnerId === membership.partnerId,
+      );
+    if (!matchedEntry) return denyPartnerAccessNotActive();
+
+    const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa, {
+      realm: "partner",
+      partnerId: matchedEntry.partnerId,
+      meta,
+    });
+    if (!amr) {
+      this.recordPasswordLoginEvent({
+        outcome: "denied",
+        realm: "partner",
+        reasonCode: "MFA_REQUIRED",
+        actorId: principal.principalId,
+        partnerId: matchedEntry.partnerId,
+        meta,
+      });
+      return null;
+    }
+
+    const now = Date.now();
+    const roleBindings =
+      await this.identityRepository!.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      );
+    const activeRoles = roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${entrySlug}:${principal.principalId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
+    const [role] = activeRoles;
+    if (!role || activeRoles.length !== 1) return denyPartnerAccessNotActive();
+    const scopes = [...getIamFleetRoleScopes(role.roleCode)!];
+    const roles = [role.roleCode];
+    const tokenVersion = Math.max(
+      ...[
+        principal.updatedAt,
+        membership.updatedAt,
+        role.updatedAt,
+        matchedEntry.updatedAt,
+      ].map((timestamp) => Date.parse(timestamp)),
+    );
+    const authTimeIso = new Date().toISOString();
+    const acr = "aal1";
+
+    const issued = await this.jwtAuthService.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "partner_user",
+        actorId: principal.principalId,
+        principalId: principal.principalId,
+        membershipId: membership.membershipId,
+        subject: principal.principalId,
+        realm: "partner",
+        tenantId: matchedEntry.tenantId ?? null,
+        partnerId: matchedEntry.partnerId,
+        partnerEntrySlug: matchedEntry.entrySlug,
+        roleFamilies: ["partner"],
+        roles,
+        scopes,
+        tokenVersion,
+        authTime: authTimeIso,
+        amr,
+        acr,
+        policyVersion: "v1",
+        requestId: meta.requestId ?? null,
+      },
+      { expiresIn: "8h", tokenVersion },
+    );
+
+    const identity: IdentityContext = {
+      authMode: "jwt_bearer",
+      actorType: "partner_user",
+      actorId: principal.principalId,
+      principalId: principal.principalId,
+      membershipId: membership.membershipId,
+      realm: "partner",
+      tenantId: matchedEntry.tenantId ?? null,
+      partnerId: matchedEntry.partnerId,
+      partnerEntrySlug: matchedEntry.entrySlug,
+      roleFamilies: ["partner"],
+      roles,
+      scopes,
+      sessionId: issued.sessionId,
+      tokenId: issued.tokenId,
+      tokenVersion,
+      authTime: issued.authTime,
+      amr,
+      acr,
+      policyVersion: issued.policyVersion,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPasswordLoginEvent({
+      outcome: "success",
+      realm: "partner",
+      actorId: principal.principalId,
+      tokenId: issued.tokenId,
+      partnerId: matchedEntry.partnerId,
+      meta,
+    });
+
+    return {
+      accessToken: issued.token,
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      partnerEntry: matchedEntry,
+      identity,
+    };
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-login")
+  async passwordLogin(
+    @Param("realm") realm: string,
+    @Body()
+    command: {
+      email?: string;
+      password?: string;
+      tenantId?: string;
+      agencyId?: string;
+      partnerId?: string;
+      totpCode?: string;
+      recoveryCode?: string;
+    },
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (realm !== "tenant" && realm !== "agency" && realm !== "partner") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Password login is not supported for realm '${realm}'.`,
+      );
+    }
+    if (
+      typeof command?.email !== "string" ||
+      !command.email.trim() ||
+      typeof command?.password !== "string" ||
+      !command.password ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Email and password are required.",
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+
+    const email = command.email.trim().toLowerCase();
+    const meta = this.buildMeta(forwardedFor, realIp, userAgent, requestId);
+    // Server-verified only (SA/SD §9): these are raw candidate codes that
+    // `resolvePasswordLoginAmr` cryptographically verifies before any `amr`
+    // is derived from them. No client-asserted boolean (e.g. `mfa: true`)
+    // is ever accepted here.
+    const MFA_CODE_MAX_LENGTH = 64;
+    const mfa: { totpCode?: string; recoveryCode?: string } = {};
+    if (
+      typeof command.totpCode === "string" &&
+      command.totpCode.trim() &&
+      command.totpCode.length <= MFA_CODE_MAX_LENGTH
+    ) {
+      mfa.totpCode = command.totpCode.trim();
+    }
+    if (
+      typeof command.recoveryCode === "string" &&
+      command.recoveryCode.trim() &&
+      command.recoveryCode.length <= MFA_CODE_MAX_LENGTH
+    ) {
+      mfa.recoveryCode = command.recoveryCode.trim();
+    }
+
+    const session =
+      realm === "tenant"
+        ? await this.attemptTenantPasswordLogin(
+            email,
+            command.password,
+            command.tenantId?.trim() || undefined,
+            mfa,
+            meta,
+          )
+        : realm === "agency"
+          ? await this.attemptAgencyPasswordLogin(
+              email,
+              command.password,
+              command.agencyId?.trim() || undefined,
+              mfa,
+              meta,
+            )
+          : await this.attemptPartnerPasswordLogin(
+              email,
+              command.password,
+              command.partnerId?.trim() || undefined,
+              mfa,
+              meta,
+            );
+
+    if (!session) {
+      this.denyPasswordLogin();
+    }
+    return toApiSuccessEnvelope(session, requestId);
   }
 
   @OpenRoute()
@@ -232,6 +1268,588 @@ export class AuthController {
       },
     );
     return toApiSuccessEnvelope(result, requestId);
+  }
+
+  private assertPasswordLoginRealm(
+    realm: string,
+  ): "tenant" | "agency" | "partner" {
+    if (realm !== "tenant" && realm !== "partner" && realm !== "agency") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Unsupported password-login realm '${realm}'. Only 'tenant', 'partner' and 'agency' are supported.`,
+      );
+    }
+    return realm;
+  }
+
+  /** Lazily built (see field doc comment): read live env on first use rather
+   * than at controller construction, so tests and dev fixtures that set
+   * notification env vars after construction still take effect. */
+  private resolvePasswordResetDelivery(): TenantInvitationDeliveryService {
+    if (!this.passwordResetDelivery) {
+      let notificationDeliveryService: NotificationDeliveryService | null;
+      try {
+        notificationDeliveryService = createNotificationDeliveryServiceFromEnv(
+          process.env,
+          this.identityRepository?.getDatabaseService(),
+        );
+      } catch {
+        notificationDeliveryService = null;
+      }
+      this.passwordResetDelivery = new TenantInvitationDeliveryService(
+        notificationDeliveryService ?? null,
+      );
+    }
+    return this.passwordResetDelivery;
+  }
+
+  /** The public response for password-reset/request must never depend on
+   * whether this succeeds, throws, or finds nothing (SA/SD §6, mirroring the
+   * unified-response rule in §4): every branch below is swallowed by the
+   * caller, never surfaced as a different status or body. */
+  private async dispatchPasswordResetEmail(
+    realm: "tenant" | "agency" | "partner",
+    email: string,
+  ): Promise<void> {
+    if (!this.identityRepository) return;
+    const match =
+      await this.identityRepository.findActivePrincipalAndMembershipForRealmByEmail(
+        email,
+        realm,
+      );
+    if (!match) return;
+    const credential =
+      await this.identityRepository.findPasswordCredentialByPrincipalId(
+        match.principal.principalId,
+      );
+    // No password credential (e.g. Google-only principal): nothing to reset,
+    // but the caller still returns the same 200 either way.
+    if (!credential) return;
+
+    const { rawToken, expiresAt } =
+      await this.identityRepository.createPasswordResetToken(
+        match.principal.principalId,
+      );
+    await this.resolvePasswordResetDelivery().sendPasswordReset({
+      dedupeKey: `${match.principal.principalId}:${randomUUID()}`,
+      realm,
+      tenantId: realm === "tenant" ? match.membership.tenantId : null,
+      recipientEmail: match.principal.email ?? email,
+      expiresAt,
+      rawToken,
+    });
+
+    this.securityEventsService?.recordEvent({
+      actorId: match.principal.principalId,
+      actorType: "system",
+      subjectId: match.principal.principalId,
+      realm,
+      tenantId: match.membership.tenantId,
+      partnerId: match.membership.partnerId,
+      eventType: "password_reset.requested",
+      eventFamily: "credential",
+      outcome: "success",
+      severity: "medium",
+      targetType: "principal",
+      targetId: match.principal.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: "self_service_password_reset_request",
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-reset/request")
+  async requestPasswordReset(
+    @Param("realm") realm: AuthRealm,
+    @Body() command: { email?: string } | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedRealm = this.assertPasswordLoginRealm(realm);
+    const email = command?.email?.trim();
+    if (email) {
+      try {
+        await this.dispatchPasswordResetEmail(resolvedRealm, email);
+      } catch (error) {
+        this.logger.warn(
+          `password-reset/request for realm '${resolvedRealm}' did not complete internally, but the public response is unaffected: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    // Always the same 200 body: this must never reveal whether the email
+    // matched an account, whether that account has a password set, or
+    // whether delivery actually succeeded (SA/SD §6).
+    return toApiSuccessEnvelope({ accepted: true }, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post(":realm/password-reset/confirm")
+  async confirmPasswordReset(
+    @Param("realm") realm: AuthRealm,
+    @Body() command: { token?: string; password?: string } | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedRealm = this.assertPasswordLoginRealm(realm);
+    const token = command?.token?.trim();
+    const password = command?.password;
+    if (!token || !password) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_RESET_INVALID",
+        "A reset token and new password are required.",
+      );
+    }
+    // PWD-LOGIN-007 (TOTP enrollment/confirmation) has not merged yet, so
+    // there is no confirmed-TOTP lookup available here; always applying the
+    // stricter single-factor minimum (SA/SD §3) is conservative -- it can
+    // only reject passwords the final MFA-aware policy would also accept
+    // under the shorter bound, never the reverse.
+    const policyResult = this.passwordPolicyService.evaluate(password, {
+      totpEnabled: false,
+    });
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Password reset is not available on this deployment.",
+      );
+    }
+
+    const tokenInvalidError = () =>
+      new ApiRequestError(
+        400,
+        "PASSWORD_RESET_TOKEN_INVALID",
+        "This password reset link is invalid or has expired.",
+      );
+
+    const consumed =
+      await this.identityRepository.consumePasswordResetToken(token);
+    if (!consumed) throw tokenInvalidError();
+
+    const principal = await this.identityRepository.findPrincipalById(
+      consumed.principalId,
+    );
+    // A token issued for a principal that is no longer active (e.g.
+    // suspended between request and confirm) must fail the same generic way
+    // as an unknown/expired token -- never a more specific error.
+    if (!principal || principal.status !== "active") throw tokenInvalidError();
+
+    const memberships =
+      await this.identityRepository.findMembershipsByPrincipalId(
+        principal.principalId,
+      );
+    const membership = memberships.find(
+      (candidate) =>
+        candidate.realm === resolvedRealm && candidate.status === "active",
+    );
+    if (!membership) throw tokenInvalidError();
+
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based login is not available on this deployment.",
+        );
+      }
+      throw error;
+    }
+
+    await this.identityRepository.setPasswordCredentialForPrincipal(
+      principal.principalId,
+      {
+        passwordHash: hashed.hash,
+        passwordAlgo: hashed.algo,
+        pepperVersion: hashed.pepperVersion,
+      },
+    );
+
+    const revokedCount =
+      await this.identityRepository.revokeAllSessionsForPrincipal(
+        principal.principalId,
+        "password_reset",
+        principal.principalId,
+      );
+
+    if (principal.email) {
+      try {
+        await this.resolvePasswordResetDelivery().sendPasswordResetCompletedNotice(
+          {
+            dedupeKey: `${principal.principalId}:${randomUUID()}`,
+            realm: resolvedRealm,
+            tenantId: resolvedRealm === "tenant" ? membership.tenantId : null,
+            recipientEmail: principal.email,
+          },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `password-reset/confirm completion notice did not send for principal ${principal.principalId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    this.securityEventsService?.recordEvent({
+      actorId: principal.principalId,
+      actorType: "system",
+      subjectId: principal.principalId,
+      realm: resolvedRealm,
+      tenantId: membership.tenantId,
+      partnerId: membership.partnerId,
+      eventType: "password_reset.completed",
+      eventFamily: "credential",
+      outcome: "success",
+      severity: "medium",
+      targetType: "principal",
+      targetId: principal.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: [],
+      sourceIp: null,
+      userAgent: null,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: "self_service_password_reset_confirm",
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: { revokedSessionCount: revokedCount },
+      maskedContext: null,
+    });
+
+    return toApiSuccessEnvelope(
+      { passwordReset: true, revokedSessionCount: revokedCount },
+      requestId,
+    );
+  }
+
+  // PWD-LOGIN-SESSION-ADD-PASSWORD-20261114 (SA/SD §1/§9/§12,
+  // docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md):
+  // a fresh, trusted-MFA session for a role that requires it, used both to
+  // gate a Google-only principal's first password (§1) and as the
+  // `currentPassword`-less fallback for an existing password's change (§9).
+  private static readonly ACCOUNT_SECURITY_FRESH_SESSION_MS = 15 * 60 * 1000;
+
+  private isFreshSessionAuthTime(
+    identity: BootstrapRequestIdentity,
+    windowMs: number,
+  ): boolean {
+    const authTimeMs = identity.authTime ? Date.parse(identity.authTime) : NaN;
+    return Number.isFinite(authTimeMs) && Date.now() - authTimeMs <= windowMs;
+  }
+
+  /** Mirrors the tenant_admin/tenant_ops_admin role-sensitivity
+   * `exchangeTenantCallbackSession` already enforces at OIDC login time
+   * (oidc-pkce.service.ts) plus the existing ordinary-login MFA switch
+   * (`isOrdinaryLoginMfaRequired`), rather than inventing a third MFA-role
+   * policy for this one route. */
+  private accountSecurityMfaRequired(
+    realm: "tenant" | "agency" | "partner",
+    roles: readonly string[],
+  ): boolean {
+    return (
+      isOrdinaryLoginMfaRequired() ||
+      (realm === "tenant" &&
+        roles.some((role) =>
+          ["tenant_admin", "tenant_ops_admin"].includes(role),
+        ))
+    );
+  }
+
+  /**
+   * SA/SD §1: adding a *first* password credential to a Google-only
+   * principal only needs fresh, trusted MFA when the session's role is one
+   * this deployment already requires MFA for; an ordinary role's plain
+   * active session (already asserted by the caller) is sufficient on its
+   * own, exactly as the existing session is already enough for every other
+   * action that role can take.
+   */
+  private hasQualifyingFreshMfaForRoleSensitiveSetup(
+    identity: BootstrapRequestIdentity,
+    realm: "tenant" | "agency" | "partner",
+  ): boolean {
+    if (!this.accountSecurityMfaRequired(realm, identity.roles ?? [])) {
+      return true;
+    }
+    return (
+      hasTrustedMfa(identity) &&
+      this.isFreshSessionAuthTime(
+        identity,
+        AuthController.ACCOUNT_SECURITY_FRESH_SESSION_MS,
+      )
+    );
+  }
+
+  /**
+   * SA/SD §9: changing an *existing* password credential without supplying
+   * `currentPassword` instead requires the session itself to be recently
+   * authenticated ("fresh session"), regardless of role -- unlike the
+   * role-sensitive MFA gate above, this is the same bar for every realm.
+   */
+  private hasQualifyingFreshSessionForChange(
+    identity: BootstrapRequestIdentity,
+  ): boolean {
+    return this.isFreshSessionAuthTime(
+      identity,
+      AuthController.ACCOUNT_SECURITY_FRESH_SESSION_MS,
+    );
+  }
+
+  private denyCredentialPasswordChange(message: string): never {
+    throw new ApiRequestError(401, "AUTHENTICATION_FAILED", message);
+  }
+
+  private recordCredentialPasswordEvent(params: {
+    outcome: "success" | "denied";
+    action: "created" | "changed";
+    realm: "tenant" | "agency" | "partner";
+    reasonCode?: string | null;
+    principalId: string;
+    tenantId?: string | null;
+    partnerId?: string | null;
+  }): void {
+    this.securityEventsService?.recordEvent({
+      actorId: params.principalId,
+      actorType:
+        params.realm === "agency"
+          ? "agency_user"
+          : params.realm === "partner"
+            ? "partner_user"
+            : "tenant_admin",
+      subjectId: params.principalId,
+      realm: params.realm,
+      tenantId: params.tenantId ?? null,
+      partnerId: params.partnerId ?? null,
+      eventType:
+        params.outcome === "success"
+          ? `password_credential.${params.action}`
+          : "password_credential.denied",
+      eventFamily: "credential",
+      outcome: params.outcome,
+      severity: params.outcome === "success" ? "low" : "medium",
+      targetType: "password_credential",
+      targetId: params.principalId,
+      sessionId: null,
+      tokenId: null,
+      authMethods: ["password"],
+      sourceIp: null,
+      userAgent: null,
+      requestId: null,
+      traceId: null,
+      reasonCode: params.reasonCode ?? null,
+      approvalId: null,
+      beforeSummary: null,
+      afterSummary: null,
+      maskedContext: null,
+    });
+  }
+
+  /**
+   * SA/SD §1 (docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md:34),
+   * §9 (:169) and §12 (:193): the one way an already-authenticated session
+   * adds a first password credential (Google-only principal) or changes an
+   * existing one. `principalId`/`realm`/`tenantId` all come from the
+   * verified session (`identity`); nothing in the request body can select a
+   * different identity, assert MFA, or bypass `PASSWORD_LOGIN_ENABLED`'s
+   * fail-closed pepper gate (`requirePasswordHashingService`). Reuses
+   * `IdentityRepository.setPasswordCredentialForPrincipal` -- the same
+   * upsert the invitation-accept and password-reset/confirm paths already
+   * write through -- so there is exactly one credential-write path, never a
+   * second table or auth model.
+   */
+  @RequireRealms("tenant", "agency", "partner")
+  @Post(":realm/credentials/password")
+  async setAccountPassword(
+    @Param("realm") realmParam: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body()
+    body: { password?: string; currentPassword?: string } | undefined,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const realm = this.assertPasswordLoginRealm(realmParam);
+    if (!identity?.principalId || identity.realm !== realm) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+    validateCsrfHeader(headers);
+
+    const password = body?.password;
+    if (typeof password !== "string" || !password) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "A new password is required.",
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+    const hasher = this.requirePasswordHashingService();
+
+    const totpCredential = await this.totpCredentialRepository?.findCredential(
+      identity.principalId,
+    );
+    const policyResult = this.passwordPolicyService.evaluate(password, {
+      totpEnabled: Boolean(totpCredential?.confirmedAt),
+    });
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+
+    // Session-derived only: `identity.principalId`/`identity.realm` were
+    // verified by `JwtAuthService`, never trusted from the request body
+    // (an `email`/`principalId`/`amr` field on `body` would otherwise let a
+    // caller pick someone else's identity).
+    const principal = await this.identityRepository.findPrincipalById(
+      identity.principalId,
+    );
+    if (!principal || principal.status !== "active") {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+
+    const membership = identity.membershipId
+      ? await this.identityRepository.findMembershipById(identity.membershipId)
+      : null;
+    if (
+      !membership ||
+      membership.principalId !== principal.principalId ||
+      membership.realm !== realm ||
+      membership.status !== "active"
+    ) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+
+    const existingCredential =
+      await this.identityRepository.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+    const action: "created" | "changed" = existingCredential
+      ? "changed"
+      : "created";
+
+    if (existingCredential) {
+      const currentPassword = body?.currentPassword;
+      if (typeof currentPassword === "string" && currentPassword) {
+        const verifyOutcome = await this.verifyPasswordAndLockout(
+          hasher,
+          principal,
+          currentPassword,
+        );
+        if (verifyOutcome !== "ok") {
+          this.recordCredentialPasswordEvent({
+            outcome: "denied",
+            action,
+            realm,
+            reasonCode: `CURRENT_PASSWORD_${verifyOutcome.toUpperCase()}`,
+            principalId: principal.principalId,
+            tenantId: membership.tenantId,
+            partnerId: membership.partnerId,
+          });
+          this.denyCredentialPasswordChange(
+            "The current password is incorrect, or this account is not eligible for this change.",
+          );
+        }
+      } else if (!this.hasQualifyingFreshSessionForChange(identity)) {
+        this.recordCredentialPasswordEvent({
+          outcome: "denied",
+          action,
+          realm,
+          reasonCode: "STEP_UP_REQUIRED",
+          principalId: principal.principalId,
+          tenantId: membership.tenantId,
+          partnerId: membership.partnerId,
+        });
+        throw new ApiRequestError(
+          403,
+          "STEP_UP_REQUIRED",
+          "Changing your password requires your current password or a recent, verified session.",
+        );
+      }
+    } else if (
+      !this.hasQualifyingFreshMfaForRoleSensitiveSetup(identity, realm)
+    ) {
+      this.recordCredentialPasswordEvent({
+        outcome: "denied",
+        action,
+        realm,
+        reasonCode: "MFA_REQUIRED",
+        principalId: principal.principalId,
+        tenantId: membership.tenantId,
+        partnerId: membership.partnerId,
+      });
+      throw new ApiRequestError(
+        403,
+        "MFA_REQUIRED",
+        "Adding a password credential requires a recent, trusted multi-factor authentication proof.",
+      );
+    }
+
+    const hashed = await hasher.hash(password);
+    await this.identityRepository.setPasswordCredentialForPrincipal(
+      principal.principalId,
+      {
+        passwordHash: hashed.hash,
+        passwordAlgo: hashed.algo,
+        pepperVersion: hashed.pepperVersion,
+      },
+    );
+
+    this.recordCredentialPasswordEvent({
+      outcome: "success",
+      action,
+      realm,
+      principalId: principal.principalId,
+      tenantId: membership.tenantId,
+      partnerId: membership.partnerId,
+    });
+
+    return toApiSuccessEnvelope({ action }, requestId);
   }
 
   @OpenRoute()
@@ -417,6 +2035,148 @@ export class AuthController {
     } catch (error) {
       throw toPublicPartnerAuthError(error);
     }
+  }
+
+  /** FLEET-ONB-004 (fleet-staff-onboarding-20261114 SA/SD §3): Fleet staff
+   * invitation Google-bind login binds the state to the proof, same as
+   * `agency/invitation-login`. The callback still lands on the existing
+   * `partner/callback-session` endpoint above -- `exchangePartnerCallbackSession`
+   * branches on the login state's `invitationTokenHash` itself. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/invitation-login")
+  getPartnerInvitationLoginUrl(
+    @Body()
+    command: {
+      invitationToken: string;
+      redirectUri: string;
+      partnerId?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      typeof command?.invitationToken !== "string" ||
+      !command.invitationToken.trim() ||
+      command.invitationToken.length > 512
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      "partner",
+      {
+        redirectUri: command.redirectUri,
+        invitationToken: command.invitationToken.trim(),
+        partnerId:
+          typeof command.partnerId === "string" ? command.partnerId : null,
+      },
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  /** Password branch of Fleet staff invitation acceptance (SA/SD §3). Mirrors
+   * `TenantPartnerController.acceptAgencyInvitationWithPassword`'s hash +
+   * validate + delegate shape, but `acceptFleetStaffInvitationWithPassword`
+   * lives on `IdentityRepository` directly (this task's write_scopes), so
+   * this controller calls it without a `TenantPartnerService` detour. */
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/invitation/accept-with-password")
+  async acceptFleetStaffInvitationWithPassword(
+    @Body() command: { invitationToken?: string; password?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const invitationToken = command?.invitationToken?.trim();
+    if (!invitationToken || invitationToken.length > 512) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    if (
+      typeof command?.password !== "string" ||
+      command.password.length > PASSWORD_MAX_LENGTH
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "A password is required.",
+      );
+    }
+    // Same policy evaluation as :realm/password-reset/confirm: there is no
+    // confirmed-TOTP lookup available before an account even exists yet, so
+    // the stricter single-factor minimum applies.
+    const policyResult = this.passwordPolicyService.evaluate(
+      command.password,
+      { totpEnabled: false },
+    );
+    if (!policyResult.valid) {
+      throw new ApiRequestError(
+        400,
+        "PASSWORD_POLICY_VIOLATION",
+        "Password does not meet the policy requirements.",
+        { reason: policyResult.reason },
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "Identity authority is not available.",
+      );
+    }
+    let hashed: Awaited<ReturnType<PasswordHashingService["hash"]>>;
+    try {
+      hashed = await new PasswordHashingService().hash(command.password);
+    } catch (error) {
+      if (error instanceof PasswordPepperNotConfiguredError) {
+        throw new ApiRequestError(
+          503,
+          "PASSWORD_LOGIN_UNAVAILABLE",
+          "Password-based invitation acceptance is not available.",
+        );
+      }
+      throw error;
+    }
+    const tokenHash = createHash("sha256")
+      .update(invitationToken)
+      .digest("hex");
+    const accepted =
+      await this.identityRepository.acceptFleetStaffInvitationWithPassword(
+        tokenHash,
+        {
+          passwordHash: hashed.hash,
+          passwordAlgo: hashed.algo,
+          pepperVersion: hashed.pepperVersion,
+        },
+      );
+    if (!accepted) {
+      throw new ApiRequestError(
+        403,
+        "FLEET_STAFF_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
+    }
+    const role = accepted.roleBindings.find(
+      (binding) =>
+        binding.sourceRef ===
+        `fleet_role:${accepted.entrySlug}:${accepted.principal.principalId}`,
+    );
+    return toApiSuccessEnvelope(
+      {
+        accepted: true,
+        entrySlug: accepted.entrySlug,
+        fleetPartnerId: accepted.fleetPartnerId,
+        principalId: accepted.principal.principalId,
+        membershipId: accepted.membership.membershipId,
+        roleCode: role?.roleCode ?? accepted.roleBindings[0]?.roleCode ?? "",
+      },
+      requestId,
+    );
   }
 
   private buildMeta(

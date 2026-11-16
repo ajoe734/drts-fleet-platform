@@ -8,8 +8,11 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
+import {
+  getOpsClient,
+  createOpsDispatchEventSource,
+} from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -28,9 +31,10 @@ interface TripRow {
 }
 
 export default function SosTripsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [trips, setTrips] = useState<TripRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const intlLocale = (locale ?? "zh") === "en" ? "en-US" : "zh-TW";
 
   const fetchTrips = async () => {
     try {
@@ -81,6 +85,11 @@ export default function SosTripsPage() {
     };
   }, []);
 
+  const renderedTrips = trips.map((trip) => ({
+    ...trip,
+    time: new Date(trip.createdAt).toLocaleTimeString(intlLocale),
+  }));
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -93,26 +102,26 @@ export default function SosTripsPage() {
             </Pill>
           </div>
         }
-        subtitle="智行叫車 · 預約制多元計程車歷史行程"
+        subtitle={t("sos.trips.subtitle", { appName: t("app.name") })}
       />
 
       <div style={{ padding: 24 }}>
         <Card
           theme={theme}
           padding={0}
-          title={loading ? "載入中..." : "多元計程車行程清單"}
+          title={loading ? t("sos.common.loading") : t("sos.trips.tableTitle")}
         >
           <Table
             theme={theme}
             columns={[
-              { h: "行程編號", k: "id", w: 150, mono: true },
-              { h: "原始訂單", k: "orderId", w: 160, mono: true },
-              { h: "狀態", k: "status", w: 110 },
-              { h: "起點", k: "start", w: 220 },
-              { h: "終點", k: "end", w: 220 },
-              { h: "觸發時間", k: "time", w: 120, mono: true },
+              { h: t("sos.field.tripId"), k: "id", w: 150, mono: true },
+              { h: t("sos.field.orderId"), k: "orderId", w: 160, mono: true },
+              { h: t("sos.field.status"), k: "status", w: 110 },
+              { h: t("sos.field.pickup"), k: "start", w: 220 },
+              { h: t("sos.field.dropoff"), k: "end", w: 220 },
+              { h: t("sos.field.triggeredAt"), k: "time", w: 120, mono: true },
             ]}
-            rows={trips}
+            rows={renderedTrips}
           />
         </Card>
       </div>

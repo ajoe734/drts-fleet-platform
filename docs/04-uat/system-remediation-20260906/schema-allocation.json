@@ -209,6 +209,12 @@
       "amended_at": "2026-11-11",
       "scope": "Added callcenter_ai_assist_allocations with V0136__callcenter_ai_assist.sql only; all previous allocations, amendments and task ownership entries remain unchanged.",
       "reason": "Registers the AI booking assist migration (durable voice.handoff queue columns, crm.callcenter_assist_drafts, crm.callcenter_assist_field_outcomes) after V0135__multi_taxi_trip_record_truth_retention.sql."
+    },
+    {
+      "amended_by_task_id": "PWD-LOGIN-001",
+      "amended_at": "2026-11-14",
+      "scope": "Added portal_password_login_allocations with V0138__portal_password_login_credentials.sql only; all previous allocations, amendments and task ownership entries remain unchanged.",
+      "reason": "Registers the portal password/TOTP login credential schema baseline (docs/01-decisions/SD-DP-20261113-001-portal-password-login.md; docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md §2) at origin/dev 9fb0f13f4514d65bb0a9b706c7705d76a368f68b, whose highest previously reserved migration is V0137 (passenger_app_allocations, SR-ACCEPT-001). V0138 was not pre-allocated by the original H90c authored implementation packet; this task registers it at implementation time per the task's own integration_notes, claiming only this single new migration file and not renaming or superseding V0137."
     }
   ],
   "voice_application_allocations": [
@@ -1055,6 +1061,31 @@
         "crm.callcenter_assist_field_outcomes stores only the outcome (accepted / corrected / ai_missing), AI status and confidence per (call_id, order_id, field) — never field values; ai_status is NULL exactly when outcome = ai_missing.",
         "ops.phase1_owned_orders gains expression indexes on record->'passenger'->>'phone' and record->'bookingRequirements'->'passengerContact'->>'phone' (with created_at DESC) for phone-number pickup-history lookups; no column or data change."
       ]
+    }
+  ],
+  "portal_password_login_allocations": [
+    {
+      "task_id": "PWD-LOGIN-001",
+      "version": "V0138",
+      "migration_filename": "V0138__portal_password_login_credentials.sql",
+      "domain": "portal_password_login",
+      "target_schema": "iam",
+      "primary_tables": [
+        "iam.identity_password_credentials",
+        "iam.identity_totp_credentials",
+        "iam.identity_totp_recovery_codes",
+        "iam.identity_password_reset_tokens"
+      ],
+      "referenced_tables": ["iam.identity_principals"],
+      "table_invariants": [
+        "iam.identity_password_credentials: principal_id varchar(100) PRIMARY KEY REFERENCES iam.identity_principals(principal_id) — one password credential per principal, kept separate from Google-bound principals so the two login methods never contend for the same unique constraint.",
+        "iam.identity_totp_credentials: principal_id varchar(100) PRIMARY KEY REFERENCES iam.identity_principals(principal_id) — one TOTP secret per principal; secret stored server-encrypted, not in plaintext.",
+        "iam.identity_totp_recovery_codes: recovery_code_id varchar(100) PRIMARY KEY, principal_id varchar(100) NOT NULL REFERENCES iam.identity_principals(principal_id), indexed by principal_id for lookup/listing.",
+        "iam.identity_password_reset_tokens: token_hash text PRIMARY KEY, principal_id varchar(100) NOT NULL REFERENCES iam.identity_principals(principal_id), expires_at timestamptz NOT NULL, indexed by principal_id.",
+        "identity_password_credentials and identity_totp_credentials both use admin.touch_updated_at() trigger convention for updated_at."
+      ],
+      "description": "外部後台帳號密碼登入與 TOTP 二階驗證的 schema 基線（SD-DP-20261113-001 / 01_system_sa_sd.md §2），與既有 Google 登入並存。",
+      "downstream_tasks": []
     }
   ]
 }

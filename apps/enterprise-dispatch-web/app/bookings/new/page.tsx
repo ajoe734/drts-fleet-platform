@@ -69,12 +69,14 @@ export default async function NewBookingPage({
   const activeCostCenters = directory.costCenters.filter(
     (row) => row.activeFlag,
   );
-  const costCenterMode = resolveCostCenterMode(
-    directoryUnavailable ? null : activeCostCenters.length,
-  );
+  const costCenterMode = bookingId
+    ? "optional"
+    : resolveCostCenterMode(
+        directoryUnavailable ? null : activeCostCenters.length,
+      );
   const onlyCostCenter =
     activeCostCenters.length === 1 ? activeCostCenters[0] : undefined;
-  if (onlyCostCenter && !initialDraft.costCenterCode.trim()) {
+  if (!bookingId && onlyCostCenter && !initialDraft.costCenterCode.trim()) {
     initialDraft.costCenterCode = onlyCostCenter.code;
     initialDraft.costCenterLabel = `${onlyCostCenter.code} · ${onlyCostCenter.name}`;
   }

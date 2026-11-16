@@ -15,23 +15,32 @@ import {
   buildAlertActionPath,
   loadSandboxExceptionData,
   selectAlertActions,
-} from "@/lib/ops-av-fallback";
+} from "../../../lib/ops-av-fallback";
 import {
   formatOpsActionLabel,
   formatOpsCodeLabel,
-} from "@/lib/localized-labels";
-import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+} from "../../../lib/localized-labels";
+import { getServerLocale } from "../../../lib/server-locale";
+import { t, type Locale } from "../../../lib/translations";
 import {
   OpsWriteActionList,
   type OpsWriteActionItem,
-} from "@/components/ops-write-action-list";
+} from "../../../components/ops-write-action-list";
 
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
   density: "compact",
 });
+
+export type SandboxExceptionsSearchParams = Record<
+  string,
+  string | string[] | undefined
+>;
+
+export type SandboxExceptionsPageProps = {
+  searchParams?: Promise<SandboxExceptionsSearchParams>;
+};
 
 type SandboxExceptionRow = Record<string, ReactNode> & {
   alertId: ReactNode;
@@ -45,10 +54,7 @@ type SandboxExceptionRow = Record<string, ReactNode> & {
   action: ReactNode;
 };
 
-const SEVERITY_TONE: Record<
-  "info" | "warning" | "critical",
-  CanvasPillTone
-> = {
+const SEVERITY_TONE: Record<"info" | "warning" | "critical", CanvasPillTone> = {
   info: "info",
   warning: "warn",
   critical: "danger",
@@ -63,15 +69,80 @@ const STATUS_TONE: Record<
   resolved: "success",
 };
 
-function buildColumns(locale: Locale): CanvasTableColumn<SandboxExceptionRow>[] {
+function parseSelectedAlertType(
+  searchParams: SandboxExceptionsSearchParams | undefined,
+): string | null {
+  const raw = searchParams?.type;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "all") {
+    return null;
+  }
+  return trimmed;
+}
+
+function collectAlertTypeOptions(
+  alerts: readonly { alertType: string }[],
+  activeType: string | null,
+): string[] {
+  const seen = new Set<string>();
+  const types: string[] = [];
+  for (const alert of alerts) {
+    const value = alert.alertType.trim();
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      types.push(value);
+    }
+  }
+  if (activeType && !seen.has(activeType)) {
+    types.push(activeType);
+  }
+  return types;
+}
+
+function buildColumns(
+  locale: Locale,
+): CanvasTableColumn<SandboxExceptionRow>[] {
   return [
-    { h: t("avFallback.exceptions.col.id", locale), k: "alertId", w: 120, mono: true },
-    { h: t("avFallback.exceptions.col.type", locale), k: "type", w: 170, mono: true },
-    { h: t("avFallback.exceptions.col.vehicle", locale), k: "vehicle", w: 120, mono: true },
-    { h: t("avFallback.exceptions.col.order", locale), k: "order", w: 180, mono: true },
+    {
+      h: t("avFallback.exceptions.col.id", locale),
+      k: "alertId",
+      w: 120,
+      mono: true,
+    },
+    {
+      h: t("avFallback.exceptions.col.type", locale),
+      k: "type",
+      w: 170,
+      mono: true,
+    },
+    {
+      h: t("avFallback.exceptions.col.vehicle", locale),
+      k: "vehicle",
+      w: 120,
+      mono: true,
+    },
+    {
+      h: t("avFallback.exceptions.col.order", locale),
+      k: "order",
+      w: 180,
+      mono: true,
+    },
     { h: t("avFallback.exceptions.col.summary", locale), k: "summary", w: 280 },
-    { h: t("avFallback.exceptions.col.severity", locale), k: "severity", w: 110 },
-    { h: t("avFallback.exceptions.col.openedAt", locale), k: "openedAt", w: 120, mono: true },
+    {
+      h: t("avFallback.exceptions.col.severity", locale),
+      k: "severity",
+      w: 110,
+    },
+    {
+      h: t("avFallback.exceptions.col.openedAt", locale),
+      k: "openedAt",
+      w: 120,
+      mono: true,
+    },
     { h: t("avFallback.exceptions.col.status", locale), k: "status", w: 120 },
     { h: t("avFallback.exceptions.col.action", locale), k: "action", w: 240 },
   ];
@@ -136,11 +207,9 @@ function buildActionItems(
         : {}),
       ...(descriptor.requiresReason
         ? {
-            reason: t(
-              "avFallback.actions.reason.sandboxException",
-              locale,
-              { alertId: alert.alertId },
-            ),
+            reason: t("avFallback.actions.reason.sandboxException", locale, {
+              alertId: alert.alertId,
+            }),
           }
         : {}),
     },
@@ -174,13 +243,27 @@ function buildOrderCell(bookingContextId: string, orderId: string | null) {
 
 export const dynamic = "force-dynamic";
 
-export default async function SandboxExceptionsPage() {
-  const locale = await getServerLocale();
-  const { alerts, ordersById } = await loadSandboxExceptionData();
+export default async function SandboxExceptionsPage({
+  searchParams,
+}: SandboxExceptionsPageProps) {
+  const [locale, resolvedSearchParams, { alerts, ordersById }] =
+    await Promise.all([
+      getServerLocale(),
+      Promise.resolve(searchParams),
+      loadSandboxExceptionData(),
+    ]);
+  const activeType = parseSelectedAlertType(resolvedSearchParams);
+  const selectedType = activeType ?? "all";
+  const typeOptions = collectAlertTypeOptions(alerts, activeType);
+  const filteredAlerts = activeType
+    ? alerts.filter((alert) => alert.alertType === activeType)
+    : alerts;
   const columns = buildColumns(locale);
 
-  const rows: SandboxExceptionRow[] = alerts.map((alert) => {
-    const order = alert.orderId ? ordersById.get(alert.orderId) ?? null : null;
+  const rows: SandboxExceptionRow[] = filteredAlerts.map((alert) => {
+    const order = alert.orderId
+      ? (ordersById.get(alert.orderId) ?? null)
+      : null;
     const bookingContextId =
       order?.bookingId ?? order?.orderId ?? alert.orderId ?? "—";
     const actions = buildActionItems(locale, alert);
@@ -210,7 +293,9 @@ export default async function SandboxExceptionsPage() {
       order: buildOrderCell(bookingContextId, alert.orderId),
       summary: (
         <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-          <span style={{ color: theme.text, fontWeight: 600 }}>{alert.title}</span>
+          <span style={{ color: theme.text, fontWeight: 600 }}>
+            {alert.title}
+          </span>
           <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
             {alert.summary}
           </span>
@@ -236,16 +321,98 @@ export default async function SandboxExceptionsPage() {
   });
 
   return (
-    <main style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <main
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={theme}
         title={t("avFallback.exceptions.title", locale)}
         subtitle={t("avFallback.exceptions.subtitle", locale)}
         actions={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn theme={theme} icon="filter">
-              {t("avFallback.exceptions.filter", locale)}
-            </Btn>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <Pill theme={theme} tone="neutral">
+              {t("avFallback.exceptions.filter.count", locale, {
+                matched: filteredAlerts.length,
+                total: alerts.length,
+              })}
+            </Pill>
+            <form
+              method="get"
+              action="/av-fallback/sandbox-exceptions"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                htmlFor="sandbox-exceptions-type-filter"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  color: theme.textMuted,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                <span>{t("avFallback.exceptions.filter", locale)}</span>
+                <select
+                  id="sandbox-exceptions-type-filter"
+                  name="type"
+                  defaultValue={selectedType}
+                  style={{
+                    height: 32,
+                    padding: "0 10px",
+                    borderRadius: 7,
+                    border: `1px solid ${theme.border}`,
+                    background: theme.surface,
+                    color: theme.text,
+                    fontFamily: theme.fontFamily,
+                    fontSize: 12,
+                  }}
+                >
+                  <option value="all">
+                    {t("avFallback.exceptions.filter.all", locale)}
+                  </option>
+                  {typeOptions.map((alertType) => (
+                    <option key={alertType} value={alertType}>
+                      {formatOpsCodeLabel(locale, alertType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Btn theme={theme} icon="filter" type="submit">
+                {t("avFallback.exceptions.filter.apply", locale)}
+              </Btn>
+              <Link
+                href="/av-fallback/sandbox-exceptions"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 7,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.surface,
+                  color: theme.text,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
+                {t("avFallback.exceptions.filter.reset", locale)}
+              </Link>
+            </form>
             <Link
               href="/av-fallback"
               style={{
@@ -277,11 +444,19 @@ export default async function SandboxExceptionsPage() {
         body={t("avFallback.exceptions.banner.body", locale)}
       />
 
-      {rows.length === 0 ? (
+      {alerts.length === 0 ? (
         <Card
           theme={theme}
           title={t("avFallback.exceptions.empty.title", locale)}
           subtitle={t("avFallback.exceptions.empty.body", locale)}
+        >
+          {null}
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card
+          theme={theme}
+          title={t("avFallback.exceptions.filteredEmpty.title", locale)}
+          subtitle={t("avFallback.exceptions.filteredEmpty.body", locale)}
         >
           {null}
         </Card>

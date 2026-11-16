@@ -30,16 +30,22 @@ import {
   getOpsClient,
 } from "../../lib/api-client";
 import {
+  DEFAULT_SOS_QUEUE_FILTERS,
   applyCanonicalSosDuty,
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
   collectUnreportedSosIncidentIds,
+  filterSosQueueRows,
   formatSosActorLabel,
+  hasActiveSosQueueFilters,
   isSosIncident,
   unwrapListItems,
   type SosPillTone,
+  type SosQueueFilters,
   type SosQueueRow,
+  type SosSeverityFilter,
+  type SosStatusFilter,
 } from "../../lib/sos-view-model";
 import { useTranslation } from "../../lib/i18n";
 
@@ -49,11 +55,46 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-type NoticeState = {
+type NoticeState =
+  | { kind: "ack_won"; actor: string }
+  | { kind: "ack_competing"; actor: string }
+  | { kind: "ack_failed" }
+  | null;
+
+type RenderedNotice = {
   tone: SosPillTone;
   title: string;
   body: string;
 } | null;
+
+function resolveQueueNotice(
+  notice: NoticeState,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): RenderedNotice {
+  if (!notice) {
+    return null;
+  }
+  switch (notice.kind) {
+    case "ack_won":
+      return {
+        tone: "success",
+        title: t("sos.notice.acknowledged"),
+        body: t("sos.notice.acknowledgedBody", { actor: notice.actor }),
+      };
+    case "ack_competing":
+      return {
+        tone: "warn",
+        title: t("sos.notice.alreadyOwnedTitle"),
+        body: t("sos.notice.alreadyOwnedBody", { actor: notice.actor }),
+      };
+    case "ack_failed":
+      return {
+        tone: "danger",
+        title: t("sos.notice.ackFailed"),
+        body: t("sos.notice.ackFailedBody"),
+      };
+  }
+}
 
 async function playAlertBeep(): Promise<boolean> {
   if (typeof window === "undefined") {
@@ -100,7 +141,8 @@ async function playAlertBeep(): Promise<boolean> {
 }
 
 export default function SosQueuePage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
+  const activeLocale = locale ?? "zh";
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
@@ -110,11 +152,18 @@ export default function SosQueuePage() {
   const [soundOff, setSoundOff] = useState<boolean>(false);
   const [soundBlocked, setSoundBlocked] = useState<boolean>(false);
   const [nowMs, setNowMs] = useState<number>(Date.now());
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoadError, setHasLoadError] = useState<boolean>(false);
   const [notice, setNotice] = useState<NoticeState>(null);
   const [latencySummary, setLatencySummary] =
     useState<DriverSosAlertLatencySummary | null>(null);
   const [renderReceiptRetry, setRenderReceiptRetry] = useState(0);
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const [draftFilters, setDraftFilters] = useState<SosQueueFilters>(
+    DEFAULT_SOS_QUEUE_FILTERS,
+  );
+  const [appliedFilters, setAppliedFilters] = useState<SosQueueFilters>(
+    DEFAULT_SOS_QUEUE_FILTERS,
+  );
   const reportedAlertIdsRef = useRef(new Set<string>());
 
   const driverNamesById = buildDriverNameMap(drivers);
@@ -123,15 +172,30 @@ export default function SosQueuePage() {
     nowMs,
     driverNamesById,
     platesByVehicleId,
+    locale: activeLocale,
   });
+  const filteredRows = filterSosQueueRows(rows, appliedFilters);
+  const hasActiveFilters = hasActiveSosQueueFilters(appliedFilters);
+  const isFilteredEmpty =
+    !loading && !hasLoadError && rows.length > 0 && filteredRows.length === 0;
   const pendingCount = rows.filter((row) => row.isPending).length;
   const pendingAlert = rows.find((row) => row.isCriticalAlert);
+  const pendingAlertId = pendingAlert?.incident.incidentId ?? null;
   const currentActorId = identity?.actorId?.trim() || DEFAULT_OPS_ACTOR_ID;
   const currentActorLabel = formatSosActorLabel(currentActorId);
   const renderedIncidentKey = collectUnreportedSosIncidentIds(
     rows,
     reportedAlertIdsRef.current,
   ).join("|");
+
+  const handleApplyFilters = () => {
+    setAppliedFilters({ ...draftFilters });
+  };
+
+  const handleResetFilters = () => {
+    setDraftFilters({ ...DEFAULT_SOS_QUEUE_FILTERS });
+    setAppliedFilters({ ...DEFAULT_SOS_QUEUE_FILTERS });
+  };
 
   const fetchRuntime = async () => {
     try {
@@ -166,10 +230,10 @@ export default function SosQueuePage() {
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
       setIdentity(identityRes);
       setLatencySummary(latencyRes);
-      setLoadError(null);
+      setHasLoadError(false);
     } catch (error) {
       console.error("Failed to load SOS incidents", error);
-      setLoadError("無法載入 SOS 事件佇列，請檢查後端連線。");
+      setHasLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -218,7 +282,7 @@ export default function SosQueuePage() {
   }, []);
 
   useEffect(() => {
-    if (!pendingAlert || soundOff) {
+    if (!pendingAlertId || soundOff) {
       return;
     }
 
@@ -240,7 +304,7 @@ export default function SosQueuePage() {
       active = false;
       clearInterval(timer);
     };
-  }, [pendingAlert, soundOff]);
+  }, [pendingAlertId, soundOff]);
 
   useEffect(() => {
     const incidentIds = renderedIncidentKey
@@ -318,25 +382,21 @@ export default function SosQueuePage() {
 
       if (ack.wonAcknowledgement) {
         setNotice({
-          tone: "success",
-          title: "已確認接手",
-          body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
+          kind: "ack_won",
+          actor: currentActorLabel,
         });
       } else {
         setNotice({
-          tone: "warn",
-          title: "First-writer-wins",
-          body: `${formatSosActorLabel(ack.dutyAcknowledgement.acknowledgedByActorId)} 已先確認此事件，畫面已同步最新處理權。`,
+          kind: "ack_competing",
+          actor: formatSosActorLabel(
+            ack.dutyAcknowledgement.acknowledgedByActorId,
+          ),
         });
       }
       await fetchRuntime();
     } catch (error) {
       console.error("Failed to acknowledge SOS incident", error);
-      setNotice({
-        tone: "danger",
-        title: "確認接手失敗",
-        body: "系統未能完成處理權寫入，請稍後再試。",
-      });
+      setNotice({ kind: "ack_failed" });
     }
   };
 
@@ -346,29 +406,31 @@ export default function SosQueuePage() {
       ? "warn"
       : "success";
   const soundLabel = soundBlocked
-    ? "提示音受阻"
+    ? t("sos.sound.blocked")
     : soundOff
-      ? "提示音未啟用"
-      : "提示音已啟用";
+      ? t("sos.sound.off")
+      : t("sos.sound.on");
   const soundCode = soundBlocked
     ? "sound_blocked"
     : soundOff
       ? "sound_off"
       : "sound_on";
 
-  const soundNotice: NoticeState = soundBlocked
+  const soundNotice: RenderedNotice = soundBlocked
     ? {
         tone: "warn",
-        title: "瀏覽器尚未允許 SOS 提示音",
-        body: "視覺警示仍會持續顯示；請點一次提示音晶片啟用瀏覽器音訊。",
+        title: t("sos.sound.blockedTitle"),
+        body: t("sos.sound.blockedBody"),
       }
     : soundOff
       ? {
           tone: "warn",
-          title: "SOS 提示音尚未啟用",
-          body: "啟用前系統仍會以持續視覺警示呈現新事件，不會僅依聲音。",
+          title: t("sos.sound.offTitle"),
+          body: t("sos.sound.offBody"),
         }
       : null;
+  const loadError = hasLoadError ? t("sos.queue.loadError") : null;
+  const renderedNotice = resolveQueueNotice(notice, t);
   const latencyHasSamples =
     latencySummary !== null && latencySummary.sampleCount > 0;
   const latencyWithinTarget =
@@ -402,9 +464,16 @@ export default function SosQueuePage() {
               </Pill>
             </div>
           }
-          subtitle="線上通報 p95 ≤ 5 秒送達值班端 · 重大事件以持續警示顯示 · 先確認者取得處理權"
+          subtitle={t("sos.queue.subtitle")}
           actions={
-            <Btn theme={theme} icon="filter">
+            <Btn
+              theme={theme}
+              icon="filter"
+              variant={
+                isFilterOpen || hasActiveFilters ? "primary" : "secondary"
+              }
+              onClick={() => setIsFilterOpen((current) => !current)}
+            >
               {t("sos.queue.filter")}
             </Btn>
           }
@@ -432,7 +501,7 @@ export default function SosQueuePage() {
                   variant="primary"
                   onClick={toggleSound}
                 >
-                  {soundOff ? "啟用提示音" : "重新檢查提示音"}
+                  {soundOff ? t("sos.sound.enable") : t("sos.sound.recheck")}
                 </Btn>
               }
             />
@@ -448,13 +517,13 @@ export default function SosQueuePage() {
             />
           ) : null}
 
-          {notice ? (
+          {renderedNotice ? (
             <Banner
               theme={theme}
-              tone={notice.tone}
-              icon={notice.tone === "success" ? "check" : "warn"}
-              title={notice.title}
-              body={notice.body}
+              tone={renderedNotice.tone}
+              icon={renderedNotice.tone === "success" ? "check" : "warn"}
+              title={renderedNotice.title}
+              body={renderedNotice.body}
             />
           ) : null}
 
@@ -517,10 +586,192 @@ export default function SosQueuePage() {
             />
           </Card>
 
+          {isFilterOpen ? (
+            <Card theme={theme} title={t("sos.filter.title")}>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleApplyFilters();
+                }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 12,
+                  alignItems: "end",
+                }}
+              >
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.field.status")}</span>
+                  <select
+                    aria-label={t("sos.field.status")}
+                    value={draftFilters.status}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        status: event.target.value as SosStatusFilter,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                    }}
+                  >
+                    <option value="all">{t("sos.filter.allStatuses")}</option>
+                    <option value="pending">{t("sos.status.pending")}</option>
+                    <option value="acknowledged">
+                      {t("sos.status.acknowledged")}
+                    </option>
+                    <option value="investigating">
+                      {t("sos.status.investigating")}
+                    </option>
+                    <option value="resolved">{t("sos.status.resolved")}</option>
+                    <option value="falseAlarm">
+                      {t("sos.status.falseAlarm")}
+                    </option>
+                    <option value="closed">{t("sos.status.closed")}</option>
+                  </select>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.field.severity")}</span>
+                  <select
+                    aria-label={t("sos.field.severity")}
+                    value={draftFilters.severity}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        severity: event.target.value as SosSeverityFilter,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                    }}
+                  >
+                    <option value="all">{t("sos.filter.allSeverities")}</option>
+                    <option value="critical">
+                      {t("sos.severity.critical")}
+                    </option>
+                    <option value="high">{t("sos.severity.high")}</option>
+                    <option value="medium">{t("sos.severity.medium")}</option>
+                    <option value="low">{t("sos.severity.low")}</option>
+                  </select>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                  }}
+                >
+                  <span>{t("sos.filter.keyword")}</span>
+                  <input
+                    type="text"
+                    aria-label={t("sos.filter.keyword")}
+                    placeholder={t("sos.filter.keywordPlaceholder")}
+                    value={draftFilters.keyword}
+                    onChange={(event) =>
+                      setDraftFilters((current) => ({
+                        ...current,
+                        keyword: event.target.value,
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: 7,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      fontSize: 12.5,
+                      fontFamily: theme.fontFamily,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </label>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Btn theme={theme} variant="primary" type="submit">
+                    {t("sos.filter.apply")}
+                  </Btn>
+                  <Btn
+                    theme={theme}
+                    variant="secondary"
+                    type="button"
+                    onClick={handleResetFilters}
+                  >
+                    {t("sos.filter.reset")}
+                  </Btn>
+                </div>
+              </form>
+            </Card>
+          ) : null}
+
           <Card
             theme={theme}
             padding={0}
-            title={loading ? "載入中..." : "SOS 佇列"}
+            title={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>
+                  {loading
+                    ? t("sos.common.loading")
+                    : t("sos.queue.tableTitle")}
+                </span>
+                {!loading ? (
+                  <Pill
+                    theme={theme}
+                    tone={hasActiveFilters ? "accent" : "neutral"}
+                  >
+                    <span data-testid="sos-queue-result-count">
+                      {t("sos.queue.resultCount", {
+                        filtered: filteredRows.length,
+                        total: rows.length,
+                      })}
+                    </span>
+                  </Pill>
+                ) : null}
+              </div>
+            }
             actions={
               <button
                 type="button"
@@ -554,7 +805,7 @@ export default function SosQueuePage() {
               theme={theme}
               columns={[
                 {
-                  h: "事件編號",
+                  h: t("sos.field.eventNo"),
                   w: 170,
                   mono: true,
                   r: (row: SosQueueRow) => (
@@ -574,7 +825,7 @@ export default function SosQueuePage() {
                   ),
                 },
                 {
-                  h: "狀態",
+                  h: t("sos.field.status"),
                   w: 110,
                   r: (row: SosQueueRow) => (
                     <Pill theme={theme} tone={row.statusTone} dot>
@@ -583,7 +834,7 @@ export default function SosQueuePage() {
                   ),
                 },
                 {
-                  h: "等待",
+                  h: t("sos.field.wait"),
                   w: 92,
                   mono: true,
                   r: (row: SosQueueRow) => (
@@ -597,13 +848,23 @@ export default function SosQueuePage() {
                     </span>
                   ),
                 },
-                { h: "駕駛", k: "driverLabel", w: 110 },
-                { h: "車牌", k: "plateLabel", w: 108, mono: true },
-                { h: "行程", k: "orderLabel", w: 158, mono: true },
-                { h: "位置", k: "locationLabel", w: 220 },
-                { h: "事件類型", k: "typeLabel", w: 110 },
+                { h: t("sos.field.driver"), k: "driverLabel", w: 110 },
                 {
-                  h: "嚴重度",
+                  h: t("sos.field.plate"),
+                  k: "plateLabel",
+                  w: 108,
+                  mono: true,
+                },
+                {
+                  h: t("sos.field.trip"),
+                  k: "orderLabel",
+                  w: 158,
+                  mono: true,
+                },
+                { h: t("sos.field.location"), k: "locationLabel", w: 220 },
+                { h: t("sos.field.type"), k: "typeLabel", w: 110 },
+                {
+                  h: t("sos.field.severity"),
                   w: 92,
                   r: (row: SosQueueRow) => (
                     <Pill theme={theme} tone={row.severityTone}>
@@ -611,10 +872,51 @@ export default function SosQueuePage() {
                     </Pill>
                   ),
                 },
-                { h: "值班確認人", k: "ackLabel", w: 124 },
+                { h: t("sos.field.owner"), k: "ackLabel", w: 124 },
               ]}
-              rows={rows}
+              rows={filteredRows}
             />
+            {isFilteredEmpty ? (
+              <div
+                data-testid="sos-queue-filtered-empty"
+                style={{
+                  padding: 20,
+                  borderTop: `1px solid ${theme.border}`,
+                  background: theme.surfaceLo,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  alignItems: "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: theme.text,
+                  }}
+                >
+                  {t("sos.filter.emptyTitle")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: theme.textMuted,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {t("sos.filter.emptyBody")}
+                </div>
+                <Btn
+                  theme={theme}
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleResetFilters}
+                >
+                  {t("sos.filter.resetAction")}
+                </Btn>
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>
@@ -705,12 +1007,24 @@ export default function SosQueuePage() {
               theme={theme}
               cols={3}
               items={[
-                { k: "駕駛", v: pendingAlert.driverLabel },
-                { k: "車牌", v: pendingAlert.plateLabel, mono: true },
-                { k: "行程", v: pendingAlert.orderLabel, mono: true },
-                { k: "位置", v: pendingAlert.locationLabel },
-                { k: "嚴重度", v: pendingAlert.severityLabel },
-                { k: "觸發時間", v: pendingAlert.occurredAtLabel, mono: true },
+                { k: t("sos.field.driver"), v: pendingAlert.driverLabel },
+                {
+                  k: t("sos.field.plate"),
+                  v: pendingAlert.plateLabel,
+                  mono: true,
+                },
+                {
+                  k: t("sos.field.trip"),
+                  v: pendingAlert.orderLabel,
+                  mono: true,
+                },
+                { k: t("sos.field.location"), v: pendingAlert.locationLabel },
+                { k: t("sos.field.severity"), v: pendingAlert.severityLabel },
+                {
+                  k: t("sos.field.triggeredAt"),
+                  v: pendingAlert.occurredAtLabel,
+                  mono: true,
+                },
               ]}
             />
 
