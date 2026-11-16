@@ -108,6 +108,11 @@ function renderIcon(
   if (isCanvasIconName(icon)) {
     return <CanvasIcon name={icon} size={size} stroke={stroke} />;
   }
+  // An icon slot never prints text: an unknown icon name used to render as
+  // a word in front of the label (e.g. "refresh刷新").
+  if (typeof icon === "string") {
+    return null;
+  }
   return icon;
 }
 

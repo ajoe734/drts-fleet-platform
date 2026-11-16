@@ -451,12 +451,16 @@ async function verifyThroughExistingPage(
   fireEvent.click(screen.getByRole("button", { name: "確認資格" }));
 }
 
-async function chooseMapLocations(container: HTMLElement) {
+async function chooseMapLocations(
+  container: HTMLElement,
+  direction: "pickup" | "dropoff" = "pickup",
+) {
   const pickers = container.querySelectorAll("[data-address-map-picker]");
-  for (const [index, query] of [
-    "taoyuan airport",
-    "taipei city hall",
-  ].entries()) {
+  const queries =
+    direction === "pickup"
+      ? ["taoyuan airport", "taipei city hall"]
+      : ["taipei city hall", "taoyuan airport"];
+  for (const [index, query] of queries.entries()) {
     const picker = within(pickers[index] as HTMLElement);
     fireEvent.change(picker.getByRole("textbox", { name: "搜尋地址" }), {
       target: { value: query },
@@ -464,7 +468,10 @@ async function chooseMapLocations(container: HTMLElement) {
     fireEvent.click(picker.getByRole("button", { name: "搜尋" }));
     fireEvent.click(
       await picker.findByRole("button", {
-        name: index === 0 ? /Taoyuan Airport Terminal 1/ : /Taipei City Hall/,
+        name:
+          query === "taoyuan airport"
+            ? /Taoyuan Airport Terminal 1/
+            : /Taipei City Hall/,
       }),
     );
   }
@@ -590,6 +597,82 @@ describe("normal airport eligibility, booking and actual record routes", () => {
     );
     expect(f.commands).toHaveLength(1);
   });
+
+  it.each(["pickup", "dropoff"] as const)(
+    "submits two bags from the actual airport %s form through the normal action",
+    async (direction) => {
+      const f = fixture();
+      await verifyThroughExistingPage(f);
+      const continuation = await screen.findByRole("link", {
+        name: "繼續建立預約",
+      });
+      const url = new URL(
+        continuation.getAttribute("href")!,
+        "https://unit.example.test",
+      );
+      expect(url.searchParams.get("eligibilityVerificationId")).toBe(
+        f.verificationId,
+      );
+      cleanup();
+      const { container } = render(
+        await BookPage(args(Object.fromEntries(url.searchParams))),
+      );
+      for (const [label, value] of [
+        ["預約開始時間", "2099-06-05T10:00"],
+        ["預約結束時間", "2099-06-05T11:00"],
+        ["乘客姓名", "SIM Airport Rider"],
+        ["乘客電話", "0900000000"],
+        ["卡別", "SIM card program"],
+        ["航班號碼", "SIM-101"],
+        ["航廈", "SIM T1"],
+        ["接送方向", direction],
+      ]) {
+        fireEvent.change(screen.getByLabelText(new RegExp("^" + label)), {
+          target: { value },
+        });
+      }
+      const luggage = screen.getByRole("spinbutton", {
+        name: "行李件數",
+      }) as HTMLInputElement;
+      expect(luggage.type).toBe("number");
+      fireEvent.change(luggage, { target: { value: "2" } });
+      expect(luggage.value).toBe("2");
+      await chooseMapLocations(container, direction);
+      const submit = screen.getByRole("button", { name: "建立預約" });
+      await waitFor(() =>
+        expect((submit as HTMLButtonElement).disabled).toBe(false),
+      );
+      fireEvent.click(submit);
+      await screen.findByTestId("partner-booking-confirmation");
+      const airport = { lat: 25.0797, lng: 121.2342 };
+      const city = { lat: 25.0375, lng: 121.5637 };
+      expect(f.commands).toHaveLength(1);
+      expect(f.commands[0]).toMatchObject({
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        eligibilityVerificationId: f.verificationId,
+        direction,
+        flightNo: "SIM-101",
+        terminal: "SIM T1",
+        luggageCount: 2,
+        pickup: direction === "pickup" ? airport : city,
+        dropoff: direction === "pickup" ? city : airport,
+      });
+      const bookingPosts = f.calls.filter(
+        (call) => call.path === "/api/partner/bookings" && call.body !== null,
+      );
+      expect(bookingPosts).toHaveLength(1);
+      expect(bookingPosts[0]!.body).toMatchObject({
+        direction,
+        luggageCount: 2,
+      });
+      expect(screen.getByTestId("partner-booking-id").textContent).toBe(
+        f.bookingId,
+      );
+      expect(screen.getByTestId("partner-order-id").textContent).toBe(
+        f.orderId,
+      );
+    },
+  );
 
   it.each(["manual_review", "ineligible"])(
     "keeps the real %s eligibility outcome and never creates a booking",

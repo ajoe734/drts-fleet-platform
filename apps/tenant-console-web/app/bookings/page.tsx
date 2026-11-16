@@ -22,11 +22,15 @@ import {
 } from "@drts/ui-web";
 import { RefreshTierControl } from "@/app/bookings/refresh-tier-control";
 import {
+  BOOKING_LIST_TABS,
   applyBookingListQuery,
   buildBookingListQueryString,
+  countBookingTabs,
   hasActiveBookingFilters,
   parseBookingListQuery,
   toggleStatus,
+  type BookingListQuery,
+  type BookingListTab,
 } from "@/lib/booking-list";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/formatters";
@@ -749,9 +753,7 @@ async function loadBookingsPageData(
     const bookings = await client.listTenantBookings();
 
     return {
-      bookings: bookings.map((booking) =>
-        toBookingListRecord(booking, locale),
-      ),
+      bookings: bookings.map((booking) => toBookingListRecord(booking, locale)),
       pageInfo: {
         page: 1,
         pageSize: 25,
@@ -768,7 +770,11 @@ async function loadBookingsPageData(
       errorMessage: null,
     };
   } catch (error) {
-    const apiError = error as { status?: number; code?: string; message?: string };
+    const apiError = error as {
+      status?: number;
+      code?: string;
+      message?: string;
+    };
     return {
       bookings: [],
       pageInfo: {
@@ -781,10 +787,7 @@ async function loadBookingsPageData(
         ...refresh,
         dataFreshness: "degraded",
       },
-      emptyReason: mapErrorToEmptyReason(
-        apiError.status ?? 500,
-        apiError.code,
-      ),
+      emptyReason: mapErrorToEmptyReason(apiError.status ?? 500, apiError.code),
       errorMessage:
         apiError.message ??
         (error instanceof Error
@@ -992,7 +995,7 @@ function buildBookingRows(
               tone={getStatusTone(booking.orderStatus)}
               dot
             >
-              {booking.orderStatus}
+              {getOrderStatusLabel(booking.orderStatus, locale)}
             </CanvasPill>
             <CanvasPill
               theme={theme}
@@ -1031,75 +1034,46 @@ function buildBookingRows(
   });
 }
 
-function getPageDeepLinks(bookings: BookingListRecord[]) {
-  const links = new Map<string, CrossAppResourceLink>();
+const BOOKING_TAB_LABEL_KEYS: Record<BookingListTab, string> = {
+  all: "bookingList.tab.all",
+  live: "bookingList.tab.live",
+  reserve: "bookingList.tab.reserve",
+  approval: "bookingList.tab.approval",
+  done: "bookingList.tab.done",
+  cancel: "bookingList.tab.cancel",
+};
 
-  for (const booking of bookings) {
-    for (const link of booking.crossAppLinks) {
-      links.set(`${link.resourceType}:${link.resourceId}`, link);
-    }
-  }
-
-  return [...links.values()];
+function getOrderStatusLabel(
+  status: BookingRecord["orderStatus"],
+  locale: Locale,
+) {
+  return t(`bookingList.status.${status}`, undefined, locale);
 }
 
-function getHeaderTabs(bookings: BookingListRecord[], locale: Locale) {
-  const liveCount = bookings.filter((booking) =>
-    isActionableStatus(booking.orderStatus),
-  ).length;
-  const reserveCount = bookings.filter((booking) => {
-    const reservationStart = parseDate(booking.reservationWindowStart);
-    return Boolean(reservationStart && reservationStart.getTime() > Date.now());
-  }).length;
-  const approvalCount = bookings.filter(
-    (booking) => booking.approvalState === "pending",
-  ).length;
-  const completedCount = bookings.filter(
-    (booking) => booking.orderStatus === "completed",
-  ).length;
-  const cancelledCount = bookings.filter(
-    (booking) => booking.orderStatus === "cancelled",
-  ).length;
+function getHeaderTabs(
+  bookings: BookingListRecord[],
+  query: BookingListQuery,
+  locale: Locale,
+) {
+  const counts = countBookingTabs(bookings);
+  const tabs = BOOKING_LIST_TABS.map((tab) => {
+    const queryString = buildBookingListQueryString(query, { tab, page: 1 });
+    return (
+      <Link
+        key={tab}
+        href={queryString ? `/bookings?${queryString}` : "/bookings"}
+        aria-current={tab === query.tab ? "page" : undefined}
+        style={{ color: "inherit", textDecoration: "none" }}
+      >
+        {t(BOOKING_TAB_LABEL_KEYS[tab], undefined, locale)} {counts[tab]}
+      </Link>
+    );
+  });
 
-  const tabs = [
-    {
-      id: "all",
-      label: t("bookingList.tab.all", undefined, locale),
-      badge: String(bookings.length),
-    },
-    {
-      id: "live",
-      label: t("bookingList.tab.live", undefined, locale),
-      badge: String(liveCount),
-    },
-    {
-      id: "reserve",
-      label: t("bookingList.tab.reserve", undefined, locale),
-      badge: String(reserveCount),
-    },
-    {
-      id: "approval",
-      label: t("bookingList.tab.approval", undefined, locale),
-      badge: String(approvalCount),
-    },
-    {
-      id: "done",
-      label: t("bookingList.tab.done", undefined, locale),
-      badge: String(completedCount),
-    },
-    {
-      id: "cancel",
-      label: t("bookingList.tab.cancel", undefined, locale),
-      badge: String(cancelledCount),
-    },
-  ];
-
-  return tabs.map((tab) => (
-    <span key={tab.id}>
-      {tab.label}
-      {tab.badge ? ` ${tab.badge}` : ""}
-    </span>
-  ));
+  return {
+    tabs,
+    activeTab: tabs[BOOKING_LIST_TABS.indexOf(query.tab)] ?? tabs[0],
+  };
 }
 
 export default async function BookingsPage({
@@ -1131,10 +1105,11 @@ export default async function BookingsPage({
     computedEmptyReason !== null
       ? getEmptyStateContent(computedEmptyReason, queryString, locale)
       : null;
-  const pageDeepLinks =
-    computedEmptyReason === null ? getPageDeepLinks(result.items) : [];
-  const headerTabs = getHeaderTabs(data.bookings, locale);
-  const activeHeaderTab = headerTabs[0];
+  const { tabs: headerTabs, activeTab: activeHeaderTab } = getHeaderTabs(
+    data.bookings,
+    query,
+    locale,
+  );
 
   const columns: CanvasTableColumn<BookingRow>[] = [
     {
@@ -1309,24 +1284,12 @@ export default async function BookingsPage({
                         theme={theme}
                         tone={isActive ? "accent" : "neutral"}
                       >
-                        {status}
+                        {getOrderStatusLabel(status, locale)}
                       </CanvasPill>
                     </Link>
                   );
                 })}
               </div>
-
-              {pageDeepLinks.length > 0 ? (
-                <div style={inlineMetaStyle}>
-                  {pageDeepLinks.map((link) =>
-                    renderActionLink({
-                      href: buildCrossAppHref(link),
-                      label: link.label,
-                      external: link.openMode === "new_tab",
-                    }),
-                  )}
-                </div>
-              ) : null}
             </div>
 
             <div style={actionRowStyle}>

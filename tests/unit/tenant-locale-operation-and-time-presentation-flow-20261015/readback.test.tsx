@@ -149,6 +149,17 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
       expect(
         document.querySelector('a[href="/bookings/booking-c121"]'),
       ).toBeTruthy();
+      // Header tabs are links that filter the list; statuses are labelled,
+      // never raw codes, and no debug refresh-tier text is shown.
+      expect(
+        document.querySelector('a[href="/bookings?tab=cancel"]'),
+      ).toBeTruthy();
+      expect(
+        screen.getAllByText(locale === "en" ? "Exception hold" : "異常暫停")
+          .length,
+      ).toBeGreaterThan(0);
+      expect(document.body.textContent).not.toContain("exception_hold");
+      expect(document.body.textContent).not.toContain("T5 /");
       cleanup();
       render(await Billing({}));
       expect(screen.getAllByText("2026-12-31").length).toBeGreaterThan(0);
