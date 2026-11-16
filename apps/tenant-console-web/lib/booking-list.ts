@@ -12,7 +12,20 @@ import {
 
 export type BookingDateField = "reservationStart" | "createdAt";
 
+/** Header tabs of the booking list; each one is a real, linkable filter. */
+export const BOOKING_LIST_TABS = [
+  "all",
+  "live",
+  "reserve",
+  "approval",
+  "done",
+  "cancel",
+] as const;
+export type BookingListTab = (typeof BOOKING_LIST_TABS)[number];
+const BOOKING_LIST_TAB_SET = new Set<string>(BOOKING_LIST_TABS);
+
 export type BookingListQuery = {
+  tab: BookingListTab;
   q: string;
   statuses: OwnedOrderStatus[];
   serviceBucket: Phase1ServiceBucket | "all";
@@ -63,7 +76,10 @@ export function parseBookingListQuery(
     DEFAULT_PAGE_SIZE,
   );
 
+  const rawTab = first(searchParams.tab);
+
   return {
+    tab: BOOKING_LIST_TAB_SET.has(rawTab) ? (rawTab as BookingListTab) : "all",
     q: first(searchParams.q).trim(),
     statuses,
     serviceBucket: SERVICE_BUCKET_SET.has(
@@ -119,11 +135,55 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
   return haystack.includes(query.toLowerCase());
 }
 
+/**
+ * Membership of one booking in a header tab. The tab counts and the tab
+ * filter both use this, so a tab never lists rows its badge did not count.
+ */
+export function matchesBookingTab(
+  booking: BookingRecord,
+  tab: BookingListTab,
+  now: number = Date.now(),
+) {
+  switch (tab) {
+    case "all":
+      return true;
+    case "live":
+      return (
+        booking.orderStatus !== "completed" &&
+        booking.orderStatus !== "cancelled"
+      );
+    case "reserve": {
+      const start = new Date(booking.reservationWindowStart).getTime();
+      return !Number.isNaN(start) && start > now;
+    }
+    case "approval":
+      return booking.approvalState === "pending";
+    case "done":
+      return booking.orderStatus === "completed";
+    case "cancel":
+      return booking.orderStatus === "cancelled";
+  }
+}
+
+export function countBookingTabs(
+  bookings: BookingRecord[],
+  now: number = Date.now(),
+): Record<BookingListTab, number> {
+  return Object.fromEntries(
+    BOOKING_LIST_TABS.map((tab) => [
+      tab,
+      bookings.filter((booking) => matchesBookingTab(booking, tab, now)).length,
+    ]),
+  ) as Record<BookingListTab, number>;
+}
+
 export function applyBookingListQuery<TBooking extends BookingRecord>(
   bookings: TBooking[],
   query: BookingListQuery,
+  now: number = Date.now(),
 ) {
   const filtered = bookings
+    .filter((booking) => matchesBookingTab(booking, query.tab, now))
     .filter((booking) => matchesTextQuery(booking, query.q))
     .filter((booking) =>
       query.statuses.length === 0
@@ -194,6 +254,9 @@ export function buildBookingListQueryString(
   };
   const params = new URLSearchParams();
 
+  if (next.tab !== "all") {
+    params.set("tab", next.tab);
+  }
   if (next.q) {
     params.set("q", next.q);
   }
@@ -251,6 +314,7 @@ export function getStatusCounts(bookings: BookingRecord[]) {
 
 export function hasActiveBookingFilters(query: BookingListQuery) {
   return Boolean(
+    query.tab !== "all" ||
     query.q ||
     query.statuses.length > 0 ||
     query.serviceBucket !== "all" ||
