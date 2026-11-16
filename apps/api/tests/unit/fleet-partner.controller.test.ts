@@ -1757,6 +1757,9 @@ describe("Fleet supply mutation responses during another request's refresh", () 
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
 // FLEET-ONB-003: Fleet staff invitation issue/revoke/deactivate route wiring
 // (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md §1-2, §8).
 // The service-level validation/transaction logic is covered by
