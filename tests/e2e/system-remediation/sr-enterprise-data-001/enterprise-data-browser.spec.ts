@@ -12,13 +12,18 @@ import { t as translate } from "../../../../apps/enterprise-dispatch-web/lib/tra
 //  - enterprise_booking_identity_empty_and_error_ui
 //  - enterprise_authorized_driver_and_support_contact_actions
 
-const portal = process.env.ENTERPRISE_DATA_PORTAL_URL || "http://127.0.0.1:3011";
+const portal =
+  process.env.ENTERPRISE_DATA_PORTAL_URL || "http://127.0.0.1:3011";
 const evidenceDir = resolve(
   process.env.ENTERPRISE_DATA_BROWSER_EVIDENCE_DIR ||
     ".artifacts/enterprise-data-acceptance/browser",
 );
-const sessions: Record<"active" | "empty", { token: string; tenantId: string }> =
-  JSON.parse(readFileSync(resolve(evidenceDir, "sessions.private.json"), "utf8"));
+const sessions: Record<
+  "active" | "empty",
+  { token: string; tenantId: string }
+> = JSON.parse(
+  readFileSync(resolve(evidenceDir, "sessions.private.json"), "utf8"),
+);
 const seed: {
   bookingId: string;
   nonexistentBookingId: string;
@@ -56,18 +61,14 @@ test("home upcoming list, trip page, and booking detail all resolve to the exact
     const row = page.getByTestId(`enterprise-home-upcoming-${seed.bookingId}`);
     await expect(row).toBeVisible();
     await row.click();
-    await expect(page).toHaveURL(
-      new RegExp(`/bookings/${seed.bookingId}$`),
-    );
+    await expect(page).toHaveURL(new RegExp(`/bookings/${seed.bookingId}$`));
     await expect(
       page.getByTestId("enterprise-booking-detail-id"),
     ).toContainText(seed.bookingId);
 
     await page.goto(`${portal}/trip`);
     await page.getByTestId("enterprise-trip-detail-link").click();
-    await expect(page).toHaveURL(
-      new RegExp(`/bookings/${seed.bookingId}$`),
-    );
+    await expect(page).toHaveURL(new RegExp(`/bookings/${seed.bookingId}$`));
     await expect(
       page.getByTestId("enterprise-booking-detail-id"),
     ).toContainText(seed.bookingId);
@@ -93,7 +94,7 @@ test("home upcoming list, trip page, and booking detail all resolve to the exact
   }
 });
 
-test("trip page shows an honest disabled driver-contact state and a real support tel action, never a fabricated driver number", async ({
+test("trip page queries driver contact and honestly reports the missing assignment with a real support tel action", async ({
   browser,
 }) => {
   const context = await contextFor(browser, sessions.active.token);
@@ -101,17 +102,47 @@ test("trip page shows an honest disabled driver-contact state and a real support
   try {
     await page.goto(`${portal}/trip`);
     const driverButton = page.getByTestId("enterprise-trip-contact-driver");
-    await expect(driverButton).toBeDisabled();
+    await expect(driverButton).toBeEnabled();
+    const contactResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname.endsWith(
+          `/api/tenant/bookings/${encodeURIComponent(seed.bookingId)}/driver-contact`,
+        ),
+    );
+    await driverButton.click();
+    const contactResponse = await contactResponsePromise;
+    expect(contactResponse.status()).toBe(409);
+    const contactResult = await contactResponse.json();
+    expect(contactResult).toMatchObject({
+      error: { code: "TENANT_DRIVER_CONTACT_NOT_AVAILABLE" },
+    });
+    await expect(
+      page.getByTestId("enterprise-driver-contact-state"),
+    ).toHaveText(translate("trip.contactNoDriver", undefined, "zh"));
+    await expect(
+      page.getByTestId("enterprise-driver-contact-support-fallback"),
+    ).toHaveCount(0);
 
     const supportLink = page.getByTestId("enterprise-trip-contact-support");
     await expect(supportLink).toHaveAttribute("href", expectedSupportTelHref);
+    const telephoneHrefs = await page
+      .locator('a[href^="tel:"]')
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    expect(new Set(telephoneHrefs)).toEqual(new Set([expectedSupportTelHref]));
 
     writeFileSync(
       resolve(evidenceDir, "contact-actions-trip-evidence.json"),
       JSON.stringify(
         {
           candidateSha: process.env.CANDIDATE_SHA,
-          driverContactDisabled: await driverButton.isDisabled(),
+          bookingId: seed.bookingId,
+          driverContactStatus: contactResponse.status(),
+          driverContactCode: contactResult.error.code,
+          driverContactMessage: await page
+            .getByTestId("enterprise-driver-contact-state")
+            .textContent(),
+          telephoneHrefs,
           supportHref: await supportLink.getAttribute("href"),
         },
         null,
@@ -191,7 +222,10 @@ test("a tenant with zero upcoming bookings sees an honest empty state on home an
     writeFileSync(
       resolve(evidenceDir, "empty-tenant-evidence.json"),
       JSON.stringify(
-        { candidateSha: process.env.CANDIDATE_SHA, tenantId: sessions.empty.tenantId },
+        {
+          candidateSha: process.env.CANDIDATE_SHA,
+          tenantId: sessions.empty.tenantId,
+        },
         null,
         2,
       ),

@@ -1651,7 +1651,14 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
   }
 
   it("proves 760260 is red by falsely publishing marker/version on periodic freshclam refresh when clamd never answers ping across virtual seconds 0..72 while the candidate keeps periodic refresh running without publishing marker or version (N1)", async () => {
-    async function runNeverReadyMarkerScenario(scriptPath: string) {
+    async function runNeverReadyMarkerScenario(
+      scriptPath: string,
+      options?: {
+        delayedInvocation?: number;
+        preSampleDelaySeconds?: string;
+        preExitDelaySeconds?: string;
+      },
+    ) {
       const dir = mkdtempSync(join(tmpdir(), "clamd-n1-never-ready-marker-"));
       const binDir = join(dir, "bin");
       const dbDir = join(dir, "db");
@@ -1661,16 +1668,51 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
       mkdirSync(binDir);
       mkdirSync(dbDir);
       mkdirSync(stateDir);
-      writeFileSync(join(stateDir, "virtual_seconds"), "0");
+      writeFileSync(join(stateDir, "virtual_seconds"), "0\n");
 
       writeMock(
         join(binDir, "freshclam"),
         [
-          `n=0; [ ! -f "$DRTS_TIMING_STATE/freshclam_count" ] || n=$(cat "$DRTS_TIMING_STATE/freshclam_count")`,
-          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/freshclam_count"`,
-          `t=$(cat "$DRTS_TIMING_STATE/virtual_seconds"); printf '%s %s\\n' "$n" "$t" >> "$DRTS_TIMING_STATE/freshclam_events"`,
+          `if [ -f "$DRTS_TIMING_STATE/freshclam_active_pid" ]; then`,
+          `  active_pid=""`,
+          `  read -r active_pid < "$DRTS_TIMING_STATE/freshclam_active_pid" 2>/dev/null || true`,
+          `  if [ -n "$active_pid" ] && kill -0 "$active_pid" 2>/dev/null && [ -r "/proc/$active_pid/stat" ]; then`,
+          `    active_stat=""`,
+          `    read -r active_stat < "/proc/$active_pid/stat" 2>/dev/null || true`,
+          `    case "$active_stat" in`,
+          `      *"(freshclam) Z "* | *"(freshclam) X "* | *"(freshclam) x "*) ;;`,
+          `      *"(freshclam) "*)`,
+          `        printf 'overlapping freshclam invocation while pid=%s is still active\\n' "$active_pid" > "$DRTS_TIMING_STATE/handshake_error.tmp"`,
+          `        mv "$DRTS_TIMING_STATE/handshake_error.tmp" "$DRTS_TIMING_STATE/handshake_error"`,
+          `        exit 1`,
+          `        ;;`,
+          `    esac`,
+          `  fi`,
+          `fi`,
+          `printf '%s\\n' "$$" > "$DRTS_TIMING_STATE/freshclam_active_pid.tmp"`,
+          `mv "$DRTS_TIMING_STATE/freshclam_active_pid.tmp" "$DRTS_TIMING_STATE/freshclam_active_pid"`,
+          `n=0`,
+          `if [ -f "$DRTS_TIMING_STATE/freshclam_count" ]; then`,
+          `  read -r n < "$DRTS_TIMING_STATE/freshclam_count" || true`,
+          `fi`,
+          `n=$((n + 1))`,
+          `printf '%s\\n' "$n" > "$DRTS_TIMING_STATE/freshclam_count.tmp"`,
+          `mv "$DRTS_TIMING_STATE/freshclam_count.tmp" "$DRTS_TIMING_STATE/freshclam_count"`,
+          `if [ -n "$DRTS_N1_DELAYED_INVOCATION" ] && [ "$n" = "$DRTS_N1_DELAYED_INVOCATION" ] && [ -n "$DRTS_N1_PRE_SAMPLE_DELAY_SECONDS" ]; then`,
+          `  /bin/sleep "$DRTS_N1_PRE_SAMPLE_DELAY_SECONDS"`,
+          `fi`,
+          `read -r t < "$DRTS_TIMING_STATE/virtual_seconds" || true`,
+          `printf '%s %s %s\\n' "$n" "$$" "$t" > "$DRTS_TIMING_STATE/freshclam_start_$n.tmp"`,
+          `mv "$DRTS_TIMING_STATE/freshclam_start_$n.tmp" "$DRTS_TIMING_STATE/freshclam_start_$n"`,
+          `printf '%s %s\\n' "$n" "$t" >> "$DRTS_TIMING_STATE/freshclam_events"`,
           `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
           `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+          `rm -f "$DRTS_TIMING_STATE/freshclam_active_pid"`,
+          `printf '%s %s %s\\n' "$n" "$$" "$t" > "$DRTS_TIMING_STATE/freshclam_done_$n.tmp"`,
+          `mv "$DRTS_TIMING_STATE/freshclam_done_$n.tmp" "$DRTS_TIMING_STATE/freshclam_done_$n"`,
+          `if [ -n "$DRTS_N1_DELAYED_INVOCATION" ] && [ "$n" = "$DRTS_N1_DELAYED_INVOCATION" ] && [ -n "$DRTS_N1_PRE_EXIT_DELAY_SECONDS" ]; then`,
+          `  /bin/sleep "$DRTS_N1_PRE_EXIT_DELAY_SECONDS"`,
+          `fi`,
         ].join("\n"),
       );
       writeMock(
@@ -1680,18 +1722,116 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
       writeMock(
         join(binDir, "clamdscan"),
         [
-          `n=0; [ ! -f "$DRTS_TIMING_STATE/ping_count" ] || n=$(cat "$DRTS_TIMING_STATE/ping_count")`,
-          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/ping_count"`,
+          `n=0`,
+          `if [ -f "$DRTS_TIMING_STATE/ping_count" ]; then`,
+          `  read -r n < "$DRTS_TIMING_STATE/ping_count" || true`,
+          `fi`,
+          `n=$((n + 1)); printf '%s\\n' "$n" > "$DRTS_TIMING_STATE/ping_count"`,
           `exit 1`,
         ].join("\n"),
       );
       writeMock(
         join(binDir, "sleep"),
         [
-          `old=$(cat "$DRTS_TIMING_STATE/virtual_seconds")`,
+          `fail_handshake() {`,
+          `  printf '%s\\n' "$1" > "$DRTS_TIMING_STATE/handshake_error.tmp"`,
+          `  mv "$DRTS_TIMING_STATE/handshake_error.tmp" "$DRTS_TIMING_STATE/handshake_error"`,
+          `  while true; do /bin/sleep 0.02; done`,
+          `}`,
+          `if [ -f "$DRTS_TIMING_STATE/handshake_error" ]; then`,
+          `  while true; do /bin/sleep 0.02; done`,
+          `fi`,
+          `read -r old < "$DRTS_TIMING_STATE/virtual_seconds" || true`,
+          `expected_inv=""`,
+          `expected_completed_inv=""`,
+          `case "$old" in`,
+          `  0) expected_inv=1; expected_completed_inv=1 ;;`,
+          `  62) expected_inv=2; expected_completed_inv=2 ;;`,
+          `  64) expected_inv=3; expected_completed_inv=3 ;;`,
+          `  66) expected_inv=4; expected_completed_inv=4 ;;`,
+          `  68) expected_inv=5; expected_completed_inv=5 ;;`,
+          `  70) expected_inv=6; expected_completed_inv=6 ;;`,
+          `  63) expected_completed_inv=2 ;;`,
+          `  65) expected_completed_inv=3 ;;`,
+          `  67) expected_completed_inv=4 ;;`,
+          `  69) expected_completed_inv=5 ;;`,
+          `  71) expected_completed_inv=6 ;;`,
+          `  *)`,
+          `    if [ "$old" -ge 1 ] && [ "$old" -le 61 ]; then`,
+          `      expected_completed_inv=1`,
+          `    fi`,
+          `    ;;`,
+          `esac`,
+          `if [ -n "$expected_inv" ]; then`,
+          `  wait_ticks=0`,
+          `  while [ ! -f "$DRTS_TIMING_STATE/freshclam_start_$expected_inv" ] || [ ! -f "$DRTS_TIMING_STATE/freshclam_done_$expected_inv" ]; do`,
+          `    if [ -f "$DRTS_TIMING_STATE/handshake_error" ]; then`,
+          `      while true; do /bin/sleep 0.02; done`,
+          `    fi`,
+          `    if [ "$wait_ticks" -ge 200 ]; then`,
+          `      if [ ! -f "$DRTS_TIMING_STATE/freshclam_start_$expected_inv" ]; then`,
+          `        fail_handshake "missing freshclam_start_$expected_inv before leaving virtual_second=$old"`,
+          `      fi`,
+          `      fail_handshake "missing freshclam_done_$expected_inv before leaving virtual_second=$old"`,
+          `    fi`,
+          `    /bin/sleep 0.01`,
+          `    wait_ticks=$((wait_ticks + 1))`,
+          `  done`,
+          `  read -r start_inv start_pid start_sec < "$DRTS_TIMING_STATE/freshclam_start_$expected_inv"`,
+          `  read -r done_inv done_pid done_sec < "$DRTS_TIMING_STATE/freshclam_done_$expected_inv"`,
+          `  if [ "$start_inv" != "$expected_inv" ] || [ "$done_inv" != "$expected_inv" ] || [ "$start_pid" != "$done_pid" ] || [ "$start_sec" != "$old" ] || [ "$done_sec" != "$old" ]; then`,
+          `    fail_handshake "freshclam handshake mismatch at virtual_second=$old: start=($start_inv,$start_pid,$start_sec) done=($done_inv,$done_pid,$done_sec)"`,
+          `  fi`,
+          `  proc_completed=0`,
+          `  wait_ticks=0`,
+          `  while [ "$wait_ticks" -lt 200 ]; do`,
+          `    if ! kill -0 "$done_pid" 2>/dev/null || [ ! -e "/proc/$done_pid/stat" ]; then`,
+          `      proc_completed=1`,
+          `      break`,
+          `    fi`,
+          `    proc_stat=""`,
+          `    if read -r proc_stat < "/proc/$done_pid/stat" 2>/dev/null; then`,
+          `      case "$proc_stat" in`,
+          `        *"(freshclam) Z "* | *"(freshclam) X "* | *"(freshclam) x "*)`,
+          `          proc_completed=1`,
+          `          reap_ticks=0`,
+          `          while [ "$reap_ticks" -lt 5 ] && [ -e "/proc/$done_pid/stat" ]; do`,
+          `            /bin/sleep 0.01`,
+          `            reap_ticks=$((reap_ticks + 1))`,
+          `          done`,
+          `          break`,
+          `          ;;`,
+          `        *"(freshclam) "*)`,
+          `          ;;`,
+          `        *)`,
+          `          proc_completed=1`,
+          `          break`,
+          `          ;;`,
+          `      esac`,
+          `    else`,
+          `      proc_completed=1`,
+          `      break`,
+          `    fi`,
+          `    /bin/sleep 0.01`,
+          `    wait_ticks=$((wait_ticks + 1))`,
+          `  done`,
+          `  if [ "$proc_completed" -ne 1 ]; then`,
+          `    fail_handshake "freshclam pid=$done_pid did not complete for invocation=$expected_inv at virtual_second=$old"`,
+          `  fi`,
+          `fi`,
+          `if [ -n "$expected_completed_inv" ]; then`,
+          `  current_count=0`,
+          `  if [ -f "$DRTS_TIMING_STATE/freshclam_count" ]; then`,
+          `    read -r current_count < "$DRTS_TIMING_STATE/freshclam_count" || true`,
+          `  fi`,
+          `  if [ "$current_count" != "$expected_completed_inv" ]; then`,
+          `    fail_handshake "unexpected freshclam_count=$current_count (expected $expected_completed_inv) before leaving virtual_second=$old"`,
+          `  fi`,
+          `fi`,
           `new=$((old + $1))`,
           `printf '%s %s %s\\n' "$1" "$old" "$new" >> "$DRTS_TIMING_STATE/sleep_events"`,
-          `printf '%s' "$new" > "$DRTS_TIMING_STATE/virtual_seconds"`,
+          `printf '%s\\n' "$new" > "$DRTS_TIMING_STATE/virtual_seconds.tmp"`,
+          `mv "$DRTS_TIMING_STATE/virtual_seconds.tmp" "$DRTS_TIMING_STATE/virtual_seconds"`,
           `if [ "$new" -ge 72 ]; then`,
           `  : > "$DRTS_TIMING_STATE/reached_poststartup_grace"`,
           `  while true; do /bin/sleep 0.02; done`,
@@ -1709,6 +1849,13 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
           CLAMAV_DB_DIR: dbDir,
           FRESHCLAM_INTERVAL_SECONDS: "2",
           DRTS_TIMING_STATE: stateDir,
+          DRTS_N1_DELAYED_INVOCATION:
+            options?.delayedInvocation !== undefined
+              ? String(options.delayedInvocation)
+              : "",
+          DRTS_N1_PRE_SAMPLE_DELAY_SECONDS:
+            options?.preSampleDelaySeconds ?? "",
+          DRTS_N1_PRE_EXIT_DELAY_SECONDS: options?.preExitDelaySeconds ?? "",
         },
         detached: true,
         stdio: "ignore",
@@ -1716,9 +1863,15 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
 
       try {
         const checkpointReached = await waitUntil(
-          () => existsSync(join(stateDir, "reached_poststartup_grace")),
+          () =>
+            existsSync(join(stateDir, "reached_poststartup_grace")) ||
+            existsSync(join(stateDir, "handshake_error")),
           5000,
         );
+        const handshakeError = existsSync(join(stateDir, "handshake_error"))
+          ? readFileSync(join(stateDir, "handshake_error"), "utf8").trim()
+          : null;
+        expect(handshakeError).toBeNull();
         expect(checkpointReached).toBe(true);
 
         const freshclamEvents = readFileSync(
@@ -1789,6 +1942,26 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
     // all 72 pings are attempted, and neither marker nor version file is ever published.
     const candidateResult = await runNeverReadyMarkerScenario(ENTRYPOINT);
     expect(candidateResult).toEqual({
+      totalFailedPings: 72,
+      virtualSecond: 72,
+      freshclamEvents: expectedFreshclamSchedule,
+      readyMarkerExists: false,
+      expectedVersionFileExists: false,
+      expectedVersion: null,
+    });
+
+    // Determinism probe on the existing N1 fixture/producer when invocation 4 (at virtual_second 66)
+    // is scheduled past start_periodic_freshclam_refresh's 5x10ms initial wait window and exits
+    // while the watchdog is blocked in mock sleep:
+    const delayedInvocation4Result = await runNeverReadyMarkerScenario(
+      ENTRYPOINT,
+      {
+        delayedInvocation: 4,
+        preSampleDelaySeconds: "0.07",
+        preExitDelaySeconds: "0.02",
+      },
+    );
+    expect(delayedInvocation4Result).toEqual({
       totalFailedPings: 72,
       virtualSecond: 72,
       freshclamEvents: expectedFreshclamSchedule,

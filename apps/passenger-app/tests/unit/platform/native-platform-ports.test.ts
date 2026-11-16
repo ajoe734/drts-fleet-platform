@@ -500,7 +500,10 @@ describe("configured runtime platform composition", () => {
     expect(requests[0]).not.toBe(requests[1]);
     expect(ports.browser.status).toBe("ready");
     expect(ports.paymentFields.status).toBe("unavailable");
-    expect(ports.paymentBrowser.status).toBe("unavailable");
+    expect(ports.paymentBrowser).toMatchObject({
+      status: "ready",
+      kind: "hosted",
+    });
     expect(ports.bookingMap.status).toBe("unavailable");
     expect(ports.notifications).toEqual({ status: "disabled" });
     expect(ports.receipts).toBeUndefined();

@@ -31,6 +31,7 @@ const VALID_CLASSIFICATIONS: readonly IdentityReadbackClassification[] = [
   "bank_ui_role",
   "referral_public_session",
   "first_party_passenger_account",
+  "partner_normal_ingress_ssr",
 ];
 
 export function getIdentityField(value: unknown, field: string): unknown {
@@ -53,10 +54,171 @@ export function getIdentityField(value: unknown, field: string): unknown {
     );
 }
 
+// Only the three normal business pages currently expose the API principal of
+// their own SSR bearer. Other Partner pages retain a missing-reader result.
+function validatePartnerSsrPath(
+  session: Pick<Session, "identity">,
+  value: string,
+) {
+  const context = session.identity.partnerContext;
+  assert(context, "partner normal ingress fixture context required");
+  const url = new URL(localRoute(value), "https://scope.invalid");
+  const match = /^\/([^/]+)\/(confirmed|receipt|trips)$/.exec(url.pathname);
+  assert(match, "partner normal business SSR reader path required");
+  assert.equal(
+    decodeURIComponent(match[1]!),
+    context.entrySlug,
+    "partner SSR entry path mismatch",
+  );
+  assert(
+    url.searchParams.getAll("partnerUserRef").length === 1 &&
+      url.searchParams.get("partnerUserRef") === context.partnerUserRef,
+    "partner SSR original user context mismatch",
+  );
+  if (match[2] !== "trips")
+    assert(
+      url.searchParams.get("bookingId")?.trim() ||
+        url.searchParams.get("orderId")?.trim(),
+      "partner SSR owned booking/order reference required",
+    );
+}
+
+function validatePartnerSsrContract(
+  session: Pick<Session, "app" | "role" | "identity">,
+) {
+  assert(
+    session.app === "partner-booking-web" &&
+      session.identity.readerFamily === "partner_normal_ingress_ssr",
+    "partner-normal-ingress-identity-readback-adapter-missing",
+  );
+  assert(
+    session.role === "referral_passenger" &&
+      session.identity.classification === "partner_normal_ingress_ssr" &&
+      session.identity.subjectPath === "subject" &&
+      session.identity.rolePath === "roles" &&
+      session.identity.expectedSubject?.trim(),
+    "partner SSR identity contract mismatch",
+  );
+  const context = session.identity.partnerContext;
+  assert(context, "partner normal ingress fixture context required");
+  assert(
+    context?.entrySlug?.trim() && context.partnerUserRef?.trim(),
+    "partner normal ingress fixture context required",
+  );
+  for (const key of ["tenantId", "partnerId", "programId"] as const)
+    assert(
+      context[key] === null ||
+        (typeof context[key] === "string" && context[key].trim().length > 0),
+      "partner fixture nullable context field required",
+    );
+  validatePartnerSsrPath(session, session.identity.path);
+}
+
+function verifyPartnerSsrReadback(
+  session: Pick<Session, "app" | "role" | "identity">,
+  body: unknown,
+  options?: {
+    expectedRole?: string | undefined;
+    status?: number | undefined;
+    candidateSha?: string | undefined;
+    expectedRuntimeSha?: string | undefined;
+    documentPath?: string | undefined;
+  },
+): IdentityReadbackResult {
+  validatePartnerSsrContract(session);
+  assert.equal(
+    options?.expectedRole ?? session.role,
+    session.role,
+    "session role mismatch",
+  );
+  assert.equal(options?.status, 200, "identity readback HTTP 200 required");
+  assert(
+    options?.expectedRuntimeSha &&
+      options.candidateSha === options.expectedRuntimeSha,
+    "identity readback runtime SHA mismatch",
+  );
+  assert(options.documentPath, "actual Partner SSR document path required");
+  validatePartnerSsrPath(session, options.documentPath);
+  assert(
+    Array.isArray(body) &&
+      body.length === 1 &&
+      body[0] &&
+      typeof body[0] === "object" &&
+      !Array.isArray(body[0]),
+    "one actual Partner SSR principal marker required",
+  );
+  const attributes = body[0] as Record<string, unknown>;
+  assert.equal(
+    attributes["data-partner-principal"],
+    "api_auth_session",
+    "partner SSR source mismatch",
+  );
+  assert.equal(
+    attributes["data-principal-availability"],
+    "available",
+    "partner SSR principal is unavailable",
+  );
+  assert.equal(
+    attributes["data-principal-subject"],
+    session.identity.expectedSubject,
+    "identity subject mismatch",
+  );
+  assert.equal(
+    attributes["data-principal-actor-type"],
+    "referral_passenger",
+    "partner SSR actor type mismatch",
+  );
+  assert.equal(
+    attributes["data-principal-realm"],
+    "partner",
+    "partner SSR realm mismatch",
+  );
+  assert.equal(
+    attributes["data-principal-entry-slug"],
+    session.identity.partnerContext!.entrySlug,
+    "partner SSR entry mismatch",
+  );
+  for (const [field, key] of [
+    ["data-principal-tenant-id", "tenantId"],
+    ["data-principal-partner-id", "partnerId"],
+    ["data-principal-program-id", "programId"],
+  ] as const)
+    assert.equal(
+      attributes[field] ?? null,
+      session.identity.partnerContext![key],
+      "partner SSR context mismatch",
+    );
+  const serializedRoles = attributes["data-principal-roles"];
+  assert(typeof serializedRoles === "string", "partner SSR roles required");
+  let roles: unknown;
+  try {
+    roles = JSON.parse(serializedRoles);
+  } catch {
+    assert.fail("partner SSR roles must be a JSON array");
+  }
+  assert(
+    Array.isArray(roles) &&
+      roles.length > 0 &&
+      roles.every((role) => typeof role === "string") &&
+      roles.includes(session.role),
+    "partner SSR canonical role mismatch",
+  );
+  // API request-id is optional and is not a whole-SSR request identifier.
+  return {
+    subject: session.identity.expectedSubject,
+    effectiveRoles: [...roles],
+    classification: "partner_normal_ingress_ssr",
+  };
+}
+
 function validateSessionIdentityContract(
   session: Pick<Session, "app" | "role" | "identity">,
   inventory: Inventory,
 ) {
+  if (session.app === "partner-booking-web") {
+    validatePartnerSsrContract(session);
+    return;
+  }
   if (session.identity.classification !== undefined) {
     assert(
       VALID_CLASSIFICATIONS.includes(session.identity.classification),
@@ -189,8 +351,11 @@ export function verifyIdentityReadback(
     status?: number | undefined;
     candidateSha?: string | undefined;
     expectedRuntimeSha?: string | undefined;
+    documentPath?: string | undefined;
   },
 ): IdentityReadbackResult {
+  if (session.app === "partner-booking-web")
+    return verifyPartnerSsrReadback(session, body, options);
   if (options?.status !== undefined) {
     assert.equal(options.status, 200, "identity readback HTTP 200 required");
   }
@@ -730,6 +895,19 @@ export function validateSessions(
   d: Deployment,
   inventory: Inventory,
 ) {
+  // A normal server-ingress fixture is still required. Generic JSON, a locale
+  // cookie and an invoker token do not provision the Partner principal.
+  assert(
+    !inventory.surfaces.some(
+      (surface) => surface.app === "partner-booking-web",
+    ) ||
+      sessions.some(
+        (session) =>
+          session.app === "partner-booking-web" &&
+          session.identity.readerFamily === "partner_normal_ingress_ssr",
+      ),
+    "partner-normal-ingress-identity-readback-adapter-missing",
+  );
   const needed = inventory.surfaces.flatMap((s) =>
     s.roles.map((role) => `${s.app}|${role}`),
   );
@@ -764,10 +942,15 @@ export function validateSessions(
       "server identity readback required",
     );
     validateSessionIdentityContract(session, inventory);
-    assert(
-      session.storageState.cookies.length > 0,
-      "provisioned application session required; invoker token alone is not login",
-    );
+    if (session.app !== "partner-booking-web") {
+      assert(
+        session.storageState.cookies.length > 0,
+        "provisioned application session required; invoker token alone is not login",
+      );
+    }
+    // Partner's normal server-side ingress does not use a browser auth cookie.
+    // Its real principal is checked only on the actual business SSR below.
+
     for (const cookie of session.storageState.cookies) {
       assert(
         cookie.domain === url.hostname &&

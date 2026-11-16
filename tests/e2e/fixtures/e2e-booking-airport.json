@@ -1,14 +1,14 @@
 {
   "businessDispatchSubtype": "credit_card_airport_transfer",
-  "airportDirection": "dropoff",
+  "direction": "dropoff",
   "terminal": "T2",
   "pickup": {
-    "address": "88 Corporate HQ, Staging City",
-    "lat": 25.0797,
-    "lng": 121.2342
+    "address": "SIM Taipei city pickup (external address facts)",
+    "lat": 25.0478,
+    "lng": 121.5319
   },
   "dropoff": {
-    "address": "Staging International Airport, Terminal 2",
+    "address": "SIM Taoyuan Airport Terminal 2 (external airport facts)",
     "lat": 25.0777,
     "lng": 121.2328
   },

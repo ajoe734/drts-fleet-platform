@@ -25,6 +25,7 @@ import { formatDateInput, formatDateTime } from "../../lib/formatters";
 import { getServerLocale } from "../../lib/server-locale";
 import { t } from "../../lib/translations";
 import { BillingProfileForm } from "./billing-profile-form";
+import { InvoiceGenerationForm } from "./invoice-generation-form";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,11 @@ const ROUTE_ACTIONS: readonly ResourceActionDescriptor[] = [
     action: "view_invoices",
     enabled: true,
     riskLevel: "low",
+  },
+  {
+    action: "generate_invoice",
+    enabled: true,
+    riskLevel: "medium",
   },
   {
     action: "refresh",
@@ -505,6 +511,10 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
   );
   const viewInvoicesAction = findAction(data.availableActions, "view_invoices");
   const refreshAction = findAction(data.availableActions, "refresh");
+  const generateInvoiceAction = findAction(
+    data.availableActions,
+    "generate_invoice",
+  );
 
   const accruedAmount = buildAccruedAmount(data.quota);
   const tripCount = data.quota?.usage.confirmedBookingCount ?? 0;
@@ -798,6 +808,17 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
             )}
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title={t("billing.generate.title", locale)}
+          subtitle={t("billing.generate.description", locale)}
+        >
+          <InvoiceGenerationForm
+            descriptor={generateInvoiceAction}
+            locale={locale}
+          />
+        </CanvasCard>
 
         <CanvasCard
           theme={th}

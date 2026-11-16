@@ -6,6 +6,7 @@ import type {
   AuditLogRecord,
   CreateServiceAreaBoundaryCommand,
   CreateStopPolicyCommand,
+  EvaluateAirportTransferRouteCommand,
   EvaluateServiceAreaCommand,
   GeoCircle,
   GeoPoint,
@@ -797,9 +798,45 @@ export class ServiceAreaService implements OnModuleInit {
     return { record: this.clone(record), audit };
   }
 
+  evaluateAirportTransferRoute(
+    command: EvaluateAirportTransferRouteCommand,
+    requestId?: string,
+  ): ServiceAreaEvaluationResult {
+    if (command.direction !== "pickup" && command.direction !== "dropoff") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Airport transfer direction must be pickup or dropoff.",
+        { field: "direction" },
+      );
+    }
+    if (!this.hasCompletePoint(command.dropoff)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Airport route evaluation requires both stop coordinates.",
+        { field: "dropoff" },
+      );
+    }
+    return this.evaluate(
+      {
+        serviceProductType: "credit_card_airport_transfer",
+        pickup: command.pickup,
+        dropoff: command.dropoff,
+        ...(command.requestedAt !== undefined
+          ? { requestedAt: command.requestedAt }
+          : {}),
+      },
+      requestId,
+      command.direction,
+    );
+  }
+
   evaluate(
     command: EvaluateServiceAreaCommand,
     requestId?: string,
+    // Internal route context: the public generic evaluator keeps its existing contract.
+    airportTransferDirection?: "pickup" | "dropoff",
   ): ServiceAreaEvaluationResult {
     if (
       !this.hasCompletePoint(command.pickup) ||
@@ -884,6 +921,37 @@ export class ServiceAreaService implements OnModuleInit {
         evaluatedStops.flatMap((stop) => stop.reasonMessages),
       ),
     };
+    if (airportTransferDirection) {
+      const airportAreas = activeAreas.filter(
+        (area) =>
+          typeof area.metadata?.airportIataCode === "string" &&
+          /^[A-Z]{3}$/.test(area.metadata.airportIataCode),
+      );
+      const airportStop = evaluatedStops.find(
+        (stop) => stop.kind === airportTransferDirection,
+      );
+      const airportMatched =
+        airportStop &&
+        airportAreas.some((area) =>
+          this.geometryContainsPoint(area.geometry, airportStop.location),
+        );
+      if (!airportMatched) {
+        const reasonCode =
+          airportAreas.length === 0
+            ? "AIRPORT_REFERENCE_NOT_CONFIGURED"
+            : airportTransferDirection === "pickup"
+              ? "AIRPORT_PICKUP_REQUIRED"
+              : "AIRPORT_DROPOFF_REQUIRED";
+        result.decision = "not_serviceable";
+        result.reasonCodes = this.unique([...result.reasonCodes, reasonCode]);
+        result.reasonMessages = this.unique([
+          ...result.reasonMessages,
+          airportAreas.length === 0
+            ? "No effective airport identity boundary is configured for this product."
+            : `The ${airportTransferDirection} stop must be within a published airport identity boundary.`,
+        ]);
+      }
+    }
     const policyDenied = this.isPolicyDenied(result);
     this.mapGeofenceObservabilityService?.recordServiceAreaEvaluation({
       decision: result.decision,

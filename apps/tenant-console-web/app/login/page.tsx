@@ -10,6 +10,7 @@ import { getTenantSession } from "@/lib/api-client";
 import { sanitizeReturnPath } from "@/lib/auth/session";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { PortalLoginFormSection } from "@/components/portal-login-form";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +158,8 @@ export default async function LoginPage({
               {t("login.submit", locale)}
             </button>
           </form>
+
+          <PortalLoginFormSection locale={locale} redirectUri={sanitizedRedirect} />
 
           <div
             style={{

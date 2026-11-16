@@ -340,6 +340,40 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Run existing workspace package unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p workspace-unit-test-results
+          result=0
+          for package in \
+            @drts/channel-partner-portal-web \
+            @drts/concierge-portal-web \
+            @drts/driver-app \
+            @drts/enterprise-dispatch-web \
+            @drts/fleet-partner-portal-web \
+            @drts/ops-console-web \
+            @drts/partner-booking-web \
+            @drts/passenger-web \
+            @drts/platform-admin-web \
+            @drts/referral-embed-web \
+            @drts/tenant-console-web \
+            @drts/shared-test-fixtures \
+            @drts/ui-web \
+            @drts/passenger-client; do
+            pnpm --filter "$package" test --maxWorkers=1 \
+              --reporter=default --reporter=json \
+              --outputFile.json="$GITHUB_WORKSPACE/workspace-unit-test-results/${package#@drts/}.json" || result=1
+          done
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-fast-checks-workspace-units-${{ github.sha }}-${{ github.run_id }}
+          path: workspace-unit-test-results/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
   product_root_unit:
     name: Product root unit tests (shard ${{ matrix.shard }}/4)
     needs: scope

@@ -12,6 +12,7 @@ import type {
   PassengerPaymentStatus,
   PassengerRideSseEvent,
   PassengerRideTracking,
+  PassengerServiceSelection,
 } from "@drts/contracts";
 
 export const PASSENGER_SCREEN_IDS = [
@@ -86,6 +87,7 @@ export interface PassengerTimelineEvent {
 
 export interface PassengerRideFixture {
   token: string;
+  serviceSelection?: PassengerServiceSelection;
   orderNo?: string;
   screenId: PassengerScreenId;
   title: string;

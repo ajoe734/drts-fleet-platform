@@ -1,4 +1,5 @@
 import "server-only";
+import { isFleetSessionRedirect } from "./fleet-session-redirect";
 
 import type {
   DriverQuizAttemptDetail,
@@ -66,6 +67,7 @@ export async function loadFleetTraining(): Promise<FleetTrainingData> {
       error: null,
     };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -95,6 +97,7 @@ export async function loadFleetDriverQuizAttempt(
     const { client } = await getServerFleetTrainingClient();
     return await client.getFleetDriverQuizAttempt(driverId, attemptId);
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }

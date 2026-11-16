@@ -50,11 +50,74 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-type NoticeState = {
+type NoticeState =
+  | { kind: "ack_won"; actor: string }
+  | { kind: "ack_competing"; actor: string }
+  | { kind: "ack_failed" }
+  | { kind: "investigation_started" }
+  | { kind: "investigation_failed" }
+  | { kind: "closed" }
+  | { kind: "close_failed" }
+  | null;
+
+type RenderedNotice = {
   tone: SosPillTone;
   title: string;
   body: string;
 } | null;
+
+function resolveDetailNotice(
+  notice: NoticeState,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): RenderedNotice {
+  if (!notice) {
+    return null;
+  }
+  switch (notice.kind) {
+    case "ack_won":
+      return {
+        tone: "success",
+        title: t("sos.notice.acknowledged"),
+        body: t("sos.notice.acknowledgedBody", { actor: notice.actor }),
+      };
+    case "ack_competing":
+      return {
+        tone: "warn",
+        title: t("sos.notice.alreadyOwnedTitle"),
+        body: t("sos.notice.alreadyOwnedBody", { actor: notice.actor }),
+      };
+    case "ack_failed":
+      return {
+        tone: "danger",
+        title: t("sos.notice.ackFailed"),
+        body: t("sos.notice.ackFailedBody"),
+      };
+    case "investigation_started":
+      return {
+        tone: "success",
+        title: t("sos.notice.investigationStarted"),
+        body: t("sos.notice.investigationStartedBody"),
+      };
+    case "investigation_failed":
+      return {
+        tone: "danger",
+        title: t("sos.notice.investigationFailed"),
+        body: t("sos.notice.statusFailedBody"),
+      };
+    case "closed":
+      return {
+        tone: "success",
+        title: t("sos.status.closed"),
+        body: t("sos.notice.closedBody"),
+      };
+    case "close_failed":
+      return {
+        tone: "danger",
+        title: t("sos.notice.closeFailed"),
+        body: t("sos.notice.statusFailedBody"),
+      };
+  }
+}
 
 type TimelineView = {
   at: string;
@@ -89,7 +152,8 @@ function ActorChip({ realm }: { realm: TimelineView["actorRealm"] }) {
 }
 
 export default function SosDetailPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
+  const activeLocale = locale ?? "zh";
   const { incidentId } = useParams() as { incidentId: string };
   const router = useRouter();
   const [incident, setIncident] = useState<IncidentRecord | null>(null);
@@ -98,7 +162,7 @@ export default function SosDetailPage() {
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [identity, setIdentity] = useState<IdentityContext | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [hasLoadError, setHasLoadError] = useState<boolean>(false);
   const [notice, setNotice] = useState<NoticeState>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
 
@@ -109,6 +173,7 @@ export default function SosDetailPage() {
         nowMs,
         driverNamesById,
         platesByVehicleId,
+        locale: activeLocale,
       })[0]
     : undefined;
   const currentActorId = identity?.actorId?.trim() || DEFAULT_OPS_ACTOR_ID;
@@ -142,10 +207,10 @@ export default function SosDetailPage() {
       setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
       setIdentity(identityRes);
-      setErrorMsg(null);
+      setHasLoadError(false);
     } catch (error) {
       console.error("Failed to load SOS incident detail", error);
-      setErrorMsg("無法載入 SOS 詳情，請確認事件編號或後端連線。");
+      setHasLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -203,25 +268,21 @@ export default function SosDetailPage() {
 
       if (ack.wonAcknowledgement) {
         setNotice({
-          tone: "success",
-          title: "已確認接手",
-          body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
+          kind: "ack_won",
+          actor: currentActorLabel,
         });
       } else {
         setNotice({
-          tone: "warn",
-          title: "First-writer-wins",
-          body: `${formatSosActorLabel(ack.dutyAcknowledgement.acknowledgedByActorId)} 已先確認此事件，畫面已同步最新處理權。`,
+          kind: "ack_competing",
+          actor: formatSosActorLabel(
+            ack.dutyAcknowledgement.acknowledgedByActorId,
+          ),
         });
       }
       await fetchData();
     } catch (error) {
       console.error("Failed to acknowledge SOS incident", error);
-      setNotice({
-        tone: "danger",
-        title: "確認接手失敗",
-        body: "系統未能完成處理權寫入，請稍後再試。",
-      });
+      setNotice({ kind: "ack_failed" });
     }
   };
 
@@ -236,19 +297,11 @@ export default function SosDetailPage() {
         },
       });
 
-      setNotice({
-        tone: "success",
-        title: "已開始調查",
-        body: "事件狀態已切換為調查中。",
-      });
+      setNotice({ kind: "investigation_started" });
       await fetchData();
     } catch (error) {
       console.error("Failed to start SOS investigation", error);
-      setNotice({
-        tone: "danger",
-        title: "開始調查失敗",
-        body: "系統未能更新事件狀態，請稍後再試。",
-      });
+      setNotice({ kind: "investigation_failed" });
     }
   };
 
@@ -263,19 +316,11 @@ export default function SosDetailPage() {
         },
       });
 
-      setNotice({
-        tone: "success",
-        title: "已結案",
-        body: "SOS 事件已完成 closeout。",
-      });
+      setNotice({ kind: "closed" });
       await fetchData();
     } catch (error) {
       console.error("Failed to close SOS incident", error);
-      setNotice({
-        tone: "danger",
-        title: "結案失敗",
-        body: "系統未能更新事件狀態，請稍後再試。",
-      });
+      setNotice({ kind: "close_failed" });
     }
   };
 
@@ -294,7 +339,7 @@ export default function SosDetailPage() {
     );
   }
 
-  if (errorMsg || !incident) {
+  if (hasLoadError || !incident) {
     return (
       <div style={{ minHeight: "100%", background: theme.bg, padding: 24 }}>
         <Banner
@@ -302,7 +347,9 @@ export default function SosDetailPage() {
           tone="danger"
           icon="warn"
           title={t("sos.detail.loadErrorTitle")}
-          body={errorMsg || "找不到該 SOS 事件。"}
+          body={
+            hasLoadError ? t("sos.detail.loadError") : t("sos.detail.notFound")
+          }
         />
         <div style={{ marginTop: 14 }}>
           <Btn theme={theme} onClick={() => router.push("/sos")}>
@@ -321,7 +368,7 @@ export default function SosDetailPage() {
           tone="warn"
           icon="warn"
           title={t("sos.detail.notSosTitle")}
-          body="此案件不屬於 SOS 值班佇列，請返回事故中心或 SOS 佇列。"
+          body={t("sos.detail.notSos")}
         />
         <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
           <Btn theme={theme} onClick={() => router.push("/sos")}>
@@ -343,12 +390,13 @@ export default function SosDetailPage() {
   const isClosed =
     incident.status === "resolved" || incident.status === "closed";
   const supplementText = getSosSupplementText(incident);
+  const renderedNotice = resolveDetailNotice(notice, t);
   const timelineEntries: TimelineView[] =
     timeline.length > 0
       ? timeline.map((entry) => ({
-          at: formatSosTimestamp(entry.createdAt),
+          at: formatSosTimestamp(entry.createdAt, undefined, activeLocale),
           tone: getSosTimelineTone(entry),
-          title: getSosTimelineTitle(entry),
+          title: getSosTimelineTitle(entry, activeLocale),
           body: entry.note || "—",
           actor: entry.actor || null,
           actorRealm: inferSosTimelineActorRealm(entry),
@@ -357,18 +405,24 @@ export default function SosDetailPage() {
           {
             at: sosRow.occurredAtLabel,
             tone: "danger",
-            title: "系統收到通報",
-            body: `關聯自 ${sosRow.eventNo}`,
+            title: t("sos.timeline.received"),
+            body: t("sos.timeline.linkedFrom", { eventNo: sosRow.eventNo }),
             actor: incident.relatedDriverId,
             actorRealm: "driver",
           },
           ...(incident.assignedTo
             ? [
                 {
-                  at: formatSosTimestamp(incident.updatedAt),
+                  at: formatSosTimestamp(
+                    incident.updatedAt,
+                    undefined,
+                    activeLocale,
+                  ),
                   tone: "success" as const,
-                  title: "值班人員已確認",
-                  body: `${formatSosActorLabel(incident.assignedTo)} 接手處理`,
+                  title: t("sos.timeline.acknowledged"),
+                  body: t("sos.timeline.takenBy", {
+                    actor: formatSosActorLabel(incident.assignedTo),
+                  }),
                   actor: incident.assignedTo,
                   actorRealm: "ops" as const,
                 },
@@ -445,13 +499,13 @@ export default function SosDetailPage() {
           gap: 16,
         }}
       >
-        {notice ? (
+        {renderedNotice ? (
           <Banner
             theme={theme}
-            tone={notice.tone}
-            icon={notice.tone === "success" ? "check" : "warn"}
-            title={notice.title}
-            body={notice.body}
+            tone={renderedNotice.tone}
+            icon={renderedNotice.tone === "success" ? "check" : "warn"}
+            title={renderedNotice.title}
+            body={renderedNotice.body}
           />
         ) : null}
 
@@ -521,7 +575,7 @@ export default function SosDetailPage() {
                     boxShadow: theme.shadowSm,
                   }}
                 >
-                  {incident.location || "尚未收到定位地址"} ·{" "}
+                  {incident.location || t("sos.detail.locationPending")} ·{" "}
                   {sosRow.occurredAtLabel}
                 </div>
               </div>
@@ -530,7 +584,7 @@ export default function SosDetailPage() {
             <Card
               theme={theme}
               title={t("sos.detail.timelineTitle")}
-              subtitle="SSE 驅動更新；事件、處理權與狀態變更全部保留在同一路徑"
+              subtitle={t("sos.detail.timelineSubtitle")}
             >
               <ol
                 style={{
@@ -663,12 +717,16 @@ export default function SosDetailPage() {
                 theme={theme}
                 cols={1}
                 items={[
-                  { k: "事件編號", v: sosRow.eventNo, mono: true },
-                  { k: "狀態", v: sosRow.statusLabel },
-                  { k: "嚴重度", v: sosRow.severityLabel },
-                  { k: "已經過", v: sosRow.elapsedLabel, mono: true },
-                  { k: "值班確認人", v: sosRow.ackLabel },
-                  { k: "回報來源", v: sosRow.driverLabel },
+                  { k: t("sos.field.eventNo"), v: sosRow.eventNo, mono: true },
+                  { k: t("sos.field.status"), v: sosRow.statusLabel },
+                  { k: t("sos.field.severity"), v: sosRow.severityLabel },
+                  {
+                    k: t("sos.field.elapsed"),
+                    v: sosRow.elapsedLabel,
+                    mono: true,
+                  },
+                  { k: t("sos.field.owner"), v: sosRow.ackLabel },
+                  { k: t("sos.field.reportedBy"), v: sosRow.driverLabel },
                 ]}
               />
             </Card>
@@ -678,12 +736,28 @@ export default function SosDetailPage() {
                 theme={theme}
                 cols={1}
                 items={[
-                  { k: "駕駛", v: sosRow.driverLabel },
-                  { k: "車牌", v: sosRow.plateLabel, mono: true },
-                  { k: "行程", v: sosRow.orderLabel, mono: true },
-                  { k: "位置", v: sosRow.locationLabel },
-                  { k: "通報時間", v: sosRow.occurredAtLabel, mono: true },
-                  { k: "事故中心 ID", v: incident.incidentId, mono: true },
+                  { k: t("sos.field.driver"), v: sosRow.driverLabel },
+                  {
+                    k: t("sos.field.plate"),
+                    v: sosRow.plateLabel,
+                    mono: true,
+                  },
+                  {
+                    k: t("sos.field.trip"),
+                    v: sosRow.orderLabel,
+                    mono: true,
+                  },
+                  { k: t("sos.field.location"), v: sosRow.locationLabel },
+                  {
+                    k: t("sos.field.reportedAt"),
+                    v: sosRow.occurredAtLabel,
+                    mono: true,
+                  },
+                  {
+                    k: t("sos.field.incidentId"),
+                    v: incident.incidentId,
+                    mono: true,
+                  },
                 ]}
               />
             </Card>
@@ -718,7 +792,7 @@ export default function SosDetailPage() {
                 cols={1}
                 items={[
                   {
-                    k: "事故中心案件",
+                    k: t("sos.field.incidentCase"),
                     v: (
                       <Link
                         href={`/incidents/${incident.incidentId}`}
@@ -729,7 +803,7 @@ export default function SosDetailPage() {
                     ),
                   },
                   {
-                    k: "申訴案件",
+                    k: t("sos.field.complaint"),
                     v: incident.relatedComplaintCaseNo ? (
                       <Link
                         href={`/complaints?caseNo=${encodeURIComponent(
@@ -744,10 +818,12 @@ export default function SosDetailPage() {
                     ),
                   },
                   {
-                    k: "服務補救",
+                    k: t("sos.field.recovery"),
                     v:
                       incident.serviceRecoveryActions.length > 0
-                        ? `${incident.serviceRecoveryActions.length} 筆`
+                        ? t("sos.detail.recoveryCount", {
+                            count: incident.serviceRecoveryActions.length,
+                          })
                         : "—",
                   },
                 ]}

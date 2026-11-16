@@ -28,6 +28,8 @@ const FIELDS: Record<string, keyof FareQuoteCommand> = {
   destination_lng: "destinationLng",
   scheduledAt: "scheduledAt",
   scheduled_at: "scheduledAt",
+  serviceSelection: "serviceSelection",
+  service_selection: "serviceSelection",
 };
 function invalid(): never {
   throw new ApiRequestError(
@@ -46,6 +48,19 @@ export function parseFareQuote(body: unknown, now: number): FareQuoteCommand {
     if (!canonical || Object.prototype.hasOwnProperty.call(command, canonical))
       invalid();
     command[canonical] = value;
+  }
+  if (command.serviceSelection !== undefined) {
+    const selection = command.serviceSelection;
+    if (
+      !selection ||
+      typeof selection !== "object" ||
+      Array.isArray(selection) ||
+      Object.keys(selection).length !== 1 ||
+      !("accessible" in selection) ||
+      selection.accessible !== true
+    )
+      invalid();
+    command.serviceSelection = { accessible: true };
   }
   for (const [field, limit] of [
     ["originLat", 90],
@@ -215,6 +230,9 @@ export class PassengerFareService {
     const fareSnapshotId = randomUUID();
     await this.store.insertSnapshot({
       ...estimate,
+      ...(command.serviceSelection
+        ? { serviceSelection: { ...command.serviceSelection } }
+        : {}),
       fareSnapshotId,
       drtsPassengerId: account.drtsPassengerId,
       origin,
@@ -229,6 +247,9 @@ export class PassengerFareService {
     return {
       serviceAreaResult: "serviceable",
       ...estimate,
+      ...(command.serviceSelection
+        ? { serviceSelection: { ...command.serviceSelection } }
+        : {}),
       fareSnapshotId,
       expiresAt,
       serviceAreaEvaluation: evaluation,

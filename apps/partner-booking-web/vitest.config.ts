@@ -2,6 +2,11 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  oxc: {
+    jsx: {
+      runtime: "automatic",
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname),
@@ -13,13 +18,13 @@ export default defineConfig({
         __dirname,
         "../../packages/api-client/src/index.ts",
       ),
-      "@drts/ui-web": path.resolve(
-        __dirname,
-        "../../packages/ui-web/src/index.tsx",
-      ),
       "@drts/ui-web/partner-booking": path.resolve(
         __dirname,
         "../../packages/ui-web/src/partner-booking-funnel.tsx",
+      ),
+      "@drts/ui-web": path.resolve(
+        __dirname,
+        "../../packages/ui-web/src/index.tsx",
       ),
       "@drts/ui-tokens": path.resolve(
         __dirname,

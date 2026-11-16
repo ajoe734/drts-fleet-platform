@@ -3,12 +3,14 @@ import type { DriverOnboardingRouter } from "@/lib/driver-identity-routing";
 type DriverTaskLike = {
   taskId: string;
   driverId: string;
+  vehicleId?: string | null;
   status: string;
 };
 
 type DriverHeartbeatAssignment = {
   taskId: string;
   driverId: string;
+  vehicleId?: string | null;
   status: string;
 } | null;
 
@@ -94,6 +96,7 @@ export async function syncDriverIdentityBootstrap(
         ? {
             taskId: activeTask.taskId,
             driverId: activeTask.driverId,
+            vehicleId: activeTask.vehicleId ?? null,
             status: activeTask.status,
           }
         : null,

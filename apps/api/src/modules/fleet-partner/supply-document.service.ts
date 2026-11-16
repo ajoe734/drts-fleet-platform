@@ -30,7 +30,7 @@ export class SupplyDocumentService {
     command: CreateSupplyDocumentUploadUrlCommand,
     requestId?: string,
   ) {
-    await this.supplySubmissionService.syncState();
+    await this.supplySubmissionService.syncSubmission(submissionId);
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,
@@ -101,7 +101,7 @@ export class SupplyDocumentService {
     command: ConfirmSupplyDocumentUploadCommand,
     requestId?: string,
   ) {
-    await this.supplySubmissionService.syncState();
+    await this.supplySubmissionService.syncSubmission(submissionId);
     const objectKey = command.objectKey.trim();
     const originalFileName = command.originalFileName.trim();
     const contentType = command.contentType.trim();
@@ -230,7 +230,7 @@ export class SupplyDocumentService {
     stream: AsyncIterable<Uint8Array>,
     contentType: string,
   ) {
-    await this.supplySubmissionService.syncState();
+    await this.supplySubmissionService.syncSubmission(submissionId);
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,
@@ -250,7 +250,7 @@ export class SupplyDocumentService {
     submissionId: string,
     documentId: string,
   ) {
-    await this.supplySubmissionService.syncState();
+    await this.supplySubmissionService.syncSubmission(submissionId);
     const document = this.supplySubmissionService.getDocumentById(documentId);
     if (!document || document.submissionId !== submissionId)
       throw new ApiRequestError(404, "NOT_FOUND", "Supply document not found.");
@@ -276,7 +276,7 @@ export class SupplyDocumentService {
     command: DeleteSupplyDocumentCommand,
     requestId?: string,
   ) {
-    await this.supplySubmissionService.syncState();
+    await this.supplySubmissionService.syncSubmission(submissionId);
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,

@@ -88,6 +88,10 @@ export function readBookingRecovery(
       !point(value.draft.destination)
     )
       throw new Error("invalid_draft");
+    const draft: BookingDraft = { ...value.draft };
+    if (value.draft.serviceSelection?.accessible === true)
+      draft.serviceSelection = { accessible: true };
+    else delete draft.serviceSelection;
     if (value.pending) {
       const pending = value.pending;
       const command = pending.command;
@@ -111,13 +115,13 @@ export function readBookingRecovery(
       )
         throw new Error("invalid_pending");
       return {
-        draft: value.draft,
+        draft,
         pending: { ...pending, outcomeUnknown: true },
         quote: value.quote,
       };
     }
     // An unsent draft always needs a fresh quote and explicit new fee confirmation.
-    return { draft: value.draft, pending: null };
+    return { draft, pending: null };
   } catch {
     clearBookingRecovery(storage);
     return null;

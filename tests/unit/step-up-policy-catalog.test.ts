@@ -178,6 +178,20 @@ const PRIVILEGED_ROUTE_FIXTURES: Array<{
     realm: "ops",
     actionId: "ops:partner-eligibility:reviews:resolve",
   },
+  // FLEET-ONB-005 SA/SD §1: manageFleetHumanRole's PUT endpoint was
+  // previously unmatched by any step-up rule (no PUT rule existed at all).
+  {
+    method: "PUT",
+    path: "/api/admin/fleet-partners/fleet-test-001/human-roles",
+    realm: "platform",
+    actionId: "platform:users:role:update",
+  },
+  {
+    method: "PUT",
+    path: "/api/admin/fleet-partners/fleet-test-001/human-roles",
+    realm: "ops",
+    actionId: "platform:users:role:update",
+  },
 ];
 
 describe("step-up policy catalog", () => {

@@ -29,7 +29,7 @@ on:
         options:
           - "current"
       retired_service_cleanup:
-        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 12 active services plus drts-passenger-web."
         required: false
         default: "none"
         type: choice
@@ -49,10 +49,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Explicit user-approved pause. Re-enabling Partner Booking requires a reviewed
-  # code change that restores build, deploy, smoke, and domain-maintenance rails.
-  DEV_PARTNER_BOOKING_STATE: "paused"
-  DEV_PAUSED_PARTNER_BOOKING_SERVICE: "drts-dev-partner-booking-web"
+  # Reviewed shared-dev activation; custom-domain maintenance remains separate.
+  DEV_PARTNER_BOOKING_STATE: "active"
+  DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
+  DEV_PARTNER_BOOKING_ENTRY_SLUG: ${{ vars.DEV_PARTNER_BOOKING_ENTRY_SLUG }}
+  DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED }}
   DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
   DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
   DEV_GCP_CLOUDSQL_INSTANCE: ${{ vars.DEV_GCP_CLOUDSQL_INSTANCE }}
@@ -115,6 +116,8 @@ env:
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
   DEV_OIDC_CLIENT_ID: ${{ vars.DEV_OIDC_CLIENT_ID }}
+  DEV_PASSWORD_PEPPER_CURRENT_VERSION: ${{ vars.DEV_PASSWORD_PEPPER_CURRENT_VERSION }}
+  DEV_PASSWORD_LOGIN_ENABLED: ${{ vars.DEV_PASSWORD_LOGIN_ENABLED }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
   DEV_AGENCY_PORTAL_ORIGIN: ${{ vars.DEV_AGENCY_PORTAL_ORIGIN }}
@@ -159,6 +162,8 @@ jobs:
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
       passenger_app_service: ${{ steps.resolve.outputs.passenger_app_service }}
       agency_portal_service: ${{ steps.resolve.outputs.agency_portal_service }}
+      partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
+      partner_booking_entry_slug: ${{ steps.resolve.outputs.partner_booking_entry_slug }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
       api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
       platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
@@ -170,6 +175,7 @@ jobs:
       channel_partner_portal_exposure_flag: ${{ steps.resolve.outputs.channel_partner_portal_exposure_flag }}
       passenger_app_exposure_flag: ${{ steps.resolve.outputs.passenger_app_exposure_flag }}
       agency_portal_exposure_flag: ${{ steps.resolve.outputs.agency_portal_exposure_flag }}
+      partner_booking_exposure_flag: ${{ steps.resolve.outputs.partner_booking_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
@@ -261,6 +267,13 @@ jobs:
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           passenger_app_service="$(pick "${DEV_GCP_PASSENGER_APP_SERVICE:-}" "" "drts-dev-passenger-app-web")"
           agency_portal_service="$(pick "${DEV_GCP_AGENCY_PORTAL_SERVICE:-}" "" "drts-dev-agency-portal-web")"
+          partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-dev-partner-booking-web")"
+          partner_booking_entry_slug="${DEV_PARTNER_BOOKING_ENTRY_SLUG:-}"
+          # This is an existing persistent entry, not a seed/demo fallback.
+          if [[ ! "$partner_booking_entry_slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::Set DEV_PARTNER_BOOKING_ENTRY_SLUG to the active persisted Partner entry before deployment."
+            exit 1
+          fi
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
 
           assert_exact_active_service() {
@@ -268,7 +281,7 @@ jobs:
             local actual="$2"
             local expected="$3"
             if [[ "$actual" != "$expected" ]]; then
-              echo "::error::Resolved ${surface} target ${actual} is outside the reviewed active dev inventory; expected ${expected}. Partner Booking is paused and service-target changes require a reviewed workflow update."
+              echo "::error::Resolved ${surface} target ${actual} is outside the reviewed active dev inventory; expected ${expected}. Service-target changes require a reviewed workflow update."
               exit 1
             fi
           }
@@ -284,6 +297,7 @@ jobs:
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
           assert_exact_active_service passenger-app-web "$passenger_app_service" "drts-dev-passenger-app-web"
           assert_exact_active_service agency-portal-web "$agency_portal_service" "drts-dev-agency-portal-web"
+          assert_exact_active_service partner-booking-web "$partner_booking_service" "drts-dev-partner-booking-web"
 
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
@@ -295,6 +309,7 @@ jobs:
           channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
           passenger_app_exposure_flag="$(exposure_flag "${DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED:-}" false)"
           agency_portal_exposure_flag="$(exposure_flag "${DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
+          partner_booking_exposure_flag="$(exposure_flag "${DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -386,6 +401,8 @@ jobs:
           emit channel_partner_portal_service "$channel_partner_portal_service"
           emit passenger_app_service "$passenger_app_service"
           emit agency_portal_service "$agency_portal_service"
+          emit partner_booking_service "$partner_booking_service"
+          emit partner_booking_entry_slug "$partner_booking_entry_slug"
           emit migration_job "$migration_job"
           emit api_exposure_flag "$api_exposure_flag"
           emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
@@ -397,6 +414,7 @@ jobs:
           emit channel_partner_portal_exposure_flag "$channel_partner_portal_exposure_flag"
           emit passenger_app_exposure_flag "$passenger_app_exposure_flag"
           emit agency_portal_exposure_flag "$agency_portal_exposure_flag"
+          emit partner_booking_exposure_flag "$partner_booking_exposure_flag"
           emit api_origin "$api_origin"
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
@@ -416,7 +434,7 @@ jobs:
     # Migration still waits for every image to succeed.
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 13
       matrix:
         image:
           [
@@ -432,6 +450,7 @@ jobs:
             channel-partner-portal-web,
             passenger-app-web,
             agency-portal-web,
+            partner-booking-web,
           ]
     # These outputs are identical for every matrix entry: all check out the
     # same immutable source. No per-image value is exposed as a shared output.
@@ -642,6 +661,19 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/agency-portal-web:${{ steps.tag.outputs.tag }}
           cache-from: type=gha,scope=agency-portal-web
           cache-to: type=gha,scope=agency-portal-web,mode=min
+
+      - name: Build & push — partner-booking-web
+        if: matrix.image == 'partner-booking-web' && steps.existing.outputs.partner-booking-web != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/partner-booking-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=partner-booking-web
+          cache-to: type=gha,scope=partner-booking-web,mode=min
 
   migrate:
     name: DB migration
@@ -902,6 +934,34 @@ jobs:
           echo "oidc_enabled=${oidc_enabled}" >> "$GITHUB_OUTPUT"
           echo "tenant_auth=${tenant_auth_secret_args}" >> "$GITHUB_OUTPUT"
 
+          # Password login (Argon2id pepper + TOTP envelope-encryption key) is
+          # all-or-nothing (PWD-LOGIN-010, SA/SD portal-password-login-20261113
+          # §10). Never read either secret value into the runner; Cloud Run
+          # mounts the reference at runtime. The two secrets' contents must be
+          # the exact JSON the API expects on these env vars: password-pepper
+          # holds PASSWORD_PEPPER_SECRETS_JSON's {"<version>":"<pepper>"} ring
+          # (apps/api/src/common/auth/password-hashing.service.ts), and
+          # totp-encryption-key holds TOTP_ENCRYPTION_KEYS_JSON's
+          # {"activeKeyId":"<id>","keys":{"<id>":"<base64 32 bytes>"}} ring
+          # (apps/api/src/modules/auth/totp-secret-cipher.ts).
+          password_login_enabled=false
+          password_pepper_present=false
+          totp_encryption_key_present=false
+          if gcloud secrets describe "${secret_prefix}-password-pepper" --project "$project_id" >/dev/null 2>&1; then
+            password_pepper_present=true
+          fi
+          if gcloud secrets describe "${secret_prefix}-totp-encryption-key" --project "$project_id" >/dev/null 2>&1; then
+            totp_encryption_key_present=true
+          fi
+          if [[ "$password_pepper_present" == true && "$totp_encryption_key_present" == true ]]; then
+            password_login_enabled=true
+            secret_args="${secret_args},PASSWORD_PEPPER_SECRETS_JSON=${secret_prefix}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${secret_prefix}-totp-encryption-key:latest"
+          elif [[ "$password_pepper_present" == true || "$totp_encryption_key_present" == true ]]; then
+            echo "::error::Password login configuration is partial: ${secret_prefix}-password-pepper and ${secret_prefix}-totp-encryption-key must both exist."
+            exit 1
+          fi
+          echo "password_login_enabled=${password_login_enabled}" >> "$GITHUB_OUTPUT"
+
           # Remote SMTP is opt-in and fail-closed. Mount secret references only;
           # never access or print SMTP credentials in the deployment runner.
           # Dev mail secrets deliberately use the drts-dev- namespace.
@@ -1076,13 +1136,31 @@ jobs:
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
           node operations/verification/verify-google-map-provider-live.mjs
 
+      - name: Resolve Fleet invitation accept URL
+        id: fleet_invitation_url
+        run: |
+          set -euo pipefail
+          fleet_login_origin="${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"
+          if [[ -z "$fleet_login_origin" ]]; then
+            echo "::error::Fleet staff invitations require DEV_FLEET_PARTNER_PORTAL_ORIGIN before deploying the API."
+            exit 1
+          fi
+          # Use the same bare-HTTPS origin already consumed by Fleet login.
+          if [[ ! "$fleet_login_origin" =~ ^https://[^/[:space:]]+$ ]]; then
+            echo "::error::Fleet Partner Portal origin must be a bare HTTPS origin: $fleet_login_origin"
+            exit 1
+          fi
+          echo "base=${fleet_login_origin}/invite" >> "$GITHUB_OUTPUT"
+
       - name: Build API env vars
         id: api_env
         env:
+          PASSWORD_LOGIN_SECRETS_PRESENT: ${{ steps.api_secrets.outputs.password_login_enabled }}
           ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}
           REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: ${{ steps.api_secrets.outputs.regulatory_alert_recipient_secret_mounted }}
           AGENCY_PORTAL_SERVICE: ${{ needs.prepare.outputs.agency_portal_service }}
           AGENCY_PORTAL_ORIGIN: ${{ needs.prepare.outputs.agency_portal_origin }}
+          FLEET_INVITATION_ACCEPT_URL_BASE: ${{ steps.fleet_invitation_url.outputs.base }}
         run: |
           set -euo pipefail
 
@@ -1162,6 +1240,21 @@ jobs:
             esac
             auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
           done
+          # Fleet Partner Portal Google login sends ${origin}/api/auth/callback
+          # as its redirect_uri; the API's validateRedirectUri rejects any origin
+          # missing from AUTH_ALLOWED_ORIGINS. Same value prepare emits as
+          # fleet_partner_portal_origin (workflow-level env from vars).
+          for origin in "${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"; do
+            [[ -n "$origin" ]] || continue
+            if [[ ! "$origin" =~ ^https://[^/[:space:]]+$ ]]; then
+              echo "::error::Fleet Partner Portal origin must be a bare HTTPS origin: $origin"
+              exit 1
+            fi
+            case ",${auth_allowed_origins}," in
+              *",${origin},"*) continue ;;
+            esac
+            auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
+          done
 
           if [[ -z "$auth_allowed_origins" ]]; then
             echo "::warning::No Tenant Console origin available: ${{ needs.prepare.outputs.tenant_console_service }} does not exist in ${{ needs.prepare.outputs.project_id }} yet and DEV_TENANT_CONSOLE_ORIGIN is unset. Deploying the API with an empty browser origin allowlist -- dev treats that as local-origins-only, not as a wildcard. Re-run this deploy once the Tenant Console service exists to grant it access."
@@ -1174,6 +1267,17 @@ jobs:
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           # Existing 2026-10-05 dev workforce policy is independent of tenant OIDC.
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}@DRTS_DEV_MFA_WAIVED=true"
+          # The first API revision must receive the rollout and pepper version
+          # with the pair already selected by api_secrets, before any later update.
+          password_login_enabled_effective=false
+          if [[ "${PASSWORD_LOGIN_SECRETS_PRESENT:-false}" == "true" ]]; then
+            password_login_enabled_effective="${DEV_PASSWORD_LOGIN_ENABLED:-true}"
+            if [[ "$password_login_enabled_effective" != "true" ]]; then
+              password_login_enabled_effective=false
+            fi
+            env_vars="${env_vars}@PASSWORD_PEPPER_CURRENT_VERSION=${DEV_PASSWORD_PEPPER_CURRENT_VERSION:-v1}"
+          fi
+          env_vars="${env_vars}@PASSWORD_LOGIN_ENABLED=${password_login_enabled_effective}"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           # Dev-only test-driver buttons on the referral embed demo (bureau inspection).
@@ -1217,6 +1321,9 @@ jobs:
           agency_login_origin="${agency_portal_configured_origin:-$agency_portal_cloud_run_origin}"
           if [[ -n "$agency_login_origin" ]]; then
             env_vars="${env_vars}@AGENCY_INVITATION_ACCEPT_URL_BASE=${agency_login_origin}/invite"
+          fi
+          if [[ -n "${FLEET_INVITATION_ACCEPT_URL_BASE:-}" ]]; then
+            env_vars="${env_vars}@FLEET_INVITATION_ACCEPT_URL_BASE=${FLEET_INVITATION_ACCEPT_URL_BASE}"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
@@ -1323,6 +1430,40 @@ jobs:
             --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Reconcile password login configuration on the API service
+        # A separate step (not folded into "Build API env vars"/"Deploy — api"
+        # above) so adding this does not change those two steps' literal
+        # content -- several tests (tests/unit/dev-pax-review-env-transport-20261016/transport.test.ts,
+        # tests/unit/notification-delivery/deploy-dev-smtp.test.ts) capture
+        # those steps' `run:` scalars verbatim and replace every `${{ }}`
+        # expression against a fixed fixture map.
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.api_secrets.outputs.password_login_enabled }}" == "true" ]]; then
+            # DEV_PASSWORD_LOGIN_ENABLED (SA/SD portal-password-login-20261113
+            # §10) is a separate global rollout input for staged deploys
+            # (backend support first, frontend entry later); it must never be
+            # inferred from secret presence. Default true preserves today's
+            # already-live behavior (entry open once both secrets exist) for
+            # deployments that never set it; an explicit "false" keeps the
+            # secrets mounted -- so existing password/TOTP logins keep
+            # working -- while only hiding the entry/new password creation.
+            password_login_enabled_effective="${DEV_PASSWORD_LOGIN_ENABLED:-true}"
+            if [[ "$password_login_enabled_effective" != "true" ]]; then
+              password_login_enabled_effective=false
+            fi
+            gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --update-secrets "PASSWORD_PEPPER_SECRETS_JSON=${{ needs.prepare.outputs.secret_prefix }}-password-pepper:latest,TOTP_ENCRYPTION_KEYS_JSON=${{ needs.prepare.outputs.secret_prefix }}-totp-encryption-key:latest" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=${password_login_enabled_effective},PASSWORD_PEPPER_CURRENT_VERSION=${DEV_PASSWORD_PEPPER_CURRENT_VERSION:-v1}"
+          else
+            gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --update-env-vars "PASSWORD_LOGIN_ENABLED=false"
+          fi
 
       - name: Resolve API URL
         id: api_url
@@ -1479,6 +1620,9 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
+          # Every page needs a fleet session (Google login at /login, or the
+          # session bearer the operational harness sends), so the portal can
+          # be reachable without showing the demo fleet to anonymous visitors.
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
@@ -1486,7 +1630,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@DRTS_FLEET_PORTAL_AUTH_REQUIRED=true" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1768,41 +1912,64 @@ jobs:
               --update-env-vars "^@^AUTH_ALLOWED_ORIGINS=${reconciled_allowed_origins}@AGENCY_INVITATION_ACCEPT_URL_BASE=${expected_invite_base}"
           fi
 
-  paused-partner-booking-cleanup:
-    name: Enforce Partner Booking paused state
-    runs-on: ubuntu-latest
-    needs: [prepare, deploy]
-    if: ${{ always() && needs.prepare.result == 'success' }}
-    environment: dev
-    steps:
-      - name: Checkout deployment controls
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ needs.prepare.outputs.project_id }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ needs.prepare.outputs.project_id }}
-
-      - name: Remove paused Partner Booking Cloud Run service
+      - name: Deploy — partner-booking-web
         run: |
-          ./operations/deployment/cleanup-paused-partner-booking-service.sh \
-            "${{ needs.prepare.outputs.project_id }}" \
-            "${{ needs.prepare.outputs.region }}"
+          IMAGE="${{ needs.prepare.outputs.registry }}/partner-booking-web:${{ needs.build-push.outputs.image_tag }}"
+          # Normal Partner BFF uses the API's actual Cloud Run origin/audience.
+          # No tenant, API key, Google credential or issuer secret is sent to the browser.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@DRTS_API_URL=${{ steps.api_url.outputs.url }}@DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}@NEXT_PUBLIC_API_URL=/control-plane-proxy"
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.partner_booking_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3007 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-env-vars "$env_vars" \
+            ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
+            --cpu 1 --concurrency 80 --execution-environment gen1 --no-cpu-boost \
+            --min-instances 0 --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — partner-booking-web
+        if: ${{ needs.prepare.outputs.partner_booking_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.partner_booking_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Reconcile Partner Booking runtime origin
+        run: |
+          set -euo pipefail
+          # First activation resolves the URL only after the service exists.
+          partner_origin="$(gcloud run services describe "${{ needs.prepare.outputs.partner_booking_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          [[ "$partner_origin" =~ ^https://[^/[:space:]]+$ ]]
+          current_api_env="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" --project "${{ needs.prepare.outputs.project_id }}" --format=json)"
+          origins="$(jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "AUTH_ALLOWED_ORIGINS") | .value // empty' <<<"$current_api_env")"
+          case ",${origins}," in
+            *",${partner_origin},"*) ;;
+            *)
+              origins="${origins:+${origins},}${partner_origin}"
+              # The quota-retry wrapper runs `gcloud run deploy`, which
+              # demands --image even for an env-only change. Keep the API on
+              # the image this job already deployed.
+              api_image="$(jq -r '.spec.template.spec.containers[0].image // empty' <<<"$current_api_env")"
+              [[ -n "$api_image" ]]
+              operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
+                --region "${{ needs.prepare.outputs.region }}" --project "${{ needs.prepare.outputs.project_id }}" \
+                --image "$api_image" \
+                --update-env-vars "^@^AUTH_ALLOWED_ORIGINS=${origins}"
+              ;;
+          esac
 
   health-check:
     name: Dev health check
     runs-on: ubuntu-latest
-    needs: [prepare, deploy, paused-partner-booking-cleanup]
-    if: ${{ always() && needs.deploy.result == 'success' && needs.paused-partner-booking-cleanup.result == 'success' }}
+    needs: [prepare, deploy]
+    if: ${{ always() && needs.deploy.result == 'success' }}
     environment: dev
     outputs:
       api: ${{ steps.urls.outputs.api }}
@@ -1816,6 +1983,7 @@ jobs:
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
       passenger_app: ${{ steps.urls.outputs.passenger_app }}
       agency_portal: ${{ steps.urls.outputs.agency_portal }}
+      partner_booking: ${{ steps.urls.outputs.partner_booking }}
       referral_entry_host: ${{ needs.deploy.outputs.referral_entry_host }}
 
     steps:
@@ -1846,7 +2014,8 @@ jobs:
             "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
             "${{ needs.prepare.outputs.passenger_app_service }}" \
-            "${{ needs.prepare.outputs.agency_portal_service }}"; do
+            "${{ needs.prepare.outputs.agency_portal_service }}" \
+            "${{ needs.prepare.outputs.partner_booking_service }}"; do
             echo "Waiting for ${svc} ..."
             service_ready=false
             for i in $(seq 1 24); do
@@ -1919,6 +2088,11 @@ jobs:
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
 
+          partner_booking_url="$(gcloud run services describe "${{ needs.prepare.outputs.partner_booking_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+
           echo "api=${api_url}" >> "$GITHUB_OUTPUT"
           echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
           echo "ops_console=${ops_console_url}" >> "$GITHUB_OUTPUT"
@@ -1930,6 +2104,7 @@ jobs:
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
           echo "passenger_app=${passenger_app_url}" >> "$GITHUB_OUTPUT"
           echo "agency_portal=${agency_portal_url}" >> "$GITHUB_OUTPUT"
+          echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
 
       # gcloud auth print-identity-token, and IAM credentials API generateIdToken
       # called with an *already-impersonated* SA access token (self-impersonation),
@@ -2038,6 +2213,43 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ steps.urls.outputs.agency_portal }}
           id_token_include_email: true
+
+      - name: Mint identity token — Partner Booking
+        id: id_token_partner_booking
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.partner_booking }}
+          id_token_include_email: true
+
+      - name: Verify active Partner Booking entry
+        env:
+          PARTNER_BOOKING_ID_TOKEN: ${{ steps.id_token_partner_booking.outputs.id_token }}
+          PARTNER_BOOKING_URL: ${{ steps.urls.outputs.partner_booking }}
+          PARTNER_BOOKING_ENTRY_SLUG: ${{ needs.prepare.outputs.partner_booking_entry_slug }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PARTNER_BOOKING_ID_TOKEN" ]]
+          echo "::add-mask::${PARTNER_BOOKING_ID_TOKEN}"
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --fail \
+            --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+            --header "Authorization: Bearer ${PARTNER_BOOKING_ID_TOKEN}" \
+            --dump-header "$headers" --output "$body" --write-out '%{http_code}' \
+            "${PARTNER_BOOKING_URL}/${PARTNER_BOOKING_ENTRY_SLUG}/eligibility")"
+          [[ "$status" == 200 ]]
+          served_sha="$(awk 'tolower($1) == "x-drts-candidate-sha:" {gsub("\r", "", $2); print $2}' "$headers")"
+          [[ "$served_sha" == "$CANDIDATE_SHA" ]]
+          grep -Eq 'data-partner-entry-source="authority(_cache)?"' "$body"
+          grep -F '<form' "$body" >/dev/null
+          rm -f "$headers" "$body"
+          # This proves the configured normal entry renders from backend authority,
+          # not eligibility approval, creation, completion or external issuer success.
 
       - name: Verify passenger app endpoints
         env:
@@ -2354,7 +2566,7 @@ jobs:
           echo "  tenant-console: ${{ steps.urls.outputs.tenant_console }}"
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
           echo "  referral-embed-web: ${{ steps.urls.outputs.referral_embed }}/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
-          echo "  partner-booking: PAUSED (service removed; code preserved)"
+          echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}/${{ needs.prepare.outputs.partner_booking_entry_slug }}/eligibility (normal entry; create/completion separately verified)"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
           echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /login; candidate SHA checked)"
@@ -2725,6 +2937,17 @@ jobs:
           id_token_audience: ${{ needs.health-check.outputs.channel_partner_portal }}
           id_token_include_email: true
 
+      - name: Mint identity token — Partner Booking (operational candidate)
+        id: id_token_partner_booking
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.partner_booking }}
+          id_token_include_email: true
+
       - name: Mint identity token — driver provisioning (operational candidate)
         id: id_token_driver_provisioning
         uses: google-github-actions/auth@v2
@@ -2776,6 +2999,9 @@ jobs:
           DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
           DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
           DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
+          DRTS_DEV_PARTNER_BOOKING_BASE_URL: ${{ needs.health-check.outputs.partner_booking }}
+          DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG: ${{ needs.prepare.outputs.partner_booking_entry_slug }}
+          DRTS_DEV_PARTNER_BOOKING_ID_TOKEN: ${{ steps.id_token_partner_booking.outputs.id_token }}
           DRTS_DEV_TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
           DRTS_DEV_BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
           DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
@@ -2798,11 +3024,10 @@ jobs:
           DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: ${{ vars.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID || secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID }}
         run: |
           set -euo pipefail
-          # Deleted Cloud Run services retain their service hostname; the control
-          # plane returns 404, which is the retire/paused contract under test.
+          # Only retired services derive their former hostname for the 404 contract.
+          # Active Partner Booking uses the actual resolved status.url above.
           api_url="${{ needs.health-check.outputs.api }}"
           cloud_run_suffix="${api_url#https://drts-dev-api-}"
-          export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
           export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
           export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
           operations/verification/run-operational-browser-acceptance.sh \
@@ -3032,7 +3257,6 @@ jobs:
       - build-push
       - migrate
       - deploy
-      - paused-partner-booking-cleanup
       - health-check
       - retired-service-cleanup
       - operational-candidate-acceptance
@@ -3046,7 +3270,6 @@ jobs:
           R_BUILD_PUSH: ${{ needs.build-push.result }}
           R_MIGRATE: ${{ needs.migrate.result }}
           R_DEPLOY: ${{ needs.deploy.result }}
-          R_PAUSED_CLEANUP: ${{ needs.paused-partner-booking-cleanup.result }}
           R_HEALTH_CHECK: ${{ needs.health-check.result }}
           R_RETIRED_CLEANUP: ${{ needs.retired-service-cleanup.result }}
           R_ACCEPTANCE: ${{ needs.operational-candidate-acceptance.result }}
@@ -3061,7 +3284,6 @@ jobs:
             "build-push|Build & push images|before deploy|${R_BUILD_PUSH}"
             "migrate|DB migration|before deploy|${R_MIGRATE}"
             "deploy|Deploy services|the deploy itself|${R_DEPLOY}"
-            "paused-cleanup|Enforce Partner Booking paused state|after deploy|${R_PAUSED_CLEANUP}"
             "health-check|Dev health check|after deploy|${R_HEALTH_CHECK}"
             "retired-cleanup|Fail-closed retired service cleanup|after deploy|${R_RETIRED_CLEANUP}"
             "acceptance|Candidate SHA operational acceptance|after deploy|${R_ACCEPTANCE}"

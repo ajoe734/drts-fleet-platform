@@ -1,5 +1,6 @@
 import type {
   FareQuoteResponse,
+  PassengerServiceSelection,
   FareVersion,
   FaresResponse,
   GeoPoint,
@@ -51,6 +52,7 @@ export interface FareEstimate {
 }
 
 export interface FareQuoteSnapshot extends FareEstimate {
+  serviceSelection?: PassengerServiceSelection;
   fareSnapshotId: string;
   drtsPassengerId: string;
   origin: GeoPoint;

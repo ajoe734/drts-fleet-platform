@@ -16,7 +16,7 @@ import {
   formatEnterpriseBookingTime,
   getEnterpriseDispatchTenantClient,
   getEnterpriseTripProgressStage,
-  selectActiveEnterpriseTrip,
+  isEnterpriseActiveTripStatus,
 } from "../../lib/api-client";
 import {
   ENTERPRISE_TENANT_SESSION_COOKIE,
@@ -26,7 +26,7 @@ import { enterpriseTenant } from "../../lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "../../lib/enterprise-theme";
 import { getServerLocale } from "../../lib/server-locale";
 import { type TranslationKey, t as translate } from "../../lib/translations";
-import type { TenantDashboardSummary } from "@drts/contracts";
+import type { BookingRecord } from "@drts/contracts";
 
 export default async function TripPage() {
   const locale = await getServerLocale();
@@ -41,18 +41,25 @@ export default async function TripPage() {
     return <EnterpriseGatePage kind="auth-required" />;
   }
 
-  let summary: TenantDashboardSummary | null = null;
+  let bookings: BookingRecord[];
   try {
-    summary = await getEnterpriseDispatchTenantClient(
+    bookings = await getEnterpriseDispatchTenantClient(
       verified.session,
-    ).getDashboardSummary();
+    ).listBookings();
   } catch (error) {
     return (
       <EnterpriseGatePage kind={classifyEnterpriseDashboardFetchError(error)} />
     );
   }
 
-  const trip = selectActiveEnterpriseTrip(summary.upcomingBookings);
+  const trip =
+    bookings
+      .filter((booking) => isEnterpriseActiveTripStatus(booking.orderStatus))
+      .sort(
+        (left, right) =>
+          Date.parse(left.reservationWindowStart) -
+          Date.parse(right.reservationWindowStart),
+      )[0] ?? null;
 
   if (!trip) {
     return (
@@ -96,7 +103,7 @@ export default async function TripPage() {
     );
   }
 
-  const stage = getEnterpriseTripProgressStage(trip.status);
+  const stage = getEnterpriseTripProgressStage(trip.orderStatus);
   const supportPhone = enterpriseTenant.supportPhone;
 
   return (
@@ -162,7 +169,7 @@ export default async function TripPage() {
                 </div>
                 <div style={{ marginTop: 5 }}>
                   <EPill t={t} tone="neutral" dot>
-                    {tr(`status.order.${trip.status}` as TranslationKey)}
+                    {tr(`status.order.${trip.orderStatus}` as TranslationKey)}
                   </EPill>
                 </div>
               </div>
@@ -195,16 +202,16 @@ export default async function TripPage() {
           <div style={{ marginTop: 18 }}>
             <EntRoute
               t={t}
-              from={trip.pickupAddress}
-              to={trip.dropoffAddress}
+              from={trip.pickup.address}
+              to={trip.dropoff.address}
               win={formatEnterpriseBookingTime(trip.reservationWindowStart)}
             />
           </div>
           <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
             <DriverContactAction
-              key={`${trip.bookingId}:${trip.status}`}
+              key={`${trip.bookingId}:${trip.orderStatus}`}
               bookingId={trip.bookingId}
-              status={trip.status}
+              status={trip.orderStatus}
               locale={locale}
             />
             <a

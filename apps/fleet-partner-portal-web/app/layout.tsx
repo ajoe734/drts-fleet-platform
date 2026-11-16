@@ -27,6 +27,18 @@ export default async function RootLayout({
 }) {
   const locale = await getServerLocale();
   const requestHeaders = await headers();
+  // The sign-in page stands alone: no portal chrome or nav-badge API reads
+  // for a visitor who has no session yet.
+  if (requestHeaders.get("x-drts-fleet-pathname") === "/login") {
+    return (
+      <html lang={locale}>
+        <body style={{ margin: 0, minHeight: "100dvh" }}>
+          <RuntimeConfigScript />
+          <LanguageProvider defaultLocale={locale}>{children}</LanguageProvider>
+        </body>
+      </html>
+    );
+  }
   const hostOnly =
     isHostPortalPath(requestHeaders.get("x-drts-fleet-pathname") ?? "") ||
     Boolean(

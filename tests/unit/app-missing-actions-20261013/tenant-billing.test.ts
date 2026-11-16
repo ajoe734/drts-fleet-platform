@@ -13,24 +13,38 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiClient } from "../../../packages/api-client/src/index";
+import {
+  ApiClient,
+  createTenantBearerClient,
+} from "../../../packages/api-client/src/index";
 import type { TenantBillingProfile } from "@drts/contracts";
 import BillingPage from "../../../apps/tenant-console-web/app/billing/page";
 import { BillingProfileForm } from "../../../apps/tenant-console-web/app/billing/billing-profile-form";
-import { saveBillingProfile } from "../../../apps/tenant-console-web/app/billing/actions";
+import {
+  saveBillingProfile,
+  generateInvoiceFromBilling,
+} from "../../../apps/tenant-console-web/app/billing/actions";
+import { InvoiceGenerationForm } from "../../../apps/tenant-console-web/app/billing/invoice-generation-form";
 
 const mocks = vi.hoisted(() => ({
   client: vi.fn(),
   request: vi.fn(),
   revalidate: vi.fn(),
   refresh: vi.fn(),
+  push: vi.fn(),
+  redirect: vi.fn(),
+  session: vi.fn(),
+  clientForSession: vi.fn(),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mocks.refresh }),
+  useRouter: () => ({ refresh: mocks.refresh, push: mocks.push }),
+  redirect: mocks.redirect,
 }));
 vi.mock("../../../apps/tenant-console-web/lib/api-client", () => ({
   getTenantClient: mocks.client,
+  getTenantSession: mocks.session,
+  createTenantBearerClientFromSession: mocks.clientForSession,
 }));
 vi.mock("../../../apps/tenant-console-web/lib/server-locale", () => ({
   getServerLocale: async () => "en",
@@ -76,6 +90,21 @@ function readResponse(url: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.session.mockResolvedValue({
+    accessToken: "unit-session",
+    tenantId: profile.tenantId,
+  });
+  mocks.clientForSession.mockImplementation(
+    (session: { accessToken: string; tenantId: string }) =>
+      createTenantBearerClient(
+        "https://api.example.test",
+        session.accessToken,
+        session.tenantId,
+      ),
+  );
+  mocks.redirect.mockImplementation((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  });
   mocks.client.mockResolvedValue(
     new ApiClient({
       baseUrl: "https://api.example.test",
@@ -459,5 +488,270 @@ describe("tenant settings billing navigation", () => {
     expect(
       actions.every((link) => link.getAttribute("href") === "/billing"),
     ).toBe(true);
+  });
+});
+
+describe("tenant invoice generation through the normal billing page", () => {
+  const period = {
+    periodStart: "2026-03-01T00:00:00.000",
+    periodEnd: "2026-03-31T23:59:59.999",
+  };
+  const issued = {
+    invoiceId: "invoice-SIM-generated-billing",
+    tenantId: profile.tenantId,
+    periodStart: "2026-02-28T16:00:00.000Z",
+    periodEnd: "2026-03-31T15:59:59.999Z",
+  };
+  const issuedWire = {
+    invoice_id: issued.invoiceId,
+    tenant_id: issued.tenantId,
+    period_start: issued.periodStart,
+    period_end: issued.periodEnd,
+  };
+  const generateDescriptor = {
+    action: "generate_invoice",
+    enabled: true,
+    riskLevel: "medium" as const,
+  };
+
+  function enterPeriod() {
+    fireEvent.change(screen.getByLabelText("Period start (Taipei time)"), {
+      target: { value: period.periodStart },
+    });
+    fireEvent.change(screen.getByLabelText("Period end (Taipei time)"), {
+      target: { value: period.periodEnd },
+    });
+  }
+
+  it("uses the verified tenant, real SDK bearer request and full Taipei month-end precision, then links the returned invoice ID", async () => {
+    mocks.request.mockResolvedValueOnce(response(issuedWire));
+    const result = await generateInvoiceFromBilling(
+      form({ ...period, tenantId: "foreign-tenant-form-value" }),
+    );
+    expect(mocks.clientForSession).toHaveBeenCalledWith({
+      accessToken: "unit-session",
+      tenantId: profile.tenantId,
+    });
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    const [url, init] = mocks.request.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.test/api/tenant/invoices/generate");
+    expect(init.method).toBe("POST");
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer unit-session");
+    expect(headers.get("x-tenant-id")).toBe(profile.tenantId);
+    expect(headers.get("x-realm")).toBe("tenant");
+    expect(JSON.parse(String(init.body))).toEqual({
+      tenantId: profile.tenantId,
+      periodStart: issued.periodStart,
+      periodEnd: issued.periodEnd,
+    });
+    expect(result).toEqual({
+      ok: true,
+      invoiceId: issued.invoiceId,
+      href: `/invoices?invoiceId=${issued.invoiceId}`,
+      message: "Invoice created. Opening its recorded details.",
+    });
+    expect(mocks.revalidate.mock.calls).toEqual([["/billing"], ["/invoices"]]);
+  });
+
+  it("retains the original login redirect when the verified tenant session is absent", async () => {
+    mocks.session.mockResolvedValueOnce(null);
+    await expect(generateInvoiceFromBilling(form(period))).rejects.toThrow(
+      "NEXT_REDIRECT:/login",
+    );
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.clientForSession).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "not-a-date", "2026-03-01T00:00+09:00"])(
+    "does not submit an invalid or differently zoned wall-clock field (%s)",
+    async (periodStart) => {
+      const result = await generateInvoiceFromBilling(
+        form({ ...period, periodStart }),
+      );
+      expect(result).toEqual({
+        ok: false,
+        message: "Enter a valid start and end date and time in Taipei time.",
+      });
+      expect(mocks.request).not.toHaveBeenCalled();
+      expect(mocks.revalidate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [403, "INVOICE_ACCESS_DENIED", "Tenant billing authority is required."],
+    [
+      400,
+      "VALIDATION_ERROR",
+      "Billing period must be closed before invoice generation.",
+    ],
+    [
+      400,
+      "VALIDATION_ERROR",
+      "No eligible trips found for the requested billing period.",
+    ],
+    [503, "UNAVAILABLE", "Billing storage is unavailable."],
+  ])(
+    "preserves the actual Generate rejection (%s %s)",
+    async (status, code, message) => {
+      mocks.request.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code,
+              message,
+              retryable: false,
+              trace_id: "tenant-generation-unit",
+            },
+          }),
+          { status: Number(status) },
+        ),
+      );
+      const result = await generateInvoiceFromBilling(form(period));
+      expect(result).toEqual({
+        ok: false,
+        message: expect.stringContaining(String(message)),
+      });
+      expect(mocks.request).toHaveBeenCalledTimes(1);
+      expect(mocks.revalidate).not.toHaveBeenCalled();
+      expect(mocks.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not turn an unconfirmed successful response into a fabricated invoice link", async () => {
+    mocks.request.mockResolvedValueOnce(response({ status: "accepted" }));
+    const result = await generateInvoiceFromBilling(form(period));
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "The server did not return an invoice ID. Open the invoice register to check the result before submitting again.",
+    });
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it("mounts the actual billing form, submits its normal fields and opens only the exact invoice ID from Generate", async () => {
+    render(await BillingPage({}));
+    expect(screen.getByRole("form", { name: "Generate invoice" })).toBeTruthy();
+    expect(
+      screen.getByRole("form", { name: "Edit billing profile" }),
+    ).toBeTruthy();
+    expect(document.querySelector('input[name="tenantId"]')).toBeNull();
+    expect(
+      screen.getByLabelText("Period end (Taipei time)").getAttribute("step"),
+    ).toBe("0.001");
+    expect(screen.getByText(/Enter Asia\/Taipei time/)).toBeTruthy();
+    enterPeriod();
+    mocks.request.mockResolvedValueOnce(response(issuedWire));
+    fireEvent.click(screen.getByRole("button", { name: "Generate invoice" }));
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith(
+        `/invoices?invoiceId=${issued.invoiceId}`,
+      ),
+    );
+    await screen.findByRole("status");
+    expect(
+      screen
+        .getByRole("link", { name: "Open generated invoice" })
+        .getAttribute("href"),
+    ).toBe(`/invoices?invoiceId=${issued.invoiceId}`);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Invoice created. Opening its recorded details.",
+    );
+    const writes = mocks.request.mock.calls.filter(
+      ([, init]) => init.method === "POST",
+    );
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0]![1].body))).toEqual({
+      tenantId: profile.tenantId,
+      periodStart: issued.periodStart,
+      periodEnd: issued.periodEnd,
+    });
+    expect(
+      (screen.getByLabelText("Invoice title *") as HTMLInputElement).value,
+    ).toBe(profile.invoiceTitle);
+  });
+
+  it("retains period edits through pending and a failed API response without blocking the separate billing profile editor", async () => {
+    render(await BillingPage({}));
+    enterPeriod();
+    const enteredStart = (
+      screen.getByLabelText("Period start (Taipei time)") as HTMLInputElement
+    ).value;
+    const enteredEnd = (
+      screen.getByLabelText("Period end (Taipei time)") as HTMLInputElement
+    ).value;
+    let finish!: (response: Response) => void;
+    mocks.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Generate invoice" }));
+    await waitFor(() => expect(typeof finish).toBe("function"));
+    expect(
+      screen.getByLabelText("Period start (Taipei time)").matches(":disabled"),
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Generating…" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save billing profile",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    finish(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "UNAVAILABLE",
+            message: "Billing storage is unavailable.",
+            retryable: false,
+            trace_id: "tenant-generation-unit",
+          },
+        }),
+        { status: 503 },
+      ),
+    );
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Billing storage is unavailable.",
+    );
+    expect(
+      (screen.getByLabelText("Period start (Taipei time)") as HTMLInputElement)
+        .value,
+    ).toBe(enteredStart);
+    expect(
+      (screen.getByLabelText("Period end (Taipei time)") as HTMLInputElement)
+        .value,
+    ).toBe(enteredEnd);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+    expect(
+      mocks.request.mock.calls.filter(([, init]) => init.method === "POST"),
+    ).toHaveLength(1);
+  });
+
+  it("uses Chinese billing copy and respects an explicitly unavailable action without calling Generate", () => {
+    render(
+      createElement(InvoiceGenerationForm, {
+        descriptor: { ...generateDescriptor, enabled: false },
+        locale: "zh",
+      }),
+    );
+    expect(screen.getByLabelText("期間開始（台北時間）")).toBeTruthy();
+    expect(screen.getByText(/不代表外部稅務開票或乘客扣款/)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "產生帳單" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.submit(screen.getByRole("form", { name: "產生帳單" }));
+    expect(mocks.session).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
   });
 });

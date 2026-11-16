@@ -20,9 +20,11 @@ import {
   isEnterpriseDraftComplete,
   parseEnterpriseBookingDraft,
   resolveCopyByLocale,
+  resolveCostCenterMode,
   serializeEnterpriseBookingDraft,
   validateReservationWindow,
 } from "../../../lib/enterprise-booking-draft";
+import { createEnterpriseDispatchSessionClient } from "../../../lib/api-client";
 import {
   ENTERPRISE_TENANT_SESSION_COOKIE,
   verifyEnterpriseTenantSession,
@@ -59,20 +61,37 @@ export default async function ReviewBookingPage({
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   let verifiedTenantId: string | undefined;
+  // Creation still requires a cost center when its directory cannot be read.
+  // Existing-booking edits preserve their original optional value.
+  let activeCostCenterCount: number | null = null;
   try {
     const cookieStore = await cookies();
     const verified = await verifyEnterpriseTenantSession(
       cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
     );
     verifiedTenantId = verified.session?.tenantId;
+    if (verified.session) {
+      activeCostCenterCount = (
+        await createEnterpriseDispatchSessionClient(
+          verified.session,
+        ).listActiveCostCenters()
+      ).filter((row) => row.activeFlag).length;
+    }
   } catch {
-    verifiedTenantId = undefined;
+    // A failed cost-center read must not unset an already verified tenant.
+    activeCostCenterCount = null;
   }
   const resolvedSearchParams = (await searchParams) ?? {};
   const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
     ? resolvedSearchParams.bookingId[0]
     : resolvedSearchParams.bookingId;
+  const costCenterMode = bookingId
+    ? "optional"
+    : resolveCostCenterMode(activeCostCenterCount);
+  const costCenterUsed =
+    costCenterMode === "required" ||
+    (costCenterMode === "optional" && draft.costCenterCode.trim().length > 0);
 
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
@@ -89,7 +108,10 @@ export default async function ReviewBookingPage({
     now,
     locale,
   );
-  const canSubmit = timeValidation.isValid && isEnterpriseDraftComplete(draft, now);
+  const canSubmit =
+    timeValidation.isValid &&
+    isEnterpriseDraftComplete(draft, now, costCenterMode);
+  const costCenterFilled = draft.costCenterCode.trim().length > 0;
 
   const effectivePassenger =
     draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
@@ -154,35 +176,39 @@ export default async function ReviewBookingPage({
             title={tr("review.card.approval")}
             sub={tr("card.sub.costOwnershipApproval")}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 14px",
-                background: t.primaryBg,
-                border: "1px solid " + t.primaryBd,
-                borderRadius: 12,
-                marginBottom: 14,
-              }}
-            >
-              <span style={{ color: t.primary }}>
-                <EIcon name="building" size={22} />
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {draft.costCenterLabel}
+            {costCenterUsed ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 14px",
+                  background: t.primaryBg,
+                  border: "1px solid " + t.primaryBd,
+                  borderRadius: 12,
+                  marginBottom: 14,
+                }}
+              >
+                <span style={{ color: t.primary }}>
+                  <EIcon name="building" size={22} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>
+                    {displayDraftValue(draft.costCenterLabel)}
+                  </div>
+                  <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
+                    {tr("review.approval.costNote", {
+                      remain: preview.remainingBudgetLabel,
+                    })}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
-                  {tr("review.approval.costNote", {
-                    remain: preview.remainingBudgetLabel,
-                  })}
-                </div>
+                <EPill t={t} tone={costCenterFilled ? "success" : "warn"} dot>
+                  {tr(
+                    costCenterFilled ? "new.check.valid" : "new.check.pending",
+                  )}
+                </EPill>
               </div>
-              <EPill t={t} tone="success" dot>
-                {tr("new.check.valid")}
-              </EPill>
-            </div>
+            ) : null}
             <ERow
               t={t}
               k={tr("new.check.fare")}
@@ -299,11 +325,7 @@ export default async function ReviewBookingPage({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard
-            t={t}
-            title={tr("detail.card.trip")}
-            sub={tr("card.sub.trip")}
-          >
+          <ECard t={t} title={tr("detail.card.trip")} sub={tr("card.sub.trip")}>
             <EntRoute
               t={t}
               from={draft.pickup}

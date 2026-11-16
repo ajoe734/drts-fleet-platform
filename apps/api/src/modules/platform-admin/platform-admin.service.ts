@@ -68,6 +68,9 @@ import {
 import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
+import { TenantInvitationDeliveryService } from "../tenant-partner/tenant-invitation-delivery.service";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
+import type { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
@@ -1471,6 +1474,129 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
     return user;
+  }
+
+  // ── PWD-LOGIN-006: admin-triggered password reset ───────────────────────
+
+  /**
+   * SA/SD §6: `platform_user_admin`/`tenant_admin` can only ever trigger the
+   * same reset-email flow a user would trigger themselves. There is no path
+   * here that reads, accepts, or returns a plaintext password -- the admin
+   * never sees anything the self-service request wouldn't already send to
+   * the user's own inbox.
+   */
+  async sendUserPasswordReset(
+    targetPrincipalId: string,
+    command: { reasonCode?: string },
+    requestId?: string,
+    actorId?: string | null,
+  ): Promise<{ sent: boolean }> {
+    const reasonCode = this.requireNonBlank(command?.reasonCode, "reasonCode");
+    const auditActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "send password reset emails",
+    );
+
+    const principal =
+      await this.identityRepository.findPrincipalById(targetPrincipalId);
+    if (!principal || principal.status !== "active") {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLATFORM_USER_NOT_FOUND",
+        "Target user could not be found or is not active.",
+        { targetPrincipalId },
+      );
+    }
+
+    const credential =
+      await this.identityRepository.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+    if (!credential || !principal.email) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSWORD_RESET_NOT_APPLICABLE",
+        "This user has no password credential to reset.",
+        { targetPrincipalId },
+      );
+    }
+
+    const memberships = await this.identityRepository.findMembershipsByPrincipalId(
+      principal.principalId,
+    );
+    const membership = memberships.find(
+      (candidate) =>
+        (candidate.realm === "tenant" ||
+          candidate.realm === "agency" ||
+          candidate.realm === "partner") &&
+        candidate.status === "active",
+    );
+    if (!membership) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSWORD_RESET_NOT_APPLICABLE",
+        "This user has no active tenant, agency, or partner membership.",
+        { targetPrincipalId },
+      );
+    }
+    const realm = membership.realm as "tenant" | "agency" | "partner";
+
+    const { rawToken, expiresAt } =
+      await this.identityRepository.createPasswordResetToken(
+        principal.principalId,
+      );
+    const delivery = await this.resolvePasswordResetDelivery().sendPasswordReset({
+      dedupeKey: `${principal.principalId}:${randomUUID()}`,
+      realm,
+      tenantId: realm === "tenant" ? membership.tenantId : null,
+      recipientEmail: principal.email,
+      expiresAt,
+      rawToken,
+    });
+
+    this.recordAudit(
+      {
+        actorId: auditActorId,
+        actorType: "platform_admin",
+        tenantId: realm === "tenant" ? membership.tenantId : null,
+        moduleName: "platform-admin",
+        actionName: "send_user_password_reset",
+        resourceType: "identity_principal",
+        resourceId: principal.principalId,
+        newValuesSummary: {
+          realm,
+          reasonCode,
+          deliveryStatus: delivery.status,
+        },
+      },
+      requestId,
+    );
+
+    return { sent: delivery.status === "sent" };
+  }
+
+  private passwordResetDelivery?: TenantInvitationDeliveryService;
+
+  /** Lazily built the same way AuthController builds its copy: this service
+   * only has IdentityRepository injected, not a wired
+   * NotificationDeliveryService, and reading env at construction time would
+   * miss env set after the service was instantiated (tests, dev fixtures). */
+  private resolvePasswordResetDelivery(): TenantInvitationDeliveryService {
+    if (!this.passwordResetDelivery) {
+      let notificationDeliveryService: NotificationDeliveryService | null;
+      try {
+        notificationDeliveryService = createNotificationDeliveryServiceFromEnv(
+          process.env,
+          this.identityRepository.getDatabaseService(),
+        );
+      } catch {
+        notificationDeliveryService = null;
+      }
+      this.passwordResetDelivery = new TenantInvitationDeliveryService(
+        notificationDeliveryService ?? null,
+      );
+    }
+    return this.passwordResetDelivery;
   }
 
   // ── Platform Adapters ───────────────────────────────────────────────────

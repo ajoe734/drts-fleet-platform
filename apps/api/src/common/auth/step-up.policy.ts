@@ -511,6 +511,55 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
       /^platform-admin\/agencies\/[^/]+\/members\/[^/]+\/access-period$/,
     ),
   },
+  // FLEET-ONB-003 SA/SD §1 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md):
+  // Fleet staff invitation issuance/revocation and membership deactivation
+  // are privileged platform/ops mutations, same authority model as
+  // manageFleetHumanRole (fleet-partner.service.ts). Reuses the existing
+  // platform:users:* action ids, mirroring the agency rules above.
+  {
+    actionId: "platform:users:create",
+    description: "Fleet partner staff invitation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "POST",
+      /^admin\/fleet-partners\/[^/]+\/invitations$/,
+    ),
+  },
+  {
+    actionId: "platform:users:role:update",
+    description: "Fleet partner staff invitation revoke",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "POST",
+      /^admin\/fleet-partners\/[^/]+\/invitations\/[^/]+\/revoke$/,
+    ),
+  },
+  {
+    actionId: "platform:users:role:update",
+    description: "Fleet partner staff membership deactivation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "POST",
+      /^admin\/fleet-partners\/[^/]+\/members\/[^/]+\/deactivate$/,
+    ),
+  },
+  // FLEET-ONB-005 SA/SD §1: the existing `manageFleetHumanRole` endpoint
+  // grants/revokes a Fleet staff role binding, the same authority model as
+  // the invitation/revoke/deactivate rules above, but was missing a step-up
+  // rule entirely (no PUT rule existed, so this route never matched).
+  {
+    actionId: "platform:users:role:update",
+    description: "Fleet partner staff human role grant/revoke",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "PUT",
+      /^admin\/fleet-partners\/[^/]+\/human-roles$/,
+    ),
+  },
 ] as const;
 
 export function resolveRouteStepUpPolicy(

@@ -304,7 +304,10 @@ export class ShiftAttendanceRepository {
             // to this query) or gone — and retry instead of failing the
             // command.
             await client.query("ROLLBACK TO SAVEPOINT shift_insert_attempt");
-            shift = { ...shift, shiftId: await this.allocateNextShiftId(client) };
+            shift = {
+              ...shift,
+              shiftId: await this.allocateNextShiftId(client),
+            };
             continue;
           }
           throw error;
@@ -354,9 +357,10 @@ export class ShiftAttendanceRepository {
         );
       }
 
-      // Read active shift
+      // Hold the active shift through commit so another terminal writer cannot
+      // commit between this snapshot and the clock-out update. Driver lock stays first.
       const shiftRes = await client.query<JsonRecordRow>(
-        `SELECT record FROM ops.phase1_driver_shifts WHERE driver_id = $1 AND status = 'active'`,
+        `SELECT record FROM ops.phase1_driver_shifts WHERE driver_id = $1 AND status = 'active' FOR UPDATE`,
         [driverId],
       );
       const firstRow = shiftRes.rows[0];

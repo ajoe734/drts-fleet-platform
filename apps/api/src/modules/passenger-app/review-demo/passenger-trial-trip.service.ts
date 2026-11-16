@@ -36,6 +36,8 @@ export const PASSENGER_TRIAL_SUPPLY = [
 }));
 // Existing registry records the trial pairs are cloned from, in preference order.
 const TEMPLATE_VEHICLE_IDS = ["pax-review-vehicle-a", "veh-demo-001"];
+const ACCESSIBLE_TRIAL_VEHICLE_ID = PASSENGER_TRIAL_SUPPLY[2]!.vehicleId;
+const ACCESSIBLE_TRIAL_MODEL = "輪椅測試車（模擬）";
 const TRIAL_ACTOR = {
   actorId: "passenger-trial-trip",
   actorType: "system" as const,
@@ -239,6 +241,10 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
           ...structuredClone(template),
           vehicleId: pair.vehicleId,
           plateNo: pair.plateNo,
+          vehicleForm:
+            pair.vehicleId === ACCESSIBLE_TRIAL_VEHICLE_ID
+              ? "accessible"
+              : "sedan",
           operatingArea: "taipei",
           supportedServiceBuckets: ["standard_taxi"],
           dispatchableFlag: true,
@@ -289,7 +295,10 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
         disclosureProfiles: missingVehicles.map((pair) => ({
           vehicleId: pair.vehicleId,
           make: "Toyota",
-          model: "Corolla Altis",
+          model:
+            pair.vehicleId === ACCESSIBLE_TRIAL_VEHICLE_ID
+              ? ACCESSIBLE_TRIAL_MODEL
+              : "Corolla Altis",
           modelYear: 2024,
           doorCount: 4,
           color: "黃",
@@ -303,6 +312,40 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
         })),
       });
     }
+    // Refresh the existing simulated pair too, without replacing its current
+    // availability, assignments or other registry fields.
+    const refreshedSupply = await this.registryRepository.loadState();
+    const accessibleVehicle = refreshedSupply.vehicles.find(
+      (vehicle) => vehicle.vehicleId === ACCESSIBLE_TRIAL_VEHICLE_ID,
+    );
+    const accessibleDisclosure = (
+      refreshedSupply.disclosureProfiles ?? []
+    ).find((profile) => profile.vehicleId === ACCESSIBLE_TRIAL_VEHICLE_ID);
+    await this.registryRepository.persistChanges({
+      ...(accessibleVehicle?.vehicleForm !== "accessible" && accessibleVehicle
+        ? {
+            vehicles: [
+              {
+                ...accessibleVehicle,
+                vehicleForm: "accessible",
+                updatedAt: now,
+              },
+            ],
+          }
+        : {}),
+      ...(accessibleDisclosure &&
+      accessibleDisclosure.model !== ACCESSIBLE_TRIAL_MODEL
+        ? {
+            disclosureProfiles: [
+              {
+                ...accessibleDisclosure,
+                model: ACCESSIBLE_TRIAL_MODEL,
+                updatedAt: now,
+              },
+            ],
+          }
+        : {}),
+    });
     // Trial vehicles created before that rule carry the template's unbound
     // exclusivity; bind them too (an upsert per vehicle, read from storage).
     const unbound = (state.exclusivities ?? []).filter(

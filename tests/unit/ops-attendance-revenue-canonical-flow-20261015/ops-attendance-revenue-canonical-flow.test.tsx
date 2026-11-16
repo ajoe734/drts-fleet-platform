@@ -18,11 +18,13 @@ import type {
   ReconciliationIssueRecord,
   SettlementMatrixRecord,
   ShiftRecord,
+  TenantInvoiceRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import AttendancePage from "../../../apps/ops-console-web/app/attendance/page";
 import { GET as exportAttendanceGet } from "../../../apps/ops-console-web/app/attendance/export/route";
 import RevenuePage from "../../../apps/ops-console-web/app/revenue/page";
+import BillingPage from "../../../apps/ops-console-web/app/billing/page";
 import { OpsAttendanceExportButton } from "../../../apps/ops-console-web/components/ops-attendance-filter-export";
 import {
   ATTENDANCE_EXPORT_CSV_HEADERS,
@@ -35,6 +37,7 @@ import {
 } from "../../../apps/ops-console-web/lib/ops-analytics";
 
 const mockServerClient = vi.hoisted(() => ({
+  listPlatformInvoices: vi.fn(),
   listShifts: vi.fn(),
   listAttendance: vi.fn(),
   listDrivers: vi.fn(),
@@ -48,7 +51,9 @@ const mockServerClient = vi.hoisted(() => ({
   listReconciliationIssues: vi.fn(),
 }));
 
-const mockGetServerLocale = vi.hoisted(() => vi.fn(async () => "en" as const));
+const mockGetServerLocale = vi.hoisted(() =>
+  vi.fn(async (): Promise<"en" | "zh"> => "en"),
+);
 
 vi.mock("../../../apps/ops-console-web/lib/api-client.server", () => ({
   getServerOpsClient: vi.fn(async () => mockServerClient),
@@ -197,7 +202,8 @@ function makeShift(
   return {
     shiftId: overrides.shiftId,
     driverId: overrides.driverId,
-    vehicleId: "vehicleId" in overrides ? (overrides.vehicleId ?? null) : "VEH-A",
+    vehicleId:
+      "vehicleId" in overrides ? (overrides.vehicleId ?? null) : "VEH-A",
     status: overrides.status ?? "completed",
     clockedInAt: overrides.clockedInAt,
     clockedOutAt:
@@ -206,7 +212,9 @@ function makeShift(
         : "2026-10-15T08:00:00.000Z",
     startLocation: overrides.startLocation ?? "Neihu Depot",
     endLocation:
-      "endLocation" in overrides ? (overrides.endLocation ?? null) : "Songshan Hub",
+      "endLocation" in overrides
+        ? (overrides.endLocation ?? null)
+        : "Songshan Hub",
     notes: overrides.notes ?? null,
   };
 }
@@ -240,6 +248,7 @@ function makeAttendance(
 beforeEach(() => {
   vi.setSystemTime(new Date(FIXED_NOW_ISO));
   mockGetServerLocale.mockResolvedValue("en");
+  mockServerClient.listPlatformInvoices.mockReset();
   mockServerClient.listShifts.mockReset();
   mockServerClient.listAttendance.mockReset();
   mockServerClient.listDrivers.mockReset();
@@ -251,6 +260,159 @@ beforeEach(() => {
   mockServerClient.listSettlementMatrix.mockReset();
   mockServerClient.listForwarderReconciliationIssues.mockReset();
   mockServerClient.listReconciliationIssues.mockReset();
+});
+
+describe("Ops canonical invoice review and original order navigation", () => {
+  function invoice(): TenantInvoiceRecord {
+    return {
+      invoiceId: "SIM-invoice-ops-review",
+      tenantId: "SIM-tenant-ops-review",
+      periodStart: "2026-10-01T00:00:00.000Z",
+      periodEnd: "2026-11-01T00:00:00.000Z",
+      amount: { currency: "TWD", amountMinor: 15500 },
+      status: "issued",
+      artifactUrl: "https://artifact.example.invalid/existing-signed-invoice",
+      pricingVersionSnapshot: "SIM-existing-pricing-version",
+      createdAt: "2026-11-02T00:00:00.000Z",
+      updatedAt: "2026-11-02T00:00:00.000Z",
+      lines: [
+        {
+          lineId: "SIM-line-A",
+          orderId: "SIM-order-A",
+          description: "Recorded travel trip",
+          amount: { currency: "TWD", amountMinor: 10500 },
+          partnerEntrySlug: "SIM-travel-entry",
+        },
+        {
+          lineId: "SIM-line-B",
+          orderId: "SIM-order-B",
+          description: "Recorded second trip",
+          amount: { currency: "TWD", amountMinor: 5000 },
+        },
+      ],
+    };
+  }
+
+  it("uses the normal operational client and opens recorded invoice lines with their original order links", async () => {
+    mockServerClient.listPlatformInvoices.mockResolvedValue([invoice()]);
+    render(await BillingPage({}));
+    expect(mockServerClient.listPlatformInvoices).toHaveBeenCalledTimes(1);
+    const details = document.querySelector("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.click(details.querySelector("summary")!);
+    expect(details.open).toBe(true);
+    expect(screen.getByText("Invoice ID: SIM-invoice-ops-review")).toBeTruthy();
+    expect(screen.getByText("SIM-tenant-ops-review")).toBeTruthy();
+    expect(screen.getByText("Recorded travel trip")).toBeTruthy();
+    expect(screen.getByText("TWD 105.00")).toBeTruthy();
+    expect(screen.getByText("TWD 155.00")).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole("link", { name: "Open original order" })
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/dispatch/SIM-order-A", "/dispatch/SIM-order-B"]);
+    expect(
+      screen
+        .getByRole("link", { name: "Download recorded invoice" })
+        .getAttribute("href"),
+    ).toBe(invoice().artifactUrl);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("filters by the exact order ID while keeping the full invoice total distinct from its selected line", async () => {
+    const unrelated = invoice();
+    unrelated.invoiceId = "SIM-other-invoice";
+    unrelated.lines = [
+      { ...unrelated.lines[0]!, orderId: "SIM-order-A-extra" },
+    ];
+    mockServerClient.listPlatformInvoices.mockResolvedValue([
+      invoice(),
+      unrelated,
+    ]);
+    render(
+      await BillingPage({
+        searchParams: Promise.resolve({ orderId: " SIM-order-A " }),
+      }),
+    );
+    expect(document.querySelectorAll("details")).toHaveLength(1);
+    expect(document.querySelector("details")!.open).toBe(true);
+    expect(screen.getByLabelText("Order ID").getAttribute("value")).toBe(
+      "SIM-order-A",
+    );
+    expect(screen.getByText("TWD 155.00")).toBeTruthy();
+    expect(screen.getByText("TWD 105.00")).toBeTruthy();
+    expect(screen.queryByText("Recorded second trip")).toBeNull();
+    expect(screen.queryByText("Invoice ID: SIM-other-invoice")).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Refresh invoices" })
+        .getAttribute("href"),
+    ).toBe("/billing?orderId=SIM-order-A");
+    expect(
+      screen
+        .getByRole("button", { name: "Find order invoices" })
+        .closest("form")
+        ?.getAttribute("method"),
+    ).toBe("get");
+    expect(document.querySelector("form")?.getAttribute("action")).toBe(
+      "/billing",
+    );
+  });
+
+  it("distinguishes an unmatched order from an empty canonical invoice register", async () => {
+    mockServerClient.listPlatformInvoices.mockResolvedValue([invoice()]);
+    const first = render(
+      await BillingPage({
+        searchParams: Promise.resolve({ orderId: "SIM-unknown-order" }),
+      }),
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      "No recorded invoice line matches this order ID.",
+    );
+    expect(document.querySelectorAll("details")).toHaveLength(0);
+    first.unmount();
+    mockServerClient.listPlatformInvoices.mockResolvedValue([]);
+    render(await BillingPage({}));
+    expect(screen.getByRole("status").textContent).toBe(
+      "No invoices are recorded in your current view.",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("renders failed reads explicitly instead of a fake empty or successful invoice", async () => {
+    mockServerClient.listPlatformInvoices.mockRejectedValue(
+      new Error("upstream private detail"),
+    );
+    render(await BillingPage({}));
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Invoices could not be read. Refresh this page or contact the responsible finance team.",
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("upstream private detail")).toBeNull();
+    expect(document.querySelectorAll("details")).toHaveLength(0);
+  });
+
+  it("keeps zero as a recorded amount, uses Chinese labels, and does not present a passenger payment action", async () => {
+    mockGetServerLocale.mockResolvedValue("zh");
+    const zero = invoice();
+    zero.amount.amountMinor = 0;
+    zero.lines = [
+      { ...zero.lines[0]!, amount: { currency: "TWD", amountMinor: 0 } },
+    ];
+    mockServerClient.listPlatformInvoices.mockResolvedValue([zero]);
+    render(
+      await BillingPage({
+        searchParams: Promise.resolve({ orderId: "SIM-order-A" }),
+      }),
+    );
+    expect(screen.getByRole("heading", { name: "帳單核對" })).toBeTruthy();
+    expect(screen.getAllByText("TWD 0.00")).toHaveLength(2);
+    expect(
+      screen.getByRole("link", { name: "查看原訂單" }).getAttribute("href"),
+    ).toBe("/dispatch/SIM-order-A");
+    expect(screen.getByText(/帳單金額不代表乘客信用卡扣款/)).toBeTruthy();
+    expect(document.querySelectorAll("form[method=post]")).toHaveLength(0);
+  });
 });
 
 afterEach(() => {
@@ -563,12 +725,12 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
         vehicleId: "all",
       });
 
-      expect(
-        formatRevenueBilledLabel("當期 billed (MTD)", "近 7 天"),
-      ).toBe("當期 billed (近 7 天)");
-      expect(
-        formatRevenueBilledLabel("Billed (MTD)", "Last 30 days"),
-      ).toBe("Billed (Last 30 days)");
+      expect(formatRevenueBilledLabel("當期 billed (MTD)", "近 7 天")).toBe(
+        "當期 billed (近 7 天)",
+      );
+      expect(formatRevenueBilledLabel("Billed (MTD)", "Last 30 days")).toBe(
+        "Billed (Last 30 days)",
+      );
     });
   });
 
@@ -906,9 +1068,9 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
       mockServerClient.listAttendance.mockResolvedValueOnce([]);
       mockServerClient.listDrivers.mockResolvedValueOnce([]);
       const { unmount: u1 } = render(await AttendancePage({}));
-      expect(
-        screen.getByRole("status").getAttribute("data-empty-reason"),
-      ).toBe("not_provisioned");
+      expect(screen.getByRole("status").getAttribute("data-empty-reason")).toBe(
+        "not_provisioned",
+      );
       u1();
 
       // 2. no_data (drivers exist, 0 shifts/attendance in default view)
@@ -916,9 +1078,9 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
       mockServerClient.listAttendance.mockResolvedValueOnce([]);
       mockServerClient.listDrivers.mockResolvedValueOnce(drivers);
       const { unmount: u2 } = render(await AttendancePage({}));
-      expect(
-        screen.getByRole("status").getAttribute("data-empty-reason"),
-      ).toBe("no_data");
+      expect(screen.getByRole("status").getAttribute("data-empty-reason")).toBe(
+        "no_data",
+      );
       u2();
 
       // 3. filtered_empty (foreign driverId with 0 matching rows)
@@ -930,9 +1092,9 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
           searchParams: Promise.resolve({ driverId: "DRV-FOREIGN-404" }),
         }),
       );
-      expect(
-        screen.getByRole("status").getAttribute("data-empty-reason"),
-      ).toBe("filtered_empty");
+      expect(screen.getByRole("status").getAttribute("data-empty-reason")).toBe(
+        "filtered_empty",
+      );
       expect(
         (screen.getByTestId("attendance-filter-driver") as HTMLSelectElement)
           .value,
@@ -946,9 +1108,9 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
       mockServerClient.listAttendance.mockResolvedValueOnce([]);
       mockServerClient.listDrivers.mockResolvedValueOnce([]);
       const { unmount: u4 } = render(await AttendancePage({}));
-      expect(
-        screen.getByRole("status").getAttribute("data-empty-reason"),
-      ).toBe("permission_denied");
+      expect(screen.getByRole("status").getAttribute("data-empty-reason")).toBe(
+        "permission_denied",
+      );
       expect(
         screen
           .getByTestId("attendance-export-trigger")
@@ -963,9 +1125,9 @@ describe("OPS-ATTENDANCE-REVENUE-CANONICAL-FLOW-20261015", () => {
       mockServerClient.listAttendance.mockResolvedValueOnce([]);
       mockServerClient.listDrivers.mockResolvedValueOnce([]);
       const { unmount: u5 } = render(await AttendancePage({}));
-      expect(
-        screen.getByRole("status").getAttribute("data-empty-reason"),
-      ).toBe("fetch_failed");
+      expect(screen.getByRole("status").getAttribute("data-empty-reason")).toBe(
+        "fetch_failed",
+      );
       expect(
         screen.getByText("Upstream shift service unavailable"),
       ).toBeTruthy();

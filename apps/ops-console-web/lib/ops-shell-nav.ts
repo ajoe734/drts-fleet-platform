@@ -109,6 +109,12 @@ export function buildOpsShellNav(
       label: t("nav.revenue", locale),
     },
     {
+      key: "billing",
+      href: "/billing",
+      icon: "revenue",
+      label: t("nav.billing", locale),
+    },
+    {
       key: "attendance",
       href: "/attendance",
       icon: "attendance",

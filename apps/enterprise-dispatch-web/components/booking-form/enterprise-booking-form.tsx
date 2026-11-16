@@ -31,6 +31,7 @@ import {
   validateReservationWindow,
   type EnterpriseAirportDirection,
   type EnterpriseBookingDraftForm,
+  type EnterpriseCostCenterMode,
   type EnterprisePassengerMode,
   type EnterpriseVehiclePreference,
 } from "@/lib/enterprise-booking-draft";
@@ -486,12 +487,14 @@ export function EnterpriseBookingForm({
   passengers,
   addresses,
   costCenters,
+  costCenterMode = "required",
   bookingId,
 }: {
   initialDraft: EnterpriseBookingDraftForm;
   passengers: Array<string | TenantPassengerRecord>;
   addresses: Array<string | TenantAddressRecord>;
   costCenters: Array<string | TenantCostCenterRecord>;
+  costCenterMode?: EnterpriseCostCenterMode | undefined;
   bookingId?: string | undefined;
 }) {
   const { locale, t: tr } = useTranslation();
@@ -529,8 +532,12 @@ export function EnterpriseBookingForm({
   );
   const isReservationWindowInvalid =
     hasReservationWindowInput && !timeValidation.isValid;
+  const costCenterUsed = costCenterMode !== "not_used";
+  const costCenterRequired = costCenterMode === "required";
+  const costCenterFilled = draft.costCenterCode.trim().length > 0;
   const canContinue =
-    isEnterpriseDraftComplete(draft) && timeValidation.isValid;
+    isEnterpriseDraftComplete(draft, undefined, costCenterMode) &&
+    timeValidation.isValid;
 
   const passengerOptions = passengers
     .filter((row) => typeof row === "string" || row.activeFlag)
@@ -575,6 +582,12 @@ export function EnterpriseBookingForm({
       value: draft.costCenterCode,
       label: draft.costCenterLabel || tr("new.costCenter.hint"),
     });
+  }
+  if (
+    costCenterMode === "optional" &&
+    !costCenterOptions.some((option) => option.value === "")
+  ) {
+    costCenterOptions.unshift({ value: "", label: tr("new.costCenter.hint") });
   }
   const vehicleOptions: {
     value: EnterpriseVehiclePreference;
@@ -1039,33 +1052,35 @@ export function EnterpriseBookingForm({
           sub={tr("card.sub.costVehicleNotes")}
         >
           <div className="ent-fields-two-cols">
-            <BookingField
-              fieldId={costCenterFieldId}
-              label={tr("new.field.costCenter")}
-              req
-              full
-              hint={tr("new.costCenter.hint")}
-              hintId={costCenterHintId}
-            >
-              {hasCostCenterOptions ? (
-                <SelectControl
-                  id={costCenterFieldId}
-                  required
-                  value={draft.costCenterCode}
-                  onChange={setCostCenterCode}
-                  options={costCenterOptions}
-                  aria-describedby={costCenterHintId}
-                />
-              ) : (
-                <TextControl
-                  id={costCenterFieldId}
-                  required
-                  value={draft.costCenterCode}
-                  onChange={setCostCenterCode}
-                  aria-describedby={costCenterHintId}
-                />
-              )}
-            </BookingField>
+            {costCenterUsed ? (
+              <BookingField
+                fieldId={costCenterFieldId}
+                label={tr("new.field.costCenter")}
+                req={costCenterRequired}
+                full
+                hint={tr("new.costCenter.hint")}
+                hintId={costCenterHintId}
+              >
+                {hasCostCenterOptions ? (
+                  <SelectControl
+                    id={costCenterFieldId}
+                    required={costCenterRequired}
+                    value={draft.costCenterCode}
+                    onChange={setCostCenterCode}
+                    options={costCenterOptions}
+                    aria-describedby={costCenterHintId}
+                  />
+                ) : (
+                  <TextControl
+                    id={costCenterFieldId}
+                    required={costCenterRequired}
+                    value={draft.costCenterCode}
+                    onChange={setCostCenterCode}
+                    aria-describedby={costCenterHintId}
+                  />
+                )}
+              </BookingField>
+            ) : null}
             <BookingField
               fieldId={bookedByFieldId}
               label={tr("new.field.bookedBy")}
@@ -1141,15 +1156,19 @@ export function EnterpriseBookingForm({
           title={tr("new.check.title")}
           sub={tr("card.sub.helperReads")}
         >
-          <ERow
-            t={t}
-            k={tr("new.field.costCenter")}
-            v={
-              <EPill t={t} tone="success" dot>
-                {tr("new.check.valid")}
-              </EPill>
-            }
-          />
+          {costCenterRequired || costCenterFilled ? (
+            <ERow
+              t={t}
+              k={tr("new.field.costCenter")}
+              v={
+                <EPill t={t} tone={costCenterFilled ? "success" : "warn"} dot>
+                  {tr(
+                    costCenterFilled ? "new.check.valid" : "new.check.pending",
+                  )}
+                </EPill>
+              }
+            />
+          ) : null}
           <ERow
             t={t}
             k={tr("new.check.quota")}

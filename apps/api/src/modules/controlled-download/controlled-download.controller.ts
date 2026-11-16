@@ -204,6 +204,11 @@ export class ControlledDownloadController {
     if (resolution.status === "ok") {
       return new StreamableFile(resolution.bytes, {
         type: resolution.mimeType,
+        ...(kind === "multi-taxi-trip-records"
+          ? {
+              disposition: 'attachment; filename="multi-taxi-trip-records.csv"',
+            }
+          : {}),
       });
     }
 

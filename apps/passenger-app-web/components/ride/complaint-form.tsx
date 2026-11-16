@@ -1,4 +1,5 @@
 import { t } from "./translations";
+import type { CreatePassengerComplaintResponse } from "@drts/contracts";
 import { useState, useRef } from "react";
 import { CORE_FOREGROUNDS } from "@drts/ui-tokens";
 import { passengerChrome } from "../../lib/passenger-presentation";
@@ -96,6 +97,9 @@ export function ComplaintForm({
   const [contactConsent, setContactConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [complaintAck, setComplaintAck] = useState<
+    (CreatePassengerComplaintResponse & { rideId: string }) | null
+  >(null);
 
   const idempotencyKeyRef = useRef<string>("");
   if (!idempotencyKeyRef.current) {
@@ -135,7 +139,8 @@ export function ComplaintForm({
     );
   }
 
-  if (submitted) {
+  const submittedAck = complaintAck?.rideId === token ? complaintAck : null;
+  if (submitted && submittedAck) {
     return (
       <div
         style={
@@ -218,12 +223,26 @@ export function ComplaintForm({
             >
               {t.FormSubmitted}
             </div>
+            <dl
+              data-testid="passenger-complaint-ack"
+              data-order-id={submittedAck.rideId}
+              style={{ margin: 0 }}
+            >
+              <dt>{t.ComplaintCaseNumber}</dt>
+              <dd style={{ margin: "4px 0", overflowWrap: "anywhere" }}>
+                <output data-testid="passenger-complaint-id">
+                  {submittedAck.complaintId}
+                </output>
+              </dd>
+            </dl>
+            <p>{t.ComplaintCaseReferenceHint}</p>
             {t.ComplaintProcessingNotice}
           </div>
           <button
             type="button"
             onClick={() => {
               setSubmitted(false);
+              setComplaintAck(null);
               setOpen(false);
               setContent("");
               setLostItemDescription("");
@@ -252,19 +271,29 @@ export function ComplaintForm({
     if (!content.trim() || submitting) return;
     setSubmitting(true);
     try {
-      await requestPassengerRideAction(
-        token,
-        "complaints",
-        {
-          rideId: token,
-          category,
-          content,
-          contactConsent,
-          ...(category === "lost_item" ? { lostItemDescription } : {}),
-        },
-        false,
-        idempotencyKeyRef.current,
-      );
+      const acknowledgment =
+        await requestPassengerRideAction<CreatePassengerComplaintResponse>(
+          token,
+          "complaints",
+          {
+            rideId: token,
+            category,
+            content,
+            contactConsent,
+            ...(category === "lost_item" ? { lostItemDescription } : {}),
+          },
+          false,
+          idempotencyKeyRef.current,
+        );
+      if (
+        typeof acknowledgment?.complaintId !== "string" ||
+        !acknowledgment.complaintId.trim()
+      )
+        throw new Error(t.ComplaintResultUnconfirmed);
+      setComplaintAck({
+        rideId: token,
+        complaintId: acknowledgment.complaintId,
+      });
       setSubmitted(true);
       idempotencyKeyRef.current = "";
     } catch (e: unknown) {

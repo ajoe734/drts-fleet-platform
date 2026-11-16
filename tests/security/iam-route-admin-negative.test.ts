@@ -396,7 +396,7 @@ describe("IAM Route Admin Negative Matrix (17 GAP Routes)", () => {
       );
       expect(await guard.canActivate(ctx as any)).toBe(true);
 
-      const result = billingSettlementController.listPlatformInvoices(
+      const result = await billingSettlementController.listPlatformInvoices(
         req.identity,
       );
       expect(result.data).toBeDefined();

@@ -51,10 +51,10 @@ function validators() {
       .otpOptionsFromEnv,
     mail: load("modules/notification-delivery/smtp-mail.transport.ts")
       .createMailTransportFromEnv,
-    smsAvailability: () =>
-      new (load(
-        "modules/passenger-app/otp/sms.port.ts",
-      ).UnconfiguredSmsPort)().availability(),
+    smsAvailability: (env) =>
+      load("modules/passenger-app/otp/sms.port.ts")
+        .createSmsPortFromEnv(env)
+        .availability(),
     matchesScope: load("common/auth/internal-key-exception-registry.ts")
       .matchesScope,
     weakSecret: load("config/auth-startup-config.ts").isWeakSecret,
@@ -78,7 +78,10 @@ function validateRuntime(plan, values, checks = validators()) {
     .publicEntry.expectedProviders;
   // Match PassengerAppModule's actual SMS_PORT binding, rather than treating
   // an OTP pepper as proof that an unavailable SMS adapter can serve users.
-  if (providers.includes("phone") && checks.smsAvailability() !== "available")
+  if (
+    providers.includes("phone") &&
+    checks.smsAvailability(env) !== "available"
+  )
     reject(
       "F-PUBLIC-ENTRY deployment blocker: production PassengerAppModule SMS_PORT adapter unavailable for required phone login",
     );
@@ -179,7 +182,10 @@ function validateRuntime(plan, values, checks = validators()) {
   for (const group of [
     [
       "PSP_MERCHANT_ID",
-      "PSP_API_KEY",
+      ...(env.PSP_PROVIDER?.trim() === "ecpay" ||
+      Boolean(env.PSP_HASH_KEY?.trim() || env.PSP_HASH_IV?.trim())
+        ? ["PSP_HASH_KEY", "PSP_HASH_IV"]
+        : ["PSP_API_KEY"]),
       "PSP_SANDBOX",
       "PSP_TOKEN_ENCRYPTION_KEY_NAME",
       "PSP_PROVIDER",

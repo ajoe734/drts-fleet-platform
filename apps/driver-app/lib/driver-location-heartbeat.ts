@@ -57,11 +57,19 @@ type HeartbeatSyncResult = {
 type HeartbeatTransportMode = "none" | "foreground" | "background";
 type HeartbeatAssignment = Pick<DriverTaskRecord, "taskId" | "driverId"> & {
   status?: string | null;
+  vehicleId?: string | null;
+};
+
+type HeartbeatTrackingContext = {
+  taskId: string | null;
+  vehicleId: string | null;
+  taskStatus: string | null;
 };
 
 const listeners = new Set<HeartbeatListener>();
 
 let activeTaskId: string | null = null;
+let activeVehicleId: string | null = null;
 let activeTaskStatus: string | null = null;
 let latestUpdate: HeartbeatLocationUpdate | null = null;
 let heartbeatQueue = Promise.resolve();
@@ -311,17 +319,25 @@ function queueHeartbeat(
   options?: {
     preserveKeyEvent?: boolean;
     workStateOverride?: DriverLocationHeartbeatEnvelope["workState"];
+    context?: HeartbeatTrackingContext;
   },
 ) {
   if (!options?.preserveKeyEvent && transportMode !== source) {
     return;
   }
 
+  const context = options?.context ?? {
+    taskId: activeTaskId,
+    vehicleId: activeVehicleId,
+    taskStatus: activeTaskStatus,
+  };
+  const taskId = context.taskId;
+  const vehicleId = context.vehicleId;
+  const workState =
+    options?.workStateOverride ?? resolveHeartbeatWorkState(context.taskStatus);
   const recordedAtMs = getHeartbeatRecordedAtMs(update);
   if (!options?.preserveKeyEvent) {
-    const cadence = getCadenceForWorkState(
-      resolveHeartbeatWorkState(activeTaskStatus),
-    );
+    const cadence = getCadenceForWorkState(workState);
     if (!shouldQueueHeartbeat(update, recordedAtMs, cadence)) {
       return;
     }
@@ -336,14 +352,13 @@ function queueHeartbeat(
     .catch(() => undefined)
     .then(async () => {
       await enqueueDriverLocationEvent({
-        taskId: activeTaskId,
+        taskId,
+        vehicleId,
         recordedAt: update.recordedAt,
         lat: update.latitude,
         lng: update.longitude,
         accuracyM: update.accuracyM,
-        workState:
-          options?.workStateOverride ??
-          resolveHeartbeatWorkState(activeTaskStatus),
+        workState,
         appState: source === "background" ? "background" : "foreground",
         transportMode: source,
         networkType: "unknown",
@@ -360,7 +375,7 @@ function queueHeartbeat(
 }
 
 function queueStateSnapshot(
-  nextTaskStatus: string | null,
+  nextContext: HeartbeatTrackingContext,
   source: Exclude<HeartbeatTransportMode, "none">,
 ) {
   if (!latestUpdate) {
@@ -368,20 +383,31 @@ function queueStateSnapshot(
   }
 
   const previousWorkState = resolveHeartbeatWorkState(activeTaskStatus);
-  const nextWorkState = resolveHeartbeatWorkState(nextTaskStatus);
+  const nextWorkState = resolveHeartbeatWorkState(nextContext.taskStatus);
   if (previousWorkState === nextWorkState) {
     return;
   }
 
   queueHeartbeat(latestUpdate, source, {
     preserveKeyEvent: true,
-    workStateOverride: nextWorkState,
+    context: nextContext,
   });
 }
 
 function stopForegroundLocationSubscription() {
   foregroundLocationSubscription?.remove();
   foregroundLocationSubscription = null;
+}
+
+function resetHeartbeatContext() {
+  activeTaskId = null;
+  activeVehicleId = null;
+  activeTaskStatus = null;
+  transportMode = "none";
+  lastHeartbeatQueuedAtMs = null;
+  lastHeartbeatQueuedCoord = null;
+  appliedBackgroundCadenceKey = null;
+  stopForegroundLocationSubscription();
 }
 
 if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
@@ -520,18 +546,12 @@ async function seedLatestLocation() {
 export async function stopDriverLocationHeartbeat(): Promise<void> {
   if (transportMode !== "none") {
     queueStateSnapshot(
-      null,
+      { taskId: null, vehicleId: null, taskStatus: null },
       transportMode === "background" ? "background" : "foreground",
     );
   }
 
-  activeTaskId = null;
-  activeTaskStatus = null;
-  transportMode = "none";
-  lastHeartbeatQueuedAtMs = null;
-  lastHeartbeatQueuedCoord = null;
-  appliedBackgroundCadenceKey = null;
-  stopForegroundLocationSubscription();
+  resetHeartbeatContext();
 
   const started = await Location.hasStartedLocationUpdatesAsync(
     DRIVER_LOCATION_TASK_NAME,
@@ -544,9 +564,7 @@ export async function stopDriverLocationHeartbeat(): Promise<void> {
   await flushDriverLocationQueue();
 }
 
-type TrackingTarget = {
-  taskId: string | null;
-  taskStatus: string | null;
+type TrackingTarget = HeartbeatTrackingContext & {
   requireBackground: boolean;
 };
 
@@ -559,148 +577,175 @@ type TrackingTarget = {
 async function applyHeartbeatTracking(
   target: TrackingTarget,
 ): Promise<HeartbeatSyncResult> {
-  await initializeDriverLocationOfflineQueue();
+  try {
+    await initializeDriverLocationOfflineQueue();
 
-  if (reviewLocation() && !target.requireBackground) {
-    if (activeTaskId !== target.taskId) reviewPosition = 0;
-    activeTaskId = target.taskId;
-    activeTaskStatus = target.taskStatus;
-    transportMode = "foreground";
-    stopForegroundLocationSubscription();
-    installReviewLocationProducer();
-    const point = PAX_REVIEW_TRACK[reviewPosition]!;
-    const update = {
-      latitude: point.lat,
-      longitude: point.lng,
-      accuracyM: 5,
-      recordedAt: new Date().toISOString(),
-    };
-    emitLocationUpdate(update);
-    queueHeartbeat(update, "foreground", { preserveKeyEvent: true });
-    return {
-      status: "active",
-      message: "演練模擬 GPS；非實車定位。",
-      latestUpdate,
-    };
-  }
-
-  const permissionResult = await ensureLocationPermissions(
-    target.requireBackground,
-  );
-  if (permissionResult.status === "permission_denied") {
-    transportMode = "none";
-    stopForegroundLocationSubscription();
-    appliedBackgroundCadenceKey = null;
-    const wasStarted = await Location.hasStartedLocationUpdatesAsync(
-      DRIVER_LOCATION_TASK_NAME,
-    ).catch(() => false);
-    if (wasStarted) {
-      await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME).catch(
-        () => undefined,
-      );
-    }
-    console.warn(
-      "[driver-location-heartbeat] tracking blocked",
-      sanitizeLogMessage(permissionResult.reason) ?? permissionResult.reason,
-    );
-    return permissionResult;
-  }
-
-  const workState = resolveHeartbeatWorkState(target.taskStatus);
-  const cadence = getCadenceForWorkState(workState);
-  const cadenceKey = `${cadence.intervalMs}:${cadence.distanceM}`;
-  const nextTransportMode =
-    permissionResult.message === null ? "background" : "foreground";
-  const targetChanged =
-    activeTaskId !== target.taskId || activeTaskStatus !== target.taskStatus;
-  if (targetChanged || transportMode !== nextTransportMode) {
-    lastHeartbeatQueuedAtMs = null;
-    lastHeartbeatQueuedCoord = null;
-  }
-  if (targetChanged && transportMode !== "none") {
-    queueStateSnapshot(target.taskStatus, transportMode);
-  }
-  activeTaskId = target.taskId;
-  activeTaskStatus = target.taskStatus;
-  transportMode = nextTransportMode;
-  stopForegroundLocationSubscription();
-
-  foregroundLocationSubscription = await Location.watchPositionAsync(
-    {
-      accuracy: Location.Accuracy.Balanced,
-      distanceInterval: cadence.distanceM,
-      timeInterval: cadence.intervalMs,
-    },
-    (position) => {
-      const update = toHeartbeatLocationUpdate(position);
+    if (reviewLocation() && !target.requireBackground) {
+      if (
+        activeTaskId !== target.taskId ||
+        activeVehicleId !== target.vehicleId
+      )
+        reviewPosition = 0;
+      if (
+        activeTaskId !== target.taskId ||
+        activeVehicleId !== target.vehicleId ||
+        activeTaskStatus !== target.taskStatus
+      ) {
+        lastHeartbeatQueuedAtMs = null;
+        lastHeartbeatQueuedCoord = null;
+      }
+      activeTaskId = target.taskId;
+      activeVehicleId = target.vehicleId;
+      activeTaskStatus = target.taskStatus;
+      transportMode = "foreground";
+      stopForegroundLocationSubscription();
+      installReviewLocationProducer();
+      const point = PAX_REVIEW_TRACK[reviewPosition]!;
+      const update = {
+        latitude: point.lat,
+        longitude: point.lng,
+        accuracyM: 5,
+        recordedAt: new Date().toISOString(),
+      };
       emitLocationUpdate(update);
-      queueHeartbeat(update, "foreground");
-    },
-  );
+      queueHeartbeat(update, "foreground", { preserveKeyEvent: true });
+      return {
+        status: "active",
+        message: "演練模擬 GPS；非實車定位。",
+        latestUpdate,
+      };
+    }
 
-  const started = await Location.hasStartedLocationUpdatesAsync(
-    DRIVER_LOCATION_TASK_NAME,
-  ).catch(() => false);
-
-  if (permissionResult.message === null) {
-    // Restart background updates when the cadence changes so the OS picks up the
-    // new interval / distance filter (e.g. available 30s → on_trip 15s).
-    const cadenceChanged = appliedBackgroundCadenceKey !== cadenceKey;
-    if (!started || cadenceChanged) {
-      if (started) {
+    const permissionResult = await ensureLocationPermissions(
+      target.requireBackground,
+    );
+    if (permissionResult.status === "permission_denied") {
+      resetHeartbeatContext();
+      const wasStarted = await Location.hasStartedLocationUpdatesAsync(
+        DRIVER_LOCATION_TASK_NAME,
+      ).catch(() => false);
+      if (wasStarted) {
         await Location.stopLocationUpdatesAsync(
           DRIVER_LOCATION_TASK_NAME,
         ).catch(() => undefined);
       }
-
-      const isAvailability = workState === "available";
-      await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME, {
-        accuracy: Location.Accuracy.Balanced,
-        activityType: Location.ActivityType.AutomotiveNavigation,
-        deferredUpdatesInterval: cadence.intervalMs,
-        distanceInterval: cadence.distanceM,
-        pausesUpdatesAutomatically: false,
-        showsBackgroundLocationIndicator: true,
-        timeInterval: cadence.intervalMs,
-        foregroundService: {
-          notificationTitle: isAvailability
-            ? "On duty — available for dispatch"
-            : "Trip tracking active",
-          notificationBody: isAvailability
-            ? "DRTS is sharing your location so dispatch can offer you nearby jobs."
-            : "DRTS is sending driver location heartbeats for the active trip.",
-          killServiceOnDestroy: false,
-        },
-      });
-      appliedBackgroundCadenceKey = cadenceKey;
+      console.warn(
+        "[driver-location-heartbeat] tracking blocked",
+        sanitizeLogMessage(permissionResult.reason) ?? permissionResult.reason,
+      );
+      return permissionResult;
     }
-  } else if (started) {
-    await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME).catch(
-      () => undefined,
+
+    const workState = resolveHeartbeatWorkState(target.taskStatus);
+    const cadence = getCadenceForWorkState(workState);
+    const cadenceKey = `${cadence.intervalMs}:${cadence.distanceM}`;
+    const nextTransportMode =
+      permissionResult.message === null ? "background" : "foreground";
+    const targetChanged =
+      activeTaskId !== target.taskId ||
+      activeVehicleId !== target.vehicleId ||
+      activeTaskStatus !== target.taskStatus;
+    if (targetChanged || transportMode !== nextTransportMode) {
+      lastHeartbeatQueuedAtMs = null;
+      lastHeartbeatQueuedCoord = null;
+    }
+    if (targetChanged && transportMode !== "none") {
+      queueStateSnapshot(target, transportMode);
+    }
+    activeTaskId = target.taskId;
+    activeVehicleId = target.vehicleId;
+    activeTaskStatus = target.taskStatus;
+    transportMode = nextTransportMode;
+    stopForegroundLocationSubscription();
+
+    foregroundLocationSubscription = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        distanceInterval: cadence.distanceM,
+        timeInterval: cadence.intervalMs,
+      },
+      (position) => {
+        const update = toHeartbeatLocationUpdate(position);
+        emitLocationUpdate(update);
+        queueHeartbeat(update, "foreground");
+      },
     );
-    appliedBackgroundCadenceKey = null;
-  }
 
-  await seedLatestLocation();
-  if (targetChanged && latestUpdate) {
-    queueHeartbeat(latestUpdate, nextTransportMode, {
-      preserveKeyEvent: true,
+    const started = await Location.hasStartedLocationUpdatesAsync(
+      DRIVER_LOCATION_TASK_NAME,
+    ).catch(() => false);
+
+    if (permissionResult.message === null) {
+      // Restart background updates when the cadence changes so the OS picks up the
+      // new interval / distance filter (e.g. available 30s → on_trip 15s).
+      const cadenceChanged = appliedBackgroundCadenceKey !== cadenceKey;
+      if (!started || cadenceChanged) {
+        if (started) {
+          await Location.stopLocationUpdatesAsync(
+            DRIVER_LOCATION_TASK_NAME,
+          ).catch(() => undefined);
+        }
+
+        const isAvailability = workState === "available";
+        await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+          activityType: Location.ActivityType.AutomotiveNavigation,
+          deferredUpdatesInterval: cadence.intervalMs,
+          distanceInterval: cadence.distanceM,
+          pausesUpdatesAutomatically: false,
+          showsBackgroundLocationIndicator: true,
+          timeInterval: cadence.intervalMs,
+          foregroundService: {
+            notificationTitle: isAvailability
+              ? "On duty — available for dispatch"
+              : "Trip tracking active",
+            notificationBody: isAvailability
+              ? "DRTS is sharing your location so dispatch can offer you nearby jobs."
+              : "DRTS is sending driver location heartbeats for the active trip.",
+            killServiceOnDestroy: false,
+          },
+        });
+        appliedBackgroundCadenceKey = cadenceKey;
+      }
+    } else if (started) {
+      await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME).catch(
+        () => undefined,
+      );
+      appliedBackgroundCadenceKey = null;
+    }
+
+    await seedLatestLocation();
+    if (targetChanged && latestUpdate) {
+      queueHeartbeat(latestUpdate, nextTransportMode, {
+        preserveKeyEvent: true,
+      });
+    }
+
+    console.info("[driver-location-heartbeat] tracking active", {
+      workState,
+      transportMode: nextTransportMode,
+      taskId: target.taskId,
+      intervalMs: cadence.intervalMs,
+      distanceM: cadence.distanceM,
     });
+
+    return {
+      status: "active",
+      message: permissionResult.message,
+      latestUpdate,
+    };
+  } catch (error) {
+    resetHeartbeatContext();
+    const started = await Location.hasStartedLocationUpdatesAsync(
+      DRIVER_LOCATION_TASK_NAME,
+    ).catch(() => false);
+    if (started) {
+      await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME).catch(
+        () => undefined,
+      );
+    }
+    throw error;
   }
-
-  console.info("[driver-location-heartbeat] tracking active", {
-    workState,
-    transportMode: nextTransportMode,
-    taskId: target.taskId,
-    intervalMs: cadence.intervalMs,
-    distanceM: cadence.distanceM,
-  });
-
-  return {
-    status: "active",
-    message: permissionResult.message,
-    latestUpdate,
-  };
 }
 
 /**
@@ -722,6 +767,7 @@ export async function syncDriverLocationHeartbeat(
 
   return applyHeartbeatTracking({
     taskId: task.taskId,
+    vehicleId: task.vehicleId ?? null,
     taskStatus: nextTaskStatus,
     requireBackground: false,
   });
@@ -737,6 +783,7 @@ export async function syncDriverLocationHeartbeat(
 export async function syncDriverOnlineAvailableHeartbeat(): Promise<HeartbeatSyncResult> {
   return applyHeartbeatTracking({
     taskId: null,
+    vehicleId: null,
     taskStatus: null,
     requireBackground: true,
   });

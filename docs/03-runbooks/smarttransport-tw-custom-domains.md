@@ -26,39 +26,67 @@
 
 ## 1. 前綴 → 服務對照
 
-| 子網域                       | Cloud Run 服務                      | 用途                                            |
-| ---------------------------- | ----------------------------------- | ----------------------------------------------- |
-| `fleets.smarttransport.tw`   | `drts-dev-platform-admin-web`       | 車隊管理後臺                                    |
-| `ops.smarttransport.tw`      | `drts-dev-ops-console-web`          | 營運中心                                        |
-| `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴                                        |
-| `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web`  | 企業派車                                        |
-| `bank.smarttransport.tw`     | `drts-dev-bank-console-web`         | 銀行後臺                                        |
-| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web`   | 渠道夥伴                                        |
-| `tenant.smarttransport.tw`   | `drts-dev-tenant-console-web`       | 企業租戶                                        |
-| `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入                                        |
-| `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API                                        |
-| `ride.smarttransport.tw`     | `drts-dev-passenger-app-web`        | 第一方乘客網頁 App（2026-10-09 重開；部署待驗） |
-| 選配（建議 `agency.smarttransport.tw`，未預填 live） | `drts-dev-agency-portal-web` | 交通局與監理機關獨立唯讀查核網站（2026-10-25 接線；部署待驗） |
+| 子網域                                               | Cloud Run 服務                      | 用途                                                          |
+| ---------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------- |
+| `fleets.smarttransport.tw`                           | `drts-dev-platform-admin-web`       | 車隊管理後臺                                                  |
+| `ops.smarttransport.tw`                              | `drts-dev-ops-console-web`          | 營運中心                                                      |
+| `partners.smarttransport.tw`                         | `drts-dev-fleet-partner-portal-web` | 車行夥伴                                                      |
+| `dispatch.smarttransport.tw`                         | `drts-dev-enterprise-dispatch-web`  | 企業派車                                                      |
+| `bank.smarttransport.tw`                             | `drts-dev-bank-console-web`         | 銀行後臺                                                      |
+| `channel.smarttransport.tw`                          | `drts-channel-partner-portal-web`   | 渠道夥伴                                                      |
+| `tenant.smarttransport.tw`                           | `drts-dev-tenant-console-web`       | 企業租戶                                                      |
+| `refer.smarttransport.tw`                            | `drts-dev-referral-embed-web`       | 推薦嵌入                                                      |
+| `api.smarttransport.tw`                              | `drts-dev-api`                      | 後端 API                                                      |
+| `ride.smarttransport.tw`                             | `drts-dev-passenger-app-web`        | 第一方乘客網頁 App（2026-10-09 重開；部署待驗）               |
+| 選配（建議 `agency.smarttransport.tw`，未預填 live） | `drts-dev-agency-portal-web`        | 交通局與監理機關獨立唯讀查核網站（2026-10-25 接線；部署待驗） |
 
 > `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
 > 亦已退休；三者不得回到 authoritative domain mapping inventory、deploy workflow、smoke URL inventory。
 
 2026-10-09 使用者重開的是新 `passenger-app-web`，並沿用 `ride.smarttransport.tw`。
 2026-10-25 依已審核設計 §7.6 補齊 `agency-portal-web`（`drts-dev-agency-portal-web`）部署接線。
-原 `passenger-web` 仍退役；新的 active inventory 為 11 個 Cloud Run 服務（10 web + API）。
+原 `passenger-web` 仍退役；納入下節 Partner activation 後，active inventory 為 12 個 Cloud Run 服務（11 web + API）。Partner 本階段僅交付實際 `run.app` origin，不增加自訂網域 mapping。
 乘客服務名稱從 `DEV_GCP_PASSENGER_APP_SERVICE` 解析，未設定時用
 `drts-dev-passenger-app-web`；機關查核網站服務名稱從 `DEV_GCP_AGENCY_PORTAL_SERVICE` 解析，未設定時用 `drts-dev-agency-portal-web`；workflow 拒絕其他 target。既有分類規則已由
 PAX-WEB-SHELL 登記新 App，本 task 不重複改 `repo-classification.json`。
 `agency.smarttransport.tw` 僅為 D5 建議之選配自訂網域；未顯式設定 `DEV_AGENCY_PORTAL_HOST` 或 `DEV_AGENCY_PORTAL_ORIGIN` 時，`domain-mappings-dev.yml` 僅輸出 operator notice 並略過該選配 domain mapping，不將未配置之建議網域寫死為已生效。
 
-### Partner Booking — PAUSED
+### Partner Booking — shared-dev activation
 
-`partner-booking-web`（含獨立網站與 bank-app embed）自 2026-08-01 起明確暫停，
-不屬於 active inventory。`domain-mappings-dev.yml` 不建立或重建
-`book.smarttransport.tw`；`deploy-dev.yml` 也不 build、deploy、公開或 smoke 此
-service，並會以 fail-closed cleanup 刪除殘留的
-`drts-dev-partner-booking-web` Cloud Run service。程式碼與 route 文件保留，恢復
-必須透過 reviewed workflow change。
+`partner-booking-web`（service `drts-dev-partner-booking-web`，container `3007`）
+由已審查的 `deploy-dev.yml` 同一 immutable snapshot 建置、部署及探測；納入後
+active inventory 為 **12 個 Cloud Run 服務（11 web + API）**。這是設定候選，
+沒有該 snapshot 的部署與 HTTP 證據前，不宣稱入口已上線。
+
+Main 部署前先以正常 Platform Admin/Partner 流程建立持久化 tenant、partner、program、
+active entry 和有效 ingress credential，再將真正 entrySlug 寫入 GitHub variable
+`DEV_PARTNER_BOOKING_ENTRY_SLUG`（必填，沒有 demo fallback）。`prepare` 在任何 build/deploy
+前驗證這個 slug 的格式；它不會建立 entry，存在/active/後端連線由部署後探測確認。
+`DEV_GCP_PARTNER_BOOKING_SERVICE` 未設時只接受 `drts-dev-partner-booking-web`。
+沿既有曝光選項 `DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED` 預設 `false`；只有 operator
+明確設 `true` 才供一般審查者直接以瀏覽器開啟。private 探測成功不等於一般使用者能進入。
+API 與其他產品的曝光設定不變。
+
+Partner 專用 BFF 使用實際 API `status.url` 作 `DRTS_API_URL` 與
+`DRTS_API_AUTH_AUDIENCE`；API/BFF 正常 transport 補丁必須同版採用，runtime SA 的 API
+invoker 與既有 Google registry 的精確 audience/routeScopes 須由 Main 核對。
+既有產品 Bearer、entry/資格/owner guard 保留；不把服務 token 或 API key 送給瀏覽器。
+新服務部署後才讀取其 `status.url`，將該 origin 加入既有 `AUTH_ALLOWED_ORIGINS`，保留其他 origins。
+
+Main 從授權 deploy run 的 `health-check` output/summary 交付
+`<actual-partner-status.url>/<persisted-entrySlug>/eligibility`。探測需 200、同 SHA header、
+`data-partner-entry-source=authority` 或 `authority_cache` 及正常 form；它只證明正常入口可用，
+不代表資格核准、create、派車、完程、付款或外部 issuer 已驗收。
+正常 caller 還須依既有交付提供 `partnerUserRef`／`referenceToken`，不能用固定 owner 或假 session。
+
+2026-08-01 的 pause 已是歷史設定。`cleanup-paused-partner-booking-service.sh` 只保留
+歷史工具與 fake-gcloud regression，不得手動用於已啟用的 Partner；active deploy、needs、outcome
+都不再呼叫它。退休 passenger/concierge 的原 negative 不變。
+
+本階段只用實際 `run.app` origin。`domain-mappings-dev.yml` 的歷史 Partner mapping-pause
+保持原樣，仍不建立或重建 `book.smarttransport.tw`；這不再表示 Cloud Run 服務暫停。
+DNS/custom-domain、production rail 和外部 issuer/maps/實車等是各自後續交付；沒有 live 查核
+就不把歷史網域、CI disposable 測試或 PR 連結當成可用正式網址。
 
 ---
 
@@ -132,7 +160,7 @@ gcloud beta run domain-mappings describe --domain ride.smarttransport.tw \
 ```
 
 全部 active mapping `READY=True` 且憑證 ACTIVE 即完成。`book.smarttransport.tw`
-若仍可解析或仍有既有 mapping，只代表待清理的外部殘留，不是 active surface，
+若仍可解析或仍有既有 mapping，只代表歷史外部殘留，不是本輪已驗證入口，
 也不得由本 workflow 重建。
 
 DNS 不會開放 Cloud Run IAM。新乘客服務預設 private，shared dev operator

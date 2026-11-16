@@ -19,6 +19,7 @@ import type {
   PassengerBookingSettingsResponse,
   PassengerPaymentMethod,
   PassengerRideResponse,
+  PassengerServiceSelection,
   ResolvedAddressPayload,
 } from "@drts/contracts";
 import {
@@ -48,6 +49,7 @@ interface Draft {
   localTime: string;
   /** The app proposed localTime and keeps it current until the passenger types one. */
   localTimeAuto?: boolean;
+  serviceSelection?: PassengerServiceSelection;
 }
 interface Recovery {
   command: CreatePassengerRideCommand;
@@ -445,10 +447,20 @@ export function NativeBookingScreen({
         destinationLat: draft.destination.lat,
         destinationLng: draft.destination.lng,
         scheduledAt: time,
+        ...(draft.serviceSelection
+          ? { serviceSelection: draft.serviceSelection }
+          : {}),
       });
       if (!live(ticket)) return;
       if (result.serviceAreaResult === "not_serviceable") {
         setError("所選地址不在服務範圍內，請修改地址。");
+        return;
+      }
+      if (
+        draft.serviceSelection?.accessible &&
+        !result.serviceSelection?.accessible
+      ) {
+        setError("無法確認輪椅需求，請重新試算。");
         return;
       }
       if (result.fareVersion !== fare.version) {
@@ -771,6 +783,29 @@ export function NativeBookingScreen({
           <Text testID="booking-lead-policy" style={styles.note}>
             請至少提前 {settings.minLeadTimeMinutes} 分鐘預約。
           </Text>
+          <Pressable
+            testID="booking-wheelchair-requirement"
+            accessibilityRole="checkbox"
+            accessibilityLabel="輪椅需求"
+            accessibilityState={{
+              checked: draft.serviceSelection?.accessible === true,
+              disabled,
+            }}
+            disabled={disabled}
+            style={styles.button}
+            onPress={() => {
+              const next: Draft = { ...draft };
+              if (draft.serviceSelection?.accessible)
+                delete next.serviceSelection;
+              else next.serviceSelection = { accessible: true };
+              changeDraft(next);
+            }}
+          >
+            <Text style={styles.text}>輪椅需求</Text>
+          </Pressable>
+          <Text style={styles.note}>
+            需求將隨預約送出，實際供應以派車結果為準。
+          </Text>
           <Button
             id="booking-fee-expand"
             label={feeExpanded ? "收合完整費用" : "展開完整費用"}
@@ -823,6 +858,14 @@ export function NativeBookingScreen({
                 <Text testID="booking-confirm-time" style={styles.text}>
                   {draft.localTime.replace("T", " ")}
                 </Text>
+                {quote.serviceSelection?.accessible ? (
+                  <Text
+                    testID="booking-confirm-wheelchair-requirement"
+                    style={styles.text}
+                  >
+                    輪椅需求
+                  </Text>
+                ) : null}
                 <Text testID="booking-confirm-fare" style={styles.text}>
                   預估 NT$ {quote.estimatedMin}–{quote.estimatedMax}
                 </Text>

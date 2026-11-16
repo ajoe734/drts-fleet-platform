@@ -384,7 +384,7 @@ describe("Native payment methods actual SDK and rendered actions with external b
     await press(r, "payment-verify");
     expect(text(r, "payment-error")).toContain("已取消驗證");
     expect(exists(r, "payment-pending")).toBe(true);
-    expect(sent(f, "GET")).toHaveLength(1);
+    expect(sent(f, "GET")).toHaveLength(2);
     expect(exists(r, "payment-success")).toBe(false);
   });
   it("visibly skips missing external verification and keeps manual readback available", async () => {

@@ -116,7 +116,9 @@ describe("RegulatoryRegistryRepository", () => {
     expect(credentialBackfillSql).toContain("dp.taxi_registration_no");
     expect(credentialBackfillSql).toContain("NULL,");
     expect(credentialBackfillSql).toContain("'unverified'");
-    expect(credentialBackfillSql).toContain("ON CONFLICT (driver_id) DO NOTHING");
+    expect(credentialBackfillSql).toContain(
+      "ON CONFLICT (driver_id) DO NOTHING",
+    );
     expect(credentialBackfillSql).not.toContain("'TPE'");
 
     const correctionQueueSql = String(query.mock.calls[1]?.[0]);
@@ -125,5 +127,44 @@ describe("RegulatoryRegistryRepository", () => {
     expect(correctionQueueSql).toContain(
       "AND (d.door_count IS NULL OR d.color IS NULL)",
     );
+  });
+});
+
+describe("committed single-vehicle passenger display read", () => {
+  it("reads the requested committed plate without disclosure rows or mutation locks", async () => {
+    const record = { vehicleId: VEHICLE_ID, plateNo: "SIM-DURABLE-PLATE" };
+    const query = vi.fn().mockResolvedValue({ rows: [{ record }] });
+    const repository = new RegulatoryRegistryRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    expect(await repository.findVehicleById(VEHICLE_ID)).toEqual(record);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[1]).toEqual([VEHICLE_ID]);
+    expect(query.mock.calls[0]?.[0]).toMatch(
+      /FROM reg\.phase1_registry_vehicles WHERE vehicle_id = \$1/,
+    );
+    expect(query.mock.calls[0]?.[0]).not.toMatch(
+      /FOR UPDATE|disclosure|INSERT|UPDATE|DELETE/,
+    );
+  });
+
+  it("keeps an absent durable vehicle absent instead of loading another plate", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new RegulatoryRegistryRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    await expect(repository.findVehicleById(VEHICLE_ID)).resolves.toBeNull();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a real vehicle-source failure instead of calling it an absent row", async () => {
+    const failure = new Error("SIM database read failure");
+    const repository = new RegulatoryRegistryRepository({
+      isEnabled: () => true,
+      query: vi.fn().mockRejectedValue(failure),
+    } as never);
+    await expect(repository.findVehicleById(VEHICLE_ID)).rejects.toBe(failure);
   });
 });

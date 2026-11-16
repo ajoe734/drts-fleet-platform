@@ -14,6 +14,15 @@ const SUPPLY = ["a", "b"].map((suffix) => ({
   driverId: `pax-review-driver-${suffix}`,
   vehicleId: `pax-review-vehicle-${suffix}`,
 }));
+// Device invitations can address the existing self-serve trial identities too.
+// Pause/restore below deliberately remains limited to the original review pairs.
+const INVITABLE_DRIVERS = [
+  ...SUPPLY.map(({ driverId }) => ({ driverId, trial: false })),
+  ...[1, 2, 3].map((index) => ({
+    driverId: `pax-trial-driver-${index}`,
+    trial: true,
+  })),
+];
 
 /** Small rehearsal operator entry using the original Ops BFF and authorities.
  * It creates no alternate order, session or dispatch state in the browser.
@@ -145,8 +154,11 @@ export default function SharedOrderReviewOps() {
               onChange={(e) => setSelected(e.target.value)}
               disabled={busy}
             >
-              {SUPPLY.map((s) => (
-                <option key={s.driverId}>{s.driverId}</option>
+              {INVITABLE_DRIVERS.map((driver) => (
+                <option key={driver.driverId} value={driver.driverId}>
+                  {driver.driverId}
+                  {driver.trial ? t.trialDriverSuffix : ""}
+                </option>
               ))}
             </select>
             <button
@@ -184,6 +196,16 @@ export default function SharedOrderReviewOps() {
                 </button>
               </label>
             )}
+            <p>{t.trialInvitationNotice}</p>
+            <p>
+              <a
+                href="/review-driver/onboarding"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t.driverWindow}
+              </a>
+            </p>
             <p>{t.supplyNotice}</p>
             {(["offline", "available"] as const).map((workState) => (
               <button

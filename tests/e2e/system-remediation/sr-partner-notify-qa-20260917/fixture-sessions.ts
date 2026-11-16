@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { JwtAuthService as JwtType } from "../../../../apps/api/src/common/auth/jwt-auth.service";
@@ -12,11 +12,27 @@ async function main() {
     !process.argv[2]
   )
     throw new Error("Fixture sessions require authorized hosted UAT");
+  // Earlier hosted stages renew these same real sessions in a child worker.
+  // Carry its latest verified result across steps, not the expired seed token.
+  const renewedFile = process.env.DRTS_UAT_RENEWED_SESSIONS_FILE?.trim();
+  let renewed: Record<string, string> = {};
+  if (renewedFile) {
+    try {
+      renewed = JSON.parse(await readFile(renewedFile, "utf8")) as Record<
+        string,
+        string
+      >;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   const apiRequire = createRequire(path.resolve("apps/api/package.json"));
   apiRequire("reflect-metadata");
   const { NestFactory } = apiRequire("@nestjs/core");
   const { AppModule } = apiRequire("./dist/app.module.js");
-  const { JwtAuthService } = apiRequire("./dist/common/auth/jwt-auth.service.js");
+  const { JwtAuthService } = apiRequire(
+    "./dist/common/auth/jwt-auth.service.js",
+  );
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: false,
   });
@@ -32,8 +48,11 @@ async function main() {
       // the old credential AND its durable authority to remain valid first.
       // This provisions a fresh fixture authentication, not a product refresh
       // endpoint/MFA-flow test, and never extends an expired or revoked token.
-      const payload = await jwt.verifyAccessToken(process.env[name] ?? "");
-      if (!payload) throw new Error(`Fixture authority is no longer valid: ${name}`);
+      const payload = await jwt.verifyAccessToken(
+        renewed[name] ?? process.env[name] ?? "",
+      );
+      if (!payload)
+        throw new Error(`Fixture authority is no longer valid: ${name}`);
       const identity = jwt.toRequestIdentity(payload);
       const authTime = new Date().toISOString();
       const issued = await jwt.issueSessionToken(
@@ -49,11 +68,17 @@ async function main() {
         { ensurePrincipal: false, authTime },
       );
       if (!(await jwt.verifyAccessToken(issued.token)))
-        throw new Error(`Fresh fixture session failed durable validation: ${name}`);
+        throw new Error(
+          `Fresh fixture session failed durable validation: ${name}`,
+        );
       tokens[name] = issued.token;
     }
     // Credentials never enter CLI arguments, stdout or uploaded reports.
     await writeFile(process.argv[2]!, JSON.stringify(tokens), { mode: 0o600 });
+    // The job-scoped private file is outside uploaded artifact directories.
+    // It contains only sessions that passed both existing durable verifiers.
+    if (renewedFile)
+      await writeFile(renewedFile, JSON.stringify(tokens), { mode: 0o600 });
   } finally {
     await app.close();
   }

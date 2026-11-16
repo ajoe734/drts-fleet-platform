@@ -8,6 +8,17 @@ import type {
 import type { FetchFn, FetchResponse } from "../client.js";
 import { PassengerApiError } from "../auth/errors.js";
 
+/** Public SDK session issued by the existing passenger-owned binding route. */
+export interface PassengerPaymentBindingSession {
+  provider: "ecpay";
+  merchantToken: string;
+  tokenExpireDate: string;
+  serverType: "Stage" | "Prod";
+  sandbox?: boolean;
+  sdkScriptUrl?: string;
+  approvedActionOrigins?: readonly string[];
+}
+
 function invalidResponse(): never {
   // Do not include a PSP response, credential, or arbitrary upstream message.
   throw new PassengerApiError(
@@ -145,6 +156,42 @@ export class PassengerPaymentClient {
     const envelope = record(payload);
     if (!("data" in envelope)) return invalidResponse();
     return envelope.data;
+  }
+  async getBindingSession(): Promise<PassengerPaymentBindingSession> {
+    const data = record(
+      await this.request("/payment-methods?binding_session=1", "GET"),
+    );
+    // Match the existing Web SDK session normalization, including its token alias.
+    const merchantToken =
+      typeof data.merchantToken === "string" && data.merchantToken.trim()
+        ? data.merchantToken.trim()
+        : typeof data.token === "string" && data.token.trim()
+          ? data.token.trim()
+          : "";
+    if (
+      (data.provider !== undefined && data.provider !== "ecpay") ||
+      !merchantToken ||
+      (data.serverType !== "Stage" && data.serverType !== "Prod")
+    )
+      return invalidResponse();
+    return {
+      provider: "ecpay",
+      merchantToken,
+      tokenExpireDate: String(data.tokenExpireDate ?? ""),
+      serverType: data.serverType,
+      ...(typeof data.sandbox === "boolean" ? { sandbox: data.sandbox } : {}),
+      ...(typeof data.sdkScriptUrl === "string"
+        ? { sdkScriptUrl: data.sdkScriptUrl }
+        : {}),
+      ...(Array.isArray(data.approvedActionOrigins)
+        ? {
+            approvedActionOrigins: data.approvedActionOrigins.filter(
+              (origin): origin is string =>
+                typeof origin === "string" && origin.trim().length > 0,
+            ),
+          }
+        : {}),
+    };
   }
   async getMethods(): Promise<PaymentMethodsResponse> {
     const data = record(await this.request("/payment-methods", "GET"));

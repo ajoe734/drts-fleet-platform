@@ -103,6 +103,42 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     });
 
+    it("persists invitation delivery outcomes for a fresh repository on the formal schema", async () => {
+      const f = await fixture();
+      for (const deliveryStatus of ["delivered", "delivery_failed"] as const) {
+        const updated = await f.repository.setAgencyInvitationDeliveryStatus(
+          f.issued.invitation.invitationId,
+          deliveryStatus,
+        );
+        expect(updated).toMatchObject({
+          invitationId: f.issued.invitation.invitationId,
+          membershipId: f.issued.membership.membershipId,
+          deliveryStatus,
+          tokenHash: f.tokenHash,
+          acceptedAt: null,
+          revokedAt: null,
+        });
+        const fresh = new IdentityRepository(f.database);
+        expect(await fresh.findInvitationByTokenHash(f.tokenHash)).toEqual(
+          updated,
+        );
+        const persisted = await f.database.query<{
+          delivery_status: string;
+          record_delivery_status: string;
+        }>(
+          `SELECT delivery_status, record->>'deliveryStatus' AS record_delivery_status
+             FROM iam.identity_invitations WHERE invitation_id = $1`,
+          [f.issued.invitation.invitationId],
+        );
+        expect(persisted.rows).toEqual([
+          {
+            delivery_status: deliveryStatus,
+            record_delivery_status: deliveryStatus,
+          },
+        ]);
+      }
+    });
+
     it("only one concurrent consumer binds and activates the agency membership", async () => {
       const f = await fixture();
       const second = new IdentityRepository(f.database);

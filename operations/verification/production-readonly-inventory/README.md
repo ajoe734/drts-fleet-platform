@@ -324,3 +324,47 @@ git diff --exit-code 8a7d254a137c8d49d36ba51f284733b13c4216e1 -- \
 | `tests/unit/sr-prod-readonly-inventory-20261012/observed.test.ts` | `f6157055f93ad3c677cdfa9ef9d90ff74e6b08ab31b27e81f03744a3f582d043` |
 
 All locally started required checks completed and their results were read before handoff. No cloud auth, authenticated resource request, workflow dispatch, release alias, product/dev/preview/PG/browser/Compose server or deployment ran here. A later inventory rerun belongs to Supervisor only after authentic source acceptance/publication and fresh human review of the existing immutable workflow; the actual46GET run remains retained, and there is no unchanged blind rerun. The current C123 four-ancestor publication HOLD, full44/134/15, C125both, AndroidANDiOS, manual/legal/provider/financial/operator restore, H3/F2/continuous all-writer/ZEROremoved and original Ride/Payment gates remain unchanged. These source hashes are not runtime, review, CI, merge or readiness acceptance.
+
+## Agency production rail lineage follow-up (candidate; not adopted or deployed)
+
+The source proposal follows PR #3214 head
+`47972f20825ee1a18cfccb9065bc30fb0823d7e0`, which adds the existing Agency
+portal to the production rail. The original source history and checks above
+remain historical evidence. This proposal has not been adopted by Main and
+claims no new source acceptance, production review, inventory run or rollout.
+
+`checkRail` keeps its existing exact two-file SHA256 comparison. Its proposed
+active source fingerprints are:
+
+| Existing rail dependency           | Proposed SHA256                                                    |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `production-release-rail/rail.cjs` | `3134f8a446fae4354222496ffc80d938897f7667d6c459e806608ae0563deed8` |
+| `production-release-rail/run.cjs`  | `0066f0089089aeae8be1f514d35ac5eaab9990b92d8ae2e5419eb882929d142a` |
+
+All other source/target/identity/descriptor/selector/budget and mismatch rejection
+rules are preserved. Changing either file again, including a comment, still
+fails `RAIL_LINEAGE_CHANGED`; the existing changed-rail CLI regression remains.
+The image URI roster adds only `agency-portal-web`, matching the new verified
+rail topology and Docker image. The other ten active surfaces and all excluded
+retired surfaces retain their existing treatment.
+
+BUREAU-R13 specifies a separate non-IAP Agency host. The collector therefore
+reads its normal Cloud Run service, actual revision and IAM metadata through
+existing GET schemas, without requiring a staff LB/IAP join for this one
+surface. All original ten LB/IAP joins remain required. The complete-report
+minimum becomes eleven services, eleven revisions and eleven service policies;
+the original ten IAP observations are unchanged. Missing Agency metadata cannot
+be serialized as a complete report.
+
+The socket-free fixture uses eleven service/policy/revision sets and only the
+original ten LB/NEG joins. Each added surface contributes exactly three GETs:
+service, policy and actual revision. With the existing fixed secret/registry
+selection, the same-project request count is 67 (previously 64) and the shared
+registry count is 65 (previously 62). No foreign shared-registry GET permission
+is added. Existing four wholefiles retain all cases and rejection scenarios;
+only these exact topology-derived counts change, and the complete-inventory
+case additionally checks Agency observations and missing-Agency refusal.
+
+All candidate tests, static checks and hosted CI remain to be executed on this
+follow-up. The previous local 149-case production-rail result and PR #3214
+non-unit job statuses do not substitute for the inventory regression suite.

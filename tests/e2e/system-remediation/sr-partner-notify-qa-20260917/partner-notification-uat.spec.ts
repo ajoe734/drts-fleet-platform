@@ -184,6 +184,13 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
 
   test("C203 E2E: Missing route triggers 404/permanent failure", async () => {
     const orderId = await fixture.createRide();
+    const routes = await fixture.db.query(
+      `SELECT order_id FROM mobility.phase1_order_partner_notification_routes WHERE order_id=$1
+       UNION ALL
+       SELECT order_id FROM mobility.phase1_order_first_party_notification_routes WHERE order_id=$1`,
+      [orderId],
+    );
+    expect(routes.rows).toEqual([]);
     const outboxId = await fixture.enqueue(orderId, "missing_route");
     const row = await fixture.settled(outboxId);
     expect(row).toMatchObject({
@@ -194,11 +201,17 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       delivery_id: null,
       receipt_id: null,
     });
-    expect(row.payload.partnerNotification).toMatchObject({
-      failureReason: "route_missing",
-      retryDisposition: "manual_only",
+    // Neither immutable route exists, so the normal router seals its own
+    // no-channel outcome before any partner transport/HTTP attempt.
+    expect(row.payload.channelRouting).toMatchObject({
+      resolvedChannel: "none",
+      failureReason: "no_notification_channel",
+      retryDisposition: "none",
+      deliveryTarget: null,
       deliveryStage: null,
       receiptId: null,
+      downstreamStatus: "unknown",
+      expiresAt: null,
     });
     expect(received(outboxId)).toHaveLength(0);
     expect(
@@ -727,10 +740,39 @@ test.describe("SR-PARTNER-NOTIFY-QA-20260917: E2E Partner Notification Delivery 
       "cancellation committed before arrival was due",
     ).toBeLessThan(due);
     await refusedWithoutSending(arrival, "notification_obsolete", "terminal");
+    // Cancellation is a real fifth producer, not another synthetic fixture
+    // call. Read its committed event independently before enqueuing receipt.
+    const beforeReceipt = (await fixture.db.query(
+      `SELECT outbox_id, event_type,
+              (payload->>'eventSequence')::integer AS event_sequence
+         FROM ops.consumer_notification_outbox WHERE order_id=$1
+         ORDER BY (payload->>'eventSequence')::integer`,
+      [orderId],
+    )) as {
+      rows: {
+        outbox_id: string;
+        event_type: string;
+        event_sequence: number;
+      }[];
+    };
+    expect(
+      beforeReceipt.rows.map(({ event_type, event_sequence }) => ({
+        event_type,
+        event_sequence,
+      })),
+    ).toEqual([
+      { event_type: "eta_changed", event_sequence: 1 },
+      { event_type: "eta_changed", event_sequence: 2 },
+      { event_type: "eta_changed", event_sequence: 3 },
+      { event_type: "driver_arrived", event_sequence: 4 },
+      { event_type: "trip_cancelled", event_sequence: 5 },
+    ]);
+    const cancellation = beforeReceipt.rows[4]!;
+    expect([first, old, latest, arrival]).not.toContain(cancellation.outbox_id);
     const receipt = await fixture.enqueue(orderId);
     await accepted(receipt);
     expect(JSON.parse(received(receipt)[0]!.rawBody).data.event_sequence).toBe(
-      5,
+      cancellation.event_sequence + 1,
     );
     expect((await fixture.outcome(old))!.attempt_count).toBe(1);
     expect((await fixture.outcome(arrival))!.attempt_count).toBe(1);

@@ -26,6 +26,8 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-drts-csrf",
   "x-drts-internal-key",
   "x-drts-google-id-token",
+  // Private provenance from the loopback runtime wrapper; never relayed.
+  "x-drts-runtime-origin",
   "x-actor-id",
   "x-actor-type",
   "x-auth-mode",

@@ -24,6 +24,7 @@
 // noted inline; they are follow-up work for the backend, not fabricated here.
 
 import "server-only";
+import { isFleetSessionRedirect } from "./fleet-session-redirect";
 
 import type {
   DriverWorkState,
@@ -402,6 +403,7 @@ export async function loadDrivers(): Promise<DriversView> {
       trainingAvailable: false,
     };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -552,6 +554,7 @@ export async function loadVehicles(): Promise<VehiclesView> {
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapVehicle), source: "live", error: null };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -631,6 +634,7 @@ export async function loadTrips(periodMonth?: string): Promise<TripsView> {
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapTrip), source: "live", error: null };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -706,6 +710,7 @@ export async function loadQuality(periodMonth?: string): Promise<QualityView> {
     const record = await client.getFleetPortalQualityMetrics(currentPeriod);
     return { metrics: mapQualityMetrics(record), source: "live" };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -750,6 +755,7 @@ export async function loadStatements(): Promise<StatementsView> {
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapStatement), source: "live" };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
@@ -828,6 +834,7 @@ export async function loadStatementDetail(
       source: "live",
     };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
@@ -1005,6 +1012,7 @@ export async function loadRevenue(periodMonth?: string): Promise<RevenueView> {
       error: null,
     };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -1059,6 +1067,7 @@ export async function loadDashboard(
     const res = await getServerFleetPartnerClient();
     client = res.client;
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -1672,6 +1681,7 @@ export async function loadCases(): Promise<CasesView> {
     }));
     return { rows, source: "live", connected: true };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }
@@ -1699,6 +1709,7 @@ export async function loadCaseDetail(caseId: string): Promise<CaseDetailView> {
       error: null,
     };
   } catch (err) {
+    if (isFleetSessionRedirect(err)) throw err;
     if (isConfigError(err)) {
       throw err;
     }

@@ -10,6 +10,28 @@ export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
 }
 
 const en = {
+  "billing.generate.title": "Generate invoice",
+  "billing.generate.description":
+    "Select a closed billing period for eligible completed trips in your tenant.",
+  "billing.generate.periodHelp":
+    "Enter Asia/Taipei time (UTC+08:00). The period must end before now; it may include trips completed earlier today. Existing billing permissions and invoice rules apply.",
+  "billing.generate.start": "Period start (Taipei time)",
+  "billing.generate.end": "Period end (Taipei time)",
+  "billing.generate.submit": "Generate invoice",
+  "billing.generate.pending": "Generating…",
+  "billing.generate.required":
+    "Enter a valid start and end date and time in Taipei time.",
+  "billing.generate.failed":
+    "The invoice could not be confirmed. Check the invoice register before submitting again.",
+  "billing.generate.unconfirmed":
+    "The server did not return an invoice ID. Open the invoice register to check the result before submitting again.",
+  "billing.generate.created": "Invoice created. Opening its recorded details.",
+  "billing.generate.open": "Open generated invoice",
+  "billing.generate.unavailable":
+    "Invoice generation is currently unavailable. Refresh this page.",
+  "billing.generate.boundary":
+    "This creates your tenant's billing record. It does not issue an external tax invoice or establish passenger payment.",
+
   "platformNotice.section": "Platform notices",
   "platformNotice.read": "Read",
   "platformNotice.markRead": "Mark as read",
@@ -4143,11 +4165,117 @@ const en = {
   "login.securityNote":
     "Managed HttpOnly session cookies and same-origin CSRF protection are enforced. Browser clients never receive readable bearer tokens.",
 
+  // ── password login (PWD-LOGIN-009) ──
+  "login.password.divider": "Or sign in with email and password",
+  "login.password.emailLabel": "Email",
+  "login.password.passwordLabel": "Password",
+  "login.password.signIn": "Sign in",
+  "login.password.forgotPassword": "Forgot your password?",
+  "login.password.verificationToggleShow": "I have a verification code",
+  "login.password.verificationToggleHide": "Hide verification code",
+  "login.password.useAuthenticatorCode": "Authenticator app code",
+  "login.password.useRecoveryCode": "Use a recovery code",
+  "login.password.totpCodeLabel": "Authenticator code",
+  "login.password.totpCodeHint": "Enter the 6-digit code from your authenticator app.",
+  "login.password.recoveryCodeLabel": "Recovery code",
+  "login.password.recoveryCodeHint": "Enter one of the one-time recovery codes you saved during setup.",
+  "login.password.busy": "Signing in...",
+  "login.password.genericError":
+    "The email or password is incorrect, or the account is not available. If your account uses two-factor authentication, enter your code above and try again.",
+
+  // ── set/reset password (PWD-LOGIN-009) ──
+  "passwordSetup.newPasswordLabel": "New password",
+  "passwordSetup.confirmPasswordLabel": "Confirm new password",
+  "passwordSetup.passwordHint":
+    "Use at least 15 characters, or at least 8 if two-factor authentication is enabled on this account.",
+  "passwordSetup.save": "Save password",
+  "passwordSetup.mismatch": "The two passwords you entered do not match.",
+  "passwordSetup.saved": "Your password has been saved. All existing sessions on this account have been signed out.",
+  "passwordSetup.backToLogin": "Back to sign-in",
+
+  "invite.title": "Activate your tenant account",
+  "invite.description":
+    "Choose how you want to sign in: continue with your organization's Google/OIDC identity, or set a password for this account.",
+  "invite.googleCta": "Continue with Google / OIDC",
+  "invite.passwordSectionTitle": "Or set a password",
+  "invite.invalidLink": "This invitation link is missing or invalid. Ask your administrator to resend the invitation.",
+
+  "forgotPassword.title": "Forgot your password",
+  "forgotPassword.description":
+    "Enter the email address on your account. If it has a password set, we will send a reset link.",
+  "forgotPassword.requestReset": "Send reset link",
+  "forgotPassword.accepted":
+    "If an account with a password exists for that email, a reset link has been sent. Check your inbox.",
+
+  "resetPassword.title": "Reset your password",
+  "resetPassword.description":
+    "Choose a new password. Signing in again will require it; all other sessions on this account will be signed out.",
+  "resetPassword.invalidLink": "This reset link is missing a token. Request a new one from the forgot-password page.",
+
+  // ── TOTP two-factor setup (PWD-LOGIN-009) ──
+  "totp.enrollTitle": "Set up two-factor authentication",
+  "totp.enrollDescription":
+    "Add an authenticator app (such as Google Authenticator or Authy) for an extra sign-in step.",
+  "totp.start": "Start setup",
+  "totp.manualSecretLabel": "Manual setup key",
+  "totp.manualSecretHint":
+    "If you cannot scan a code, enter this key manually as a text/time-based (TOTP) account in your authenticator app.",
+  "totp.otpauthUriLabel": "Setup link",
+  "totp.otpauthUriHint": "Some authenticator apps can add this account directly if you open or paste this link on the same device.",
+  "totp.confirmCodeLabel": "Enter the 6-digit code from your app",
+  "totp.confirm": "Confirm and enable",
+  "totp.recoveryCodesTitle": "Save your recovery codes",
+  "totp.recoveryCodesNotice":
+    "These one-time recovery codes are shown only once. Save them somewhere safe; each can be used once if you lose access to your authenticator app.",
+  "totp.copy": "Copy codes",
+  "totp.copied": "Codes copied to clipboard.",
+  "totp.copyFailed": "Could not copy automatically. Please select and copy the codes manually.",
+  "totp.download": "Download codes",
+  "totp.dismiss": "I have saved these codes",
+
+  // ── account security (PWD-LOGIN-009) ──
+  "accountSecurity.title": "Account security",
+  "accountSecurity.totpSectionTitle": "Two-factor authentication",
+  "accountSecurity.totpCta": "Set up two-factor authentication",
+  "accountSecurity.passwordSectionTitle": "Password",
+  "accountSecurity.passwordSectionBody":
+    "To change your password, request a reset link by email on the forgot-password page.",
+  "accountSecurity.passwordCta": "Request a password reset email",
+  "accountSecurity.sessionsTitle": "Signed-in devices",
+  "accountSecurity.sessionsEmpty": "No active sessions were found.",
+  "accountSecurity.currentSessionBadge": "This device",
+  "accountSecurity.sessionRealmLabel": "Access",
+  "accountSecurity.sessionAuthTimeLabel": "Signed in at",
+  "accountSecurity.sessionMethodsLabel": "Sign-in method",
+  "accountSecurity.revokeSession": "Sign out this device",
+  "accountSecurity.revokeAllSessions": "Sign out of all devices",
+  "accountSecurity.sessionRevoked": "That device has been signed out.",
+
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "Not available",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "billing.generate.title": "產生帳單",
+  "billing.generate.description":
+    "選擇已關閉的帳務期間，依本租戶符合條件的已完程紀錄產生帳單。",
+  "billing.generate.periodHelp":
+    "請輸入台北時間 Asia/Taipei（UTC+08:00），期間結束時間須早於現在，可包含今天稍早已完程的紀錄。仍適用既有帳務權限與產生規則。",
+  "billing.generate.start": "期間開始（台北時間）",
+  "billing.generate.end": "期間結束（台北時間）",
+  "billing.generate.submit": "產生帳單",
+  "billing.generate.pending": "產生中…",
+  "billing.generate.required": "請填寫有效的台北時間期間開始與結束日期時間。",
+  "billing.generate.failed":
+    "未能確認帳單結果，請先查看帳單清單再決定是否重新提交。",
+  "billing.generate.unconfirmed":
+    "伺服器未回傳帳單編號，請先開啟帳單清單確認結果，再決定是否重新提交。",
+  "billing.generate.created": "帳單已產生，正在開啟已記錄的明細。",
+  "billing.generate.open": "查看新產生的帳單",
+  "billing.generate.unavailable": "目前無法產生帳單，請重新整理此頁。",
+  "billing.generate.boundary":
+    "此為本租戶內部帳務紀錄，不代表外部稅務開票或乘客扣款。",
+
   "platformNotice.section": "平台公告",
   "platformNotice.read": "已讀",
   "platformNotice.markRead": "標示已讀",
@@ -8009,6 +8137,84 @@ const zh: Record<keyof typeof en, string> = {
   "login.submit": "透過 OIDC 登入",
   "login.securityNote":
     "強制使用受控 HttpOnly session cookie 與同源 CSRF 保護。瀏覽器端永不接收可讀的 Bearer Token。",
+
+  // ── password login (PWD-LOGIN-009) ──
+  "login.password.divider": "或使用電子郵件與密碼登入",
+  "login.password.emailLabel": "電子郵件",
+  "login.password.passwordLabel": "密碼",
+  "login.password.signIn": "登入",
+  "login.password.forgotPassword": "忘記密碼？",
+  "login.password.verificationToggleShow": "我有驗證碼",
+  "login.password.verificationToggleHide": "隱藏驗證碼欄位",
+  "login.password.useAuthenticatorCode": "驗證器 App 驗證碼",
+  "login.password.useRecoveryCode": "使用復原碼",
+  "login.password.totpCodeLabel": "驗證器驗證碼",
+  "login.password.totpCodeHint": "請輸入驗證器 App 顯示的 6 位數驗證碼。",
+  "login.password.recoveryCodeLabel": "復原碼",
+  "login.password.recoveryCodeHint": "請輸入您設定時保存的其中一組一次性復原碼。",
+  "login.password.busy": "登入中…",
+  "login.password.genericError":
+    "電子郵件或密碼不正確，或此帳號目前無法使用。若此帳號已啟用兩步驟驗證，請在上方輸入驗證碼後再試一次。",
+
+  // ── set/reset password (PWD-LOGIN-009) ──
+  "passwordSetup.newPasswordLabel": "新密碼",
+  "passwordSetup.confirmPasswordLabel": "確認新密碼",
+  "passwordSetup.passwordHint": "至少 15 個字元；若此帳號已啟用兩步驟驗證，則至少 8 個字元即可。",
+  "passwordSetup.save": "儲存密碼",
+  "passwordSetup.mismatch": "您輸入的兩次密碼不一致。",
+  "passwordSetup.saved": "密碼已儲存。此帳號所有既有登入 session 均已登出。",
+  "passwordSetup.backToLogin": "回到登入頁",
+
+  "invite.title": "啟用您的租戶帳號",
+  "invite.description": "請選擇登入方式：繼續使用貴組織的 Google / OIDC 身分，或為此帳號設定密碼。",
+  "invite.googleCta": "使用 Google / OIDC 繼續",
+  "invite.passwordSectionTitle": "或設定密碼",
+  "invite.invalidLink": "此邀請連結缺少必要資訊或已失效，請請管理員重新發送邀請。",
+
+  "forgotPassword.title": "忘記密碼",
+  "forgotPassword.description": "請輸入您帳號的電子郵件。若該帳號已設定密碼，我們會寄送重設連結。",
+  "forgotPassword.requestReset": "寄送重設連結",
+  "forgotPassword.accepted": "若該電子郵件對應的帳號已設定密碼，重設連結已寄出，請查看您的收件匣。",
+
+  "resetPassword.title": "重設密碼",
+  "resetPassword.description": "請設定新密碼。重設後需以新密碼重新登入；此帳號其他所有 session 將被登出。",
+  "resetPassword.invalidLink": "此重設連結缺少驗證用的 token，請從忘記密碼頁重新申請。",
+
+  // ── TOTP two-factor setup (PWD-LOGIN-009) ──
+  "totp.enrollTitle": "設定兩步驟驗證",
+  "totp.enrollDescription": "加入驗證器 App（例如 Google Authenticator 或 Authy），為登入加上一道額外驗證。",
+  "totp.start": "開始設定",
+  "totp.manualSecretLabel": "手動設定金鑰",
+  "totp.manualSecretHint": "若無法掃描，可在驗證器 App 中以文字／時間制（TOTP）帳號手動輸入此金鑰。",
+  "totp.otpauthUriLabel": "設定連結",
+  "totp.otpauthUriHint": "部分驗證器 App 若在同一裝置開啟或貼上此連結，可直接新增此帳號。",
+  "totp.confirmCodeLabel": "請輸入 App 顯示的 6 位數驗證碼",
+  "totp.confirm": "確認並啟用",
+  "totp.recoveryCodesTitle": "請保存您的復原碼",
+  "totp.recoveryCodesNotice":
+    "這些一次性復原碼只會顯示這一次，請妥善保存；若您之後無法使用驗證器 App，可各使用一次登入。",
+  "totp.copy": "複製復原碼",
+  "totp.copied": "已複製到剪貼簿。",
+  "totp.copyFailed": "無法自動複製，請手動選取並複製復原碼。",
+  "totp.download": "下載復原碼",
+  "totp.dismiss": "我已保存這些復原碼",
+
+  // ── account security (PWD-LOGIN-009) ──
+  "accountSecurity.title": "帳號安全",
+  "accountSecurity.totpSectionTitle": "兩步驟驗證",
+  "accountSecurity.totpCta": "設定兩步驟驗證",
+  "accountSecurity.passwordSectionTitle": "密碼",
+  "accountSecurity.passwordSectionBody": "若要變更密碼，請至忘記密碼頁申請以電子郵件寄送重設連結。",
+  "accountSecurity.passwordCta": "申請密碼重設信",
+  "accountSecurity.sessionsTitle": "已登入裝置",
+  "accountSecurity.sessionsEmpty": "目前沒有找到任何有效 session。",
+  "accountSecurity.currentSessionBadge": "此裝置",
+  "accountSecurity.sessionRealmLabel": "存取範圍",
+  "accountSecurity.sessionAuthTimeLabel": "登入時間",
+  "accountSecurity.sessionMethodsLabel": "登入方式",
+  "accountSecurity.revokeSession": "登出此裝置",
+  "accountSecurity.revokeAllSessions": "登出所有裝置",
+  "accountSecurity.sessionRevoked": "該裝置已登出。",
 
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "無資料",

@@ -30,7 +30,7 @@ export class PassengerAuthorityError extends Error {
 function camelizeKeys(obj: any): any {
   if (Array.isArray(obj)) {
     return obj.map((v) => camelizeKeys(v));
-  } else if (obj !== null && obj.constructor === Object) {
+  } else if (obj !== null && obj !== undefined && obj.constructor === Object) {
     return Object.keys(obj).reduce((result, key) => {
       const camelKey = key.replace(/([-_][a-z])/g, (group) =>
         group.toUpperCase().replace("-", "").replace("_", ""),
@@ -207,6 +207,36 @@ export function subscribePassengerRideAuthority(
   };
 }
 
+function resolveAccountArtifactUrl(
+  candidate: unknown,
+  orderId: string,
+  format: "html" | "pdf",
+): string | undefined {
+  if (typeof candidate !== "string") return undefined;
+  const trimmed = candidate.trim();
+  if (!trimmed) return undefined;
+  const expectedPath = `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/${format}`;
+  if (trimmed === expectedPath) return expectedPath;
+  try {
+    const base =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "https://passenger.local";
+    const parsed = new URL(trimmed, base);
+    if (
+      parsed.origin === base &&
+      parsed.pathname === expectedPath &&
+      !parsed.search &&
+      !parsed.hash
+    ) {
+      return expectedPath;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+  return undefined;
+}
+
 export async function fetchPassengerReceipt(
   idOrToken: string,
   isToken: boolean = false,
@@ -227,14 +257,31 @@ export async function fetchPassengerReceipt(
   } else {
     try {
       const raw = await passengerClient.getReceipt(idOrToken);
-      const rawData = (raw as any)?.data || raw;
+      const rawData = camelizeKeys((raw as any)?.data || raw);
       if (!rawData || typeof rawData !== "object") {
         return rawData;
       }
-      let receiptUrl = rawData.receiptUrl || rawData.htmlUrl || "";
-      let pdfUrl = rawData.pdfUrl || rawData.record?.pdfUrl || undefined;
-      let record = rawData.record;
-      let receiptId = rawData.receiptId;
+      const initialHtmlUrl =
+        resolveAccountArtifactUrl(rawData.htmlUrl, idOrToken, "html") ||
+        resolveAccountArtifactUrl(rawData.receiptUrl, idOrToken, "html");
+      let receiptUrl =
+        initialHtmlUrl ||
+        (typeof rawData.receiptUrl === "string" && rawData.receiptUrl.trim()
+          ? rawData.receiptUrl.trim()
+          : typeof rawData.htmlUrl === "string" && rawData.htmlUrl.trim()
+            ? rawData.htmlUrl.trim()
+            : "");
+      let htmlUrl = initialHtmlUrl;
+      let pdfUrl =
+        resolveAccountArtifactUrl(rawData.pdfUrl, idOrToken, "pdf") ||
+        resolveAccountArtifactUrl(rawData.record?.pdfUrl, idOrToken, "pdf");
+      let record =
+        rawData.record && typeof rawData.record === "object"
+          ? { ...rawData.record }
+          : undefined;
+      let receiptId = rawData.receiptId || rawData.certificateId;
+      let certificateId = rawData.certificateId || rawData.receiptId;
+      let orderId = rawData.orderId || idOrToken;
       let receiptNo = rawData.receiptNo;
       let issuedAt = rawData.issuedAt;
       let amountMinor = rawData.amountMinor;
@@ -252,28 +299,70 @@ export async function fetchPassengerReceipt(
 
           if (rideRes.status === "fulfilled" && rideRes.value?.ride?.receipt) {
             const official = rideRes.value.ride.receipt;
-            if (official.receiptId) receiptId = official.receiptId;
+            if (official.receiptId) {
+              receiptId = official.receiptId;
+              if (!certificateId) certificateId = official.receiptId;
+            }
+            if (official.orderId) orderId = official.orderId;
             if (official.receiptNo) receiptNo = official.receiptNo;
             if (official.issuedAt) issuedAt = official.issuedAt;
             if (typeof official.amountMinor === "number")
               amountMinor = official.amountMinor;
             if (official.currency) currency = official.currency;
-            if (official.record) {
-              record = official.record;
-              if (official.record.htmlUrl && !receiptUrl)
-                receiptUrl = official.record.htmlUrl;
-              if (official.record.pdfUrl && !pdfUrl)
-                pdfUrl = official.record.pdfUrl;
+            if (official.record && typeof official.record === "object") {
+              record = { ...official.record };
+              const officialHtmlUrl = resolveAccountArtifactUrl(
+                official.record.htmlUrl,
+                idOrToken,
+                "html",
+              );
+              const officialPdfUrl = resolveAccountArtifactUrl(
+                official.record.pdfUrl,
+                idOrToken,
+                "pdf",
+              );
+              if (officialHtmlUrl && !htmlUrl) htmlUrl = officialHtmlUrl;
+              if (officialHtmlUrl && !receiptUrl) receiptUrl = officialHtmlUrl;
+              if (officialPdfUrl && !pdfUrl) pdfUrl = officialPdfUrl;
             }
           }
 
           if (dlRes.status === "fulfilled" && dlRes.value.ok) {
-            const dlJson = await dlRes.value.json().catch(() => ({}));
-            const dlData = dlJson?.data || dlJson;
-            if (dlData.htmlUrl && !receiptUrl) receiptUrl = dlData.htmlUrl;
-            if (dlData.pdfUrl) pdfUrl = dlData.pdfUrl;
-            if (record && pdfUrl && !record.pdfUrl) {
-              record = { ...record, pdfUrl };
+            const dlJson = camelizeKeys(
+              await dlRes.value.json().catch(() => ({})),
+            );
+            const dlData =
+              dlJson && typeof dlJson === "object"
+                ? (dlJson as any).data || dlJson
+                : {};
+            const dlOrderId =
+              typeof dlData.orderId === "string" && dlData.orderId.trim()
+                ? dlData.orderId.trim()
+                : undefined;
+            if (!dlOrderId || dlOrderId === idOrToken) {
+              if (
+                typeof dlData.certificateId === "string" &&
+                dlData.certificateId.trim()
+              ) {
+                certificateId = dlData.certificateId.trim();
+                if (!receiptId) receiptId = certificateId;
+              }
+              if (dlOrderId) orderId = dlOrderId;
+              const dlHtmlUrl =
+                resolveAccountArtifactUrl(dlData.htmlUrl, idOrToken, "html") ||
+                resolveAccountArtifactUrl(dlData.receiptUrl, idOrToken, "html");
+              const dlPdfUrl = resolveAccountArtifactUrl(
+                dlData.pdfUrl,
+                idOrToken,
+                "pdf",
+              );
+              if (dlHtmlUrl) {
+                htmlUrl = dlHtmlUrl;
+                if (!receiptUrl) receiptUrl = dlHtmlUrl;
+              }
+              if (dlPdfUrl) {
+                pdfUrl = dlPdfUrl;
+              }
             }
           }
         } catch {
@@ -281,14 +370,48 @@ export async function fetchPassengerReceipt(
         }
       }
 
+      const resolvedHtmlUrl =
+        htmlUrl || resolveAccountArtifactUrl(receiptUrl, idOrToken, "html");
+      if (record && typeof record === "object") {
+        const nextRecord: Record<string, unknown> = { ...record };
+        const existingRecordHtmlUrl = resolveAccountArtifactUrl(
+          nextRecord.htmlUrl,
+          idOrToken,
+          "html",
+        );
+        const existingRecordPdfUrl = resolveAccountArtifactUrl(
+          nextRecord.pdfUrl,
+          idOrToken,
+          "pdf",
+        );
+        if (resolvedHtmlUrl) {
+          nextRecord.htmlUrl = resolvedHtmlUrl;
+        } else if (existingRecordHtmlUrl) {
+          nextRecord.htmlUrl = existingRecordHtmlUrl;
+        } else {
+          delete nextRecord.htmlUrl;
+        }
+        if (pdfUrl) {
+          nextRecord.pdfUrl = pdfUrl;
+        } else if (existingRecordPdfUrl) {
+          nextRecord.pdfUrl = existingRecordPdfUrl;
+          pdfUrl = existingRecordPdfUrl;
+        } else {
+          delete nextRecord.pdfUrl;
+        }
+        record = nextRecord;
+      }
+
       return {
         ...(receiptId ? { receiptId } : {}),
+        ...(certificateId ? { certificateId } : {}),
+        ...(orderId ? { orderId } : {}),
         ...(receiptNo ? { receiptNo } : {}),
         ...(issuedAt ? { issuedAt } : {}),
         ...(typeof amountMinor === "number" ? { amountMinor } : {}),
         ...(currency ? { currency } : {}),
-        receiptUrl,
-        htmlUrl: rawData.htmlUrl || receiptUrl || undefined,
+        receiptUrl: resolvedHtmlUrl || receiptUrl,
+        htmlUrl: resolvedHtmlUrl || receiptUrl || undefined,
         ...(pdfUrl ? { pdfUrl } : {}),
         ...(record ? { record } : {}),
       };
@@ -444,6 +567,9 @@ export function mapPassengerRideAuthorityToFixture(
   return {
     token,
     orderNo: view.order.orderNo,
+    ...(view.order.serviceSelection
+      ? { serviceSelection: view.order.serviceSelection }
+      : {}),
     screenId,
     title:
       view.order.status === "cancelled"

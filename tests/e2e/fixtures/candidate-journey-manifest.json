@@ -66,16 +66,16 @@
       "path": "/dashboard",
       "expectedStatus": 200,
       "kind": "web"
-    }
-  ],
-  "retiredSurfaces": [
+    },
     {
       "id": "partner-booking-web",
       "urlEnv": "DRTS_OPERATIONAL_PARTNER_BOOKING_URL",
       "path": "/",
-      "expectedStatus": 404,
-      "state": "paused"
-    },
+      "expectedStatus": 200,
+      "kind": "web"
+    }
+  ],
+  "retiredSurfaces": [
     {
       "id": "concierge-portal-web",
       "urlEnv": "DRTS_OPERATIONAL_CONCIERGE_PORTAL_URL",

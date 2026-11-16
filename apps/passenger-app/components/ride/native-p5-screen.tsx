@@ -441,6 +441,9 @@ function NativeP5ScreenBody({
         <View testID="native-cancelled-card" style={styles.card}>
           <Text style={styles.heading}>行程已取消</Text>
           <Text style={styles.text}>{fixture.orderNo}</Text>
+          {fixture.serviceSelection?.accessible ? (
+            <Text style={styles.text}>輪椅需求</Text>
+          ) : null}
           <Text style={styles.text}>{fixture.cancelledAtText}</Text>
           <Text style={styles.text}>{fixture.pickupLabel}</Text>
           <Text style={styles.text}>{fixture.dropoffLabel}</Text>
@@ -463,6 +466,9 @@ function NativeP5ScreenBody({
       <View style={styles.card}>
         <Text style={styles.heading}>{fixture.status}</Text>
         <Text style={styles.text}>{fixture.orderNo}</Text>
+        {fixture.serviceSelection?.accessible ? (
+          <Text style={styles.text}>輪椅需求</Text>
+        ) : null}
         <Text style={styles.text}>{fixture.requestedPickupText}</Text>
         <Text style={styles.text}>{fixture.pickupLabel}</Text>
         <Text style={styles.text}>{fixture.dropoffLabel}</Text>

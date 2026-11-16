@@ -1,8 +1,9 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import {
   decodeStateEnvelope,
   encodeStateEnvelope,
   generateCsrfToken,
+  resolveBrowserOrigin,
   sanitizeReturnPath,
   verifyCsrfToken,
   verifySameOrigin,
@@ -93,8 +94,10 @@ describe("Tenant Auth Session Utilities", () => {
         expect(decodeStateEnvelope("some.envelope")).toBeNull();
       } finally {
         if (originalSecret) process.env.BFF_STATE_SECRET = originalSecret;
-        if (originalAuthSecret) process.env.AUTH_COOKIE_SECRET = originalAuthSecret;
-        if (originalInternalKey) process.env.DRTS_INTERNAL_KEY = originalInternalKey;
+        if (originalAuthSecret)
+          process.env.AUTH_COOKIE_SECRET = originalAuthSecret;
+        if (originalInternalKey)
+          process.env.DRTS_INTERNAL_KEY = originalInternalKey;
       }
     });
 
@@ -181,6 +184,85 @@ describe("Tenant Auth Session Utilities", () => {
     it("rejects when both Origin and Referer are absent", () => {
       const req = new Request("http://localhost:3004/api/bookings");
       expect(verifySameOrigin(req)).toBe(false);
+    });
+  });
+
+  // On Cloud Run, Next standalone's request URL is its bind address
+  // (0.0.0.0:PORT, or 127.0.0.1:PORT behind the loopback wrapper).
+  describe("resolveBrowserOrigin", () => {
+    const host = "drts-dev-tenant-console-web-xyz.a.run.app";
+    const publicOrigin = `https://${host}`;
+    afterEach(() => {
+      delete process.env.K_SERVICE;
+      delete process.env.DRTS_RUNTIME_ORIGIN_HEADER;
+    });
+
+    it("keeps request.url outside Cloud Run, ignoring Host and provenance", () => {
+      const req = new Request("http://localhost:3004/x", {
+        headers: { host, "x-drts-runtime-origin": publicOrigin },
+      });
+      expect(resolveBrowserOrigin(req)).toBe("http://localhost:3004");
+    });
+
+    it("uses https with Host on Cloud Run instead of the bind address", () => {
+      process.env.K_SERVICE = "drts-dev-enterprise-dispatch-web";
+      const req = new Request("https://0.0.0.0:3010/x", {
+        headers: { host, "x-drts-runtime-origin": "https://forged.test" },
+      });
+      expect(resolveBrowserOrigin(req)).toBe(publicOrigin);
+      const browserPost = (origin: string) =>
+        verifySameOrigin(
+          new Request("https://0.0.0.0:3010/x", {
+            method: "POST",
+            headers: { host, origin },
+          }),
+        );
+      expect(browserPost(publicOrigin)).toBe(true);
+      expect(browserPost("https://attacker.example.test")).toBe(false);
+    });
+
+    it.each(["evil.test/path", "user@evil.test", "evil.test:443", ""])(
+      "falls back to request.url for an unusable Host %j",
+      (badHost) => {
+        process.env.K_SERVICE = "svc";
+        const req = new Request("https://0.0.0.0:3010/x", {
+          headers: badHost ? { host: badHost } : {},
+        });
+        expect(resolveBrowserOrigin(req)).toBe("https://0.0.0.0:3010");
+      },
+    );
+
+    it("uses the loopback wrapper's provenance only when the wrapper says so", () => {
+      process.env.K_SERVICE = "drts-dev-tenant-console-web";
+      process.env.DRTS_RUNTIME_ORIGIN_HEADER = "1";
+      const wrapped = (provenance: string) =>
+        new Request("http://127.0.0.1:3104/x", {
+          headers: {
+            host: "127.0.0.1:3104",
+            "x-drts-runtime-origin": provenance,
+          },
+        });
+      expect(resolveBrowserOrigin(wrapped(publicOrigin))).toBe(publicOrigin);
+      expect(
+        verifySameOrigin(
+          new Request("http://127.0.0.1:3104/x", {
+            method: "POST",
+            headers: {
+              host: "127.0.0.1:3104",
+              origin: publicOrigin,
+              "x-drts-runtime-origin": publicOrigin,
+            },
+          }),
+        ),
+      ).toBe(true);
+      // Not an exact origin: fall back to Host rather than trust it.
+      expect(resolveBrowserOrigin(wrapped(`${publicOrigin}/path`))).toBe(
+        "https://127.0.0.1:3104",
+      );
+      process.env.DRTS_RUNTIME_ORIGIN_HEADER = "0";
+      expect(resolveBrowserOrigin(wrapped(publicOrigin))).toBe(
+        "https://127.0.0.1:3104",
+      );
     });
   });
 });

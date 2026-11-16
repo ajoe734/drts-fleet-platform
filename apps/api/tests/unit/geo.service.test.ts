@@ -1,3 +1,8 @@
+import type {
+  ComputeGeoRouteCommand,
+  ServiceAreaEvaluationResult,
+} from "@drts/contracts";
+import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -565,5 +570,218 @@ describe("GeoController", () => {
       geocodeProvider: "mock",
       surface: "ops_console",
     });
+  });
+});
+
+const AIRPORT_ROUTE_SIM_HOME = { lat: 25.033964, lng: 121.564468 };
+const AIRPORT_ROUTE_SIM_AIRPORT = { lat: 25.0797, lng: 121.2342 };
+const AIRPORT_ROUTE_SIM_OTHER_CITY = { lat: 25.06, lng: 121.58 };
+const AIRPORT_ROUTE_SIM_CONTEXT = {
+  actorId: "unit-airport-coverage-operator",
+  actorType: "platform_admin" as const,
+};
+
+// External airport identity/operating-area facts are explicit SIM. These are
+// normal service mutations; neither geometry nor route business logic is stubbed.
+async function createAirportRouteAreas(
+  areas = new ServiceAreaService(),
+  airportOptions: {
+    metadata?: Record<string, unknown>;
+    products?: ("credit_card_airport_transfer" | "taxi_realtime")[];
+    effectiveFrom?: string;
+    effectiveUntil?: string | null;
+    publish?: boolean;
+  } = {},
+) {
+  const cityGeometry = areas
+    .listServiceAreas()
+    .find((area) => area.areaCode === "TAIPEI_CORE")!.geometry;
+  const city = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_CITY",
+      displayName: "Explicit SIM airport-product city coverage",
+      geometry: cityGeometry,
+      serviceProductTypes: ["credit_card_airport_transfer"],
+      effectiveFrom: "2020-01-01T00:00:00.000Z",
+      metadata: { externalFacts: "SIM" },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  await areas.publishServiceArea(
+    city.record.serviceAreaId,
+    {},
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  const airport = await areas.createServiceArea(
+    {
+      areaCode: "UNIT_SIM_AIRPORT_IDENTITY",
+      displayName: "Explicit SIM airport identity boundary",
+      geometry: {
+        type: "circle",
+        center: AIRPORT_ROUTE_SIM_AIRPORT,
+        radiusMeters: 6500,
+      },
+      serviceProductTypes: airportOptions.products ?? [
+        "credit_card_airport_transfer",
+      ],
+      effectiveFrom: airportOptions.effectiveFrom ?? "2020-01-01T00:00:00.000Z",
+      effectiveUntil: airportOptions.effectiveUntil ?? null,
+      metadata: airportOptions.metadata ?? {
+        airportIataCode: "TPE",
+        externalFacts: "SIM",
+      },
+    },
+    AIRPORT_ROUTE_SIM_CONTEXT,
+  );
+  if (airportOptions.publish !== false) {
+    await areas.publishServiceArea(
+      airport.record.serviceAreaId,
+      {},
+      AIRPORT_ROUTE_SIM_CONTEXT,
+    );
+  }
+  return { areas, city: city.record, airport: airport.record };
+}
+
+async function readActualAirportPreview(
+  areas: ServiceAreaService,
+  pickup: { lat: number; lng: number },
+  dropoff: { lat: number; lng: number },
+  direction: "pickup" | "dropoff",
+) {
+  // Reflect.construct also runs on the old real GeoService constructor: an old
+  // caller missing the new response field fails an assertion, not an import.
+  const geo = Reflect.construct(GeoService, [
+    new MockGeoProvider(),
+    new GeoProviderConfigService({
+      NODE_ENV: "test",
+      DRTS_ENV: "test",
+      MAP_PROVIDER_MODE: "mock",
+    }),
+    undefined,
+    undefined,
+    areas,
+  ]) as GeoService;
+  const response = await new GeoController(geo).route({
+    origin: pickup,
+    destination: dropoff,
+    airportTransfer: { direction },
+  } as ComputeGeoRouteCommand & {
+    airportTransfer: { direction: "pickup" | "dropoff" };
+  });
+  expect(response.data).toHaveProperty("serviceAreaEvaluation");
+  const result = response.data as typeof response.data & {
+    serviceAreaEvaluation: ServiceAreaEvaluationResult;
+  };
+  expect(result.provider).toBe("mock");
+  return result.serviceAreaEvaluation;
+}
+
+describe("normal Geo airport preview uses the same published route authority", () => {
+  it("returns the existing evaluation DTO alongside actual provider route metrics", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const result = await readActualAirportPreview(
+      areas,
+      AIRPORT_ROUTE_SIM_AIRPORT,
+      AIRPORT_ROUTE_SIM_HOME,
+      "pickup",
+    );
+    expect(result).toMatchObject({
+      decision: "serviceable",
+      serviceProductType: "credit_card_airport_transfer",
+    });
+    expect(result.stops.map((stop) => stop.kind)).toEqual([
+      "pickup",
+      "dropoff",
+    ]);
+  });
+
+  it("does not turn city-to-city routing into an airport benefit", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const result = await readActualAirportPreview(
+      areas,
+      AIRPORT_ROUTE_SIM_HOME,
+      AIRPORT_ROUTE_SIM_OTHER_CITY,
+      "dropoff",
+    );
+    expect(result.decision).toBe("not_serviceable");
+    expect(result.reasonCodes).toContain("AIRPORT_DROPOFF_REQUIRED");
+  });
+
+  it("keeps business route intent out of the external provider request", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const provider = new MockGeoProvider();
+    const providerRoute = vi.spyOn(provider, "route");
+    const service = Reflect.construct(GeoService, [
+      provider,
+      new GeoProviderConfigService({
+        NODE_ENV: "test",
+        DRTS_ENV: "test",
+        MAP_PROVIDER_MODE: "mock",
+      }),
+      undefined,
+      undefined,
+      areas,
+    ]) as GeoService;
+    const response = await service.route({
+      origin: AIRPORT_ROUTE_SIM_AIRPORT,
+      destination: AIRPORT_ROUTE_SIM_HOME,
+      airportTransfer: { direction: "pickup" },
+    } as ComputeGeoRouteCommand & { airportTransfer: { direction: "pickup" } });
+    expect(response).toHaveProperty("serviceAreaEvaluation");
+    expect(providerRoute).toHaveBeenCalledWith({
+      origin: AIRPORT_ROUTE_SIM_AIRPORT,
+      destination: AIRPORT_ROUTE_SIM_HOME,
+      travelMode: "drive",
+      requestedByActorId: null,
+    });
+  });
+
+  it("does not claim serviceability when the route authority was not injected", async () => {
+    const service = createService();
+    await expect(
+      service.route({
+        origin: AIRPORT_ROUTE_SIM_AIRPORT,
+        destination: AIRPORT_ROUTE_SIM_HOME,
+        airportTransfer: { direction: "pickup" },
+      } as ComputeGeoRouteCommand & {
+        airportTransfer: { direction: "pickup" };
+      }),
+    ).rejects.toMatchObject({
+      response: { error: { code: "AIRPORT_ROUTE_EVALUATION_UNAVAILABLE" } },
+    });
+  });
+
+  it("rejects an invalid airport direction through the actual Geo caller", async () => {
+    const { areas } = await createAirportRouteAreas();
+    const service = Reflect.construct(GeoService, [
+      new MockGeoProvider(),
+      new GeoProviderConfigService({
+        NODE_ENV: "test",
+        DRTS_ENV: "test",
+        MAP_PROVIDER_MODE: "mock",
+      }),
+      undefined,
+      undefined,
+      areas,
+    ]) as GeoService;
+    const command = {
+      origin: AIRPORT_ROUTE_SIM_AIRPORT,
+      destination: AIRPORT_ROUTE_SIM_HOME,
+      airportTransfer: { direction: "sideways" },
+    } as unknown as ComputeGeoRouteCommand;
+    await expect(service.route(command)).rejects.toMatchObject({
+      response: { error: { code: "VALIDATION_ERROR" } },
+    });
+  });
+
+  it("preserves ordinary route responses when no airport intent was requested", async () => {
+    const result = await createService().route({
+      origin: AIRPORT_ROUTE_SIM_HOME,
+      destination: AIRPORT_ROUTE_SIM_OTHER_CITY,
+    });
+    expect(result.provider).toBe("mock");
+    expect(result.distanceMeters).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty("serviceAreaEvaluation");
   });
 });

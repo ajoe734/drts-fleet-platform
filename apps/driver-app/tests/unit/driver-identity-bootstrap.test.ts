@@ -131,6 +131,7 @@ describe("syncDriverIdentityBootstrap", () => {
     expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
       taskId: "task-001",
       driverId: "driver-001",
+      vehicleId: null,
       status: "on_trip",
     });
     expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
@@ -144,15 +145,13 @@ describe("syncDriverIdentityBootstrap", () => {
     const syncDriverLocationHeartbeat = vi.fn(async () => {
       callOrder.push("sync");
     });
-    const listDriverTasks = vi
-      .fn()
-      .mockResolvedValue([
-        {
-          taskId: "task-001",
-          driverId: "driver-001",
-          status: "enroute_pickup",
-        },
-      ]);
+    const listDriverTasks = vi.fn().mockResolvedValue([
+      {
+        taskId: "task-001",
+        driverId: "driver-001",
+        status: "enroute_pickup",
+      },
+    ]);
 
     const result = await syncDriverIdentityBootstrap({
       getDriverIdentityIssue: () => null,
@@ -195,5 +194,79 @@ describe("syncDriverIdentityBootstrap", () => {
     expect(evaluateTrackingRecovery).toHaveBeenCalledWith({
       activeAssignment: null,
     });
+  });
+});
+
+it("forwards the active task's actual vehicle instead of a queued task's vehicle", async () => {
+  const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
+  await syncDriverIdentityBootstrap({
+    getDriverIdentityIssue: () => null,
+    initializeDriverIdentity: async () => {},
+    isDriverIdentityProvisioned: () => true,
+    listDriverTasks: async () => [
+      {
+        taskId: "queued-context-task",
+        driverId: "driver-context",
+        vehicleId: "queued-context-vehicle",
+        status: "queued",
+      },
+      {
+        taskId: "active-context-task",
+        driverId: "driver-context",
+        vehicleId: "active-context-vehicle",
+        status: "accepted",
+      },
+    ],
+    resetDriverAppToOnboarding: vi.fn(),
+    router: createRouter(),
+    syncDriverLocationHeartbeat,
+  });
+
+  expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
+    taskId: "active-context-task",
+    driverId: "driver-context",
+    vehicleId: "active-context-vehicle",
+    status: "accepted",
+  });
+});
+
+it("restores the cold session before reading and forwarding the active vehicle", async () => {
+  let provisioned = false;
+  const order: string[] = [];
+  const syncDriverLocationHeartbeat = vi.fn(async () => {
+    order.push("heartbeat");
+  });
+  const resetDriverAppToOnboarding = vi.fn();
+  const result = await syncDriverIdentityBootstrap({
+    getDriverIdentityIssue: () => null,
+    initializeDriverIdentity: async () => {
+      order.push("identity");
+      provisioned = true;
+    },
+    isDriverIdentityProvisioned: () => provisioned,
+    listDriverTasks: async () => {
+      order.push("tasks");
+      return [
+        {
+          taskId: "restored-context-task",
+          driverId: "driver-context",
+          vehicleId: "restored-context-vehicle",
+          status: "on_trip",
+        },
+      ];
+    },
+    resetDriverAppToOnboarding,
+    router: createRouter(),
+    syncDriverLocationHeartbeat,
+  });
+
+  expect(result).toBe("synced");
+  expect(order).toEqual(["identity", "tasks", "heartbeat"]);
+  expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
+  expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
+    taskId: "restored-context-task",
+    driverId: "driver-context",
+    vehicleId: "restored-context-vehicle",
+    status: "on_trip",
   });
 });

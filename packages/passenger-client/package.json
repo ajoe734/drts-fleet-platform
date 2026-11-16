@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
+    "test": "vitest run --root ../.. --config vitest.config.ts tests/unit/pax-web-shell-20261009/passenger-client.test.ts",
     "test:watch": "vitest",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc --noEmit"

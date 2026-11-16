@@ -130,22 +130,32 @@ for (const c of cases(inventory)) {
         viewport: { width: c.width, height: c.width === 390 ? 844 : 960 },
         serviceWorkers: "block",
       });
-      const identity = await context.request.get(
-        new URL(session.identity.path, target).href,
-        {
-          headers: isolatedHeaders(target, target, token, {}),
-          maxRedirects: 0,
-        },
-      );
-      const identityBody: unknown = await identity.json();
-      const verifiedReadback = verifyIdentityReadback(session, identityBody, {
-        expectedRole: c.role,
-        status: identity.status(),
-        candidateSha: identity.headers()["x-drts-candidate-sha"],
-        expectedRuntimeSha: inventory.runtimeSha,
-      });
-      expect(verifiedReadback.subject).toBe(session.identity.expectedSubject);
-      expect(verifiedReadback.effectiveRoles).toContain(c.role);
+      const partnerSsr =
+        session.app === "partner-booking-web" &&
+        session.identity.readerFamily === "partner_normal_ingress_ssr";
+      if (!partnerSsr) {
+        const identity = await context.request.get(
+          new URL(session.identity.path, target).href,
+          {
+            headers: isolatedHeaders(target, target, token, {}),
+            maxRedirects: 0,
+          },
+        );
+        const identityBody: unknown = await identity.json();
+        const verifiedReadback = verifyIdentityReadback(session, identityBody, {
+          expectedRole: c.role,
+          status: identity.status(),
+          candidateSha: identity.headers()["x-drts-candidate-sha"],
+          expectedRuntimeSha: inventory.runtimeSha,
+        });
+        expect(verifiedReadback.subject).toBe(session.identity.expectedSubject);
+        expect(verifiedReadback.effectiveRoles).toContain(c.role);
+      }
+      if (partnerSsr && (c.state === "expired" || c.state === "permission")) {
+        stage =
+          "partner-normal-ingress-negative-session-variant-adapter-missing";
+        throw new Error(stage);
+      }
       if (c.state === "expired" || c.state === "permission") {
         stage = "negative-session-variant-missing";
         expect(session.variants?.[c.state]).toBeDefined();
@@ -232,6 +242,50 @@ for (const c of cases(inventory)) {
       expect(response?.headers()["x-drts-candidate-sha"]).toBe(
         inventory.runtimeSha,
       );
+      if (partnerSsr) {
+        // Read only the current business document's sanitized SSR projection.
+        // No separate preflight, JSON endpoint or new JWT can stand in for it.
+        stage = "partner-same-SSR-identity-readback";
+        const attributes = [
+          "data-partner-principal",
+          "data-principal-availability",
+          "data-principal-subject",
+          "data-principal-actor-type",
+          "data-principal-realm",
+          "data-principal-roles",
+          "data-principal-tenant-id",
+          "data-principal-partner-id",
+          "data-principal-program-id",
+          "data-principal-entry-slug",
+        ];
+        const principal = await page
+          .locator('[data-partner-principal="api_auth_session"]')
+          .evaluateAll(
+            (nodes, names) =>
+              nodes.map((node) =>
+                Object.fromEntries(
+                  names.map((name) => [name, node.getAttribute(name)]),
+                ),
+              ),
+            attributes,
+          );
+        if (
+          principal.length === 0 ||
+          (principal.length === 1 &&
+            principal[0]!["data-principal-availability"] === "unavailable")
+        )
+          stage = "partner-normal-ingress-SSR-principal-unavailable-missing";
+        const document = new URL(response!.url());
+        const verifiedReadback = verifyIdentityReadback(session, principal, {
+          expectedRole: c.role,
+          status: response!.status(),
+          candidateSha: response!.headers()["x-drts-candidate-sha"],
+          expectedRuntimeSha: inventory.runtimeSha,
+          documentPath: document.pathname + document.search,
+        });
+        expect(verifiedReadback.subject).toBe(session.identity.expectedSubject);
+        expect(verifiedReadback.effectiveRoles).toContain(c.role);
+      }
       await expect(page.locator(recipe.ready)).toBeVisible();
       stage = "state-keyboard-recipe";
       await keyboardSteps(page, recipe.steps[c.locale]);

@@ -66,6 +66,7 @@ import type {
   VehicleFleetAffiliationRecord,
   VehicleFleetAffiliationType,
   VehicleLicenseType,
+  VehicleForm,
   VehicleRegistryRecord,
   VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
@@ -954,6 +955,35 @@ export class RegulatoryRegistryService
       (candidateVehicle) => candidateVehicle.vehicleId === vehicleId,
     );
     return this.normalizeVehicleLicenseType(vehicle?.licenseType);
+  }
+
+  getVehicleForm(vehicleId: string): VehicleForm | null {
+    return (
+      this.vehicles.find((vehicle) => vehicle.vehicleId === vehicleId)
+        ?.vehicleForm ?? null
+    );
+  }
+
+  async prepareVehicleForms(
+    vehicleIds: string[],
+    executor?: RegulatoryRegistryQueryExecutor,
+  ) {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository?.isEnabled())
+      return new Map(vehicleIds.map((id) => [id, this.getVehicleForm(id)]));
+    const rows = await repository.findVehicleForms(vehicleIds, executor);
+    const returned = new Map(
+      rows.map((row) => [row.vehicleId, row.vehicleForm]),
+    );
+    const forms = new Map(
+      vehicleIds.map((id) => [id, returned.get(id) ?? null]),
+    );
+    this.vehicles = this.vehicles.map((vehicle) =>
+      forms.has(vehicle.vehicleId)
+        ? { ...vehicle, vehicleForm: forms.get(vehicle.vehicleId)! }
+        : vehicle,
+    );
+    return forms;
   }
 
   listDrivers() {

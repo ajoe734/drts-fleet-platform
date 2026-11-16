@@ -322,6 +322,9 @@ function buildFallbackUnifiedTaskView(
   return {
     taskId: task.taskId,
     orderId: task.orderId,
+    ...(task.serviceSelection
+      ? { serviceSelection: task.serviceSelection }
+      : {}),
     orderDomain: forwarded ? "forwarded" : "owned",
     sourcePlatform: forwarded
       ? (task.sourcePlatform as UnifiedDriverTaskView["sourcePlatform"])
@@ -998,6 +1001,9 @@ function TaskCard({
 
           <View style={styles.cardPillRow}>
             <Pill tone="neutral">{typeLabel}</Pill>
+            {task.serviceSelection?.accessible ? (
+              <Pill tone="info">輪椅需求</Pill>
+            ) : null}
             {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
             {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
           </View>
@@ -1216,6 +1222,9 @@ function DenseTaskRow({
             >
               {busy ? "正在提交平台回覆…" : buildDenseStatusText(task)}
             </Text>
+            {task.serviceSelection?.accessible ? (
+              <Text style={styles.denseStatusText}>輪椅需求</Text>
+            ) : null}
             {actionable && !busy ? (
               <Text style={styles.denseSwipeHint}>右滑接受 · 左滑婉拒</Text>
             ) : null}

@@ -33,7 +33,10 @@ export async function submitEnterpriseBookingDraft({
 }) {
   const client = getEnterpriseDispatchTenantClient(tenantId?.trim() ?? "");
   if (bookingId) {
-    const updateCmd = buildEnterpriseBookingUpdateCommand(draft, clickNow);
+    const originalBooking = await client.getBooking(bookingId);
+    const updateCmd = buildEnterpriseBookingUpdateCommand(draft, clickNow, {
+      originalBooking,
+    });
     await client.updateBooking(bookingId, updateCmd);
     router.push(`/bookings/${encodeURIComponent(bookingId)}`);
     router.refresh();

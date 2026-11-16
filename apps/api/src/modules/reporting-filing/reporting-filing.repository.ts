@@ -245,6 +245,32 @@ export class ReportingFilingRepository {
     return job;
   }
 
+  /** Narrow committed lookup for an already-signed multi-taxi artifact. */
+  async loadMultiTaxiTripExportJobByArtifactId(
+    artifactId: string,
+  ): Promise<StoredReportJobRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_report_jobs
+       WHERE job_type = 'multi_taxi_trip_records' AND status = 'completed'
+         AND record->'artifact'->>'artifactId' = $1`,
+      [artifactId],
+    );
+    if (result.rows.length > 1)
+      throw new Error("Ambiguous multi-taxi export artifact");
+    if (!result.rows[0]) return null;
+    const job = this.parseRecord<StoredReportJobRecord>(
+      result.rows[0].record,
+      "admin.phase1_report_jobs",
+    );
+    if (
+      job.jobType !== "multi_taxi_trip_records" ||
+      job.status !== "completed" ||
+      job.artifact?.artifactId !== artifactId
+    )
+      throw new Error("Multi-taxi export artifact readback mismatch");
+    return job;
+  }
+
   async loadReportJobs(jobIds: string[]): Promise<StoredReportJobRecord[]> {
     if (!jobIds.length) return [];
     const result = await this.databaseService!.query<

@@ -15,6 +15,7 @@ const native = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  Platform: { OS: "web", Version: 0 },
   View: "View",
   ScrollView: "ScrollView",
   Text: "Text",
@@ -29,6 +30,13 @@ vi.mock("react-native", () => ({
     addEventListener: () => ({ remove() {} }),
   },
 }));
+vi.mock("expo-constants", () => ({ default: { expoConfig: {} } }));
+vi.mock("react-native-maps", () => ({
+  default: "NativeMapView",
+  Marker: "NativeMapMarker",
+  PROVIDER_GOOGLE: "google",
+}));
+vi.mock("react-native-webview", () => ({ WebView: "WebView" }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async () =>
     JSON.stringify({

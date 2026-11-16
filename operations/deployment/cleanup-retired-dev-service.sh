@@ -36,6 +36,7 @@ intended_services=(
   "drts-channel-partner-portal-web"
   "drts-dev-passenger-app-web"
   "drts-dev-agency-portal-web"
+  "drts-dev-partner-booking-web"
 )
 optional_services=(
   "drts-dev-scanner"

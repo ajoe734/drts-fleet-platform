@@ -165,17 +165,19 @@ describe("BillingPDF actual three-family production/store/controlled-download co
     );
     expect(r.batch.workflowState).toBe("exported");
     expect(
-      r.controller.getDriverStatement(
-        r.statement.statementId,
-        identity("driver", DRIVER),
+      (
+        await r.controller.getDriverStatement(
+          r.statement.statementId,
+          identity("driver", DRIVER),
+        )
       ).data.statementId,
     ).toBe(r.statement.statementId);
-    expect(() =>
+    await expect(
       r.controller.getDriverStatement(
         r.statement.statementId,
         identity("driver", "drv-intruder"),
       ),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
   it("reads an existing canonical historical Chinese line description through repository rehydration and registered rebuild/download", async () => {

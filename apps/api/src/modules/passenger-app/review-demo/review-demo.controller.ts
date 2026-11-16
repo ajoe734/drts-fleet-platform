@@ -19,13 +19,17 @@ import {
 } from "../otp/passenger-otp.controller";
 import { PaymentChargeService } from "../payment/payment-charge.service";
 import { assertNoUnpaidPassengerRides } from "../payment/unpaid-payment.guard";
+import { PassengerTrialTripService } from "./passenger-trial-trip.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 import { ReviewSmsPort } from "./review-sms.port";
 import { ReviewSupplyService } from "./review-supply.service";
 
 @Controller("ops/review-demo")
 export class ReviewDemoOpsController {
-  constructor(private readonly supply: ReviewSupplyService) {}
+  constructor(
+    private readonly supply: ReviewSupplyService,
+    private readonly trialTrips: PassengerTrialTripService,
+  ) {}
 
   @Get("config")
   @RequireRealms("ops", "platform", "system")
@@ -38,7 +42,13 @@ export class ReviewDemoOpsController {
   async prepare() {
     if (!reviewDemoEnabled(process.env))
       throw new ApiRequestError(404, "not_found", "Rehearsal is not enabled.");
-    return toApiSuccessEnvelope(await this.supply.prepare());
+    const prepared = await this.supply.prepare();
+    // The self-serve trial's test pairs sit on the same review authorization.
+    // The rehearsal's "pause supply" only controls pax-review-*, so an idle
+    // trial pair left online (e.g. by a cancelled trial ride) would quietly
+    // serve the no-supply branch. Idle trial pairs belong offline anyway.
+    const trialSupply = await this.trialTrips.releaseIdleSupply();
+    return toApiSuccessEnvelope({ ...prepared, trialSupply });
   }
 }
 

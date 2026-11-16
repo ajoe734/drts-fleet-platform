@@ -73,7 +73,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
   return (
     <TouchableOpacity
       accessibilityHint={accessibilityHint}
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={accessibilityLabel ?? title}
       accessibilityRole="button"
       activeOpacity={0.7}
       disabled={isDisabled}

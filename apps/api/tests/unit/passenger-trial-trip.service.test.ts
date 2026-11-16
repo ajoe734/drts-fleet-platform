@@ -636,4 +636,122 @@ describe("PassengerTrialTripService", () => {
     expect(at(90_000).lat).toBeCloseTo(25.01, 6);
     expect(at(90_000).lng).toBeCloseTo(121.46, 6);
   });
+
+  describe("releaseIdleSupply", () => {
+    // Database rows the sweep reads: stale open trips, busy drivers, and the
+    // registry work state of the remaining (idle) trial drivers.
+    function sweepHarness(options: {
+      busy?: string[];
+      online?: string[];
+      failOffline?: string[];
+    }) {
+      const h = harness();
+      const calls: string[] = [];
+      h.database.query.mockImplementation(
+        async (sql: string, params?: unknown[]) => {
+          if (sql.includes("updated_at < now()")) {
+            calls.push("stale");
+            return { rows: [] };
+          }
+          if (sql.includes("SELECT DISTINCT record->>'driverId'")) {
+            calls.push("busy");
+            return {
+              rows: (options.busy ?? []).map((driver_id) => ({ driver_id })),
+            };
+          }
+          if (sql.includes("reg.phase1_registry_drivers")) {
+            calls.push("online");
+            const ids = (params?.[0] ?? []) as string[];
+            return {
+              rows: (options.online ?? [])
+                .filter((id) => ids.includes(id))
+                .map((driver_id) => ({ driver_id })),
+            };
+          }
+          return { rows: [] };
+        },
+      );
+      h.registry.updateDriverWorkStateFromPersistence.mockImplementation(
+        async (driverId: string) => {
+          if (options.failOffline?.includes(driverId))
+            throw new Error("storage unavailable");
+          return {};
+        },
+      );
+      return { h, calls };
+    }
+
+    it("takes a trial pair left online after a cancelled ride offline", async () => {
+      // A ride cancelled after assignment leaves no open task and no offline
+      // step, so the pair stayed available for any review-authorization order.
+      const { h, calls } = sweepHarness({ online: ["pax-trial-driver-1"] });
+      await expect(h.service.releaseIdleSupply()).resolves.toEqual({
+        releasedDriverIds: ["pax-trial-driver-1"],
+        busyDriverIds: [],
+        failedDriverIds: [],
+      });
+      expect(calls).toEqual(["stale", "busy", "online"]);
+      expect(
+        h.registry.updateDriverWorkStateFromPersistence,
+      ).toHaveBeenCalledExactlyOnceWith("pax-trial-driver-1", {
+        workState: "offline",
+      });
+    });
+
+    it("leaves pairs serving an open trial ride alone", async () => {
+      const { h } = sweepHarness({
+        busy: ["pax-trial-driver-2"],
+        online: ["pax-trial-driver-1", "pax-trial-driver-2"],
+      });
+      await expect(h.service.releaseIdleSupply()).resolves.toEqual({
+        releasedDriverIds: ["pax-trial-driver-1"],
+        busyDriverIds: ["pax-trial-driver-2"],
+        failedDriverIds: [],
+      });
+      const onlineQuery = h.database.query.mock.calls.find(([sql]) =>
+        String(sql).includes("reg.phase1_registry_drivers"),
+      );
+      expect(onlineQuery?.[1]).toEqual([
+        ["pax-trial-driver-1", "pax-trial-driver-3"],
+      ]);
+      expect(
+        h.registry.updateDriverWorkStateFromPersistence,
+      ).not.toHaveBeenCalledWith("pax-trial-driver-2", expect.anything());
+    });
+
+    it("writes nothing when every idle pair is already offline", async () => {
+      const { h } = sweepHarness({});
+      await expect(h.service.releaseIdleSupply()).resolves.toEqual({
+        releasedDriverIds: [],
+        busyDriverIds: [],
+        failedDriverIds: [],
+      });
+      expect(
+        h.registry.updateDriverWorkStateFromPersistence,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("reports a pair it could not take offline without hiding the others", async () => {
+      const { h } = sweepHarness({
+        online: ["pax-trial-driver-1", "pax-trial-driver-3"],
+        failOffline: ["pax-trial-driver-1"],
+      });
+      await expect(h.service.releaseIdleSupply()).resolves.toEqual({
+        releasedDriverIds: ["pax-trial-driver-3"],
+        busyDriverIds: [],
+        failedDriverIds: ["pax-trial-driver-1"],
+      });
+    });
+
+    it("does nothing without registry storage", async () => {
+      const h = harness();
+      h.database.isEnabled.mockReturnValue(false);
+      await expect(h.service.releaseIdleSupply()).resolves.toEqual({
+        releasedDriverIds: [],
+        busyDriverIds: [],
+        failedDriverIds: [],
+      });
+      expect(h.database.query).not.toHaveBeenCalled();
+    });
+  });
 });

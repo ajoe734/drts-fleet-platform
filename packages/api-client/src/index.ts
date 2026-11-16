@@ -72,6 +72,10 @@ import type {
   CreateFleetPartnerCommand,
   ManageFleetHumanRoleCommand,
   FleetHumanRoleRecord,
+  InviteFleetStaffCommand,
+  FleetStaffInvitationView,
+  FleetStaffInvitationIssued,
+  FleetStaffMemberView,
   CreateFleetPartnerRevenueShareRuleCommand,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
@@ -4625,6 +4629,47 @@ export class ApiClient {
     );
   }
 
+  /** FLEET-ONB-008: Fleet staff invitation issue/list/revoke, SA/SD §2/§8. */
+  async listFleetStaffInvitations(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetStaffInvitationView[]> {
+    return this.getList<FleetStaffInvitationView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  async inviteFleetStaff(
+    fleetPartnerId: string,
+    command: InviteFleetStaffCommand,
+  ): Promise<FleetStaffInvitationIssued> {
+    return this.post<FleetStaffInvitationIssued>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations`,
+      { body: command },
+    );
+  }
+
+  async revokeFleetStaffInvitation(
+    fleetPartnerId: string,
+    entrySlug: string,
+    invitationId: string,
+  ): Promise<FleetStaffInvitationView> {
+    return this.post<FleetStaffInvitationView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/invitations/${encodeURIComponent(invitationId)}/revoke?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  /** FLEET-ONB-008: disables an active Fleet staff membership, SA/SD §8. */
+  async deactivateFleetStaffMember(
+    fleetPartnerId: string,
+    entrySlug: string,
+    membershipId: string,
+  ): Promise<FleetStaffMemberView> {
+    return this.post<FleetStaffMemberView>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/members/${encodeURIComponent(membershipId)}/deactivate?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
   async listFleetPartnerDrivers(
     fleetPartnerId: string,
   ): Promise<DriverFleetAffiliationRecord[]> {
@@ -5027,8 +5072,10 @@ export class ApiClient {
     return this.getList<MaintenanceRecord>(path);
   }
 
-  async createMaintenance(command: CreateMaintenanceRecordCommand) {
-    return this.post("/api/maintenance", { body: command });
+  async createMaintenance(
+    command: CreateMaintenanceRecordCommand,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/maintenance", { body: command });
   }
 
   async getMaintenance(maintenanceId: string) {
@@ -5038,8 +5085,10 @@ export class ApiClient {
   async updateMaintenance(
     maintenanceId: string,
     command: UpdateMaintenanceRecordCommand,
-  ) {
-    return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
+  ): Promise<ActionReceipt> {
+    return this.patch<ActionReceipt>(`/api/maintenance/${maintenanceId}`, {
+      body: command,
+    });
   }
 
   async deleteMaintenance(maintenanceId: string) {

@@ -279,40 +279,19 @@ describe("operational browser journeys manifest guard", () => {
       tokenEnv: "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
       templateVariable: "tenantSessionToken",
     });
-    // /bookings/new starts with an empty cost center unless the URL carries
-    // `cc`, and the review link stays disabled until it is filled, so every
-    // review click must follow a cost-center fill (deploy-dev failed on
-    // 2026-11-08 and 2026-11-10 because it did not).
-    const enterpriseFormSource = readFileSync(
-      path.join(
-        process.cwd(),
-        "apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-form.tsx",
-      ),
-      "utf8",
-    );
-    expect(enterpriseFormSource).toContain(
-      "return `enterprise-booking-${field}`;",
-    );
-    expect(enterpriseFormSource).toContain(
-      'enterpriseBookingFieldId("cost-center")',
-    );
+    // The shared-dev acceptance tenant has no active cost center, so since
+    // 2026-11-13 /bookings/new hides that field and the review link is enabled
+    // without it. Filling `#enterprise-booking-cost-center` there would wait
+    // for a control that is not rendered.
     for (const operation of enterpriseJourney.operations) {
       const steps: Array<{ kind: string; control?: string }> =
         operation.before ?? [];
-      const reviewIndex = steps.findIndex(
-        (step) => step.control === "[data-drt-intent='enterprise-review']",
-      );
-      if (reviewIndex < 0) continue;
       expect(
-        steps
-          .slice(0, reviewIndex)
-          .some(
-            (step) =>
-              step.kind === "fill" &&
-              step.control === "#enterprise-booking-cost-center",
-          ),
-        `${operation.name} must fill the cost center before review`,
-      ).toBe(true);
+        steps.some(
+          (step) => step.control === "#enterprise-booking-cost-center",
+        ),
+        `${operation.name} must not wait for the hidden cost-center field`,
+      ).toBe(false);
     }
 
     const referralJourney = manifest.journeys.find(

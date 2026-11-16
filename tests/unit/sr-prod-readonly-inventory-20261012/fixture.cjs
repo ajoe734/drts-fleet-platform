@@ -80,7 +80,10 @@ function fixture(overrides = {}, collector = { TARGET, inventory }) {
         revision = `${name}/revisions/prod-${op.id}-00001`;
       body = {
         name,
-        ingress: "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
+        ingress:
+          op.id === "agency-portal-web"
+            ? "INGRESS_TRAFFIC_ALL"
+            : "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
         latestReadyRevision: revision,
         latestCreatedRevision: revision,
         trafficStatuses: [{ revision, percent: 100 }],
@@ -127,31 +130,35 @@ function fixture(overrides = {}, collector = { TARGET, inventory }) {
       };
     if (op.kind === "backends")
       body = {
-        items: TOPOLOGY.map(([id]) => ({
-          name:
-            id === "referral-embed-web"
-              ? "drts-prod-referral-lb"
-              : id === "passenger-app-web"
-                ? "drts-prod-passenger-lb"
-                : `prod-${id}-lb`,
-          iap: {
-            enabled: true,
-            oauth2ClientId: "123456789-client.apps.googleusercontent.com",
-          },
-          backends: [
-            {
-              group: `https://www.googleapis.com/compute/v1/projects/${TARGET.project}/regions/${TARGET.region}/networkEndpointGroups/${neg(id)}`,
+        items: TOPOLOGY.filter(([id]) => id !== "agency-portal-web").map(
+          ([id]) => ({
+            name:
+              id === "referral-embed-web"
+                ? "drts-prod-referral-lb"
+                : id === "passenger-app-web"
+                  ? "drts-prod-passenger-lb"
+                  : `prod-${id}-lb`,
+            iap: {
+              enabled: true,
+              oauth2ClientId: "123456789-client.apps.googleusercontent.com",
             },
-          ],
-        })),
+            backends: [
+              {
+                group: `https://www.googleapis.com/compute/v1/projects/${TARGET.project}/regions/${TARGET.region}/networkEndpointGroups/${neg(id)}`,
+              },
+            ],
+          }),
+        ),
       };
     if (op.kind === "negs")
       body = {
-        items: TOPOLOGY.map(([id]) => ({
-          name: neg(id),
-          networkEndpointType: "SERVERLESS",
-          cloudRun: { service: `prod-${id}` },
-        })),
+        items: TOPOLOGY.filter(([id]) => id !== "agency-portal-web").map(
+          ([id]) => ({
+            name: neg(id),
+            networkEndpointType: "SERVERLESS",
+            cloudRun: { service: `prod-${id}` },
+          }),
+        ),
       };
     if (op.kind === "account")
       body = { uniqueId: "1234567890123456789", disabled: false };

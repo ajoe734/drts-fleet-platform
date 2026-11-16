@@ -25,10 +25,15 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
 ]);
 
 const [, , childEntry, internalPortArg] = process.argv;
-// Only this existing consumer understands the private provenance. Other
-// control-plane applications must not receive an unknown header to relay.
-const fleetOriginConsumer =
-  childEntry === "apps/fleet-partner-portal-web/server.js";
+// Only these consumers understand the private provenance and keep it from
+// their API relays. Other control-plane applications must not receive an
+// unknown header to relay. The loopback child's request.url is 127.0.0.1, so
+// these portals build Google OIDC callbacks and same-origin checks from it.
+const ORIGIN_CONSUMER_ENTRIES = new Set([
+  "apps/fleet-partner-portal-web/server.js",
+  "apps/tenant-console-web/server.js",
+]);
+const originConsumer = ORIGIN_CONSUMER_ENTRIES.has(childEntry);
 
 if (!childEntry || !internalPortArg) {
   console.error(
@@ -199,10 +204,20 @@ async function applyUpstreamAuth(headers, req, targetUrl) {
 
 function writeResponse(res, upstream) {
   for (const [key, value] of upstream.headers.entries()) {
-    if (REQUEST_HEADER_BLOCKLIST.has(key.toLowerCase())) {
+    const name = key.toLowerCase();
+    if (REQUEST_HEADER_BLOCKLIST.has(name) || name === "set-cookie") {
       continue;
     }
     res.setHeader(key, value);
+  }
+  // Headers iteration yields every Set-Cookie as its own entry, and setHeader
+  // replaces, so copying them one by one kept only the last cookie. The OIDC
+  // callbacks set the session and CSRF cookies and then clear the state
+  // cookie, so the browser only ever received the clear and the login was
+  // lost. Forward all of them as one multi-value header.
+  const setCookies = upstream.headers.getSetCookie();
+  if (setCookies.length > 0) {
+    res.setHeader("set-cookie", setCookies);
   }
 
   res.statusCode = upstream.status;
@@ -224,8 +239,7 @@ async function forwardNextRequest(req, res, requestUrl) {
   const headers = copyRequestHeaders(req, targetUrl, {
     forwardAuthorization: true,
   });
-  if (fleetOriginConsumer)
-    headers.set(RUNTIME_ORIGIN_HEADER, requestUrl.origin);
+  if (originConsumer) headers.set(RUNTIME_ORIGIN_HEADER, requestUrl.origin);
   const body =
     method === "GET" || method === "HEAD"
       ? undefined
@@ -268,6 +282,9 @@ const child = spawn(process.execPath, [childEntry], {
     ...process.env,
     HOSTNAME: "127.0.0.1",
     PORT: String(internalPort),
+    // Tells shared auth code (@drts/tenant-auth, also run without this
+    // wrapper) that RUNTIME_ORIGIN_HEADER comes from here, never a caller.
+    DRTS_RUNTIME_ORIGIN_HEADER: originConsumer ? "1" : "0",
   },
   stdio: "inherit",
 });

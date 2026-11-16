@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import * as contracts from "../../../packages/contracts/src/index";
+import { ApiClientError } from "../../../packages/api-client/src/index";
 import * as canvas from "../../../packages/ui-web/src/index";
 import type * as BookingModule from "../../../apps/tenant-console-web/app/bookings/page";
 import type * as InvoiceModule from "../../../apps/tenant-console-web/app/invoices/page";
@@ -114,6 +115,7 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
         react: React,
         "react/jsx-runtime": jsxRuntime,
         "@drts/ui-web": canvas,
+        "@drts/api-client": { ApiClientError },
         "@drts/contracts": contracts,
         "next/navigation": { useRouter: () => ({ refresh() {} }) },
         "next/cache": { revalidatePath() {} },

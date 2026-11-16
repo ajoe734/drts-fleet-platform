@@ -2,13 +2,26 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { SUPERVISOR_EXECUTION_MODES } from "@drts/contracts";
 import type {
+  ComputeGeoRouteCommand,
+  GeoProviderHealthResponse,
+  GeoSearchResponse,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  GeoRouteResponse,
+  SearchGeoQuery,
+  ResolveAddressCommand,
+  ReverseGeocodeCommand,
   ApiSuccessEnvelope,
   BookingRecord,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
   CreatePartnerIngressHandoffCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBookingCommand,
   IdentityContext,
   OwnedOrderRecord,
+  PartnerOrderReceiptRecord,
+  PartnerOrderReadRecord,
   PartnerEntryBrandingMetadata,
   PartnerRecordAuditMetadata,
   PartnerBootstrapSession,
@@ -94,10 +107,14 @@ async function getServerAuthorityHeaders(): Promise<Record<string, string>> {
   const targetUrl = new URL(API_URL);
   const audience =
     configuredAudience ||
-    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX)
+      ? targetUrl.origin
+      : null);
   if (audience) {
     const identityToken = await mintMetadataIdentityToken(audience);
     if (identityToken) {
+      // Match the existing proxy transport while retaining the product bearer.
+      headers["x-serverless-authorization"] = `Bearer ${identityToken}`;
       headers["x-drts-google-id-token"] = identityToken;
     }
   }
@@ -687,6 +704,21 @@ export async function createPartnerBooking(
   );
 }
 
+export async function listPartnerBookings(
+  session: PartnerSessionRecord,
+  query: Pick<TenantBookingListQuery, "page" | "pageSize" | "status"> = {},
+): Promise<TenantBookingsPageRecord> {
+  const params = new URLSearchParams();
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.pageSize !== undefined)
+    params.set("pageSize", String(query.pageSize));
+  if (query.status !== undefined) params.set("status", String(query.status));
+  return requestAuthority<TenantBookingsPageRecord>(
+    "/api/partner/bookings?" + params.toString(),
+    { method: "GET", headers: buildPartnerHeaders(session) },
+  );
+}
+
 export async function getPartnerConfirmation(
   session: PartnerSessionRecord,
   bookingId: string,
@@ -703,8 +735,8 @@ export async function getPartnerConfirmation(
 export async function getPartnerTrip(
   session: PartnerSessionRecord,
   orderId: string,
-): Promise<OwnedOrderRecord> {
-  return requestAuthority<OwnedOrderRecord>(
+): Promise<PartnerOrderReadRecord> {
+  return requestAuthority<PartnerOrderReadRecord>(
     `/api/partner/orders/${encodeURIComponent(orderId)}`,
     {
       method: "GET",
@@ -713,9 +745,155 @@ export async function getPartnerTrip(
   );
 }
 
+/** Passenger electronic-payment records do not represent partner settlement. */
 export async function getPartnerReceipt(
   session: PartnerSessionRecord,
   orderId: string,
-): Promise<OwnedOrderRecord> {
-  return getPartnerTrip(session, orderId);
+): Promise<PartnerOrderReceiptRecord> {
+  return requestAuthority<PartnerOrderReceiptRecord>(
+    "/api/partner/orders/" + encodeURIComponent(orderId) + "/receipt",
+    {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    },
+  );
+}
+
+/** Normal Partner utility reads use the same server-only bearer and Cloud Run transport. */
+export async function getPartnerGeoHealth(session: PartnerSessionRecord) {
+  return requestAuthority<GeoProviderHealthResponse>("/api/geo/health", {
+    method: "GET",
+    headers: buildPartnerHeaders(session),
+  });
+}
+export async function searchPartnerGeo(
+  session: PartnerSessionRecord,
+  query: SearchGeoQuery,
+) {
+  const params = new URLSearchParams({
+    q: query.q,
+    surface: "partner_booking",
+  });
+  if (query.locale) params.set("locale", query.locale);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.near) {
+    params.set("nearLat", String(query.near.lat));
+    params.set("nearLng", String(query.near.lng));
+  }
+  if (session.identity.actorId !== null)
+    params.set("requestedByActorId", session.identity.actorId);
+  return requestAuthority<GeoSearchResponse>("/api/geo/search?" + params, {
+    method: "GET",
+    headers: buildPartnerHeaders(session),
+  });
+}
+export async function resolvePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ResolveAddressCommand,
+) {
+  return requestAuthority<GeoResolveResponse>("/api/geo/resolve", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
+}
+export async function reversePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ReverseGeocodeCommand,
+) {
+  return requestAuthority<GeoReverseResponse>("/api/geo/reverse", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
+}
+export async function routePartnerGeo(
+  session: PartnerSessionRecord,
+  command: ComputeGeoRouteCommand,
+) {
+  return requestAuthority<GeoRouteResponse>("/api/geo/route", {
+    method: "POST",
+    headers: buildPartnerHeaders(session),
+    body: JSON.stringify(command),
+  });
+}
+
+/** Read the principal of this exact BFF bearer; this does not create a session. */
+export type PartnerPrincipalReadback =
+  | {
+      availability: "available";
+      source: "api_auth_session";
+      actorId: string;
+      actorType: "referral_passenger";
+      realm: "partner";
+      roles: string[];
+      tenantId: string | null;
+      partnerId: string | null;
+      partnerProgramId: string | null;
+      partnerEntrySlug: string;
+      requestId: string | null;
+    }
+  | {
+      availability: "unavailable";
+      source: "api_auth_session";
+      reason: string;
+    };
+
+export async function getPartnerPrincipalReadback(
+  session: PartnerSessionRecord,
+): Promise<PartnerPrincipalReadback> {
+  const unavailable = (reason: string): PartnerPrincipalReadback => ({
+    availability: "unavailable",
+    source: "api_auth_session",
+    reason,
+  });
+  try {
+    const envelope = await requestAuthorityEnvelope<{
+      active: boolean;
+      identity: IdentityContext;
+    }>("/api/auth/session", {
+      method: "GET",
+      headers: buildPartnerHeaders(session),
+    });
+    const identity = envelope.data?.identity;
+    if (envelope.data?.active !== true || !identity)
+      return unavailable("PARTNER_PRINCIPAL_INACTIVE");
+    // Read consistency, not a new authorization policy: the original order
+    // reads remain authoritative and remain readable if this observation fails.
+    if (
+      identity.actorType !== "referral_passenger" ||
+      identity.realm !== "partner" ||
+      typeof identity.actorId !== "string" ||
+      identity.actorId.length === 0 ||
+      identity.actorId !== session.identity.actorId ||
+      identity.tenantId !== session.identity.tenantId ||
+      (identity.partnerId ?? null) !== (session.identity.partnerId ?? null) ||
+      (identity.partnerProgramId ?? null) !==
+        (session.identity.partnerProgramId ?? null) ||
+      !identity.partnerEntrySlug ||
+      identity.partnerEntrySlug !== session.partnerEntry.entrySlug ||
+      !Array.isArray(identity.roles) ||
+      !identity.roles.includes("referral_passenger")
+    )
+      return unavailable("PARTNER_PRINCIPAL_READBACK_MISMATCH");
+    return {
+      availability: "available",
+      source: "api_auth_session",
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      realm: identity.realm,
+      roles: [...identity.roles],
+      tenantId: identity.tenantId ?? null,
+      partnerId: identity.partnerId ?? null,
+      partnerProgramId: identity.partnerProgramId ?? null,
+      partnerEntrySlug: identity.partnerEntrySlug,
+      requestId: normalizeEnvelopeRequestId(envelope.meta),
+    };
+  } catch (error) {
+    return unavailable(
+      error instanceof PartnerAuthorityError
+        ? error.code
+        : "PARTNER_PRINCIPAL_UNAVAILABLE",
+    );
+  }
 }

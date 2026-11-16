@@ -22,6 +22,7 @@ const skippedRuntimeSurfaces = [] as const;
 type RuntimeSurfaceKey =
   | "api"
   | "agency-portal-web"
+  | "partner-booking-web"
   | "bank-console-web"
   | "channel-partner-portal-web"
   | "enterprise-dispatch-web"
@@ -270,6 +271,23 @@ function resolveCloudRunBaseUrl(
 
   return `https://${serviceHost}-${currentDevHostSuffix}`;
 }
+
+// Partner has no guessed historical host or demo-entry fallback.
+const partnerBookingBaseUrl =
+  process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL?.trim();
+const partnerBookingEntrySlug =
+  process.env.DRTS_DEV_PARTNER_BOOKING_ENTRY_SLUG?.trim();
+if (
+  !partnerBookingBaseUrl ||
+  !partnerBookingEntrySlug ||
+  !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(partnerBookingEntrySlug)
+) {
+  throw new Error(
+    "Configure the actual Partner deployed URL and persisted entry slug for the active runtime matrix",
+  );
+}
+const partnerBookingMarker =
+  /合作方案資格確認|確認資格|Program eligibility|Verify eligibility/i;
 
 const surfaces: RuntimeSurface[] = [
   {
@@ -982,6 +1000,20 @@ const surfaces: RuntimeSurface[] = [
       },
     ],
   },
+  {
+    key: "partner-booking-web",
+    family: "normal Partner eligibility entry (availability only)",
+    baseUrl: partnerBookingBaseUrl,
+    actors: [{ key: "normal-entry-visitor", actorType: "anonymous" }],
+    routes: [
+      {
+        key: "eligibility",
+        path: `/${partnerBookingEntrySlug}/eligibility`,
+        operation: "configured backend-authority entry",
+        marker: partnerBookingMarker,
+      },
+    ],
+  },
 ];
 
 const crashMarkers = [
@@ -1129,7 +1161,8 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
           ? {
               "X-DRTS-E2E-Entry-Slug":
                 testCase.actor.partnerEntrySlug ?? referralEmbedEntrySlug,
-              "X-DRTS-E2E-Partner-Id": "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+              "X-DRTS-E2E-Partner-Id":
+                "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
               "X-DRTS-E2E-Tenant-Id": "tenant-demo-001",
               "X-DRTS-E2E-Partner-Program-Id": "program-referral-community",
             }
@@ -1144,6 +1177,12 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
           "X-DRTS-E2E-Surface": testCase.surface.key,
           "X-DRTS-E2E-Operation": testCase.route.operation,
           ...partnerHeaders,
+          ...(testCase.surface.key === "partner-booking-web" &&
+          process.env.DRTS_DEV_PARTNER_BOOKING_ID_TOKEN
+            ? {
+                Authorization: `Bearer ${process.env.DRTS_DEV_PARTNER_BOOKING_ID_TOKEN}`,
+              }
+            : {}),
         },
         maxRedirects: 3,
       });
@@ -1163,6 +1202,17 @@ test.describe(`dev runtime ${TARGET_CASE_COUNT}-case end-to-end matrix`, () => {
       }
 
       expect(kind).toBe("html");
+      if (testCase.surface.key === "partner-booking-web") {
+        expect(body).toMatch(
+          /data-partner-entry-source="authority(?:_cache)?"/,
+        );
+        const sha = process.env.DRTS_CANDIDATE_SHA?.trim();
+        if (!sha)
+          throw new Error(
+            "DRTS_CANDIDATE_SHA is required for Partner runtime acceptance",
+          );
+        expect(response.headers()["x-drts-candidate-sha"]).toBe(sha);
+      }
       const visibleText = visibleTextFromHtml(body);
       for (const marker of crashMarkers) {
         expect(visibleText).not.toMatch(marker);

@@ -75,7 +75,51 @@ export async function registerDriver(
   });
 }
 
+/** Every caller signs in a fixed rehearsal phone and binds a card per run, so
+ * the sixth run would meet the five-card cap with 新增信用卡 disabled. Before
+ * binding, remove earlier runs' cards through the ordinary UI. The list is the
+ * default card first, then oldest to newest, so the second row is the oldest
+ * non-default card and never one this run just bound. */
+async function freeOneCardSlot(page: Page) {
+  await page.goto(`${PAX}/account/payment-methods`);
+  const remove = page.getByRole("button", { name: "刪除", exact: true });
+  await expect(
+    remove.first().or(page.getByText("尚未設定付款卡片", { exact: true })),
+  ).toBeVisible();
+  for (let count = await remove.count(); count >= 5; ) {
+    let freed = false;
+    for (let index = 1; index < count; index += 1) {
+      await remove.nth(index).click();
+      const removed = page.waitForResponse(
+        (r) =>
+          /\/payment-methods\/[^/]+$/.test(new URL(r.url()).pathname) &&
+          r.request().method() === "DELETE",
+      );
+      await page.getByRole("button", { name: "確定刪除", exact: true }).click();
+      const response = await removed;
+      if (response.status() === 409) {
+        const refusal = await response.json();
+        expect(refusal?.error?.code, "Only an in-use card may be skipped").toBe(
+          "pending_payment_block",
+        );
+        // A refused delete stays on the confirmation screen. Return through
+        // its normal UI before trying a different non-default card.
+        await page.getByRole("button", { name: "取消", exact: true }).click();
+        await expect(remove).toHaveCount(count);
+        continue;
+      }
+      expect(response.ok(), "Remove an earlier run's card").toBe(true);
+      await expect(remove).toHaveCount(count - 1);
+      count -= 1;
+      freed = true;
+      break;
+    }
+    expect(freed, "At least one non-default card must be removable").toBe(true);
+  }
+}
+
 export async function bind(page: Page, scenario: "success" | "retry_once") {
+  await freeOneCardSlot(page);
   await page.goto(`${PAX}/account/payment-methods`);
   await page
     .getByLabel("模擬 PSP 結果", { exact: true })

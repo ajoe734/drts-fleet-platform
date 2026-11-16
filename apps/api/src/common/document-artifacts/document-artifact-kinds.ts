@@ -6,6 +6,7 @@ export const DOCUMENT_ARTIFACT_KINDS = [
   "tenant-invoice",
   "placard",
   "report",
+  "multi-taxi-trip-records",
   "fleet-upload-intent",
   "fleet-upload-content",
   "fleet-upload-scan",

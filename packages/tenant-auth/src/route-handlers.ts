@@ -7,6 +7,7 @@ import {
 } from "./constants";
 import {
   isSecureEnvironment,
+  resolveBrowserOrigin,
   sanitizeReturnPath,
   encodeStateEnvelope,
   decodeStateEnvelope,
@@ -23,6 +24,27 @@ import {
   tenantAuthFetch,
   resolveTenantApiUrl as resolveApiUrl,
 } from "./api-fetch";
+import {
+  handleListSessions,
+  handlePasswordLogin,
+  handlePasswordResetConfirm,
+  handlePasswordResetRequest,
+  handleRevokeSession,
+  handleTotpConfirm,
+  handleTotpEnroll,
+  type PortalCredentialConfig,
+} from "./credential-handlers";
+
+function tenantCredentialConfig(): PortalCredentialConfig {
+  return {
+    realm: "tenant",
+    sessionCookieName: TENANT_SESSION_COOKIE_NAME,
+    csrfCookieName: TENANT_CSRF_COOKIE_NAME,
+    csrfHeaderName: TENANT_CSRF_HEADER_NAME,
+    apiBaseUrl: resolveApiUrl(),
+    fetchImpl: tenantAuthFetch,
+  };
+}
 
 function validateCsrfAndOrigin(request: NextRequest): NextResponse | null {
   if (!verifySameOrigin(request)) {
@@ -66,9 +88,12 @@ async function getAuth(
       request.nextUrl.searchParams.get("return_url") ||
       "/";
     const tenantId = request.nextUrl.searchParams.get("tenant_id") || "";
-    const returnUrl = sanitizeReturnPath(rawReturnUrl, request.nextUrl.origin);
+    const returnUrl = sanitizeReturnPath(
+      rawReturnUrl,
+      resolveBrowserOrigin(request),
+    );
 
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/tenant/callback`;
+    const callbackUrl = `${resolveBrowserOrigin(request)}/api/auth/tenant/callback`;
     const backendUrl = new URL(`${resolveApiUrl()}/api/auth/tenant/login`);
     backendUrl.searchParams.set("redirect_uri", callbackUrl);
     if (tenantId) {
@@ -203,7 +228,7 @@ async function getAuth(
     const expectedState = statePayload.state || stateToken;
 
     if (state !== expectedState && state !== stateToken) {
-      const loginUrl = new URL(loginFailurePath, request.nextUrl.origin);
+      const loginUrl = new URL(loginFailurePath, resolveBrowserOrigin(request));
       loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
       loginUrl.searchParams.set(
         "message",
@@ -212,7 +237,7 @@ async function getAuth(
       return NextResponse.redirect(loginUrl);
     }
 
-    const callbackUrl = `${request.nextUrl.origin}/api/auth/tenant/callback`;
+    const callbackUrl = `${resolveBrowserOrigin(request)}/api/auth/tenant/callback`;
 
     try {
       const exchangeRes = await tenantAuthFetch(
@@ -254,12 +279,12 @@ async function getAuth(
       const csrfToken = generateCsrfToken();
       const targetRedirect = sanitizeReturnPath(
         returnUrl,
-        request.nextUrl.origin,
+        resolveBrowserOrigin(request),
       );
       const isSecure = isSecureEnvironment(request);
 
       const response = NextResponse.redirect(
-        new URL(targetRedirect, request.nextUrl.origin),
+        new URL(targetRedirect, resolveBrowserOrigin(request)),
       );
 
       response.cookies.set(
@@ -344,6 +369,11 @@ async function getAuth(
     }
   }
 
+  // 4. /api/auth/sessions (self-service session inventory)
+  if (actionPath === "sessions") {
+    return handleListSessions(request, tenantCredentialConfig());
+  }
+
   return NextResponse.json(
     { error: "AUTH_ENDPOINT_NOT_FOUND" },
     { status: 404 },
@@ -356,6 +386,80 @@ async function postAuth(
 ) {
   const { auth = [] } = await context.params;
   const actionPath = auth.join("/");
+
+  // 0. /api/auth/tenant/invitation/accept-with-password
+  // PWD-LOGIN-004 "set a password" branch (SA/SD §5). Pre-session, like the
+  // invitation-login forwarding above: the one-time invitation token itself
+  // authorizes the action, so no session/CSRF cookie exists yet to check.
+  if (actionPath === "tenant/invitation/accept-with-password") {
+    const body = await request.json().catch(() => null);
+    const invitationToken =
+      typeof body?.invitationToken === "string"
+        ? body.invitationToken.trim()
+        : "";
+    const password =
+      typeof body?.password === "string" ? body.password : "";
+    if (!invitationToken || invitationToken.length > 512 || !password) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_INVALID",
+          message: "A valid invitation token and password are required.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const res = await tenantAuthFetch(
+        `${resolveApiUrl()}/api/tenant/invitations/accept-with-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitationToken, password }),
+          cache: "no-store",
+        },
+      );
+      const data = await res.json().catch(() => null);
+      return NextResponse.json(data ?? {}, { status: res.status || 502 });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_INVITATION_ACCEPT_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream invitation service unavailable",
+        },
+        { status: 503 },
+      );
+    }
+  }
+
+  // 0b. /api/auth/tenant/password-login (PWD-LOGIN-009, SA/SD §4/§7)
+  if (actionPath === "tenant/password-login") {
+    return handlePasswordLogin(request, tenantCredentialConfig());
+  }
+
+  // 0c. /api/auth/tenant/password-reset/request|confirm (SA/SD §6)
+  if (actionPath === "tenant/password-reset/request") {
+    return handlePasswordResetRequest(request, tenantCredentialConfig());
+  }
+  if (actionPath === "tenant/password-reset/confirm") {
+    return handlePasswordResetConfirm(request, tenantCredentialConfig());
+  }
+
+  // 0d. /api/auth/tenant/mfa/totp/enroll|confirm (SA/SD §7)
+  if (actionPath === "tenant/mfa/totp/enroll") {
+    return handleTotpEnroll(request, tenantCredentialConfig());
+  }
+  if (actionPath === "tenant/mfa/totp/confirm") {
+    return handleTotpConfirm(request, tenantCredentialConfig());
+  }
+
+  // 0e. /api/auth/sessions/:sid/revoke (self-service, not realm-prefixed)
+  const revokeMatch = actionPath.match(/^sessions\/([^/]+)\/revoke$/);
+  if (revokeMatch && revokeMatch[1]) {
+    return handleRevokeSession(request, revokeMatch[1], tenantCredentialConfig());
+  }
 
   // 1. /api/auth/logout
   if (actionPath === "logout") {

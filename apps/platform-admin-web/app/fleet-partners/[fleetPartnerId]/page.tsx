@@ -28,14 +28,21 @@ import {
   AFFILIATION_TYPES,
   createDriverAffiliation,
   createRevenueShareRule,
+  deactivateFleetStaffMember,
   EMPTY_AFFILIATION_FORM,
   EMPTY_RULE_FORM,
+  FLEET_STAFF_ROLE_CODES,
   formatMoneyMinor,
   getFleetPartner,
+  inviteFleetStaff,
   listFleetPartnerDrivers,
   listFleetHumanRoles,
+  listFleetStaffInvitations,
   manageFleetHumanRole,
+  revokeFleetStaffInvitation,
   type FleetHumanRoleRecord,
+  type FleetStaffInvitationView,
+  type InviteFleetStaffCommand,
   type ManageFleetHumanRoleCommand,
   listFleetStatements,
   listRevenueShareRules,
@@ -52,6 +59,9 @@ import {
   type FleetPartnerStatementRecord,
   type FleetRuleFormState,
 } from "../fleet-partner-shared";
+
+type InvitationTableRow = FleetStaffInvitationView & Record<string, unknown>;
+type MemberTableRow = FleetHumanRoleRecord & Record<string, unknown>;
 
 type DriverTableRow = DriverFleetAffiliationRecord & Record<string, unknown>;
 type RuleTableRow = FleetPartnerRevenueShareRuleRecord &
@@ -95,6 +105,34 @@ function payoutTone(status?: string): CanvasTone {
     default:
       return "neutral";
   }
+}
+
+function invitationStatus(
+  invitation: FleetStaffInvitationView,
+): "invited" | "accepted" | "revoked" {
+  if (invitation.revokedAt) return "revoked";
+  if (invitation.acceptedAt) return "accepted";
+  return "invited";
+}
+
+function invitationStatusTone(
+  status: ReturnType<typeof invitationStatus>,
+): CanvasTone {
+  if (status === "accepted") return "success";
+  if (status === "invited") return "warn";
+  return "neutral";
+}
+
+function memberStatusTone(status: string): CanvasTone {
+  if (status === "active") return "success";
+  if (status === "invited") return "warn";
+  return "neutral";
+}
+
+function memberStatusLabel(status: string, t: (key: string) => string) {
+  if (status === "active") return t("fleetPartners.status.active");
+  if (status === "disabled") return t("fleetPartners.humanRoles.disabled");
+  return t(`fleetPartners.invitations.status.${status}`);
 }
 
 function partnershipTypeKey(value: string) {
@@ -149,6 +187,19 @@ export default function FleetPartnerDetailPage() {
   const [humanRoles, setHumanRoles] = useState<FleetHumanRoleRecord[]>([]);
   const [humanSaving, setHumanSaving] = useState(false);
   const [humanAck, setHumanAck] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<FleetStaffInvitationView[]>(
+    [],
+  );
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] =
+    useState<InviteFleetStaffCommand["roleCode"]>("fleet_partner_ops");
+  const [inviteValidTo, setInviteValidTo] = useState("");
+  const [issuingInvitation, setIssuingInvitation] = useState(false);
+  const [invitationBusyId, setInvitationBusyId] = useState<string | null>(null);
+  const [disablingMembershipId, setDisablingMembershipId] = useState<
+    string | null
+  >(null);
+  const [invitationAck, setInvitationAck] = useState<string | null>(null);
   // A read started before a write (or an entry/partner switch) cannot replace
   // the write's verified readback with older data while leaving its ACK visible.
   const humanRequestVersion = useRef(0);
@@ -216,17 +267,160 @@ export default function FleetPartnerDetailPage() {
     const version = ++humanRequestVersion.current;
     const entrySlug = humanEntrySlug.trim();
     setHumanAck(null);
+    setInvitationAck(null);
     setError(null);
     try {
-      const roles = await listFleetHumanRoles(
-        client,
-        fleetPartnerId,
-        entrySlug,
-      );
-      if (version === humanRequestVersion.current) setHumanRoles(roles);
+      const [roles, invites] = await Promise.all([
+        listFleetHumanRoles(client, fleetPartnerId, entrySlug),
+        listFleetStaffInvitations(client, fleetPartnerId, entrySlug),
+      ]);
+      if (version === humanRequestVersion.current) {
+        setHumanRoles(roles);
+        setInvitations(invites);
+      }
     } catch (readError: any) {
       if (version === humanRequestVersion.current)
         setError(readError?.message ?? t("common.unknown"));
+    }
+  };
+
+  const handleIssueInvitation = async () => {
+    const entrySlug = humanEntrySlug.trim();
+    setIssuingInvitation(true);
+    setInvitationAck(null);
+    setError(null);
+    try {
+      const issued = await inviteFleetStaff(client, fleetPartnerId, {
+        entrySlug,
+        email: inviteEmail.trim(),
+        roleCode: inviteRole,
+        validTo: inviteValidTo ? new Date(inviteValidTo).toISOString() : null,
+      });
+      setInvitations((current) => [issued.invitation, ...current]);
+      setInviteEmail("");
+      setInviteValidTo("");
+      setInvitationAck(
+        issued.deliveryOutcome === "sent"
+          ? t("fleetPartners.invitations.sent", {
+              email: issued.invitation.email,
+            })
+          : t("fleetPartners.invitations.notDelivered", {
+              email: issued.invitation.email,
+            }),
+      );
+    } catch (issueError: any) {
+      setError(issueError?.message ?? t("common.unknown"));
+    } finally {
+      setIssuingInvitation(false);
+    }
+  };
+
+  const handleRevokeInvitation = async (
+    invitation: FleetStaffInvitationView,
+  ) => {
+    const entrySlug = humanEntrySlug.trim();
+    setInvitationBusyId(invitation.invitationId);
+    setInvitationAck(null);
+    setError(null);
+    try {
+      const revoked = await revokeFleetStaffInvitation(
+        client,
+        fleetPartnerId,
+        entrySlug,
+        invitation.invitationId,
+      );
+      setInvitations((current) =>
+        current.map((row) =>
+          row.invitationId === revoked.invitationId ? revoked : row,
+        ),
+      );
+    } catch (revokeError: any) {
+      setError(revokeError?.message ?? t("common.unknown"));
+    } finally {
+      setInvitationBusyId(null);
+    }
+  };
+
+  /** Resend = revoke the old token (if not already revoked), then re-issue
+   * the same email/role, preserving the existing member's validTo. If the
+   * revoke succeeds but the re-issue fails, the list keeps showing the
+   * revoked row and the error, never a false "sent" acknowledgement. */
+  const handleResendInvitation = async (
+    invitation: FleetStaffInvitationView,
+  ) => {
+    const entrySlug = humanEntrySlug.trim();
+    setInvitationBusyId(invitation.invitationId);
+    setInvitationAck(null);
+    setError(null);
+    try {
+      let current = invitation;
+      if (!current.revokedAt) {
+        current = await revokeFleetStaffInvitation(
+          client,
+          fleetPartnerId,
+          entrySlug,
+          invitation.invitationId,
+        );
+        setInvitations((rows) =>
+          rows.map((row) =>
+            row.invitationId === current.invitationId ? current : row,
+          ),
+        );
+      }
+      const existingMember = humanRoles.find(
+        (role) => role.membershipId === invitation.membershipId,
+      );
+      const issued = await inviteFleetStaff(client, fleetPartnerId, {
+        entrySlug,
+        email: invitation.email,
+        roleCode: invitation.roleCode as InviteFleetStaffCommand["roleCode"],
+        validTo: existingMember?.validTo ?? null,
+      });
+      setInvitations((rows) => [issued.invitation, ...rows]);
+      setInvitationAck(
+        issued.deliveryOutcome === "sent"
+          ? t("fleetPartners.invitations.sent", {
+              email: issued.invitation.email,
+            })
+          : t("fleetPartners.invitations.notDelivered", {
+              email: issued.invitation.email,
+            }),
+      );
+    } catch (resendError: any) {
+      setError(resendError?.message ?? t("common.unknown"));
+    } finally {
+      setInvitationBusyId(null);
+    }
+  };
+
+  const handleDisableMember = async (row: FleetHumanRoleRecord) => {
+    const entrySlug = humanEntrySlug.trim();
+    setDisablingMembershipId(row.membershipId);
+    setInvitationAck(null);
+    setError(null);
+    try {
+      const disabled = await deactivateFleetStaffMember(
+        client,
+        fleetPartnerId,
+        entrySlug,
+        row.membershipId,
+      );
+      setHumanRoles((current) =>
+        current.map((entry) =>
+          entry.membershipId === disabled.membershipId
+            ? { ...entry, status: disabled.status }
+            : entry,
+        ),
+      );
+      setInvitationAck(
+        t("fleetPartners.invitations.memberDisabled", {
+          principal: disabled.principalId,
+        }),
+      );
+    } catch (disableError: any) {
+      setError(disableError?.message ?? t("common.unknown"));
+    } finally {
+      setDisablingMembershipId(null);
     }
   };
 
@@ -414,6 +608,115 @@ export default function FleetPartnerDetailPage() {
     [locale, t],
   );
 
+  const invitationColumns: CanvasTableColumn<InvitationTableRow>[] = useMemo(
+    () => [
+      {
+        h: t("fleetPartners.invitations.col.email"),
+        r: (row: InvitationTableRow) => row.email,
+      },
+      {
+        h: t("fleetPartners.invitations.col.role"),
+        r: (row: InvitationTableRow) => row.roleCode,
+      },
+      {
+        h: t("fleetPartners.invitations.col.status"),
+        r: (row: InvitationTableRow) => {
+          const status = invitationStatus(row);
+          return (
+            <CanvasPill tone={invitationStatusTone(status)} dot>
+              {t(`fleetPartners.invitations.status.${status}`)}
+            </CanvasPill>
+          );
+        },
+      },
+      {
+        h: t("fleetPartners.invitations.col.expiresAt"),
+        r: (row: InvitationTableRow) =>
+          row.expiresAt ? formatDateTime(row.expiresAt) : t("common.noValues"),
+      },
+      {
+        h: t("common.actions"),
+        r: (row: InvitationTableRow) => {
+          const status = invitationStatus(row);
+          const busy = invitationBusyId === row.invitationId;
+          return (
+            <div style={{ display: "flex", gap: 6 }}>
+              {status === "invited" ? (
+                <CanvasBtn
+                  disabled={busy}
+                  onClick={() => void handleRevokeInvitation(row)}
+                >
+                  {busy
+                    ? t("common.saving")
+                    : t("fleetPartners.invitations.revoke")}
+                </CanvasBtn>
+              ) : null}
+              {status !== "accepted" ? (
+                <CanvasBtn
+                  disabled={busy}
+                  onClick={() => void handleResendInvitation(row)}
+                >
+                  {busy
+                    ? t("common.saving")
+                    : t("fleetPartners.invitations.resend")}
+                </CanvasBtn>
+              ) : null}
+            </div>
+          );
+        },
+      },
+    ],
+    [invitationBusyId, t],
+  );
+
+  const activeMembers = useMemo(
+    () => humanRoles.filter((row) => row.status !== "invited"),
+    [humanRoles],
+  );
+
+  const memberColumns: CanvasTableColumn<MemberTableRow>[] = useMemo(
+    () => [
+      {
+        h: t("fleetPartners.invitations.membersCol.principal"),
+        r: (row: MemberTableRow) => row.principalId,
+      },
+      {
+        h: t("fleetPartners.invitations.membersCol.role"),
+        r: (row: MemberTableRow) => row.roleCode,
+      },
+      {
+        h: t("fleetPartners.invitations.membersCol.status"),
+        r: (row: MemberTableRow) => (
+          <CanvasPill tone={memberStatusTone(row.status)} dot>
+            {memberStatusLabel(row.status, t)}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: t("fleetPartners.invitations.membersCol.validTo"),
+        r: (row: MemberTableRow) =>
+          row.validTo
+            ? t("fleetPartners.humanRoles.until", { date: row.validTo })
+            : t("fleetPartners.openEnded"),
+      },
+      {
+        h: t("common.actions"),
+        r: (row: MemberTableRow) =>
+          row.status === "active" ? (
+            <CanvasBtn
+              disabled={disablingMembershipId === row.membershipId}
+              onClick={() => void handleDisableMember(row)}
+            >
+              {disablingMembershipId === row.membershipId
+                ? t("common.saving")
+                : t("fleetPartners.invitations.disableAction")}
+            </CanvasBtn>
+          ) : null,
+      },
+    ],
+    [disablingMembershipId, t],
+  );
+
   return (
     <div style={pageBodyStyle}>
       <CanvasPageHeader
@@ -570,6 +873,85 @@ export default function FleetPartnerDetailPage() {
               ))}
             </ul>
           </CanvasCard>
+
+          <CanvasCard
+            title={t("fleetPartners.invitations.title")}
+            subtitle={t("fleetPartners.invitations.subtitle")}
+          >
+            <div style={formGridStyle}>
+              <CanvasField label={t("fleetPartners.invitations.form.email")}>
+                <input
+                  aria-label={t("fleetPartners.invitations.form.email")}
+                  type="email"
+                  style={inputStyle()}
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                />
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.invitations.form.role")}>
+                <select
+                  aria-label={t("fleetPartners.invitations.form.role")}
+                  style={inputStyle()}
+                  value={inviteRole}
+                  onChange={(event) =>
+                    setInviteRole(
+                      event.target.value as InviteFleetStaffCommand["roleCode"],
+                    )
+                  }
+                >
+                  {FLEET_STAFF_ROLE_CODES.map((value) => (
+                    <option key={value} value={value}>
+                      {t(
+                        `fleetPartners.humanRoles.${value.replace("fleet_partner_", "")}`,
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.invitations.form.validTo")}>
+                <input
+                  aria-label={t("fleetPartners.invitations.form.validTo")}
+                  type="datetime-local"
+                  style={inputStyle()}
+                  value={inviteValidTo}
+                  onChange={(event) => setInviteValidTo(event.target.value)}
+                />
+              </CanvasField>
+            </div>
+            <div style={actionRowStyle}>
+              <CanvasBtn
+                variant="primary"
+                disabled={!humanEntrySlug || !inviteEmail || issuingInvitation}
+                onClick={() => void handleIssueInvitation()}
+              >
+                {issuingInvitation
+                  ? t("common.creating")
+                  : t("fleetPartners.invitations.issue")}
+              </CanvasBtn>
+            </div>
+            {invitationAck ? <p role="status">{invitationAck}</p> : null}
+            <div style={{ marginTop: 16 }}>
+              {invitations.length === 0 ? (
+                <div>{t("fleetPartners.invitations.empty")}</div>
+              ) : (
+                <CanvasTable
+                  columns={invitationColumns}
+                  rows={invitations as InvitationTableRow[]}
+                />
+              )}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              {activeMembers.length === 0 ? (
+                <div>{t("fleetPartners.invitations.membersEmpty")}</div>
+              ) : (
+                <CanvasTable
+                  columns={memberColumns}
+                  rows={activeMembers as MemberTableRow[]}
+                />
+              )}
+            </div>
+          </CanvasCard>
+
           <div style={heroStyle}>
             <CanvasCard
               title={t("fleetPartners.partnerProfileTitle")}

@@ -24,6 +24,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/helpers.sh
 source "${SCRIPT_DIR}/lib/helpers.sh"
+# shellcheck source=lib/airport-service-area-fixture.sh
+source "${SCRIPT_DIR}/lib/airport-service-area-fixture.sh"
 
 SCENARIO="E2E-020"
 PRODUCT_TYPE="credit_card_airport_transfer"
@@ -69,9 +71,10 @@ cleanup() {
 
   rm -f "${ORIGINAL_MATRIX_FILE}"
 }
-trap cleanup EXIT
+trap 'cleanup; cleanup_airport_service_areas' EXIT
 
 chain_init
+prepare_airport_service_areas
 
 echo -e "\n${BOLD}════════════════════════════════════════════════════════${RESET}"
 echo -e "${BOLD}  E2E-020 — Service product runtime eligibility${RESET}"

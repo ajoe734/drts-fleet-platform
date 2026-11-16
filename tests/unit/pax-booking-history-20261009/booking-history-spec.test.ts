@@ -114,6 +114,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       "pax-1",
       "req-1",
       expect.any(Function),
+      undefined,
     );
   });
 
@@ -171,6 +172,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       "pax-1",
       "req-1",
       expect.any(Function),
+      undefined,
     );
   });
 

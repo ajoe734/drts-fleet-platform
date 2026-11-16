@@ -44,6 +44,7 @@ it("the external review producer reaches actual location subscribers, trip metri
     await heartbeat.syncDriverLocationHeartbeat({
       taskId: "actual-ui-task",
       driverId: "pax-review-driver-a",
+      vehicleId: "actual-ui-vehicle",
       status: "on_trip",
     }),
   ).toMatchObject({ status: "active" });
@@ -68,4 +69,15 @@ it("the external review producer reaches actual location subscribers, trip metri
   );
   unsubscribe();
   await heartbeat.stopDriverLocationHeartbeat();
+  const activeDrafts = queued.mock.calls
+    .map(([draft]) => draft)
+    .filter((draft) => draft.workState === "on_trip");
+  expect(activeDrafts.length).toBeGreaterThan(0);
+  expect(
+    activeDrafts.every(
+      (draft) =>
+        draft.taskId === "actual-ui-task" &&
+        draft.vehicleId === "actual-ui-vehicle",
+    ),
+  ).toBe(true);
 });

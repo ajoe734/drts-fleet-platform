@@ -18,6 +18,7 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { ServiceAreaService } from "../service-area/service-area.service";
 import {
   type MapGeofenceGeoOutcome,
   MapGeofenceObservabilityService,
@@ -55,6 +56,8 @@ export class GeoService {
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional()
     private readonly mapGeofenceObservabilityService?: MapGeofenceObservabilityService,
+    @Optional()
+    private readonly serviceAreaService?: ServiceAreaService,
   ) {}
 
   health() {
@@ -192,12 +195,29 @@ export class GeoService {
       normalized.locale = command.locale;
     }
     this.assertProviderUsable("route");
-    return this.withProviderErrorMapping(
+    let serviceAreaEvaluation: GeoRouteResponse["serviceAreaEvaluation"];
+    if (command.airportTransfer !== undefined) {
+      if (!this.serviceAreaService) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "AIRPORT_ROUTE_EVALUATION_UNAVAILABLE",
+          "Airport route authority is unavailable.",
+        );
+      }
+      serviceAreaEvaluation =
+        this.serviceAreaService.evaluateAirportTransferRoute({
+          pickup: normalized.origin,
+          dropoff: normalized.destination,
+          direction: command.airportTransfer?.direction,
+        });
+    }
+    const route = await this.withProviderErrorMapping(
       "route",
       normalized,
       () => this.provider().route(normalized),
       () => "resolved",
     );
+    return serviceAreaEvaluation ? { ...route, serviceAreaEvaluation } : route;
   }
 
   private providerConfig() {

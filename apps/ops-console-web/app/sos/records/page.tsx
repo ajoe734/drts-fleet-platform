@@ -8,8 +8,11 @@ import {
   CanvasTable as Table,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
+import {
+  getOpsClient,
+  createOpsDispatchEventSource,
+} from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -19,6 +22,7 @@ const theme = buildCanvasTheme({
 
 interface AuditLogRow {
   id: string;
+  actorId: string | null;
   operator: string;
   action: string;
   target: string;
@@ -27,9 +31,10 @@ interface AuditLogRow {
 }
 
 export default function SosRecordsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [records, setRecords] = useState<AuditLogRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const intlLocale = (locale ?? "zh") === "en" ? "en-US" : "zh-TW";
 
   const fetchRecords = async () => {
     try {
@@ -38,6 +43,7 @@ export default function SosRecordsPage() {
       const items = Array.isArray(res) ? res : res?.items || [];
       const mapped: AuditLogRow[] = items.map((audit: any) => ({
         id: audit.auditId,
+        actorId: audit.actorId || null,
         operator: audit.actorId || "系統",
         action: audit.actionName,
         target: audit.resourceId || "—",
@@ -76,6 +82,12 @@ export default function SosRecordsPage() {
     };
   }, []);
 
+  const renderedRecords = records.map((record) => ({
+    ...record,
+    operator: record.actorId || t("sos.records.system"),
+    time: new Date(record.createdAt).toLocaleTimeString(intlLocale),
+  }));
+
   return (
     <div style={{ background: theme.bg, minHeight: "100%" }}>
       <PageHeader
@@ -88,25 +100,27 @@ export default function SosRecordsPage() {
             </Pill>
           </div>
         }
-        subtitle="值班安全人員與系統操作稽核紀錄"
+        subtitle={t("sos.records.subtitle")}
       />
 
       <div style={{ padding: 24 }}>
         <Card
           theme={theme}
           padding={0}
-          title={loading ? "載入中..." : "值班室操作日誌"}
+          title={
+            loading ? t("sos.common.loading") : t("sos.records.tableTitle")
+          }
         >
           <Table
             theme={theme}
             columns={[
-              { h: "日誌編號", k: "id", w: 140, mono: true },
-              { h: "操作值班員", k: "operator", w: 120 },
-              { h: "動作類型", k: "action", w: 180, mono: true },
-              { h: "目標事件", k: "target", w: 160, mono: true },
-              { h: "時間", k: "time", w: 120, mono: true },
+              { h: t("sos.field.auditId"), k: "id", w: 140, mono: true },
+              { h: t("sos.field.operator"), k: "operator", w: 120 },
+              { h: t("sos.field.action"), k: "action", w: 180, mono: true },
+              { h: t("sos.field.target"), k: "target", w: 160, mono: true },
+              { h: t("sos.field.time"), k: "time", w: 120, mono: true },
             ]}
-            rows={records}
+            rows={renderedRecords}
           />
         </Card>
       </div>

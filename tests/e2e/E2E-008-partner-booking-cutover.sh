@@ -17,6 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/helpers.sh
 source "${SCRIPT_DIR}/lib/helpers.sh"
+# shellcheck source=lib/airport-service-area-fixture.sh
+source "${SCRIPT_DIR}/lib/airport-service-area-fixture.sh"
 
 SCENARIO="E2E-008"
 ENTRY_SLUG="${E2E_PARTNER_ENTRY_SLUG_OVERRIDE:-bank-demo-alpha-airport}"
@@ -42,7 +44,7 @@ cleanup() {
     log_warn "Body: ${RESP_BODY:-<empty>}"
   fi
 }
-trap cleanup EXIT
+trap 'cleanup; cleanup_airport_service_areas' EXIT
 
 chain_init
 
@@ -73,7 +75,8 @@ BOOTSTRAP_FIXTURE=$(mktemp /tmp/drts-e2e-008-bootstrap-XXXXXX.json)
 ELIGIBILITY_FIXTURE=$(mktemp /tmp/drts-e2e-008-eligibility-XXXXXX.json)
 BOOKING_FIXTURE=$(mktemp /tmp/drts-e2e-008-booking-XXXXXX.json)
 INVOICE_FIXTURE=$(mktemp /tmp/drts-e2e-008-invoice-XXXXXX.json)
-trap 'rm -f "$BOOTSTRAP_FIXTURE" "$ELIGIBILITY_FIXTURE" "$BOOKING_FIXTURE" "$INVOICE_FIXTURE"; cleanup' EXIT
+trap 'rm -f "$BOOTSTRAP_FIXTURE" "$ELIGIBILITY_FIXTURE" "$BOOKING_FIXTURE" "$INVOICE_FIXTURE"; cleanup; cleanup_airport_service_areas' EXIT
+prepare_airport_service_areas
 
 printf '%s\n' "{\"entrySlug\":\"${ENTRY_SLUG}\",\"apiKey\":\"${PARTNER_KEY}\"}" > "$BOOTSTRAP_FIXTURE"
 printf '%s\n' \

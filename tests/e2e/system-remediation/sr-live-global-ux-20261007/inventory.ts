@@ -193,6 +193,73 @@ function tenantRolesAt(runtimeSha: string, policy: string): string[] {
   return roles;
 }
 
+// Partner booking uses the normal ingress identity, not a tenant role or the
+// referral embed's recovery-scope reader. Bind its role to this exact method in
+// the requested commit, so an unrelated literal cannot mask a changed contract.
+function partnerIngressRolesAt(
+  runtimeSha: string,
+  roleSource: string,
+): string[] {
+  const source = ts.createSourceFile(
+    roleSource,
+    sourceAt(runtimeSha, roleSource),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const changed = () =>
+    new Error(
+      "partner ingress identity source changed; review inventory parser",
+    );
+  if (
+    (source as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] })
+      .parseDiagnostics.length
+  )
+    throw changed();
+  const classes = source.statements
+    .filter(ts.isClassDeclaration)
+    .filter((declaration) => declaration.name?.text === "TenantPartnerService");
+  if (classes.length !== 1) throw changed();
+  const methods = classes[0]!.members
+    .filter(ts.isMethodDeclaration)
+    .filter(
+      (method) =>
+        ts.isIdentifier(method.name) &&
+        method.name.text === "issuePartnerIngressHandoff",
+    );
+  const returns = methods[0]?.body?.statements.filter(ts.isReturnStatement);
+  if (methods.length !== 1 || returns?.length !== 1) throw changed();
+  const result = returns[0]!.expression;
+  if (!result || !ts.isObjectLiteralExpression(result)) throw changed();
+  const property = (object: ts.ObjectLiteralExpression, name: string) => {
+    const matches = object.properties.filter(
+      (entry) =>
+        ts.isPropertyAssignment(entry) &&
+        ts.isIdentifier(entry.name) &&
+        entry.name.text === name,
+    );
+    if (matches.length !== 1) throw changed();
+    return (matches[0] as ts.PropertyAssignment).initializer;
+  };
+  const identity = property(result, "identity");
+  if (!ts.isObjectLiteralExpression(identity)) throw changed();
+  const actor = property(identity, "actorType");
+  const realm = property(identity, "realm");
+  const roles = property(identity, "roles");
+  if (
+    !ts.isStringLiteral(actor) ||
+    actor.text !== "referral_passenger" ||
+    !ts.isStringLiteral(realm) ||
+    realm.text !== "partner" ||
+    !ts.isArrayLiteralExpression(roles) ||
+    roles.elements.length !== 1
+  )
+    throw changed();
+  const role = roles.elements[0];
+  if (!role || !ts.isStringLiteral(role) || role.text !== actor.text)
+    throw changed();
+  return [role.text];
+}
+
 export function inventoryAt(runtimeSha: string): Inventory {
   if (!fullSha(runtimeSha))
     throw new Error("runtimeSha must be immutable full SHA");
@@ -225,6 +292,16 @@ export function inventoryAt(runtimeSha: string): Inventory {
     service:
       app === "channel-partner-portal-web" ? `drts-${app}` : `drts-dev-${app}`,
   });
+  const workflow = sourceAt(runtimeSha, ".github/workflows/deploy-dev.yml");
+  const deployed = [
+    ...workflow.matchAll(/assert_exact_active_service ([a-z-]+) /g),
+  ]
+    .map((m) => m[1]!)
+    .filter((app) => app !== "api")
+    .sort();
+  const partnerBookingActive = deployed.includes("partner-booking-web");
+  const partnerRoleSource =
+    "apps/api/src/modules/tenant-partner/tenant-partner.service.ts";
   const surfaces = [
     surface("tenant-console-web", tenantRoles),
     surface("enterprise-dispatch-web", tenantRoles),
@@ -238,18 +315,20 @@ export function inventoryAt(runtimeSha: string): Inventory {
     surface("fleet-partner-portal-web", ["partner_api_key", "partner_user"]),
     surface("channel-partner-portal-web", ["partner_api_key"]),
     surface("referral-embed-web", ["referral_passenger"]),
+    ...(partnerBookingActive
+      ? [
+          surface(
+            "partner-booking-web",
+            partnerIngressRolesAt(runtimeSha, partnerRoleSource),
+            partnerRoleSource,
+          ),
+        ]
+      : []),
     // Harness roles are case/session labels. This actor is not a legacy IAM
     // role or a JWT roles claim; passenger JWTs reject legacy roles/scopes.
     surface("passenger-app-web", [passengerActor], passengerSource),
     surface("agency-portal-web", ["agency_viewer", "agency_exporter"]),
   ];
-  const workflow = sourceAt(runtimeSha, ".github/workflows/deploy-dev.yml");
-  const deployed = [
-    ...workflow.matchAll(/assert_exact_active_service ([a-z-]+) /g),
-  ]
-    .map((m) => m[1]!)
-    .filter((app) => app !== "api")
-    .sort();
   if (
     JSON.stringify(deployed) !==
     JSON.stringify(surfaces.map((s) => s.app).sort())
@@ -336,8 +415,12 @@ export function inventoryAt(runtimeSha: string): Inventory {
     surfaces,
     screens,
     excluded: {
-      "partner-booking-web":
-        ".github/workflows/deploy-dev.yml: paused-partner-booking-cleanup",
+      ...(!partnerBookingActive
+        ? {
+            "partner-booking-web":
+              ".github/workflows/deploy-dev.yml: paused-partner-booking-cleanup",
+          }
+        : {}),
       "passenger-web":
         ".github/workflows/deploy-dev.yml: retired-service-cleanup; legacy passenger-web remains retired",
       "concierge-portal-web":

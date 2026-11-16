@@ -1261,3 +1261,193 @@ describe("USER copy through the original mounted booking and public fare flows",
     expect(calls("/fares")).toHaveLength(1);
   });
 });
+
+// UC16: Actual BookingForm/Screen, original portable client and actual BFF.
+// Only the upstream quote/create HTTP replies are SIM; no service/body mapper
+// or form consumer is mocked, and no monetary/equipment acceptance is claimed.
+describe("normal Passenger wheelchair requirement follows the owned quote", () => {
+  async function selectRequirement() {
+    await form();
+    const checkbox = screen.getByRole("checkbox", { name: "輪椅需求" });
+    expect(checkbox).toHaveProperty("checked", false);
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveProperty("checked", true);
+  }
+  async function requoteCurrentDraft() {
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+  }
+
+  it("sends the chosen requirement through the real quote/BFF and creates with only its owned fareSnapshotId", async () => {
+    f.quoteSnapshotId = "synthetic-wheelchair-quote-1";
+    render(<BookingScreen paymentSelection={selection} />);
+    await selectRequirement();
+    await quote();
+    expect(calls("/quotes")[0]!.body).toMatchObject({
+      serviceSelection: { accessible: true },
+    });
+    const dialog = screen.getByRole("dialog", { name: "確認叫車" });
+    expect(within(dialog).getByText("輪椅需求")).toBeTruthy();
+    expect(within(dialog).getByText("NT$ 320–380")).toBeTruthy();
+    confirmed();
+    click("確認叫車");
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/ride?rideId=synthetic-owned-order"),
+    );
+    expect(calls("/rides")[0]!.body).toMatchObject({
+      fareSnapshotId: "synthetic-wheelchair-quote-1",
+      paymentMethodId: selection.paymentMethodId,
+    });
+    expect(calls("/rides")[0]!.body).not.toHaveProperty("serviceSelection");
+    expect(calls("/rides")[0]!.body).not.toHaveProperty("accessible");
+  });
+
+  it("keeps the requirement on modify and invalidates the old confirmation when it is changed", async () => {
+    f.quoteSnapshotId = "synthetic-wheelchair-quote-2";
+    render(<BookingScreen paymentSelection={selection} />);
+    await selectRequirement();
+    await quote();
+    confirmed();
+    click("返回修改");
+    await form();
+    const checkbox = screen.getByRole("checkbox", { name: "輪椅需求" });
+    expect(checkbox).toHaveProperty("checked", true);
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveProperty("checked", false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls("/rides")).toHaveLength(0);
+    f.quoteSnapshotId = "synthetic-standard-requote-2";
+    await requoteCurrentDraft();
+    expect(calls("/quotes")).toHaveLength(2);
+    expect(calls("/quotes")[1]!.body).not.toHaveProperty("serviceSelection");
+    const dialog = screen.getByRole("dialog", { name: "確認叫車" });
+    expect(within(dialog).queryByText("輪椅需求")).toBeNull();
+    expect(within(dialog).getByRole("checkbox")).toHaveProperty(
+      "checked",
+      false,
+    );
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+    expect(calls("/rides")[0]!.body.fareSnapshotId).toBe(
+      "synthetic-standard-requote-2",
+    );
+  });
+
+  it("restores an unsent wheelchair draft on remount and requests a fresh echoed quote", async () => {
+    const mounted = render(<BookingScreen paymentSelection={selection} />);
+    await selectRequirement();
+    await quote();
+    mounted.unmount();
+    f.quoteSnapshotId = "synthetic-wheelchair-after-remount";
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(screen.getByRole("checkbox", { name: "輪椅需求" })).toHaveProperty(
+      "checked",
+      true,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "清除選點" })).toHaveLength(2);
+    await requoteCurrentDraft();
+    expect(calls("/quotes")).toHaveLength(2);
+    expect(calls("/quotes")[1]!.body).toMatchObject({
+      serviceSelection: { accessible: true },
+    });
+    expect(
+      within(screen.getByRole("dialog", { name: "確認叫車" })).getByText(
+        "輪椅需求",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("recovers an unknown create acknowledgement with the same selected quote/body/request key", async () => {
+    f.quoteSnapshotId = "synthetic-wheelchair-recovery";
+    f.createResponder = async () =>
+      Response.json({ error: { code: "unavailable" } }, { status: 503 });
+    const mounted = render(<BookingScreen paymentSelection={selection} />);
+    await selectRequirement();
+    await quote();
+    confirmed();
+    click("確認叫車");
+    await screen.findByRole("button", { name: "重試同一筆叫車請求" });
+    const first = calls("/rides")[0]!;
+    mounted.unmount();
+    let release!: (reply: Response) => void;
+    f.createResponder = () =>
+      new Promise<Response>((done) => {
+        release = done;
+      });
+    render(<BookingScreen paymentSelection={selection} />);
+    await screen.findByRole("button", { name: "重試同一筆叫車請求" });
+    click("重試同一筆叫車請求");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(2));
+    try {
+      const dialog = screen.getByRole("dialog", { name: "確認叫車" });
+      expect(within(dialog).getByText("輪椅需求")).toBeTruthy();
+      expect(calls("/rides")[1]!.body).toEqual(first.body);
+      expect(calls("/rides")[1]!.headers.get("x-request-id")).toBe(
+        first.headers.get("x-request-id"),
+      );
+      expect(calls("/rides")[1]!.body.fareSnapshotId).toBe(
+        "synthetic-wheelchair-recovery",
+      );
+      expect(calls("/rides")[1]!.body).not.toHaveProperty("serviceSelection");
+    } finally {
+      await act(async () => {
+        release(
+          apiWireResponse({
+            ride: { order: { orderId: "synthetic-owned-order" } },
+          }),
+        );
+      });
+    }
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/ride?rideId=synthetic-owned-order"),
+    );
+  });
+
+  it("keeps the request unconfirmed when the server does not echo the wheelchair requirement", async () => {
+    f.echoServiceSelection = false;
+    render(<BookingScreen paymentSelection={selection} />);
+    await selectRequirement();
+    await selectAddress(0, "上車");
+    await selectAddress(1, "下車");
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: "2099-10-11T12:00" },
+    });
+    click("試算車資");
+    await screen.findByText("無法確認輪椅需求，請重新試算。");
+    expect(calls("/quotes")[0]!.body).toMatchObject({
+      serviceSelection: { accessible: true },
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "輪椅需求" })).toHaveProperty(
+      "checked",
+      true,
+    );
+    expect(calls("/rides")).toHaveLength(0);
+  });
+
+  it("keeps ordinary bookings unselected and does not advertise a wheelchair vehicle or alter their command", async () => {
+    render(<BookingScreen paymentSelection={selection} />);
+    await form();
+    expect(screen.getByRole("checkbox", { name: "輪椅需求" })).toHaveProperty(
+      "checked",
+      false,
+    );
+    await quote();
+    expect(calls("/quotes")[0]!.body).not.toHaveProperty("serviceSelection");
+    expect(
+      within(screen.getByRole("dialog", { name: "確認叫車" })).queryByText(
+        "輪椅需求",
+      ),
+    ).toBeNull();
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+    expect(calls("/rides")[0]!.body.fareSnapshotId).toBe(
+      "synthetic-owned-quote",
+    );
+    expect(calls("/rides")[0]!.body).not.toHaveProperty("serviceSelection");
+  });
+});

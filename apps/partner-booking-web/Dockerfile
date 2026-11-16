@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 #
-# Partner Booking is now part of the shared dev deploy: the same image serves
-# credit-card airport transfer, insurance replacement, and travel-agency flows.
+# Shared-dev Partner image. Actual activation and status.url are owned by
+# deploy-dev.yml; the same image serves airport, insurance and travel entries.
 
 ARG NODE_VERSION=22-alpine
 FROM node:${NODE_VERSION} AS base
@@ -30,10 +30,14 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 FROM deps AS build
+ARG DRTS_CANDIDATE_SHA
+ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/partner-booking-web/ apps/partner-booking-web/
 COPY tsconfig.base.json .
 
-RUN pnpm --filter @drts/ui-tokens build && \
+RUN pnpm --filter @drts/contracts build && \
+    pnpm --filter @drts/ui-tokens build && \
+    pnpm --filter @drts/ui-web build && \
     pnpm --filter @drts/partner-booking-web build
 
 FROM node:${NODE_VERSION} AS runtime

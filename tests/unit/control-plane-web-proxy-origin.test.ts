@@ -614,9 +614,14 @@ describe("public runtime wrapper composed with real Fleet handler", () => {
           `drts_session=${bearer}; drts_csrf=original-csrf`,
       ).toBe(true);
       expect(forwarded.has("x-forwarded-host")).toBe(false);
+      const originConsumer =
+        app === "fleet-partner-portal-web" || app === "tenant-console-web";
       expect(forwarded.get("x-drts-runtime-origin")).toBe(
-        app === "fleet-partner-portal-web" ? externalOrigin : null,
+        originConsumer ? externalOrigin : null,
       );
+      expect(
+        runtime.spawn.mock.calls[0]?.[2].env.DRTS_RUNTIME_ORIGIN_HEADER,
+      ).toBe(originConsumer ? "1" : "0");
     },
   );
   it("strips supplied provenance on originless requests and fails closed for an unrecognized child entry", async () => {

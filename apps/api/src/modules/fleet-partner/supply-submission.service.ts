@@ -118,6 +118,32 @@ export class SupplySubmissionService implements OnModuleInit {
     this.hydrateState(state);
   }
 
+  /**
+   * Refresh only one submission's rows (FLEET-SUPPLY-SCOPED-LOAD-20261114).
+   * For reads and status changes that look at nothing but the target
+   * submission: detail, submit, withdraw and document upload, confirm,
+   * download and delete. Draft create/update keep syncState(), because
+   * their identity and plate checks span other submissions, and so do the
+   * list and renewal reads. The other submissions' cached rows are not
+   * consulted by these paths, so leaving them as they are is safe.
+   */
+  async syncSubmission(submissionId: string) {
+    const state =
+      await this.supplySubmissionRepository.loadSubmissionState(submissionId);
+    const replaceOwn = <T extends { submissionId: string }>(
+      current: readonly T[],
+      loaded: readonly T[],
+    ) => [
+      ...loaded.map((row) => ({ ...row })),
+      ...current.filter((row) => row.submissionId !== submissionId),
+    ];
+    this.submissions = replaceOwn(this.submissions, state.submissions);
+    this.driverDrafts = replaceOwn(this.driverDrafts, state.driverDrafts);
+    this.vehicleDrafts = replaceOwn(this.vehicleDrafts, state.vehicleDrafts);
+    this.documents = replaceOwn(this.documents, state.documents);
+    this.reviewEvents = replaceOwn(this.reviewEvents, state.reviewEvents);
+  }
+
   async listSupplySubmissions(
     fleetPartnerId: string,
     filters: SupplySubmissionFilters = {},
@@ -153,7 +179,7 @@ export class SupplySubmissionService implements OnModuleInit {
     fleetPartnerId: string,
     submissionId: string,
   ) {
-    await this.syncState();
+    await this.syncSubmission(submissionId);
     return this.buildDetail(submissionId, fleetPartnerId);
   }
 
@@ -1204,7 +1230,7 @@ export class SupplySubmissionService implements OnModuleInit {
     command: SubmitSupplySubmissionCommand,
     requestId?: string,
   ) {
-    await this.syncState();
+    await this.syncSubmission(submissionId);
     const submission = this.requireScopedSubmission(
       submissionId,
       fleetPartnerId,
@@ -1278,7 +1304,7 @@ export class SupplySubmissionService implements OnModuleInit {
     command: WithdrawSupplySubmissionCommand,
     requestId?: string,
   ) {
-    await this.syncState();
+    await this.syncSubmission(submissionId);
     const submission = this.requireScopedSubmission(
       submissionId,
       fleetPartnerId,

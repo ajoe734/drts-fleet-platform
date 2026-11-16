@@ -31,6 +31,7 @@ const fleetPortalDeployWorkflow = path.join(
 );
 const temporaryDirectories: string[] = [];
 
+// Historical pre-activation inventory, only for the retained fake-gcloud helper cases.
 const activeServices = [
   "drts-dev-api",
   "drts-dev-platform-admin-web",
@@ -107,21 +108,14 @@ afterEach(() => {
   }
 });
 
-describe("paused Partner Booking Cloud Run cleanup", () => {
-  it("wires a mandatory cleanup between deploy and health check", () => {
+describe("historical paused Partner cleanup disconnected from active deploy", () => {
+  it("keeps the historical destructive helper disconnected from active Partner deployment", () => {
     const source = readFileSync(deployWorkflow, "utf8");
-    const cleanupJob = source.indexOf("\n  paused-partner-booking-cleanup:");
-    const healthJob = source.indexOf("\n  health-check:");
     const exactActiveTargets = [
       ...source.matchAll(
         /^\s+assert_exact_active_service ([^ ]+) "\$[^ ]+" "([^"]+)"$/gm,
       ),
     ].map((match) => `${match[1]}|${match[2]}`);
-
-    expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
-    expect(source).toContain(
-      "./operations/deployment/cleanup-paused-partner-booking-service.sh",
-    );
     expect(exactActiveTargets).toEqual([
       "api|drts-dev-api",
       "platform-admin-web|drts-dev-platform-admin-web",
@@ -134,29 +128,21 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
       "channel-partner-portal-web|drts-channel-partner-portal-web",
       "passenger-app-web|drts-dev-passenger-app-web",
       "agency-portal-web|drts-dev-agency-portal-web",
+      "partner-booking-web|drts-dev-partner-booking-web",
     ]);
-    expect(cleanupJob).toBeGreaterThan(-1);
-    expect(healthJob).toBeGreaterThan(cleanupJob);
-    expect(source.slice(cleanupJob, healthJob)).toContain(
+    expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "active"');
+    expect(source).toContain("Build & push — partner-booking-web");
+    expect(source).toContain("Deploy — partner-booking-web");
+    expect(source).toContain("Verify active Partner Booking entry");
+    expect(source).not.toContain("cleanup-paused-partner-booking-service.sh");
+    expect(source).not.toContain("paused-partner-booking-cleanup");
+    expect(source.slice(source.indexOf("\n  health-check:"))).toContain(
       "needs: [prepare, deploy]",
     );
-    expect(source.slice(cleanupJob, healthJob)).toContain(
-      "if: ${{ always() && needs.prepare.result == 'success' }}",
-    );
-    expect(source.slice(cleanupJob, healthJob)).not.toContain(
-      "needs.deploy.result",
-    );
-    expect(source.slice(cleanupJob, healthJob)).not.toContain(
-      "env.DEV_PARTNER_BOOKING_STATE",
-    );
-    expect(source.slice(cleanupJob, healthJob)).toContain(
-      "ref: ${{ github.sha }}",
-    );
-    expect(source.slice(healthJob)).toContain(
-      "needs: [prepare, deploy, paused-partner-booking-cleanup]",
-    );
-    expect(source.slice(healthJob)).toContain(
-      "needs.paused-partner-booking-cleanup.result == 'success'",
+    // Historical helper behavior and all its inventory-negative cases below stay
+    // executable against fake gcloud; the active rail must never call it.
+    expect(readFileSync(cleanupScript, "utf8")).toContain(
+      "gcloud run services delete",
     );
   });
 

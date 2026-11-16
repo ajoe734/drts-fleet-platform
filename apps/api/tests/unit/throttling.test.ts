@@ -514,3 +514,93 @@ describe("authenticated session read through the real guards and storage", () =>
     );
   });
 });
+
+describe("normal Partner ingress revalidation through the real guards and storage", () => {
+  const stores = new Set<KeyScopedThrottlerStorage>();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-12T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    stores.forEach((store) => store.onApplicationShutdown());
+    stores.clear();
+    vi.useRealTimers();
+  });
+
+  it("admits the 31st through 180th same-IP normal handoff and preserves the inherited five-minute block", async () => {
+    const storage = new KeyScopedThrottlerStorage();
+    stores.add(storage);
+    const auth = new BootstrapAuthGuard(new Reflector());
+    const throttle = new BootstrapThrottlerGuard(
+      [...GLOBAL_RATE_LIMIT],
+      storage,
+      new Reflector(),
+    );
+    await throttle.onModuleInit();
+    const call = async () => {
+      const request: {
+        method: string;
+        originalUrl: string;
+        ip: string;
+        headers: Record<string, string>;
+        identity?: BootstrapRequestIdentity;
+      } = {
+        method: "POST",
+        originalUrl: "/api/partner/ingress/handoff",
+        ip: "192.0.2.50",
+        headers: {},
+      };
+      const headers: Record<string, number> = {};
+      const context = {
+        getClass: () => TenantPartnerController,
+        getHandler: () =>
+          TenantPartnerController.prototype.issuePartnerIngressHandoff,
+        switchToHttp: () => ({
+          getRequest: () => request,
+          getResponse: () => ({
+            header: (name: string, value: number) => {
+              headers[name] = value;
+            },
+          }),
+        }),
+      } as unknown as ExecutionContext;
+      // Match the real OpenRoute guard order without pre-filling an identity.
+      // WIF/credential verification and JWT issuance occur in the controller
+      // after this throttle boundary; neither is invoked or claimed here.
+      expect(await auth.canActivate(context)).toBe(true);
+      expect(request.identity?.actorId).toBeNull();
+      try {
+        return { accepted: await throttle.canActivate(context), headers };
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("getStatus" in error) ||
+          typeof error.getStatus !== "function"
+        )
+          throw error;
+        return {
+          accepted: false,
+          status: error.getStatus() as number,
+          headers,
+        };
+      }
+    };
+    for (let n = 1; n <= READ_HEAVY_RATE_LIMIT.default.limit; n++) {
+      const response = await call();
+      expect(response.accepted, `normal same-IP handoff request ${n}`).toBe(
+        true,
+      );
+      if (n === 31)
+        expect(response.headers["X-RateLimit-Limit"]).toBe(
+          READ_HEAVY_RATE_LIMIT.default.limit,
+        );
+    }
+    expect(await call()).toMatchObject({
+      accepted: false,
+      status: 429,
+      headers: { "Retry-After": 300 },
+    });
+  });
+});

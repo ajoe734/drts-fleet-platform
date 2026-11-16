@@ -186,6 +186,58 @@ export function verifyCsrfToken(
   return timingSafeEqual(cookieBuf, headerBuf);
 }
 
+/** Private provenance set by runtime/web/control-plane-web-proxy.mjs. */
+export const RUNTIME_ORIGIN_HEADER = "x-drts-runtime-origin";
+
+/**
+ * The origin the browser used for this request.
+ *
+ * On Cloud Run, Next standalone builds request.url from its bind address
+ * (https://0.0.0.0:PORT, or 127.0.0.1:PORT behind the loopback wrapper), never
+ * the public host. OIDC callbacks, redirects and same-origin checks built from
+ * it fail ("Redirect URI host https://0.0.0.0:3012 is not allowed").
+ *
+ * - Behind the wrapper (DRTS_RUNTIME_ORIGIN_HEADER=1, set only on its child),
+ *   use the wrapper's header: the wrapper discards any caller copy.
+ * - Otherwise on Cloud Run (K_SERVICE), use Host with https, as in the
+ *   referral embed's request-origin rule. Cloud Run terminates TLS and keeps
+ *   Host, and so does the HTTPS load balancer for a custom domain.
+ * - Everywhere else request.url is already the browser's origin.
+ *
+ * The API still checks every OIDC redirect URI against AUTH_ALLOWED_ORIGINS.
+ */
+export function resolveBrowserOrigin(request: Request | NextRequest): string {
+  if (process.env.DRTS_RUNTIME_ORIGIN_HEADER === "1") {
+    const runtime = exactOrigin(request.headers.get(RUNTIME_ORIGIN_HEADER));
+    if (runtime) return runtime;
+  }
+  if (process.env.K_SERVICE?.trim()) {
+    const host = request.headers.get("host")?.trim();
+    if (host) {
+      try {
+        const parsed = new URL(`https://${host}`);
+        if (parsed.host === host.toLowerCase()) return parsed.origin;
+      } catch {
+        // Fall through to request.url.
+      }
+    }
+  }
+  return new URL(request.url).origin;
+}
+
+function exactOrigin(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      parsed.origin === value
+      ? parsed.origin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function verifySameOrigin(
   request: Request | NextRequest,
   expectedOrigin?: string,
@@ -196,8 +248,7 @@ export function verifySameOrigin(
   let targetOrigin = expectedOrigin;
   if (!targetOrigin) {
     try {
-      const reqUrl = new URL(request.url);
-      targetOrigin = reqUrl.origin;
+      targetOrigin = resolveBrowserOrigin(request);
     } catch {
       return false;
     }

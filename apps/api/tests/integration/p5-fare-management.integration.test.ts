@@ -102,7 +102,7 @@ describe.sequential(
         .filter(
           (name) =>
             /^V000[1-9]__/.test(name) ||
-            /^V0109__|^V0112__|^V0118__/.test(name),
+            /^V0109__|^V0112__|^V0118__|^V0137__/.test(name),
         )
         .sort();
       expect(names.some((x) => x.startsWith("V0118__"))).toBe(true);

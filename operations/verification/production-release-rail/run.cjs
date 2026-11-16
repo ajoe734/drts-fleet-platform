@@ -36,7 +36,7 @@ function imageManifest(plan, directory) {
     images[item.id] = `${plan.registry}/${item.id}@${item.digest}`;
   }
   if (Object.keys(images).length !== plan.builds.length)
-    reject("complete eleven-image manifest");
+    reject("complete release-image manifest");
   return images;
 }
 function migrate(plan, images, cloud = sdk) {
@@ -211,6 +211,59 @@ function assertProbe(service, response, body) {
       reject(`${service.id} protected smoke response contract (${key})`);
   }
 }
+async function verifyAgencyEntry(service, request, transportToken) {
+  const headers = transportToken
+    ? { Authorization: `Bearer ${transportToken}` }
+    : {};
+  const records = [];
+  for (const [path, marker] of [
+    ["/login", "/api/auth/agency/login"],
+    ["/invite", "接受機關帳號邀請"],
+  ]) {
+    const response = await request(`${service.origin}${path}`, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
+    });
+    if (
+      response.status !== 200 ||
+      response.headers.get("x-drts-candidate-sha") !==
+        service.env.DRTS_CANDIDATE_SHA ||
+      !(await response.text()).includes(marker)
+    )
+      reject(`agency-portal-web ${path} entry contract`);
+    records.push({ path, status: response.status, result: "pass" });
+  }
+  for (const cookie of [undefined, "drts_agency_session=invalid"]) {
+    const response = await request(`${service.origin}/api/auth/session`, {
+      method: "GET",
+      headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) },
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
+    });
+    let body;
+    try {
+      body = JSON.parse(await response.text());
+    } catch {
+      reject("agency-portal-web session denial JSON");
+    }
+    if (
+      response.status !== 401 ||
+      body.active !== false ||
+      body.error !== "AUTHENTICATION_REQUIRED" ||
+      body.data !== undefined
+    )
+      reject("agency-portal-web session denial contract");
+    records.push({
+      path: "/api/auth/session",
+      credentials: cookie ? "invalid-fixture" : "none",
+      status: response.status,
+      result: "pass",
+    });
+  }
+  return records;
+}
 async function verify(
   plan,
   images,
@@ -299,17 +352,30 @@ async function verify(
     const publicEntry = service.publicEntry
       ? await verifyPublicEntry(service, request)
       : undefined;
-    const token = service.publicEntry
+    const agency = service.id === "agency-portal-web";
+    // A non-IAP Agency host can use its custom browser origin while a private
+    // Cloud Run invocation must address the actual status.url audience.
+    const transportAudience = agency
+      ? description.status.url
+      : service.transportAudience;
+    const publicTransport =
+      service.publicEntry || (agency && service.allowUnauthenticated);
+    const token = publicTransport
       ? null
       : cloud([
           "auth",
           "print-identity-token",
           `--impersonate-service-account=${process.env.DEPLOYER_SERVICE_ACCOUNT}`,
-          `--audiences=${service.transportAudience}`,
+          `--audiences=${transportAudience}`,
           "--include-email",
         ]);
-    if (!service.publicEntry && !token)
-      reject(`${service.id} signed IAP transport token`);
+    if (!publicTransport && !token)
+      reject(
+        `${service.id} signed ${agency ? "Cloud Run" : "IAP"} transport token`,
+      );
+    const agencyEntry = agency
+      ? await verifyAgencyEntry(service, request, token)
+      : undefined;
     const response = await request(`${service.origin}${service.probe.path}`, {
       method: "GET",
       headers: {
@@ -323,6 +389,7 @@ async function verify(
     evidence.services.push({
       ...record,
       publicEntry,
+      ...(agencyEntry ? { agencyEntry } : {}),
       smoke: {
         path: service.probe.path,
         status: response.status,
@@ -365,5 +432,6 @@ module.exports = {
   deploy,
   assertRevision,
   assertProbe,
+  verifyAgencyEntry,
   verify,
 };

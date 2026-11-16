@@ -135,6 +135,36 @@ class TenantUatAcceptanceWorkflowStructureTests(unittest.TestCase):
         self.assertIn("git rev-parse HEAD", self.text)
         self.assertIn('"$resolved" != "$expected"', self.text)
 
+    def test_renewed_session_path_is_initialized_after_the_runner_starts(self) -> None:
+        job_env = self.text.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+        self.assertNotIn("runner.temp", job_env)
+        self.assertNotIn("DRTS_UAT_RENEWED_SESSIONS_FILE:", job_env)
+        prepare = self.text.split("      - name: Prepare evidence directory\n", 1)[1]
+        prepare = prepare.split("      - name:", 1)[0]
+        self.assertIn('echo "DRTS_UAT_RENEWED_SESSIONS_FILE=${RUNNER_TEMP}/', prepare)
+        self.assertLess(self.text.index("Prepare evidence directory"), self.text.index("Seed disposable tenant A/B sessions through the authoritative service"))
+
+    def test_renewed_session_path_expands_in_the_runner_shell(self) -> None:
+        command = next((line.strip() for line in self.text.splitlines()
+                        if line.strip().startswith('echo "DRTS_UAT_RENEWED_SESSIONS_FILE=')), None)
+        self.assertIsNotNone(command, "renewed sessions must be initialized by a runner shell step")
+        with tempfile.TemporaryDirectory(prefix="uat-path-with-spaces-") as directory:
+            root = Path(directory)
+            runner_temp = root / "runner temporary files"
+            runner_temp.mkdir()
+            env_file = root / "github-env"
+            result = subprocess.run(
+                ["bash", "-euc", command],
+                env={"RUNNER_TEMP": str(runner_temp), "GITHUB_RUN_ID": "501",
+                     "GITHUB_RUN_ATTEMPT": "3", "GITHUB_ENV": str(env_file)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(env_file.read_text(),
+                "DRTS_UAT_RENEWED_SESSIONS_FILE=" + str(runner_temp)
+                + "/tenant-uat-renewed-sessions-501-3.json\n")
+
     def test_declares_a_timeout(self) -> None:
         self.assertIn("timeout-minutes:", self.text)
 
@@ -319,7 +349,12 @@ class HostedBoundaryTests(unittest.TestCase):
 
     def test_reports_are_independent_and_every_command_uses_provenance_runner(self):
         text = WORKFLOW.read_text()
-        self.assertEqual(text.count("run-reported.py "), 6)
+        self.assertEqual(text.count("run-reported.py "), 7)
+        c032 = text.split("id: c032_partner_booking_e2e", 1)[1].split("      - name:", 1)[0]
+        self.assertIn(
+            "run-reported.py test-results/c032-partner-program-business-report.json",
+            c032,
+        )
         webhook = text.split("id: webhook_e2e", 1)[1].split("      - name:", 1)[0]
         self.assertNotIn("sr-partner-notify-qa-20260917/partner-notification-uat.spec.ts", webhook)
         self.assertEqual(text.count("--reporter=list,json"), 3)
@@ -389,6 +424,67 @@ class ReferralEmbedWorkloadIdentityRegistryTests(unittest.TestCase):
             "POST partner/ingress/referral-embed-handoff/consent",
         ):
             self.assertIn(route, route_scopes_text)
+
+    def test_derived_registry_reaches_later_fixture_child_processes(self):
+        # Only the actual workflow's GITHUB_ENV echo block executes here.
+        # This unit-only registry is not a Google assertion, key or API session.
+        derive = self.text.split(
+            "      - name: Derive Google workload identity registry for hosted UAT\n", 1
+        )[1].split("      - uses:", 1)[0]
+        block = re.search(
+            r'^          \{\n(.*?)^          \} >> "\$GITHUB_ENV"$',
+            derive,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(
+            block, "the existing derive step must publish its environment"
+        )
+        registry = [
+            {
+                "serviceAccountEmail": "unit-only@fixture.example.test",
+                "principalId": "unit-only-fixture-principal",
+                "allowedTokenAudiences": ["unit-only-audience"],
+                "routeScopes": [
+                    "GET partner/entries/*", "POST partner/ingress/handoff"
+                ],
+            }
+        ]
+        registry_json = json.dumps(registry)
+        native = "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS"
+        legacy = native + "_JSON"
+        with tempfile.TemporaryDirectory(prefix="uat-native-registry-") as directory:
+            env_file = Path(directory) / "github-env"
+            exported = subprocess.run(
+                ["bash", "-euc", "{\n" + block.group(1) + '} >> "$GITHUB_ENV"\n'],
+                env={"registry_json": registry_json, "GITHUB_ENV": str(env_file)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            # Model GitHub's multi-line GITHUB_ENV application to later steps,
+            # then let a real child inherit it without either API step's env map.
+            inherited = {}
+            lines = iter(env_file.read_text(encoding="utf-8").splitlines())
+            for header in lines:
+                name, delimiter = header.split("<<", 1)
+                value = []
+                for line in lines:
+                    if line == delimiter:
+                        break
+                    value.append(line)
+                else:
+                    self.fail("unterminated GITHUB_ENV value")
+                inherited[name] = "\n".join(value)
+            child = subprocess.run(
+                [sys.executable, "-c",
+                 "import json, os; print(json.dumps({name: os.environ.get(name) "
+                 "for name in " + repr((native, legacy)) + "}))"],
+                env=inherited, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(child.returncode, 0, child.stderr)
+            actual = json.loads(child.stdout)
+            self.assertEqual(actual[native], registry_json)
+            self.assertEqual(actual[legacy], registry_json)
+            self.assertEqual(json.loads(actual[native]), registry)
 
 
 class ReportProvenanceBehaviorTests(unittest.TestCase):
@@ -469,6 +565,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
         webhook_unit: str = "success",
         partner_notify_e2e: str = "success",
         partner_notify_unit: str = "success",
+        start_partner_booking_ui: str = "success",
+        c032_partner_booking_e2e: str = "success",
         c113_c115_acceptance: str = "success",
         gate: str = "success",
         restart_api: str = "success",
@@ -493,6 +591,8 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
                 "WEBHOOK_UNIT_OUTCOME": webhook_unit,
                 "PARTNER_NOTIFY_E2E_OUTCOME": partner_notify_e2e,
                 "PARTNER_NOTIFY_UNIT_OUTCOME": partner_notify_unit,
+                "START_PARTNER_BOOKING_UI_OUTCOME": start_partner_booking_ui,
+                "C032_PARTNER_BOOKING_E2E_OUTCOME": c032_partner_booking_e2e,
                 "C113_C115_ACCEPTANCE_OUTCOME": c113_c115_acceptance,
                 "GATE_OUTCOME": gate,
                 "RESTART_API_OUTCOME": restart_api,
@@ -549,6 +649,24 @@ class RunStatusScriptBehaviorTests(unittest.TestCase):
     def test_failed_partner_notify_unit_is_not_passed(self) -> None:
         status = self._run(partner_notify_unit="failure")
         self.assertEqual(status["status"], "failed")
+
+    def test_failed_partner_booking_ui_is_failed(self) -> None:
+        status = self._run(
+            start_partner_booking_ui="failure",
+            c032_partner_booking_e2e="skipped",
+        )
+        # Original environment setup succeeded. Failure in this additional
+        # surface is failed, not a successful original-only run or not_run.
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["start_partner_booking_ui_outcome"], "failure")
+        self.assertEqual(status["c032_partner_booking_e2e_outcome"], "skipped")
+
+    def test_unsuccessful_c032_browser_cases_are_not_passed(self) -> None:
+        for outcome in ("failure", "skipped", "cancelled", "unknown"):
+            with self.subTest(outcome=outcome):
+                status = self._run(c032_partner_booking_e2e=outcome)
+                self.assertEqual(status["status"], "failed")
+                self.assertEqual(status["c032_partner_booking_e2e_outcome"], outcome)
 
     def test_failed_c113_c115_acceptance_is_not_passed(self) -> None:
         status = self._run(c113_c115_acceptance="failure")

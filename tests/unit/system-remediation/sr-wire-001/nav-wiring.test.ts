@@ -84,7 +84,11 @@ function settingsHarness(provisioned = true) {
       ...realRequire("react"),
       useEffect: () => {},
       useState: (initial: unknown) => [
-        stateIndex++ === 0 ? false : initial,
+        typeof initial === "function"
+          ? (initial as () => unknown)()
+          : stateIndex++ === 0
+            ? false
+            : initial,
         () => {},
       ],
     },
@@ -100,6 +104,8 @@ function settingsHarness(provisioned = true) {
     "expo-router": { useRouter: () => ({ push }), Redirect: "Redirect" },
     "@expo/vector-icons": { Ionicons: "Ionicons" },
     "@/lib/api-client": {
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityHydrated: () => true,
       isDriverIdentityProvisioned: () => provisioned,
       getDriverId: () => "unit-driver",
       getProvisionedSession: () => ({

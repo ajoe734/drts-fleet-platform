@@ -185,10 +185,11 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    // 10 active entries: 2 demo bank flows, the referral demo, the formal
-    // Yuhe referral entry, 4 canonical airport-card issuers, and the
-    // insurance/travel partner routes.
-    expect(entries).toHaveLength(10);
+    // 11 active entries: 2 demo bank flows, the referral demo, the formal
+    // Yuhe referral entry, 4 canonical airport-card issuers, the
+    // insurance/travel partner routes, and the fleet partner demo entry
+    // (FLEET-ONB-001).
+    expect(entries).toHaveLength(11);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
@@ -201,6 +202,7 @@ describe("tenant partner foundation service", () => {
         "northwind",
         "tailspin",
         "adventureworks",
+        "fleet-demo-001",
       ]),
     );
     expect(alphaEntry).toMatchObject({
@@ -384,7 +386,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(10);
+    expect(store.snapshot().partnerEntries).toHaveLength(11);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );

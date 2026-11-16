@@ -55,7 +55,7 @@ beforeEach(() => {
       journeys: [],
       retiredSurfaces: [
         {
-          id: "paused-partner-booking",
+          id: "retired-concierge",
           baseUrlEnv: "SOCKET_FREE_RETIRED_ORIGIN",
           path: "/",
         },
@@ -92,7 +92,7 @@ async function runWorker(index: number, label: string) {
   // callbacks and does not claim to exercise the separate issuer lifecycle.
   expect(harness.beforeAllCallbacks).toHaveLength(1);
   const callback = harness.callbacks.get(
-    "paused Partner Booking and retired Concierge remain unreachable",
+    "retired Concierge remains unreachable",
   );
   expect(callback).toBeDefined();
   await callback!({

@@ -703,26 +703,26 @@ export default function MaintenancePage() {
       try {
         const client = getOpsClient();
         if (action.action === "complete_maintenance") {
-          await client.updateMaintenance(record.maintenanceId, {
+          const receipt = await client.updateMaintenance(record.maintenanceId, {
             status: "completed",
             ...(reason.trim() ? { notes: reason.trim() } : {}),
           });
+          await loadRecords("poll");
+          setToast({
+            tone: "success",
+            message: t("maintenance.toast.completed", {
+              id: receipt.resourceId,
+            }),
+            actionId: receipt.actionId,
+            auditId: receipt.auditId,
+          });
         }
-        await loadRecords("poll");
-        setToast({
-          tone: "success",
-          message: t("maintenance.toast.completed", {
-            id: record.maintenanceId,
-          }),
-          actionId: `act_${record.maintenanceId}`,
-          auditId: `audit_${record.maintenanceId}`,
-        });
       } catch (e) {
         setToast({
           tone: "danger",
           message:
             e instanceof Error ? e.message : getOpsLabel(locale, "unknown"),
-          actionId: `act_${record.maintenanceId}`,
+          actionId: dash(locale),
           auditId: dash(locale),
         });
       } finally {
@@ -1240,27 +1240,29 @@ export default function MaintenancePage() {
             try {
               const client = getOpsClient();
               if (editingId) {
-                await client.updateMaintenance(
+                const receipt = await client.updateMaintenance(
                   editingId,
                   command as UpdateMaintenanceRecordCommand,
                 );
                 setToast({
                   tone: "success",
-                  message: t("maintenance.toast.updated", { id: editingId }),
-                  actionId: `act_${editingId}`,
-                  auditId: `audit_${editingId}`,
+                  message: t("maintenance.toast.updated", {
+                    id: receipt.resourceId,
+                  }),
+                  actionId: receipt.actionId,
+                  auditId: receipt.auditId,
                 });
               } else {
-                const created = (await client.createMaintenance(
+                const receipt = await client.createMaintenance(
                   command as CreateMaintenanceRecordCommand,
-                )) as MaintenanceRecord;
+                );
                 setToast({
                   tone: "success",
                   message: t("maintenance.toast.created", {
-                    id: created.maintenanceId,
+                    id: receipt.resourceId,
                   }),
-                  actionId: `act_${created.maintenanceId}`,
-                  auditId: `audit_${created.maintenanceId}`,
+                  actionId: receipt.actionId,
+                  auditId: receipt.auditId,
                 });
               }
               setShowCreate(false);

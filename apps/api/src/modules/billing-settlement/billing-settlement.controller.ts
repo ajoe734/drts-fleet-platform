@@ -278,16 +278,17 @@ export class BillingSettlementController {
   @Get("settlement/invoices")
   @RequireRealms("system", "platform", "tenant", "ops", "partner")
   @RequireScopes("billing:read")
-  listPlatformInvoices(
+  async listPlatformInvoices(
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     // `partner` is an allowed realm here and was never narrowed, so a partner
     // could list every tenant's invoices. Visibility is resolved once and
     // applies to whoever is asking.
+    const visibility = resolveTenantVisibility(identity);
     const items = filterToTenantVisibility(
-      this.billingSettlementService.listPlatformInvoices(),
-      resolveTenantVisibility(identity),
+      await this.billingSettlementService.listPlatformInvoicesFresh(visibility),
+      visibility,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -366,7 +367,7 @@ export class BillingSettlementController {
 
   @Get("driver-statements")
   @RequireRealms("platform", "ops", "driver")
-  listDriverStatements(
+  async listDriverStatements(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("period") period?: string,
     @Query("periodMonth") periodMonth?: string,
@@ -397,7 +398,7 @@ export class BillingSettlementController {
       effectiveDriverId = actorDriverId;
     }
 
-    const items = this.billingSettlementService.listDriverStatements(
+    const items = await this.billingSettlementService.listDriverStatementsFresh(
       periodMonth ?? period,
       effectiveDriverId,
     );
@@ -406,7 +407,7 @@ export class BillingSettlementController {
 
   @Get("driver-statements/:statementId")
   @RequireRealms("platform", "ops", "driver")
-  getDriverStatement(
+  async getDriverStatement(
     @Param("statementId") statementId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
@@ -425,7 +426,7 @@ export class BillingSettlementController {
     }
 
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getDriverStatement(
+      await this.billingSettlementService.getDriverStatementFresh(
         statementId,
         requestingDriverId,
       ),
@@ -435,13 +436,13 @@ export class BillingSettlementController {
 
   @Get("driver/profile/statements")
   @RequireRealms("driver")
-  listDriverOwnStatements(
+  async listDriverOwnStatements(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("period") period?: string,
     @Query("periodMonth") periodMonth?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return this.listDriverStatements(
+    return await this.listDriverStatements(
       identity,
       period,
       periodMonth,
@@ -452,12 +453,12 @@ export class BillingSettlementController {
 
   @Get("driver/profile/statements/:statementId")
   @RequireRealms("driver")
-  getDriverOwnStatement(
+  async getDriverOwnStatement(
     @Param("statementId") statementId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return this.getDriverStatement(statementId, identity, requestId);
+    return await this.getDriverStatement(statementId, identity, requestId);
   }
 
   @Get("reimbursements")
@@ -484,7 +485,7 @@ export class BillingSettlementController {
   @Get("settlement/reconciliation-issues")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:read")
-  listReconciliationIssues(
+  async listReconciliationIssues(
     @Query("status") status?: "open" | "assigned" | "resolved" | "reopened",
     @Query("issueType")
     issueType?: "forwarder_status_mismatch" | "partner_sponsor_mismatch",
@@ -492,14 +493,20 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = filterToTenantVisibility(
-      this.billingSettlementService.listReconciliationIssues({
-        ...(status ? { status } : {}),
-        ...(issueType ? { issueType } : {}),
-        ...(channelKey ? { channelKey } : {}),
-      }),
-      resolveTenantVisibility(identity),
-    );
+    const visibility = resolveTenantVisibility(identity);
+    const filters = {
+      ...(status ? { status } : {}),
+      ...(issueType ? { issueType } : {}),
+      ...(channelKey ? { channelKey } : {}),
+    };
+    const issues =
+      typeof this.billingSettlementService.listReconciliationIssuesFresh ===
+      "function"
+        ? await this.billingSettlementService.listReconciliationIssuesFresh(
+            filters,
+          )
+        : this.billingSettlementService.listReconciliationIssues(filters);
+    const items = filterToTenantVisibility(issues, visibility);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -542,11 +549,10 @@ export class BillingSettlementController {
   ) {
     // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
     // null -- platform-level records were open to everyone.
+    const visibility = resolveTenantVisibility(identity);
     assertTenantVisibility(
-      this.billingSettlementService
-        .listReconciliationIssues()
-        .find((item) => item.issueId === issueId)?.tenantId,
-      resolveTenantVisibility(identity),
+      (await this.findReconciliationIssueForVisibility(issueId))?.tenantId,
+      visibility,
       { issueId },
     );
     return toApiSuccessEnvelope(
@@ -570,11 +576,10 @@ export class BillingSettlementController {
   ) {
     // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
     // null -- platform-level records were open to everyone.
+    const visibility = resolveTenantVisibility(identity);
     assertTenantVisibility(
-      this.billingSettlementService
-        .listReconciliationIssues()
-        .find((item) => item.issueId === issueId)?.tenantId,
-      resolveTenantVisibility(identity),
+      (await this.findReconciliationIssueForVisibility(issueId))?.tenantId,
+      visibility,
       { issueId },
     );
     return toApiSuccessEnvelope(
@@ -598,11 +603,10 @@ export class BillingSettlementController {
   ) {
     // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
     // null -- platform-level records were open to everyone.
+    const visibility = resolveTenantVisibility(identity);
     assertTenantVisibility(
-      this.billingSettlementService
-        .listReconciliationIssues()
-        .find((item) => item.issueId === issueId)?.tenantId,
-      resolveTenantVisibility(identity),
+      (await this.findReconciliationIssueForVisibility(issueId))?.tenantId,
+      visibility,
       { issueId },
     );
     return toApiSuccessEnvelope(
@@ -626,11 +630,10 @@ export class BillingSettlementController {
   ) {
     // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
     // null -- platform-level records were open to everyone.
+    const visibility = resolveTenantVisibility(identity);
     assertTenantVisibility(
-      this.billingSettlementService
-        .listReconciliationIssues()
-        .find((item) => item.issueId === issueId)?.tenantId,
-      resolveTenantVisibility(identity),
+      (await this.findReconciliationIssueForVisibility(issueId))?.tenantId,
+      visibility,
       { issueId },
     );
     return toApiSuccessEnvelope(
@@ -641,6 +644,20 @@ export class BillingSettlementController {
       ),
       requestId,
     );
+  }
+
+  private async findReconciliationIssueForVisibility(issueId: string) {
+    if (
+      typeof this.billingSettlementService.findReconciliationIssueFresh ===
+      "function"
+    ) {
+      return this.billingSettlementService.findReconciliationIssueFresh(
+        issueId,
+      );
+    }
+    return this.billingSettlementService
+      .listReconciliationIssues()
+      .find((item) => item.issueId === issueId);
   }
 
   @Post("reimbursements/:batchId/approve")

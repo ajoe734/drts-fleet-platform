@@ -227,7 +227,10 @@ class EnterpriseDataAcceptanceWorkflowTests(unittest.TestCase):
             "enterprise-help-online",
             "enterprise-home-upcoming-empty",
             "enterprise-trip-empty",
-            "toBeDisabled",
+            "driverButton.click()",
+            "contactResponse.status()).toBe(409)",
+            "TENANT_DRIVER_CONTACT_NOT_AVAILABLE",
+            "trip.contactNoDriver",
         ):
             self.assertIn(marker, spec_text, f"browser spec missing coverage for {marker}")
 
