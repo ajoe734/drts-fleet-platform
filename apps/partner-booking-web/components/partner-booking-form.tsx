@@ -1136,10 +1136,6 @@ export function PartnerBookingForm({
                 label: t("field.flightNo"),
               })}
               {renderField({
-                name: "flightNo",
-                label: t("field.flightNo"),
-              })}
-              {renderField({
                 name: "luggageCount",
                 label: t("field.luggageCount"),
                 type: "number",

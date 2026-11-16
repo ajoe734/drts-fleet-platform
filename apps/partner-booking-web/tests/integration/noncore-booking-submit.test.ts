@@ -1068,4 +1068,3 @@ it.each(["manual", "cleared"] as const)(
     expect(f.commands[0]).not.toHaveProperty("paymentStatus");
   },
 );
-});
