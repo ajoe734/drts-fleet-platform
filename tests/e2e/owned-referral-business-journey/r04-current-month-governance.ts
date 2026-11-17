@@ -112,8 +112,12 @@ export async function readBrowserRoleSession(page: Page, runtimeSha: string) {
     "R04/R09 actual browser BFF session and runtime",
   );
   const payload = object(camelWire(observed.body));
-  requireFact(payload.ok === true, "R04/R09 actual browser session envelope");
-  return object(payload.data);
+  // GET /api/auth/session returns toApiSuccessEnvelope's { data, meta }; it
+  // has no `ok` field (hosted run 44104816455 failed on that). R08 reads the
+  // same BFF route as `data.active === true`.
+  const data = object(payload.data);
+  requireFact(data.active === true, "R04/R09 actual browser session envelope");
+  return data;
 }
 
 /** Capture the one original UI POST. A missing response leaves the ACK unknown;

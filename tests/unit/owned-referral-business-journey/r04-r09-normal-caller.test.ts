@@ -12,6 +12,7 @@ import type {
 } from "@drts/contracts";
 import {
   captureUiPost,
+  readBrowserRoleSession,
   runR04CurrentMonthGovernance,
   type R04Ports,
   type UiPost,
@@ -955,5 +956,46 @@ describe("actual normal caller AST wiring", () => {
       "r09-own-seven-case-ui-lifecycle-monthly-statistics",
       "page-close",
     ]);
+  });
+});
+
+describe("R04/R09 actual browser BFF session read", () => {
+  const runtimeSha = "a".repeat(40);
+  const browserPage = (status: number, body: unknown, sha = runtimeSha) =>
+    ({
+      evaluate: async () => ({ status, runtimeSha: sha, body }),
+    }) as unknown as Page;
+
+  it("accepts the API success envelope { data, meta }, which has no ok field", async () => {
+    await expect(
+      readBrowserRoleSession(
+        browserPage(200, {
+          data: { active: true, identity: { realm: "platform" } },
+          meta: { request_id: "synthetic", timestamp: "2026-11-17T00:00:00Z" },
+        }),
+        runtimeSha,
+      ),
+    ).resolves.toEqual({ active: true, identity: { realm: "platform" } });
+  });
+
+  it.each([
+    [
+      "inactive session",
+      200,
+      { data: { active: false }, meta: {} },
+      runtimeSha,
+    ],
+    ["missing data", 200, { ok: true }, runtimeSha],
+    ["non-200", 401, { data: { active: true }, meta: {} }, runtimeSha],
+    [
+      "foreign runtime",
+      200,
+      { data: { active: true }, meta: {} },
+      "b".repeat(40),
+    ],
+  ] as const)("rejects %s", async (_label, status, body, sha) => {
+    await expect(
+      readBrowserRoleSession(browserPage(status, body, sha), runtimeSha),
+    ).rejects.toThrow();
   });
 });
