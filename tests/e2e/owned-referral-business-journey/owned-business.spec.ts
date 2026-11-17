@@ -442,6 +442,21 @@ test(journeyName, async ({ browser, request }) => {
   });
   const context = await browser.newContext();
   const page = await context.newPage();
+  // Keep this page's request interception enabled for the whole journey.
+  // Playwright 1.59 sends Fetch.disable as soon as a page's last route is
+  // removed (a `times: 1` route expiring after its fulfill, or unroute). A
+  // navigation the product starts in that instant can have Fetch.requestPaused
+  // stored before the flag flips and Network.requestWillBeSent paired after
+  // it: the Request is created without a route, nobody continues the paused
+  // fetch, and the frame never commits. Hosted C1 hit this on 2026-11-16 and
+  // 2026-11-17 (screen=cancelled navigation requested, never sent, never
+  // failed). This never-requested pattern keeps one route registered, so later
+  // route/unroute calls only swap matchers; unmatched requests are continued
+  // inside the Playwright server without a client round trip.
+  await page.route(
+    `${origins.referral}/__drts-request-interception-keepalive__`,
+    (route) => route.fallback(),
+  );
   const tx = new NativeTransport(
     origins,
     runtime,
