@@ -456,7 +456,7 @@ describe("owned hosted journey transport", () => {
 
 describe("complete canonical orders bounded native read", () => {
   const ordinaryLimit = 1024 * 1024;
-  const ordersLimit = 8 * ordinaryLimit;
+  const ordersLimit = 32 * ordinaryLimit;
   const canonicalPath = "/control-plane-proxy/orders";
 
   function fullSource(bytes: number) {
