@@ -428,8 +428,9 @@ describe("same-run R04/R09 controlled helper ports", () => {
       auditId === ""
         ? readAudit(auditId)
         : [{ ...(await readAudit(auditId))[0]!, requestId: "foreign-request" }];
+    // The failure names only the mismatched field, never audit values.
     await expect(runR04CurrentMonthGovernance(ports)).rejects.toThrow(
-      /outcome request/,
+      "R04 exact UI outcome audit:n1m1-req0-act1-typ1-mod1-actn1-res1",
     );
   });
   it("binds seven exact case IDs, four UI writes, fresh timeline/audit, then report drilldown", async () => {

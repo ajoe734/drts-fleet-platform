@@ -476,18 +476,27 @@ export async function runR04CurrentMonthGovernance(p: R04Ports) {
       !!handled.auditId,
     "R04 fresh handled coaching actor and audit",
   );
-  const audit = records(
-    (await p.readAudit(text(handled.auditId))) as unknown,
-  ).filter((item) => item.auditId === handled.auditId);
+  const audits = records((await p.readAudit(text(handled.auditId))) as unknown);
+  const audit = audits.filter((item) => item.auditId === handled.auditId);
+  const checks = {
+    req: audit[0]?.requestId === outcome.requestId,
+    act: audit[0]?.actorId === p.role.principalId,
+    typ: audit[0]?.actorType === "platform_admin",
+    mod: audit[0]?.moduleName === "reporting",
+    actn:
+      audit[0]?.actionName === "referral_monthly_rating_governance.dismissed",
+    res: audit[0]?.resourceId === handled.recordId,
+  };
+  // On mismatch, name only which booleans failed (no identifiers or values),
+  // so a hosted run shows the exact field without retaining audit content.
   requireFact(
-    audit.length === 1 &&
-      audit[0]?.requestId === outcome.requestId &&
-      audit[0]?.actorId === p.role.principalId &&
-      audit[0]?.actorType === "platform_admin" &&
-      audit[0]?.moduleName === "reporting" &&
-      audit[0]?.actionName === "referral_monthly_rating_governance.dismissed" &&
-      audit[0]?.resourceId === handled.recordId,
-    "R04 exact original UI outcome request/action/resource/actor audit",
+    audit.length === 1 && Object.values(checks).every(Boolean),
+    // Evidence keeps 100 characters of the stage, so keep the prefix short.
+    `R04 exact UI outcome audit:n${Math.min(audits.length, 9)}m${Math.min(audit.length, 9)}-${Object.entries(
+      checks,
+    )
+      .map(([key, ok]) => `${key}${ok ? 1 : 0}`)
+      .join("-")}`,
   );
   return {
     month,
