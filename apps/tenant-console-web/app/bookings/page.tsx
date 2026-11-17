@@ -54,6 +54,14 @@ const BOOKING_STALE_AFTER_MS = 30_000;
 const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN ?? "http://localhost:3103";
 
+// Table cells are nowrap by default; booking ids and addresses then push the
+// status column off-screen. Let each cell wrap within its column width.
+const wrappingCellStyle: CSSProperties = {
+  display: "grid",
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+};
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
@@ -604,6 +612,10 @@ function getServiceBucketLabel(bucket: string, locale: Locale) {
   switch (bucket) {
     case "business_dispatch":
       return t("bookingList.serviceBucket.businessDispatch", undefined, locale);
+    case "standard_taxi":
+      return t("bookingList.serviceBucket.standardTaxi", undefined, locale);
+    case "av_pilot":
+      return t("bookingList.serviceBucket.avPilot", undefined, locale);
     default:
       return bucket;
   }
@@ -901,13 +913,15 @@ function buildBookingRows(
   locale: Locale,
 ): BookingRow[] {
   return bookings.map((booking) => {
-    const editWindow = formatRemainingWindow(booking.editableUntil, locale);
+    const editWindow = isActionableStatus(booking.orderStatus)
+      ? formatRemainingWindow(booking.editableUntil, locale)
+      : null;
     const source = getBookingSourceVisibility(booking);
     const sourceToneClassName = getSourceToneClassName(source.tone);
 
     return {
       bookingCell: (
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ ...wrappingCellStyle, gap: 4 }}>
           <Link href={`/bookings/${booking.bookingId}`} style={headerChipStyle}>
             <span style={primaryTextStyle}>{booking.bookingId}</span>
           </Link>
@@ -916,7 +930,7 @@ function buildBookingRows(
         </div>
       ),
       typeCell: (
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ ...wrappingCellStyle, gap: 4 }}>
           <span style={primaryTextStyle}>
             {getSubtypeLabel(booking.businessDispatchSubtype, locale)}
           </span>
@@ -929,13 +943,13 @@ function buildBookingRows(
         </div>
       ),
       routeCell: (
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ ...wrappingCellStyle, gap: 4 }}>
           <span style={primaryTextStyle}>{booking.pickup.address}</span>
           <span style={secondaryTextStyle}>↓ {booking.dropoff.address}</span>
         </div>
       ),
       windowCell: (
-        <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ ...wrappingCellStyle, gap: 6 }}>
           <span style={primaryTextStyle}>
             {formatDateTime(booking.reservationWindowStart, locale)}
           </span>
@@ -978,7 +992,7 @@ function buildBookingRows(
         </div>
       ),
       passengerCell: (
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ ...wrappingCellStyle, gap: 4 }}>
           <span style={primaryTextStyle}>{booking.passenger.name}</span>
           <span style={secondaryTextStyle}>{booking.passenger.phone}</span>
           <span style={secondaryTextStyle}>
@@ -988,7 +1002,7 @@ function buildBookingRows(
         </div>
       ),
       stateCell: (
-        <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ ...wrappingCellStyle, gap: 6 }}>
           <div style={inlineMetaStyle}>
             <CanvasPill
               theme={theme}
@@ -997,23 +1011,30 @@ function buildBookingRows(
             >
               {getOrderStatusLabel(booking.orderStatus, locale)}
             </CanvasPill>
-            <CanvasPill
-              theme={theme}
-              tone={getApprovalTone(booking.approvalState)}
-            >
-              {t(
-                "bookingList.pill.approval",
-                { state: booking.approvalState },
-                locale,
-              )}
-            </CanvasPill>
+            {booking.approvalState === "not_required" ? null : (
+              <CanvasPill
+                theme={theme}
+                tone={getApprovalTone(booking.approvalState)}
+              >
+                {t(
+                  "bookingList.pill.approval",
+                  {
+                    state: t(
+                      `bookingList.approvalState.${booking.approvalState}`,
+                      undefined,
+                      locale,
+                    ),
+                  },
+                  locale,
+                )}
+              </CanvasPill>
+            )}
             {booking.slaStatus ? (
               <CanvasPill theme={theme} tone={booking.slaStatus.tone}>
                 {booking.slaStatus.label}
               </CanvasPill>
             ) : null}
           </div>
-          <span style={secondaryTextStyle}>{booking.status}</span>
           {booking.slaStatus ? (
             <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
           ) : (

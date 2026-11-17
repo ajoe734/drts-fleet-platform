@@ -16,7 +16,7 @@
     "next": ">=16.0.0 <17"
   },
   "devDependencies": {
-    "next": "^16.4.1"
+    "next": "^16.4.6"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

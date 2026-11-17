@@ -58,6 +58,23 @@ const booking: contracts.BookingRecord = {
   createdAt: instant,
   updatedAt: instant,
 };
+// A cancelled standard-taxi booking that is still inside its edit window and
+// waiting for approval: it is not a reservation, offers no edit window, and
+// its service and approval states are labelled.
+const cancelledTaxiBooking: contracts.BookingRecord = {
+  ...booking,
+  bookingId: "booking-c122",
+  orderId: "order-c122",
+  status: "cancelled",
+  serviceBucket: "standard_taxi",
+  reservationWindowStart: "2027-01-02T08:00:00Z",
+  reservationWindowEnd: "2027-01-02T09:00:00Z",
+  modifiableUntil: "2027-01-02T07:00:00Z",
+  approvalState: "pending",
+  orderStatus: "cancelled",
+  createdAt: "2026-11-01T00:00:00Z",
+  updatedAt: "2026-11-01T00:00:00Z",
+};
 const invoice: contracts.TenantInvoiceRuntimeRecord = {
   invoiceId: "invoice-c121",
   tenantId: "tenant-c121",
@@ -93,7 +110,10 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
       // row renderers, formatters, catalogs and the profile editor execute unchanged.
       const api = {
         getTenantClient: async () => ({
-          listTenantBookings: async () => [structuredClone(booking)],
+          listTenantBookings: async () => [
+            structuredClone(booking),
+            structuredClone(cancelledTaxiBooking),
+          ],
           getBillingProfile: async () => structuredClone(profile),
           listInvoices: async () => [structuredClone(invoice)],
           listTenantStatements: async () => [],
@@ -160,6 +180,21 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
       ).toBeGreaterThan(0);
       expect(document.body.textContent).not.toContain("exception_hold");
       expect(document.body.textContent).not.toContain("T5 /");
+      expect(
+        document.querySelector('a[href="/bookings?tab=reserve"]')?.textContent,
+      ).toMatch(/\s0$/);
+      expect(document.body.textContent).toContain(
+        locale === "en" ? "Standard taxi" : "一般計程車",
+      );
+      expect(document.body.textContent).toContain(
+        locale === "en" ? "approval pending" : "審批 待審批",
+      );
+      for (const code of ["standard_taxi", "not_required"])
+        expect(document.body.textContent).not.toContain(code);
+      expect(screen.queryByText("active")).toBeNull();
+      expect(document.body.textContent).not.toContain(
+        locale === "en" ? "Editable " : "可編輯",
+      );
       cleanup();
       render(await Billing({}));
       expect(screen.getAllByText("2026-12-31").length).toBeGreaterThan(0);
