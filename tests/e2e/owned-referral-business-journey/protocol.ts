@@ -337,9 +337,36 @@ export type OriginalCancellationTerminalFacts = {
   ownRouteVisible: boolean | null;
 };
 
+/** Bounded browser-side facts around the original UI cancellation. Only
+ * status codes, enumerations, counts and booleans: no URL, header value,
+ * console text or DOM text is retained.
+ */
+export type OriginalCancellationBrowserFacts = {
+  cancelResponse: {
+    status: number;
+    contentEncoding: string;
+    contentLength: number | null;
+  } | null;
+  cancelRequestFailure: string | null;
+  navigations: { screen: string; failure: string | null }[];
+  committedScreens: string[];
+  consoleErrors: number;
+  pageErrors: number;
+  dom: {
+    phase: OriginalCancellationTerminalFacts["phase"];
+    readyState: string | null;
+    endedView: boolean;
+    cancelledView: boolean;
+    cancelButton: "absent" | "pending" | "action" | "OTHER";
+    cancelButtonDisabled: boolean | null;
+    cancelFailedBanner: boolean;
+  }[];
+};
+
 export type OriginalCancellationCheckpoint = {
   response: OriginalCancellationResponseFacts;
   terminal?: OriginalCancellationTerminalFacts;
+  browser?: OriginalCancellationBrowserFacts;
 };
 
 export function originalCancellationTerminalFacts(
