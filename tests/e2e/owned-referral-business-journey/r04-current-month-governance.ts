@@ -212,7 +212,17 @@ export async function captureUiPost(
       "R04/R09 UI POST status and served runtime",
     );
     const payload = object(camelWire(await response.json()));
-    requireFact(payload.ok === true, "R04/R09 UI POST success envelope");
+    // The control-plane proxies pass the API's toApiSuccessEnvelope
+    // { data, meta } through unchanged; it has no `ok` field (hosted run
+    // 44113090732 failed on that).
+    requireFact(
+      payload.data !== null &&
+        typeof payload.data === "object" &&
+        payload.meta !== null &&
+        typeof payload.meta === "object" &&
+        payload.error === undefined,
+      "R04/R09 UI POST success envelope",
+    );
     const requestId = text(
       new Headers(response.request().headers()).get("x-request-id"),
       "R04/R09 original UI request ID",

@@ -604,10 +604,10 @@ describe("original Playwright-shaped UI POST capture", () => {
         request: () => request,
         status: () => 200,
         headers: () => ({ "x-drts-candidate-sha": responseSha }),
+        // The real control-plane envelope: { data, meta }, no `ok` field.
         json: async () => ({
-          ok: true,
           data: { periodMonth: "2026-10" },
-          meta: {},
+          meta: { request_id: "ui-evaluate-id" },
         }),
       };
       const run = captureUiPost(
