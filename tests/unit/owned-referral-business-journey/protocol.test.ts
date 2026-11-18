@@ -514,6 +514,9 @@ describe("complete canonical orders bounded native read", () => {
     ["ops", canonicalPath, ordinaryLimit + 78],
     ["opsApi", "/api/orders", ordinaryLimit + 78],
     ["ops", canonicalPath, ordersLimit],
+    // Recent audit feed (R04 request-ID lookup): dedicated 8 MiB cap.
+    ["admin", "/control-plane-proxy/audit?auditId=", ordinaryLimit + 78],
+    ["ops", "/control-plane-proxy/audit?auditId=", 8 * ordinaryLimit],
   ] as const)(
     "reads every source row and byte for %s %s (%i bytes)",
     async (role, path, size) => {
@@ -541,6 +544,9 @@ describe("complete canonical orders bounded native read", () => {
   );
 
   it.each<[Role, string, CallOptions, Record<string, string>?, number?]>([
+    ["admin", "/control-plane-proxy/audit?auditId=synthetic-audit", {}],
+    ["admin", "/control-plane-proxy/audit", {}],
+    ["api", "/api/audit?auditId=", {}],
     ["admin", canonicalPath, {}],
     ["api", canonicalPath, {}],
     ["referral", canonicalPath, {}],
@@ -613,6 +619,17 @@ describe("complete canonical orders bounded native read", () => {
       ).rejects.toThrow("caller cannot replace authority headers");
     }
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fails closed above the dedicated recent audit feed cap", async () => {
+    const { tx, fetcher } = setup();
+    const fixture = streamResponse(fullSource(8 * ordinaryLimit + 1));
+    fetcher.mockResolvedValueOnce(fixture.result);
+    await expect(
+      tx.call("admin", "/control-plane-proxy/audit?auditId="),
+    ).rejects.toThrow("bounded response exceeded");
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fixture.cancel).toHaveBeenCalledOnce();
   });
 
   it.each(["ops", "opsApi"] as const)(
