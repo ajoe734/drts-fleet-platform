@@ -4144,7 +4144,10 @@ test(journeyName, async ({ browser, request }) => {
           });
           evidence.record({
             stage: "r04-own-current-month-ui-governance",
-            ...governance,
+            // Evidence events are allowlisted; month, record and audit IDs
+            // are not event fields (hosted run 44263223526 failed on them).
+            orderId: governance.orderId,
+            driverId: governance.driverId,
             result: "observed",
           });
         } finally {
@@ -4371,7 +4374,8 @@ test(journeyName, async ({ browser, request }) => {
           });
           evidence.record({
             stage: "r09-own-seven-case-ui-lifecycle-monthly-statistics",
-            ...lifecycle,
+            // Allowlisted event fields only; the lifecycle detail stays in RAM.
+            caseNo: lifecycle.serviceCaseNo,
             result: "observed",
           });
         } finally {
