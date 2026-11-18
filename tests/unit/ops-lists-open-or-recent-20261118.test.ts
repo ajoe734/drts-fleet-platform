@@ -14,9 +14,12 @@ import {
 const NOW = Date.parse("2026-11-18T00:00:00Z");
 
 function repositoryWithQuery() {
-  const query = vi.fn(async (_sql: string, _values?: unknown[]) => ({
-    rows: [] as { record: unknown }[],
-  }));
+  const query = vi.fn<
+    (
+      sql: string,
+      values?: unknown[],
+    ) => Promise<{ rows: { record: unknown }[] }>
+  >(async () => ({ rows: [] }));
   const database = { isEnabled: () => true, query };
   const repository = new OwnedMobilityRepository(
     database as never,
