@@ -55,6 +55,10 @@ import {
   resolveOpsAdapterEmptyState,
   resolveOpsStaleLocationKpi,
 } from "./observability-read-state";
+import {
+  OPS_DISPATCH_TASKS_WORKING_LIST,
+  OPS_ORDERS_WORKING_LIST,
+} from "@/lib/working-lists";
 
 type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
@@ -832,11 +836,14 @@ export default async function DashboardPage() {
       timestamp: "",
     }),
     resolveOrFallback(
-      () => client.getListEnvelope<OwnedOrderRecord>("/api/orders"),
+      () => client.getListEnvelope<OwnedOrderRecord>(OPS_ORDERS_WORKING_LIST),
       createFallbackListEnvelope([] as OwnedOrderRecord[]),
     ),
     resolveOrFallback(
-      () => client.getListEnvelope<DispatchJobRecord>("/api/dispatch/tasks"),
+      () =>
+        client.getListEnvelope<DispatchJobRecord>(
+          OPS_DISPATCH_TASKS_WORKING_LIST,
+        ),
       createFallbackListEnvelope([] as DispatchJobRecord[]),
     ),
     resolveOrFallback(
