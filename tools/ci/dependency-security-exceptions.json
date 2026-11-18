@@ -204,12 +204,12 @@
   {
     "advisory_id": "1247710",
     "module_name": "picomatch",
-    "reason": "GHSA-fc5q-39xc-vjpf (ReDoS via single-branch repeated extglobs) has no patched release: npm latest is 4.0.7 and the range is <=4.0.7. Both lockfile paths are build/dev tooling with repository-controlled patterns: Expo/Metro jest-util in the mobile driver app toolchain, and root lint-staged run only from local git hooks. No deployed service bundles picomatch on a request path. Replace with an upgrade once a patched picomatch is published.",
+    "reason": "GHSA-fc5q-39xc-vjpf (ReDoS via single-branch repeated extglobs) has no patched release: npm latest is 4.0.7 and the range is <=4.0.7. Both production-audit paths are build-time tooling in the mobile driver app toolchain with repository-controlled patterns: Expo/Metro jest-util and Expo CLI. No deployed service bundles picomatch on a request path. Replace with an upgrade once a patched picomatch is published.",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["2.3.2", "4.0.7"],
     "paths": [
       "apps__driver-app>expo>@expo/metro>metro>jest-worker>jest-util>picomatch",
-      ".>lint-staged>picomatch"
+      "apps__driver-app>expo>@expo/cli>picomatch"
     ]
   }
 ]
