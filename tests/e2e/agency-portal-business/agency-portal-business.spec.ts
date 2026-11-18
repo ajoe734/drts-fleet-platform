@@ -344,7 +344,7 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     await expect(
       page.getByRole("heading", { name: "Home", exact: true }),
     ).toBeVisible();
-    await expect(page.locator("main dd").first()).toHaveText(agencyId);
+    await expect(page.getByTestId("agency-system-id")).toHaveText(agencyId);
   });
 
   let selected: WireRow = {};

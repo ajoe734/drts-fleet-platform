@@ -4,7 +4,7 @@ type Params = Record<string, string | number>;
 
 const en = {
   "app.title": "DRTS Regulatory Agency Read-Only Portal",
-  "app.description": "Regulatory agency read-only query portal",
+  "app.description": "Regulatory agency read-only query portal (BUREAU-R13)",
   "shell.title": "DRTS Regulatory Agency Read-Only Portal",
   "shell.readOnly": "Read-only",
   "shell.masked": "PII Masked",
@@ -379,7 +379,7 @@ export type TranslationKey = keyof typeof en;
 
 const zh: Record<TranslationKey, string> = {
   "app.title": "DRTS 主管機關唯讀查詢",
-  "app.description": "主管機關唯讀查詢介面",
+  "app.description": "主管機關唯讀查詢介面（BUREAU-R13）",
   "shell.title": "DRTS 主管機關唯讀查詢",
   "shell.readOnly": "唯讀",
   "shell.masked": "個資已遮罩",

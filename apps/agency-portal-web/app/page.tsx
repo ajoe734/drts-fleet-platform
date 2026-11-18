@@ -90,7 +90,12 @@ export default async function HomePage() {
           {
             label: t("home.agency", undefined, locale),
             value: display(profile?.agencyDisplayName, locale),
-            note: `${t("home.agencyId", undefined, locale)} ${session.agencyId}`,
+            note: (
+              <>
+                {t("home.agencyId", undefined, locale)}{" "}
+                <span data-testid="agency-system-id">{session.agencyId}</span>
+              </>
+            ),
           },
           {
             label: t("home.role", undefined, locale),

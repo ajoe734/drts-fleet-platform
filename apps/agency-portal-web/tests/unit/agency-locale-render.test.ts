@@ -123,6 +123,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
     "@drts/contracts": contracts,
     "@drts/ui-tokens": uiTokens,
     "next/link": {
+      __esModule: true,
       default: ({
         href,
         children,

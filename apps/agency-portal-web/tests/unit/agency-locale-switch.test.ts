@@ -120,6 +120,7 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
     "@drts/contracts": contracts,
     "@drts/ui-tokens": uiTokens,
     "next/link": {
+      __esModule: true,
       default: ({
         href,
         children,
