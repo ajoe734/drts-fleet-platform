@@ -164,8 +164,8 @@ export class FareVersionRepository implements FareVersionStore {
         });
         await client.query(
           `INSERT INTO admin.audit_logs
-          (audit_id,actor_id,actor_type,tenant_id,module_name,action_name,resource_type,resource_id,old_value,new_value,request_id,created_at)
-          VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)`,
+          (audit_id,actor_id,actor_type,tenant_id,module_name,action_name,resource_type,resource_id,old_value,new_value,request_id,created_at,actor_ref)
+          VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12)`,
           [
             audit.auditId,
             normalizeUuidOrNull(audit.actorId),
@@ -178,6 +178,8 @@ export class FareVersionRepository implements FareVersionStore {
             JSON.stringify(audit.newValuesSummary),
             audit.requestId,
             state.evaluatedAt,
+            // actor_id is uuid-only; keep the verbatim actor (V0139).
+            audit.actorId ?? null,
           ],
         );
         await this.insertReceipt(

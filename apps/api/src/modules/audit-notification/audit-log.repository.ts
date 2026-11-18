@@ -12,6 +12,8 @@ import {
 interface AuditLogRow {
   audit_id: string;
   actor_id: string | null;
+  /** Verbatim actor identifier (V0139); actor_id is uuid-only. */
+  actor_ref?: string | null;
   actor_type: AuditLogRecord["actorType"];
   tenant_id: string | null;
   module_name: string;
@@ -50,6 +52,7 @@ export class AuditLogRepository {
         SELECT
           audit_id,
           actor_id,
+          actor_ref,
           actor_type,
           tenant_id,
           module_name,
@@ -78,7 +81,7 @@ export class AuditLogRepository {
       return seed.auditId === normalizedId ? seed : null;
     }
     const result = await this.databaseService!.query<AuditLogRow>(
-      `SELECT audit_id, actor_id, actor_type, tenant_id, module_name,
+      `SELECT audit_id, actor_id, actor_ref, actor_type, tenant_id, module_name,
               action_name, resource_type, resource_id, old_value, new_value,
               request_id, created_at
        FROM admin.audit_logs WHERE audit_id = $1`,
@@ -99,6 +102,7 @@ export class AuditLogRepository {
         SELECT
           audit_id,
           actor_id,
+          actor_ref,
           actor_type,
           tenant_id,
           module_name,
@@ -137,9 +141,10 @@ export class AuditLogRepository {
           old_value,
           new_value,
           request_id,
-          created_at
+          created_at,
+          actor_ref
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13
         )
         ON CONFLICT (audit_id) DO NOTHING
       `,
@@ -156,6 +161,9 @@ export class AuditLogRepository {
         JSON.stringify(record.newValuesSummary ?? null),
         record.requestId,
         record.createdAt,
+        // actor_id only holds UUIDs, and real principal IDs are
+        // `principal_<uuid>`; keep the actor itself so durable reads have it.
+        record.actorId ?? null,
       ],
     );
   }
@@ -172,7 +180,7 @@ export class AuditLogRepository {
 
     return {
       auditId: row.audit_id,
-      actorId: row.actor_id,
+      actorId: row.actor_ref ?? row.actor_id,
       actorType: row.actor_type,
       tenantId: row.tenant_id,
       moduleName: row.module_name,

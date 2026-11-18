@@ -85,6 +85,73 @@ describe("audit notification persistence baseline", () => {
     expect(firstCall?.[1]?.[1]).toBeNull();
     expect(firstCall?.[1]?.[3]).toBeNull();
     expect(firstCall?.[1]?.[7]).toBe("complaint-001");
+    // actor_id is uuid-only; actor_ref keeps the verbatim actor (V0139).
+    expect(firstCall?.[0]).toContain("actor_ref");
+    expect(firstCall?.[1]?.[12]).toBe("ops-user-001");
+  });
+
+  it("reads a principal_<uuid> actor back by audit id from actor_ref", async () => {
+    const auditId = "33333333-3333-4333-8333-333333333333";
+    const principal = "principal_0f6c8a1e2b3d4c5e8f9a0b1c2d3e4f5a";
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          audit_id: auditId,
+          actor_id: null,
+          actor_ref: principal,
+          actor_type: "platform_admin",
+          tenant_id: null,
+          module_name: "reporting",
+          action_name: "referral_monthly_rating_governance.dismissed",
+          resource_type: "referral_monthly_rating_governance_record",
+          resource_id: "record-001",
+          old_value: null,
+          new_value: null,
+          request_id: "request-002",
+          created_at: "2026-11-18T00:00:00.000Z",
+        },
+      ],
+    }));
+    const repository = new AuditLogRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const record = await repository.findById(auditId);
+
+    const firstCall = query.mock.calls[0] as [string, unknown[]] | undefined;
+    expect(firstCall?.[0]).toContain("actor_ref");
+    expect(record?.actorId).toBe(principal);
+    expect(record?.requestId).toBe("request-002");
+  });
+
+  it("keeps a legacy uuid actor_id when actor_ref is absent", async () => {
+    const auditId = "44444444-4444-4444-8444-444444444444";
+    const actor = "55555555-5555-4555-8555-555555555555";
+    const repository = new AuditLogRepository({
+      isEnabled: () => true,
+      query: vi.fn(async () => ({
+        rows: [
+          {
+            audit_id: auditId,
+            actor_id: actor,
+            actor_ref: null,
+            actor_type: "ops_user",
+            tenant_id: null,
+            module_name: "complaint",
+            action_name: "create_complaint_case",
+            resource_type: "complaint_case",
+            resource_id: "complaint-001",
+            old_value: null,
+            new_value: null,
+            request_id: "request-003",
+            created_at: "2026-11-18T00:00:00.000Z",
+          },
+        ],
+      })),
+    } as never);
+
+    expect((await repository.findById(auditId))?.actorId).toBe(actor);
   });
 
   it("falls back to the bootstrap seed when repository loading fails", async () => {
