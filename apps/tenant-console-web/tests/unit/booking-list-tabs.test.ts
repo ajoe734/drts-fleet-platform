@@ -42,6 +42,10 @@ const bookings = [
   booking("done-1", { orderStatus: "completed" }),
   booking("cancel-1", { orderStatus: "cancelled" }),
   booking("cancel-2", { orderStatus: "cancelled" }),
+  booking("cancel-future", {
+    orderStatus: "cancelled",
+    reservationWindowStart: "2026-11-21T08:00:00Z",
+  }),
 ];
 
 const ids = (items: BookingRecord[]) => items.map((item) => item.bookingId);
@@ -60,10 +64,15 @@ describe("booking list header tabs", () => {
           .items,
       );
 
-    expect(run("all")).toHaveLength(6);
-    expect(run("cancel").sort()).toEqual(["cancel-1", "cancel-2"]);
+    expect(run("all")).toHaveLength(7);
+    expect(run("cancel").sort()).toEqual([
+      "cancel-1",
+      "cancel-2",
+      "cancel-future",
+    ]);
     expect(run("done")).toEqual(["done-1"]);
     expect(run("approval")).toEqual(["approval-1"]);
+    // A cancelled booking with a future pickup is not a reservation.
     expect(run("reserve")).toEqual(["future-1"]);
     expect(run("live").sort()).toEqual(["approval-1", "future-1", "live-1"]);
   });
@@ -71,12 +80,12 @@ describe("booking list header tabs", () => {
   it("counts each tab with the same rule it filters by", () => {
     const counts = countBookingTabs(bookings, NOW);
     expect(counts).toEqual({
-      all: 6,
+      all: 7,
       live: 3,
       reserve: 1,
       approval: 1,
       done: 1,
-      cancel: 2,
+      cancel: 3,
     });
     for (const [tab, count] of Object.entries(counts)) {
       const query = parseBookingListQuery({ tab, pageSize: "50" });

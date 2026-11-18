@@ -139,6 +139,12 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
  * Membership of one booking in a header tab. The tab counts and the tab
  * filter both use this, so a tab never lists rows its badge did not count.
  */
+function isOpenBooking(booking: BookingRecord) {
+  return (
+    booking.orderStatus !== "completed" && booking.orderStatus !== "cancelled"
+  );
+}
+
 export function matchesBookingTab(
   booking: BookingRecord,
   tab: BookingListTab,
@@ -148,13 +154,12 @@ export function matchesBookingTab(
     case "all":
       return true;
     case "live":
-      return (
-        booking.orderStatus !== "completed" &&
-        booking.orderStatus !== "cancelled"
-      );
+      return isOpenBooking(booking);
     case "reserve": {
+      // A cancelled or completed booking is no longer a reservation, even
+      // when its pickup window is still in the future.
       const start = new Date(booking.reservationWindowStart).getTime();
-      return !Number.isNaN(start) && start > now;
+      return isOpenBooking(booking) && !Number.isNaN(start) && start > now;
     }
     case "approval":
       return booking.approvalState === "pending";
