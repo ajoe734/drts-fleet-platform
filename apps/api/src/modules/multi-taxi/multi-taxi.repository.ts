@@ -103,7 +103,10 @@ export function computeTwoCalendarYearRetentionFloorMs(
     baseDate.getUTCSeconds(),
     baseDate.getUTCMilliseconds(),
   );
-  return Math.max(calendarTwoYearsMs, safeBaseMs + TRIP_RECORD_MIN_RETENTION_MS);
+  return Math.max(
+    calendarTwoYearsMs,
+    safeBaseMs + TRIP_RECORD_MIN_RETENTION_MS,
+  );
 }
 
 export function computeTwoCalendarYearRetentionFloorIso(
@@ -261,7 +264,10 @@ export function evaluateTripTelemetrySamples(input: {
       recordedAtIso: recordedDate.toISOString(),
       recordedAtMs,
       receivedAtMs,
-      vehicleWasNull: row.vehicle_id === null || row.vehicle_id === undefined || row.vehicle_id === "",
+      vehicleWasNull:
+        row.vehicle_id === null ||
+        row.vehicle_id === undefined ||
+        row.vehicle_id === "",
     });
   }
 
@@ -397,8 +403,7 @@ export function evaluateTripTelemetrySamples(input: {
   };
 }
 
-export interface StoredMultiTaxiTripOperationalRecord
-  extends MultiTaxiTripOperationalRecord {
+export interface StoredMultiTaxiTripOperationalRecord extends MultiTaxiTripOperationalRecord {
   orderNo: string;
   assignmentId: string | null;
   driverId?: string | null;
@@ -3295,13 +3300,15 @@ export class MultiTaxiRepository {
       const validActorId =
         identity?.actorId && isUuid(identity.actorId) ? identity.actorId : null;
       await client.query(
-        "INSERT INTO admin.audit_logs (actor_id, actor_type, module_name, action_name, resource_type, resource_id, new_value, request_id) VALUES ($1, $2, 'partner_notification', 'retry_delivery', 'consumer_notification_outbox', $3, $4::jsonb, $5)",
+        "INSERT INTO admin.audit_logs (actor_id, actor_type, module_name, action_name, resource_type, resource_id, new_value, request_id, actor_ref) VALUES ($1, $2, 'partner_notification', 'retry_delivery', 'consumer_notification_outbox', $3, $4::jsonb, $5, $6)",
         [
           validActorId,
           identity?.actorType || "system",
           outboxId,
           JSON.stringify({ retriedAt: new Date().toISOString() }),
           requestId || null,
+          // actor_id is uuid-only; keep the verbatim actor (V0139).
+          identity?.actorId || null,
         ],
       );
 
@@ -3447,7 +3454,8 @@ export class MultiTaxiRepository {
     executor: TripOperationalRecordQueryExecutor,
     record: StoredMultiTaxiTripOperationalRecord,
   ): Promise<StoredMultiTaxiTripOperationalRecord> {
-    const initialNormalized = this.normalizeTripOperationalRecordForWrite(record);
+    const initialNormalized =
+      this.normalizeTripOperationalRecordForWrite(record);
     const telemetryResolved = await this.resolveTripTelemetryRouteInTransaction(
       executor,
       initialNormalized,
@@ -3694,7 +3702,8 @@ export class MultiTaxiRepository {
           generatedAt: existing.generatedAt,
           retainUntil: computeTwoCalendarYearRetentionFloorIso(
             existing.generatedAt,
-            Date.parse(normalized.retainUntil) > Date.parse(existing.retainUntil)
+            Date.parse(normalized.retainUntil) >
+              Date.parse(existing.retainUntil)
               ? normalized.retainUntil
               : existing.retainUntil,
           ),
@@ -3782,10 +3791,12 @@ export class MultiTaxiRepository {
     return row ? this.mapTripOperationalRecordRow(row) : null;
   }
 
-  async purgeExpiredTripOperationalRecords(options: {
-    nowIso?: string;
-    heldSubjects?: ReadonlySet<string>;
-  } = {}): Promise<{
+  async purgeExpiredTripOperationalRecords(
+    options: {
+      nowIso?: string;
+      heldSubjects?: ReadonlySet<string>;
+    } = {},
+  ): Promise<{
     purgedRecordIds: string[];
     skippedHeldRecordIds: string[];
   }> {
@@ -3802,10 +3813,15 @@ export class MultiTaxiRepository {
     if (!this.isEnabled()) {
       const purgedRecordIds: string[] = [];
       const skippedHeldRecordIds: string[] = [];
-      for (const [orderId, record] of this.inMemoryTripOperationalRecords.entries()) {
+      for (const [
+        orderId,
+        record,
+      ] of this.inMemoryTripOperationalRecords.entries()) {
         const effectiveRetainUntilMs = Math.max(
           Date.parse(record.retainUntil),
-          computeTwoCalendarYearRetentionFloorMs(Date.parse(record.generatedAt)),
+          computeTwoCalendarYearRetentionFloorMs(
+            Date.parse(record.generatedAt),
+          ),
         );
         if (effectiveRetainUntilMs > nowMs) {
           continue;
@@ -3921,7 +3937,12 @@ export class MultiTaxiRepository {
       record.paymentStatus ?? "unknown";
     const collectedFareMinor =
       paymentStatus === "captured"
-        ? Math.max(0, Math.round(record.collectedFareMinor ?? record.actualFareMinor ?? 0))
+        ? Math.max(
+            0,
+            Math.round(
+              record.collectedFareMinor ?? record.actualFareMinor ?? 0,
+            ),
+          )
         : paymentStatus === "refunded"
           ? 0
           : null;
@@ -4001,9 +4022,11 @@ export class MultiTaxiRepository {
     };
 
     const rawPaymentStatus =
-      (typeof row.live_payment_status === "string" && row.live_payment_status) ||
+      (typeof row.live_payment_status === "string" &&
+        row.live_payment_status) ||
       (typeof row.payment_status === "string" && row.payment_status) ||
-      (typeof jsonRecord.paymentStatus === "string" && jsonRecord.paymentStatus) ||
+      (typeof jsonRecord.paymentStatus === "string" &&
+        jsonRecord.paymentStatus) ||
       "unknown";
     const paymentStatus: MultiTaxiTripPaymentStatus = [
       "not_selected",
@@ -4078,7 +4101,8 @@ export class MultiTaxiRepository {
       (typeof row.route_summary === "string" && row.route_summary.trim()
         ? row.route_summary.trim()
         : null) ??
-      (typeof jsonRoute.routeSummary === "string" && jsonRoute.routeSummary.trim()
+      (typeof jsonRoute.routeSummary === "string" &&
+      jsonRoute.routeSummary.trim()
         ? jsonRoute.routeSummary.trim()
         : null);
 
@@ -4100,9 +4124,7 @@ export class MultiTaxiRepository {
       toIso(jsonRecord.reservedAt) ??
       new Date(0).toISOString();
     const generatedAt =
-      toIso(row.generated_at) ??
-      toIso(jsonRecord.generatedAt) ??
-      reservedAt;
+      toIso(row.generated_at) ?? toIso(jsonRecord.generatedAt) ?? reservedAt;
     const retainUntil = computeTwoCalendarYearRetentionFloorIso(
       generatedAt,
       toIso(row.retain_until) ?? toIso(jsonRecord.retainUntil),
@@ -4110,7 +4132,8 @@ export class MultiTaxiRepository {
 
     const rawChargingMode =
       (typeof row.charging_mode === "string" && row.charging_mode) ||
-      (typeof jsonRecord.chargingMode === "string" && jsonRecord.chargingMode) ||
+      (typeof jsonRecord.chargingMode === "string" &&
+        jsonRecord.chargingMode) ||
       "meter";
 
     const telemetryProvenance =
@@ -4120,7 +4143,9 @@ export class MultiTaxiRepository {
         : undefined;
 
     return {
-      recordId: String(row.record_id ?? jsonRecord.recordId ?? `mtr-${String(row.order_id)}`),
+      recordId: String(
+        row.record_id ?? jsonRecord.recordId ?? `mtr-${String(row.order_id)}`,
+      ),
       orderId: String(row.order_id ?? jsonRecord.orderId ?? ""),
       orderNo: String(
         row.resolved_order_no ??
@@ -4133,7 +4158,8 @@ export class MultiTaxiRepository {
       assignmentId:
         typeof row.assignment_id === "string" && row.assignment_id
           ? row.assignment_id
-          : typeof jsonRecord.assignmentId === "string" && jsonRecord.assignmentId
+          : typeof jsonRecord.assignmentId === "string" &&
+              jsonRecord.assignmentId
             ? jsonRecord.assignmentId
             : null,
       driverId:
@@ -4152,9 +4178,7 @@ export class MultiTaxiRepository {
         durationSeconds,
         source: routeSource,
         routeSummary,
-        ...(telemetryProvenance !== undefined
-          ? { telemetryProvenance }
-          : {}),
+        ...(telemetryProvenance !== undefined ? { telemetryProvenance } : {}),
       },
       payableFareMinor,
       actualFareMinor,
