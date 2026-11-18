@@ -14,7 +14,9 @@ import {
 const NOW = Date.parse("2026-11-18T00:00:00Z");
 
 function repositoryWithQuery() {
-  const query = vi.fn(async () => ({ rows: [] as { record: unknown }[] }));
+  const query = vi.fn(async (_sql: string, _values?: unknown[]) => ({
+    rows: [] as { record: unknown }[],
+  }));
   const database = { isEnabled: () => true, query };
   const repository = new OwnedMobilityRepository(
     database as never,
@@ -23,7 +25,7 @@ function repositoryWithQuery() {
   return { repository, query };
 }
 
-const sqlOf = (query: ReturnType<typeof vi.fn>) =>
+const sqlOf = (query: ReturnType<typeof repositoryWithQuery>["query"]) =>
   String(query.mock.calls[0]?.[0]).replace(/\s+/g, " ").trim();
 
 describe("recentDays query", () => {
@@ -45,7 +47,7 @@ describe("recentDays query", () => {
     "rejects %j instead of widening to every order",
     (raw) => {
       expect(() => parseRecentDaysWindow(raw, NOW)).toThrow(
-        /recentDays must be a whole number of days from 1 to 366/,
+        expect.objectContaining({ code: "RECENT_DAYS_INVALID", status: 400 }),
       );
     },
   );
