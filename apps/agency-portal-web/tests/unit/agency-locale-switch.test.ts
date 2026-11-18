@@ -133,6 +133,7 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
       useRouter: () => ({
         refresh: refreshMock,
       }),
+      usePathname: () => "/",
     },
   });
 

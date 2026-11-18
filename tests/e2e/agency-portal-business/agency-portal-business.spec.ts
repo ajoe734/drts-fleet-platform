@@ -349,7 +349,7 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
 
   let selected: WireRow = {};
   await test.step("R11 list and detail read a real completed Passenger journey from the reused database", async () => {
-    await visit(page, "/trip-records", "R11 Trip Records");
+    await visit(page, "/trip-records", "Trip Records");
     const records = await read(page, "trip-records");
     expect(
       records.total,
@@ -366,7 +366,7 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     await page.locator(`main a[href="${detailPath}"]`).click();
     await expect(
       page.getByRole("heading", {
-        name: "R11 Trip Record Detail",
+        name: "Trip Record Detail",
         exact: true,
       }),
     ).toBeVisible();
@@ -400,31 +400,31 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     {
       page: "/qualifications/drivers",
       api: "qualifications/drivers",
-      title: "R14 Driver Qualifications & Expiry",
+      title: "Driver Qualifications & Expiry",
       key: "driver_id_masked",
     },
     {
       page: "/qualifications/vehicles",
       api: "qualifications/vehicles",
-      title: "R14 Vehicle Qualifications & Expiry",
+      title: "Vehicle Qualifications & Expiry",
       key: "plate_no_masked",
     },
     {
       page: "/reports/complaints",
       api: "reports/complaint-monthly-statistics",
-      title: "R09 Monthly Complaint Statistics",
+      title: "Monthly Complaint Statistics",
       key: "period_month",
     },
     {
       page: "/reports/operations",
       api: "reports/operations-summary",
-      title: "R10 Six-Month Operations Summary",
+      title: "Six-Month Operations Summary",
       key: "from",
     },
     {
       page: "/reports/daily-dispatch",
       api: "reports/daily-dispatch-records",
-      title: "R12 Daily Dispatch Report",
+      title: "Daily Dispatch Report",
       key: "service_date",
     },
   ]) {
@@ -568,7 +568,7 @@ test("an invited Agency exporter signs in through the real BFF, reads persisted 
     try {
       await test.step("Navigate to the normal export page", async () => {
         diagnostic.navigation.startedMs = elapsed();
-        await visit(page, "/trip-records/exports", "R11 Controlled Exports");
+        await visit(page, "/trip-records/exports", "Controlled Exports");
         diagnostic.navigation.completedMs = elapsed();
         // This is document load state only; it does not prove React hydration.
         diagnostic.documentReadyState = await page.evaluate(
