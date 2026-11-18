@@ -123,6 +123,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
     "@drts/contracts": contracts,
     "@drts/ui-tokens": uiTokens,
     "next/link": {
+      __esModule: true,
       default: ({
         href,
         children,
@@ -147,6 +148,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
       useRouter: () => ({
         refresh: vi.fn(),
       }),
+      usePathname: () => "/",
     },
     "@drts/tenant-auth/api-fetch": {
       resolveTenantApiUrl: () => "http://localhost:3001",
@@ -410,7 +412,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         searchParams: Promise.resolve({ status: "expired", windowDays: "30" }),
       }),
     );
-    expect(enDriversHtml).toContain("R14 Driver Qualifications &amp; Expiry");
+    expect(enDriversHtml).toContain("Driver Qualifications &amp; Expiry");
     expect(enDriversHtml).toContain("Driver License Expiry");
     expect(enDriversHtml).toContain("DRV-***88");
     expect(enDriversHtml).toContain("11/01/2026");
@@ -438,7 +440,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
       }),
     );
     expect(enVehiclesEmptyHtml).toContain(
-      "R14 Vehicle Qualifications &amp; Expiry",
+      "Vehicle Qualifications &amp; Expiry",
     );
     expect(enVehiclesEmptyHtml).toContain("Periodic Inspection");
     expect(enVehiclesEmptyHtml).toContain("No records found");
@@ -477,7 +479,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(enComplaintsHtml).toContain("R09 Monthly Complaint Statistics");
+    expect(enComplaintsHtml).toContain("Monthly Complaint Statistics");
     expect(enComplaintsHtml).toContain(
       "Resolved count, Historical SLA breach count: Not provided",
     );
@@ -507,7 +509,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(enDaily403Html).toContain("R12 Daily Dispatch Report");
+    expect(enDaily403Html).toContain("Daily Dispatch Report");
     expect(enDaily403Html).toContain(
       "This account is not authorized to access this data (access attempt logged).",
     );
@@ -566,7 +568,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(zhListHtml).toContain("R11 行程紀錄");
+    expect(zhListHtml).toContain("行程紀錄");
     expect(zhListHtml).toContain("查詢結果：共 1 筆符合條件之行程紀錄");
     expect(zhListHtml).toContain("完單起訖與里程摘要");
     expect(zhListHtml).toContain("已授權待請款");
@@ -592,7 +594,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(enListHtml).toContain("R11 Trip Records");
+    expect(enListHtml).toContain("Trip Records");
     expect(enListHtml).toContain("Query results: 1 matching trip records");
     expect(enListHtml).toContain("Export Current Filter Scope CSV");
     expect(enListHtml).toContain(
@@ -621,7 +623,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         params: Promise.resolve({ recordId: "mtr-20261025-001" }),
       }),
     );
-    expect(enDetailHtml).toContain("R11 Trip Record Detail");
+    expect(enDetailHtml).toContain("Trip Record Detail");
     expect(enDetailHtml).toContain("Route Source (Provenance)");
     expect(enDetailHtml).toContain("Metered Completion Fare");
     expect(enDetailHtml).toContain(
@@ -645,7 +647,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(enExportsHtml).toContain("R11 Controlled Exports");
+    expect(enExportsHtml).toContain("Controlled Exports");
     expect(enExportsHtml).toContain("Preview Record Count");
     expect(enExportsHtml).toContain("Export Purpose (Required)");
     expect(enExportsHtml).toContain("Create Export Job");
@@ -718,7 +720,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(zhOpsHtml).toContain("R10 六個月營運統計");
+    expect(zhOpsHtml).toContain("六個月營運統計");
     expect(zhOpsHtml).toContain("各月明細（同批生成）");
     expect(zhOpsHtml).toContain("有效／預期快照");
     expect(zhOpsHtml).toContain("無法判定");
@@ -745,7 +747,7 @@ describe("Agency portal server and component rendering in zh and en", () => {
         }),
       }),
     );
-    expect(enOpsHtml).toContain("R10 Six-Month Operations Summary");
+    expect(enOpsHtml).toContain("Six-Month Operations Summary");
     expect(enOpsHtml).toContain("Period Summary");
     expect(enOpsHtml).toContain("Monthly Breakdown (Same Batch)");
     expect(enOpsHtml).toContain("Month Range");

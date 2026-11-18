@@ -64,6 +64,7 @@ import {
   type ObjectData,
   type Role,
   type CallOptions,
+  type OriginalCancellationBrowserFacts,
   futureTaipeiReservationIntents,
   verifyOwnedReservationCancellation,
   runOwnedRedispatchToSecond,
@@ -441,6 +442,21 @@ test(journeyName, async ({ browser, request }) => {
   });
   const context = await browser.newContext();
   const page = await context.newPage();
+  // Keep this page's request interception enabled for the whole journey.
+  // Playwright 1.59 sends Fetch.disable as soon as a page's last route is
+  // removed (a `times: 1` route expiring after its fulfill, or unroute). A
+  // navigation the product starts in that instant can have Fetch.requestPaused
+  // stored before the flag flips and Network.requestWillBeSent paired after
+  // it: the Request is created without a route, nobody continues the paused
+  // fetch, and the frame never commits. Hosted C1 hit this on 2026-11-16 and
+  // 2026-11-17 (screen=cancelled navigation requested, never sent, never
+  // failed). This never-requested pattern keeps one route registered, so later
+  // route/unroute calls only swap matchers; unmatched requests are continued
+  // inside the Playwright server without a client round trip.
+  await page.route(
+    `${origins.referral}/__drts-request-interception-keepalive__`,
+    (route) => route.fallback(),
+  );
   const tx = new NativeTransport(
     origins,
     runtime,
@@ -2599,6 +2615,165 @@ test(journeyName, async ({ browser, request }) => {
                   await route.abort("failed").catch(() => undefined);
                 }
               };
+              // Hosted C1 (2026-11-16) got a 200 ACK, never requested
+              // screen=cancelled, then hung ~18 min in an un-timed read. Keep
+              // bounded browser facts (codes, enums, counts, booleans only; no
+              // URL, header value, console or DOM text) and bound every
+              // diagnostic read so the original failure surfaces in time.
+              const settle = <T, F>(
+                work: Promise<T>,
+                ms: number,
+                fallback: F,
+              ): Promise<T | F> => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                return Promise.race<T | F>([
+                  work.catch(() => fallback),
+                  new Promise<F>((resolve) => {
+                    timer = setTimeout(() => resolve(fallback), ms);
+                  }),
+                ]).finally(() => clearTimeout(timer));
+              };
+              const screenOf = (value: string) => {
+                try {
+                  const url = new URL(value);
+                  if (url.origin !== origins.referral) return "FOREIGN";
+                  const screen = url.searchParams.get("screen");
+                  return screen === "trip" ||
+                    screen === "cancelled" ||
+                    screen === "trips"
+                    ? screen
+                    : "OTHER";
+                } catch {
+                  return "OTHER";
+                }
+              };
+              const netErrorOf = (value: string | undefined) =>
+                value && /^net::ERR_[A-Z_]{1,60}$/.test(value)
+                  ? value
+                  : value
+                    ? "OTHER"
+                    : "UNKNOWN";
+              const isMainNavigation = (request: PlaywrightRequest) => {
+                try {
+                  return (
+                    request.isNavigationRequest() &&
+                    request.frame().parentFrame() === null
+                  );
+                } catch {
+                  return false;
+                }
+              };
+              const browser: OriginalCancellationBrowserFacts = {
+                cancelResponse: null,
+                cancelRequestFailure: null,
+                navigations: [],
+                committedScreens: [],
+                consoleErrors: 0,
+                pageErrors: 0,
+                dom: [],
+              };
+              const onBrowserResponse = (response: PlaywrightResponse) => {
+                if (response.url() !== cancelUrl) return;
+                const headers = response.headers();
+                const encoding = headers["content-encoding"];
+                const length = Number(headers["content-length"]);
+                browser.cancelResponse = {
+                  status: response.status(),
+                  contentEncoding: !encoding
+                    ? "none"
+                    : ["gzip", "br", "deflate", "zstd", "identity"].includes(
+                          encoding,
+                        )
+                      ? encoding
+                      : "OTHER",
+                  contentLength: Number.isSafeInteger(length) ? length : null,
+                };
+              };
+              const onBrowserRequest = (request: PlaywrightRequest) => {
+                if (
+                  isMainNavigation(request) &&
+                  browser.navigations.length < 10
+                )
+                  browser.navigations.push({
+                    screen: screenOf(request.url()),
+                    failure: null,
+                  });
+              };
+              const onBrowserRequestFailed = (request: PlaywrightRequest) => {
+                const failure = netErrorOf(request.failure()?.errorText);
+                if (request.url() === cancelUrl)
+                  browser.cancelRequestFailure = failure;
+                else if (
+                  isMainNavigation(request) &&
+                  browser.navigations.length < 10
+                )
+                  browser.navigations.push({
+                    screen: screenOf(request.url()),
+                    failure,
+                  });
+              };
+              const onBrowserFrame = (frame: {
+                url(): string;
+                parentFrame(): unknown;
+              }) => {
+                if (
+                  frame.parentFrame() === null &&
+                  browser.committedScreens.length < 10
+                )
+                  browser.committedScreens.push(screenOf(frame.url()));
+              };
+              const onBrowserConsole = (message: { type(): string }) => {
+                if (message.type() === "error") browser.consoleErrors += 1;
+              };
+              const onBrowserPageError = () => {
+                browser.pageErrors += 1;
+              };
+              const browserDom = async (
+                phase: OriginalCancellationBrowserFacts["dom"][number]["phase"],
+              ) => {
+                const dom = await settle(
+                  page.evaluate(() => {
+                    const body = document.body?.innerText ?? "";
+                    const action = document.querySelector(
+                      '[data-drt-operation="referral-cancel"]',
+                    );
+                    const label = action?.textContent ?? "";
+                    return {
+                      readyState: [
+                        "loading",
+                        "interactive",
+                        "complete",
+                      ].includes(document.readyState)
+                        ? document.readyState
+                        : "OTHER",
+                      endedView: body.includes("行程已結束或更新"),
+                      cancelledView: body.includes("行程已取消"),
+                      cancelButton: !action
+                        ? ("absent" as const)
+                        : label.includes("取消中")
+                          ? ("pending" as const)
+                          : label.includes("取消行程")
+                            ? ("action" as const)
+                            : ("OTHER" as const),
+                      cancelButtonDisabled:
+                        action instanceof HTMLButtonElement
+                          ? action.disabled
+                          : null,
+                      cancelFailedBanner: body.includes("取消行程失敗"),
+                    };
+                  }),
+                  5_000,
+                  null,
+                );
+                if (dom && browser.dom.length < 10)
+                  browser.dom.push({ phase, ...dom });
+              };
+              page.on("response", onBrowserResponse);
+              page.on("request", onBrowserRequest);
+              page.on("requestfailed", onBrowserRequestFailed);
+              page.on("framenavigated", onBrowserFrame);
+              page.on("console", onBrowserConsole);
+              page.on("pageerror", onBrowserPageError);
               await page.route(cancelUrl, observe, { times: 1 });
               const deadline = setTimeout(
                 () =>
@@ -2636,14 +2811,21 @@ test(journeyName, async ({ browser, request }) => {
                 const terminalCheckpoint = async (
                   phase: "before-wait" | "url-ready" | "rendered" | "failed",
                 ) => {
+                  // isVisible() has no timeout of its own; bound each read.
                   const dom = {
-                    cancelledVisible: await cancelledHeading
-                      .isVisible()
-                      .catch(() => null),
-                    ownRouteVisible: await ownRoute
-                      .isVisible()
-                      .catch(() => null),
+                    cancelledVisible: await settle(
+                      cancelledHeading.isVisible(),
+                      5_000,
+                      null,
+                    ),
+                    ownRouteVisible: await settle(
+                      ownRoute.isVisible(),
+                      5_000,
+                      null,
+                    ),
                   };
+                  if (phase === "before-wait" || phase === "failed")
+                    await browserDom(phase);
                   await checkpoint({
                     response: responseFacts,
                     terminal: originalCancellationTerminalFacts(
@@ -2652,6 +2834,9 @@ test(journeyName, async ({ browser, request }) => {
                       dom,
                       phase,
                     ),
+                    browser: JSON.parse(
+                      JSON.stringify(browser),
+                    ) as OriginalCancellationBrowserFacts,
                   });
                 };
                 await cancelPhase("browser-cancel-terminal-ui", async () => {
@@ -2728,7 +2913,25 @@ test(journeyName, async ({ browser, request }) => {
                 };
               } finally {
                 clearTimeout(deadline);
-                await page.unroute(cancelUrl, observe);
+                page.off("response", onBrowserResponse);
+                page.off("request", onBrowserRequest);
+                page.off("requestfailed", onBrowserRequestFailed);
+                page.off("framenavigated", onBrowserFrame);
+                page.off("console", onBrowserConsole);
+                page.off("pageerror", onBrowserPageError);
+                // unroute() can wait on an in-flight handler; never let cleanup
+                // hold the journey past its own failure.
+                const unrouted = await settle(
+                  page.unroute(cancelUrl, observe).then(() => true),
+                  10_000,
+                  false,
+                );
+                if (!unrouted)
+                  evidence.record({
+                    stage: "browser-cancel-unroute-timeout",
+                    orderId: id,
+                    result: "failed",
+                  });
               }
             });
           },

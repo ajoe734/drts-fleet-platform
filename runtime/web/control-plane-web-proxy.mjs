@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { Readable } from "node:stream";
+import { Readable, pipeline } from "node:stream";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
@@ -227,7 +227,18 @@ function writeResponse(res, upstream) {
     return;
   }
 
-  Readable.fromWeb(upstream.body).pipe(res);
+  // A bare .pipe() leaves the body stream without an error listener. When the
+  // Next child (or the API behind it) dropped the connection mid-response,
+  // undici raised "TypeError: terminated" on that stream, nothing handled it,
+  // and the whole wrapper exited — Cloud Run then answered 503 until a new
+  // instance started. pipeline() handles the error and tears both ends down,
+  // so only the one response is lost.
+  pipeline(Readable.fromWeb(upstream.body), res, (error) => {
+    if (!error) return;
+    console.error("[control-plane-proxy] response stream ended early", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }
 
 async function forwardNextRequest(req, res, requestUrl) {

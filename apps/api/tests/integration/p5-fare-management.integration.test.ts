@@ -97,12 +97,13 @@ describe.sequential(
       url.pathname = `/${dbName}`;
       pool = new Pool({ connectionString: url.toString() });
       second = new Pool({ connectionString: url.toString() });
-      // Actual prerequisite migrations plus immutable V0112 and new V0118.
+      // Actual prerequisite migrations plus immutable V0112, new V0118 and the
+      // V0139 audit actor_ref column the fare-version audit insert writes.
       const names = readdirSync(migrations)
         .filter(
           (name) =>
             /^V000[1-9]__/.test(name) ||
-            /^V0109__|^V0112__|^V0118__|^V0137__/.test(name),
+            /^V0109__|^V0112__|^V0118__|^V0137__|^V0139__/.test(name),
         )
         .sort();
       expect(names.some((x) => x.startsWith("V0118__"))).toBe(true);

@@ -456,7 +456,7 @@ describe("owned hosted journey transport", () => {
 
 describe("complete canonical orders bounded native read", () => {
   const ordinaryLimit = 1024 * 1024;
-  const ordersLimit = 8 * ordinaryLimit;
+  const ordersLimit = 32 * ordinaryLimit;
   const canonicalPath = "/control-plane-proxy/orders";
 
   function fullSource(bytes: number) {
@@ -2374,6 +2374,17 @@ describe("original UI cancellation response capture before navigation release", 
         native.event("loadstate", { add: "domcontentloaded" });
         // Intentionally no load: this is the real native boundary regression.
       });
+      // Browser diagnostics boundary: listeners and one bounded DOM read.
+      const on = vi.fn();
+      const off = vi.fn();
+      const evaluate = vi.fn(async () => ({
+        readyState: "complete",
+        endedView: false,
+        cancelledView: hasOutcome,
+        cancelButton: "absent" as const,
+        cancelButtonDisabled: null,
+        cancelFailedBanner: false,
+      }));
       const caller = actualCancellationCaller({
         page: {
           url: () => native.page.url(),
@@ -2389,6 +2400,9 @@ describe("original UI cancellation response capture before navigation release", 
             observe = handler;
           },
           unroute,
+          on,
+          off,
+          evaluate,
         },
         // Controlled DOM assertion boundary only; no wait/navigation logic is mocked.
         expect: (value: typeof heading | typeof button) => ({
@@ -2455,6 +2469,11 @@ describe("original UI cancellation response capture before navigation release", 
         expect(f.route.fulfill).toHaveBeenCalledOnce();
         expect(button.click).toHaveBeenCalledOnce();
         expect(unroute).toHaveBeenCalledOnce();
+        expect(on).toHaveBeenCalledTimes(6);
+        expect(off.mock.calls).toEqual(on.mock.calls);
+        expect(
+          checkpoints.at(-1)?.browser?.dom.map((entry) => entry.phase),
+        ).toEqual(hasOutcome ? ["before-wait"] : ["before-wait", "failed"]);
         expect(route.abort).not.toHaveBeenCalled();
         expect(
           evidence.events.filter((event) => event.result === "failed"),

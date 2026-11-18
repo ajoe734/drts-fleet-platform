@@ -215,6 +215,12 @@
       "amended_at": "2026-11-14",
       "scope": "Added portal_password_login_allocations with V0138__portal_password_login_credentials.sql only; all previous allocations, amendments and task ownership entries remain unchanged.",
       "reason": "Registers the portal password/TOTP login credential schema baseline (docs/01-decisions/SD-DP-20261113-001-portal-password-login.md; docs/02-architecture/portal-password-login-20261113/01_system_sa_sd.md §2) at origin/dev 9fb0f13f4514d65bb0a9b706c7705d76a368f68b, whose highest previously reserved migration is V0137 (passenger_app_allocations, SR-ACCEPT-001). V0138 was not pre-allocated by the original H90c authored implementation packet; this task registers it at implementation time per the task's own integration_notes, claiming only this single new migration file and not renaming or superseding V0137."
+    },
+    {
+      "amended_by_task_id": "AUDIT-LOG-ACTOR-REF-20261118",
+      "amended_at": "2026-11-18",
+      "scope": "Added audit_log_actor_ref_allocations with V0139__audit_log_actor_ref.sql only; all previous allocations, amendments and task ownership entries remain unchanged.",
+      "reason": "Durable admin.audit_logs rows lost their actor because actor_id is uuid and writers stored normalizeUuidOrNull(principal_<uuid>). Registered at origin/dev b18c521b2cbe0278c94d5e6bf0e8206f9b1c1171, whose highest reserved migration is V0138 (portal_password_login_allocations)."
     }
   ],
   "voice_application_allocations": [
@@ -1086,6 +1092,20 @@
       ],
       "description": "外部後台帳號密碼登入與 TOTP 二階驗證的 schema 基線（SD-DP-20261113-001 / 01_system_sa_sd.md §2），與既有 Google 登入並存。",
       "downstream_tasks": []
+    }
+  ],
+  "audit_log_actor_ref_allocations": [
+    {
+      "task_id": "AUDIT-LOG-ACTOR-REF-20261118",
+      "version": "V0139",
+      "migration_filename": "V0139__audit_log_actor_ref.sql",
+      "domain": "audit_log_actor_ref",
+      "target_schema": "admin",
+      "primary_tables": [],
+      "referenced_tables": ["admin.audit_logs"],
+      "table_invariants": [
+        "admin.audit_logs.actor_ref: nullable varchar(255) holding the verbatim actor identifier. actor_id stays uuid; real principal IDs are principal_<uuid> and were stored as NULL there. Additive column only; existing rows and the V0080 append-only triggers are unchanged."
+      ]
     }
   ]
 }

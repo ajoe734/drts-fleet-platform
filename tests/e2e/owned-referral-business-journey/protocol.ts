@@ -337,9 +337,36 @@ export type OriginalCancellationTerminalFacts = {
   ownRouteVisible: boolean | null;
 };
 
+/** Bounded browser-side facts around the original UI cancellation. Only
+ * status codes, enumerations, counts and booleans: no URL, header value,
+ * console text or DOM text is retained.
+ */
+export type OriginalCancellationBrowserFacts = {
+  cancelResponse: {
+    status: number;
+    contentEncoding: string;
+    contentLength: number | null;
+  } | null;
+  cancelRequestFailure: string | null;
+  navigations: { screen: string; failure: string | null }[];
+  committedScreens: string[];
+  consoleErrors: number;
+  pageErrors: number;
+  dom: {
+    phase: OriginalCancellationTerminalFacts["phase"];
+    readyState: string | null;
+    endedView: boolean;
+    cancelledView: boolean;
+    cancelButton: "absent" | "pending" | "action" | "OTHER";
+    cancelButtonDisabled: boolean | null;
+    cancelFailedBanner: boolean;
+  }[];
+};
+
 export type OriginalCancellationCheckpoint = {
   response: OriginalCancellationResponseFacts;
   terminal?: OriginalCancellationTerminalFacts;
+  browser?: OriginalCancellationBrowserFacts;
 };
 
 export function originalCancellationTerminalFacts(
@@ -1422,10 +1449,13 @@ export type CallOptions = {
 };
 const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
 // TEN02 reads all committed orders, including historical/sibling rows, in RAM.
-// 8 MiB gives this growing source bounded headroom; chunks and the concatenated
-// buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
+// GET /api/orders has no filter or paging. On shared dev it returned
+// 10,132,582-10,213,517 bytes on 2026-11-17 (Cloud Run request log), past the
+// former 8 MiB cap, so hosted run 44094621337 failed. 32 MiB gives this growing
+// source bounded headroom; chunks and the concatenated buffer each retain at
+// most 32 MiB (JSON parsing/conversion also uses memory).
 // Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
-const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
+const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 32 * DEFAULT_RESPONSE_BYTE_LIMIT;
 export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
 // Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
 // not a business deadline). No retry is added; one request, one deadline.
