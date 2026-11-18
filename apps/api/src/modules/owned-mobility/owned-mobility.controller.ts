@@ -53,6 +53,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { parseRecentDaysWindow } from "./recent-days-window";
 import {
   CurrentIdentity,
   RequireRealms,
@@ -239,12 +240,20 @@ export class OwnedMobilityController {
     );
   }
 
+  /** `recentDays=N` returns open orders plus closed ones created in the last
+   * N days; without it every order is returned, as before. */
   @Get("orders")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  async listOrders(@Headers("x-request-id") requestId?: string) {
+  async listOrders(
+    @Headers("x-request-id") requestId?: string,
+    @Query("recentDays") recentDays?: string,
+  ) {
     return toApiSuccessEnvelope(
       {
-        items: await this.ownedMobilityService.listOrdersForRead(),
+        items: await this.ownedMobilityService.listOrdersForRead(
+          undefined,
+          parseRecentDaysWindow(recentDays),
+        ),
       },
       requestId,
     );
@@ -974,10 +983,15 @@ export class OwnedMobilityController {
 
   @Get("dispatch/tasks")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  async listDispatchJobs(@Headers("x-request-id") requestId?: string) {
+  async listDispatchJobs(
+    @Headers("x-request-id") requestId?: string,
+    @Query("recentDays") recentDays?: string,
+  ) {
     return toApiSuccessEnvelope(
       {
-        items: await this.ownedMobilityService.listDispatchJobsForRead(),
+        items: await this.ownedMobilityService.listDispatchJobsForRead(
+          parseRecentDaysWindow(recentDays),
+        ),
       },
       requestId,
     );

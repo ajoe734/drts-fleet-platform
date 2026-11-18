@@ -158,7 +158,17 @@ function harness(rows: Snapshot[]) {
       const url = new URL(String(input));
       const method = init?.method ?? "GET";
       requestPaths.push(url.pathname);
-      if (url.origin !== ORIGIN || method !== "GET" || url.search) {
+      // The dashboard and dispatch board read their working lists with the
+      // open-or-recent window; no other read may carry a query string.
+      const workingList =
+        (url.pathname === "/api/orders" ||
+          url.pathname === "/api/dispatch/tasks") &&
+        url.search === "?recentDays=30";
+      if (
+        url.origin !== ORIGIN ||
+        method !== "GET" ||
+        (url.search && !workingList)
+      ) {
         const detail = `${method} ${url.href}`;
         unexpectedRequests.push(detail);
         throw new Error(`Unexpected lifecycle transport: ${detail}`);
