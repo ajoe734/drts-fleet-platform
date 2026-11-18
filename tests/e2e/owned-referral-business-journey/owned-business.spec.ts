@@ -4282,9 +4282,18 @@ test(journeyName, async ({ browser, request }) => {
               return receipt;
             },
             openReport: async (from, to) => {
+              // Step markers (safe stage names only) show where a hosted run
+              // stops; 2026-11-18 run 44270674003 stopped here with no
+              // preview request ever reaching the Ops BFF.
+              const step = (name: string) =>
+                evidence.record({
+                  stage: `r09-open-report:${name}`,
+                  result: "observed",
+                });
               const navigation = await opsPage.goto(`${origins.ops}/reports`, {
                 timeout: 15_000,
               });
+              step("page-loaded");
               requireFact(
                 navigation?.status() === 200 &&
                   navigation.headers()["x-drts-candidate-sha"] === runtime,
@@ -4295,16 +4304,19 @@ test(journeyName, async ({ browser, request }) => {
                 .locator("..")
                 .locator("select")
                 .selectOption("six_month_operations_summary");
+              step("type-selected");
               await opsPage
                 .getByText(/^(Period from|期間起)$/)
                 .locator("..")
                 .locator('input[type="month"]')
                 .fill(from);
+              step("from-filled");
               await opsPage
                 .getByText(/^(Period to|期間迄)$/)
                 .locator("..")
                 .locator('input[type="month"]')
                 .fill(to);
+              step("to-filled");
               const previewUrl = `${origins.ops}/control-plane-proxy/reports/operations-summary/preview`;
               const responsePromise = opsPage.waitForResponse(
                 (response) =>
@@ -4315,7 +4327,9 @@ test(journeyName, async ({ browser, request }) => {
               await opsPage
                 .getByRole("button", { name: /Load preview|載入預覽/ })
                 .click();
+              step("load-clicked");
               const response = await responsePromise;
+              step("preview-response");
               requireFact(
                 response.status() === 200 &&
                   response.headers()["x-drts-candidate-sha"] === runtime,
@@ -4487,6 +4501,13 @@ test(journeyName, async ({ browser, request }) => {
   } catch (error) {
     mainError = bookingState.routeError ?? error;
     evidence.failure(mainError);
+    // Name the native class (closed labels only) of an unexpected failure.
+    if (!(mainError instanceof JourneyFailure))
+      evidence.record({
+        stage: "unexpected-consumer-failure-class",
+        ...closedPdfFailureFacts(mainError),
+        result: "failed",
+      });
   } finally {
     finalization = await finalizer.run(mainError ? "failed" : "completed");
   }
