@@ -200,6 +200,7 @@ import {
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  type OpenOrRecentWindow,
   OwnedOrderDuplicateVoiceLinkError,
   OwnedOrderVersionConflictError,
   DispatchResourceReservationConflictError,
@@ -530,6 +531,16 @@ const DISPATCH_MATCHING_TIMEOUT_DEFAULT_MS = 90_000;
 const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
   "MISSING_AIRPORT_ELIGIBILITY",
 ]);
+
+/** In-memory twin of the repository's open-or-recent SQL predicate. */
+function isOrderOpenOrRecent(
+  order: Pick<OwnedOrderRecord, "status" | "createdAt">,
+  window: OpenOrRecentWindow,
+) {
+  if (order.status !== "completed" && order.status !== "cancelled") return true;
+  const createdAt = Date.parse(order.createdAt);
+  return !Number.isNaN(createdAt) && createdAt >= window.createdSince.getTime();
+}
 
 @Injectable()
 export class OwnedMobilityService
@@ -2736,11 +2747,18 @@ export class OwnedMobilityService
 
   // Public HTTP reads use committed rows. Synchronous internal callers retain
   // their original contract; a database miss/error must never revive a cache.
-  async listOrdersForRead(orderIds?: readonly string[]) {
+  /** `window` narrows the read to open orders plus closed ones created on or
+   * after `createdSince` (the Ops working lists). Omitted: every order. */
+  async listOrdersForRead(
+    orderIds?: readonly string[],
+    window?: OpenOrRecentWindow,
+  ) {
     const orders = this.ownedMobilityRepository?.isEnabled()
-      ? await this.ownedMobilityRepository.listOrdersForRead(orderIds)
+      ? await this.ownedMobilityRepository.listOrdersForRead(orderIds, window)
       : this.orders.filter(
-          (order) => !orderIds || orderIds.includes(order.orderId),
+          (order) =>
+            (!orderIds || orderIds.includes(order.orderId)) &&
+            (!window || isOrderOpenOrRecent(order, window)),
         );
     return orders.map((order) => this.cloneOrder(order));
   }
@@ -6599,10 +6617,20 @@ export class OwnedMobilityService
     return this.dispatchJobs.map((job) => this.buildDispatchJobSnapshot(job));
   }
 
-  async listDispatchJobsForRead() {
-    if (!this.ownedMobilityRepository?.isEnabled())
-      return this.listDispatchJobs();
-    const jobs = await this.ownedMobilityRepository.listDispatchJobsForRead();
+  async listDispatchJobsForRead(window?: OpenOrRecentWindow) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      if (!window) return this.listDispatchJobs();
+      const inWindow = new Set(
+        this.orders
+          .filter((order) => isOrderOpenOrRecent(order, window))
+          .map((order) => order.orderId),
+      );
+      return this.dispatchJobs
+        .filter((job) => inWindow.has(job.orderId))
+        .map((job) => this.buildDispatchJobSnapshot(job));
+    }
+    const jobs =
+      await this.ownedMobilityRepository.listDispatchJobsForRead(window);
     const orders = new Map(
       (
         await this.listOrdersForRead([

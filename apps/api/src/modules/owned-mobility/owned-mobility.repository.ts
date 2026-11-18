@@ -40,6 +40,19 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+/** Read window for the Ops working lists: every order that is still open,
+ * plus closed ones created on or after `createdSince`. */
+export interface OpenOrRecentWindow {
+  createdSince: Date;
+}
+
+/** Closed orders need no further Ops action; every other status does. */
+const CLOSED_ORDER_STATUSES_SQL = "'completed', 'cancelled'";
+
+function openOrRecentOrderPredicate(createdSinceParam: string) {
+  return `(status NOT IN (${CLOSED_ORDER_STATUSES_SQL}) OR created_at >= ${createdSinceParam}::timestamptz)`;
+}
+
 type DriverRatingSummaryRow = QueryResultRow & {
   driver_id: string;
   display_state: DriverRatingSummary["displayState"];
@@ -535,13 +548,26 @@ export class OwnedMobilityRepository {
 
   async listOrdersForRead(
     orderIds?: readonly string[],
+    window?: OpenOrRecentWindow,
   ): Promise<OwnedOrderRecord[]> {
     if (!this.isEnabled() || orderIds?.length === 0) return [];
+    const predicates: string[] = [];
+    const values: unknown[] = [];
+    if (orderIds) {
+      values.push(orderIds);
+      predicates.push(`order_id = ANY($${values.length}::varchar[])`);
+    }
+    if (window) {
+      values.push(window.createdSince.toISOString());
+      predicates.push(openOrRecentOrderPredicate(`$${values.length}`));
+    }
+    const where =
+      predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
     const result = await this.databaseService!.query<JsonRecordRow>(
       `SELECT record FROM ops.phase1_owned_orders
-       ${orderIds ? "WHERE order_id = ANY($1::varchar[])" : ""}
+       ${where}
        ORDER BY created_at DESC, order_id`,
-      orderIds ? [orderIds] : [],
+      values,
     );
     return result.rows.map((row) =>
       this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
@@ -574,10 +600,23 @@ export class OwnedMobilityRepository {
       : null;
   }
 
-  async listDispatchJobsForRead(): Promise<DispatchJobRecord[]> {
+  async listDispatchJobsForRead(
+    window?: OpenOrRecentWindow,
+  ): Promise<DispatchJobRecord[]> {
     if (!this.isEnabled()) return [];
+    // A job is in the window when its order is, so the dispatch board never
+    // shows an order without its jobs or a job without its order.
+    const where = window
+      ? `WHERE order_id IN (
+           SELECT order_id FROM ops.phase1_owned_orders
+           WHERE ${openOrRecentOrderPredicate("$1")}
+         )`
+      : "";
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM ops.phase1_dispatch_jobs ORDER BY created_at DESC, dispatch_job_id`,
+      `SELECT record FROM ops.phase1_dispatch_jobs
+       ${where}
+       ORDER BY created_at DESC, dispatch_job_id`,
+      window ? [window.createdSince.toISOString()] : [],
     );
     return result.rows.map((row) =>
       this.parseRecord<DispatchJobRecord>(

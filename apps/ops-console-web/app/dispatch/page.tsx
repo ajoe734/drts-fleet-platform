@@ -56,6 +56,10 @@ import {
   buildCanvasTheme,
   type CanvasTableColumn,
 } from "@drts/ui-web";
+import {
+  OPS_DISPATCH_TASKS_WORKING_LIST,
+  OPS_ORDERS_WORKING_LIST,
+} from "@/lib/working-lists";
 
 type DispatchPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -2644,8 +2648,11 @@ export default async function DispatchPage({
     identityResult,
     pageHealth,
   ] = await Promise.all([
-    loadListRuntime<RuntimeOwnedOrder>(client, "/api/orders"),
-    loadListRuntime<RuntimeDispatchJob>(client, "/api/dispatch/tasks"),
+    loadListRuntime<RuntimeOwnedOrder>(client, OPS_ORDERS_WORKING_LIST),
+    loadListRuntime<RuntimeDispatchJob>(
+      client,
+      OPS_DISPATCH_TASKS_WORKING_LIST,
+    ),
     loadListRuntime<DriverTaskRecord>(client, "/api/driver/tasks"),
     loadListRuntime<DriverRegistryRecord>(client, "/api/drivers"),
     loadListRuntime<RuntimeForwardedOrder>(client, "/api/forwarder/orders"),
