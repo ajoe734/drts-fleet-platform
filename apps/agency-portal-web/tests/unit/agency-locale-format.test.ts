@@ -269,7 +269,7 @@ describe("Agency portal locale catalog and formatters", () => {
     expect(enNav[0]).toMatchObject({ href: "/", label: "Home" });
     expect(enNav[7]).toMatchObject({
       href: "/qualifications/drivers",
-      label: "R14 Driver Qualifications",
+      label: "Driver Qualifications",
     });
   });
 });

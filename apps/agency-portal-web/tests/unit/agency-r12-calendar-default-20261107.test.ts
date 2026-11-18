@@ -35,6 +35,7 @@ vi.mock("next/navigation", () => ({
     throw new Error(`Unexpected Next redirect: ${destination}`);
   },
   useRouter: () => ({ refresh: vi.fn() }),
+  usePathname: () => "/reports/daily-dispatch",
 }));
 
 // Next preserves JSX for its production compiler. Reuse the existing render
@@ -147,6 +148,7 @@ const loader = createAppLoader({
   "next/headers": nextHeaders,
   "next/navigation": nextNavigation,
   "next/link": {
+    __esModule: true,
     default: ({
       href,
       children,

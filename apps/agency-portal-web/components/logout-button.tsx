@@ -30,9 +30,10 @@ export function LogoutButton({ locale: explicitLocale }: { locale?: Locale }) {
       }}
       style={{
         border: "1px solid #cbd5e1",
+        fontSize: 12.5,
         background: "#ffffff",
         borderRadius: 8,
-        padding: "6px 12px",
+        padding: "5px 10px",
         cursor: pending ? "wait" : "pointer",
       }}
     >

@@ -12,6 +12,7 @@ import type {
 } from "@drts/contracts";
 import {
   captureUiPost,
+  readBrowserRoleSession,
   runR04CurrentMonthGovernance,
   type R04Ports,
   type UiPost,
@@ -427,8 +428,9 @@ describe("same-run R04/R09 controlled helper ports", () => {
       auditId === ""
         ? readAudit(auditId)
         : [{ ...(await readAudit(auditId))[0]!, requestId: "foreign-request" }];
+    // The failure names only the mismatched field, never audit values.
     await expect(runR04CurrentMonthGovernance(ports)).rejects.toThrow(
-      /outcome request/,
+      "R04 exact UI outcome audit:n1m1-req0-act1-typ1-mod1-actn1-res1",
     );
   });
   it("binds seven exact case IDs, four UI writes, fresh timeline/audit, then report drilldown", async () => {
@@ -603,10 +605,10 @@ describe("original Playwright-shaped UI POST capture", () => {
         request: () => request,
         status: () => 200,
         headers: () => ({ "x-drts-candidate-sha": responseSha }),
+        // The real control-plane envelope: { data, meta }, no `ok` field.
         json: async () => ({
-          ok: true,
           data: { periodMonth: "2026-10" },
-          meta: {},
+          meta: { request_id: "ui-evaluate-id" },
         }),
       };
       const run = captureUiPost(
@@ -955,5 +957,46 @@ describe("actual normal caller AST wiring", () => {
       "r09-own-seven-case-ui-lifecycle-monthly-statistics",
       "page-close",
     ]);
+  });
+});
+
+describe("R04/R09 actual browser BFF session read", () => {
+  const runtimeSha = "a".repeat(40);
+  const browserPage = (status: number, body: unknown, sha = runtimeSha) =>
+    ({
+      evaluate: async () => ({ status, runtimeSha: sha, body }),
+    }) as unknown as Page;
+
+  it("accepts the API success envelope { data, meta }, which has no ok field", async () => {
+    await expect(
+      readBrowserRoleSession(
+        browserPage(200, {
+          data: { active: true, identity: { realm: "platform" } },
+          meta: { request_id: "synthetic", timestamp: "2026-11-17T00:00:00Z" },
+        }),
+        runtimeSha,
+      ),
+    ).resolves.toEqual({ active: true, identity: { realm: "platform" } });
+  });
+
+  it.each([
+    [
+      "inactive session",
+      200,
+      { data: { active: false }, meta: {} },
+      runtimeSha,
+    ],
+    ["missing data", 200, { ok: true }, runtimeSha],
+    ["non-200", 401, { data: { active: true }, meta: {} }, runtimeSha],
+    [
+      "foreign runtime",
+      200,
+      { data: { active: true }, meta: {} },
+      "b".repeat(40),
+    ],
+  ] as const)("rejects %s", async (_label, status, body, sha) => {
+    await expect(
+      readBrowserRoleSession(browserPage(status, body, sha), runtimeSha),
+    ).rejects.toThrow();
   });
 });

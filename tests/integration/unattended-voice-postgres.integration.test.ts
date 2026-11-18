@@ -110,6 +110,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       ),
     );
 
+    // AuditLogRepository.append writes actor_ref (V0139) on admin.audit_logs.
+    await pool.query(migration("V0139__audit_log_actor_ref.sql"));
+
     await pool.query(migration("V0011__phase1_runtime_snapshots.sql"));
 
     const runtimeColumns = migration(
