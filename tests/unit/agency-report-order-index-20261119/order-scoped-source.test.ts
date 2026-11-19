@@ -98,6 +98,24 @@ function orderRows(index: number, orderId: string): OrderRows {
   return rows;
 }
 
+/** All rows of the first order, then the next. */
+function concatenate<T>(lists: readonly (readonly T[])[]): T[] {
+  return lists.flatMap((list) => [...list]);
+}
+
+/** Row k of every order, then row k + 1; each order keeps its own row order. */
+function roundRobin<T>(lists: readonly (readonly T[])[]): T[] {
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  const mixed: T[] = [];
+  for (let position = 0; position < longest; position += 1) {
+    for (const list of lists) {
+      const row = list[position];
+      if (row !== undefined) mixed.push(row);
+    }
+  }
+  return mixed;
+}
+
 /**
  * The same rows in two arrangements: grouped (all rows of one order, then the
  * next) and interleaved (round-robin across orders). Both keep each order's
@@ -117,26 +135,28 @@ function arrangedSources(count: number) {
     perOrder.push(orderRows(index, orderId));
   }
   const base = buildSource(trips, []);
-  const keys = [
-    "dispatchJobs",
-    "dispatchAssignments",
-    "driverTasks",
-    "dispatchTraceLogs",
-  ] as const;
-  const grouped: Source = structuredClone(base);
-  const interleaved: Source = structuredClone(base);
-  for (const key of keys) {
-    (grouped[key] as unknown[]) = perOrder.flatMap((rows) => rows[key]);
-    const longest = Math.max(...perOrder.map((rows) => rows[key].length));
-    const mixed: unknown[] = [];
-    for (let position = 0; position < longest; position += 1) {
-      for (const rows of perOrder) {
-        const row = rows[key][position];
-        if (row) mixed.push(row);
-      }
-    }
-    (interleaved[key] as unknown[]) = mixed;
-  }
+  const grouped: Source = {
+    ...structuredClone(base),
+    dispatchJobs: concatenate(perOrder.map((rows) => rows.dispatchJobs)),
+    dispatchAssignments: concatenate(
+      perOrder.map((rows) => rows.dispatchAssignments),
+    ),
+    driverTasks: concatenate(perOrder.map((rows) => rows.driverTasks)),
+    dispatchTraceLogs: concatenate(
+      perOrder.map((rows) => rows.dispatchTraceLogs),
+    ),
+  };
+  const interleaved: Source = {
+    ...structuredClone(base),
+    dispatchJobs: roundRobin(perOrder.map((rows) => rows.dispatchJobs)),
+    dispatchAssignments: roundRobin(
+      perOrder.map((rows) => rows.dispatchAssignments),
+    ),
+    driverTasks: roundRobin(perOrder.map((rows) => rows.driverTasks)),
+    dispatchTraceLogs: roundRobin(
+      perOrder.map((rows) => rows.dispatchTraceLogs),
+    ),
+  };
   return { grouped, interleaved };
 }
 
