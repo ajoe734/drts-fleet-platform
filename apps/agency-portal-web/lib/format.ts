@@ -223,9 +223,18 @@ export function errorMessage(
   if (status === 503) {
     return t("common.error.auditUnavailable503", undefined, locale);
   }
-  return (
-    error?.message ||
-    error?.code ||
-    t("common.error.queryFailed", { status }, locale)
-  );
+  // Known agency query refusals have localized wording; the API message is
+  // English-only, so a zh page must not show it verbatim.
+  const known = error?.code ? KNOWN_ERROR_KEYS[error.code] : undefined;
+  if (known) return t(known, undefined, locale);
+  const failed = t("common.error.queryFailed", { status }, locale);
+  if (locale !== "en") {
+    return error?.code ? `${failed}：${error.code}` : failed;
+  }
+  return error?.message || error?.code || failed;
 }
+
+const KNOWN_ERROR_KEYS: Record<string, TranslationKey> = {
+  AGENCY_QUERY_INVALID: "common.error.queryInvalid",
+  AGENCY_REPORT_WINDOW_TOO_LARGE: "common.error.reportWindowTooLarge",
+};

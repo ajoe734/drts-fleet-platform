@@ -260,6 +260,37 @@ describe("Agency portal locale catalog and formatters", () => {
       "Access audit logging is temporarily unavailable",
     );
     expect(errorMessage(null, 500, "en")).toBe("Query failed (HTTP 500)");
+    // A zh page never shows the API's English message verbatim (hosted
+    // 2026-11-19: "month must use YYYY-MM." on a zh trip-records page).
+    const invalid = {
+      code: "AGENCY_QUERY_INVALID",
+      message: "month must use YYYY-MM.",
+    };
+    expect(errorMessage(invalid, 400, "zh")).toBe(
+      "查詢條件格式不正確：月份請用 YYYY-MM，日期請用 YYYY-MM-DD。",
+    );
+    expect(errorMessage(invalid, 400, "en")).toContain("YYYY-MM");
+    expect(
+      errorMessage(
+        { code: "AGENCY_REPORT_WINDOW_TOO_LARGE", message: "x" },
+        400,
+        "zh",
+      ),
+    ).toBe("報表期間過長，最多選擇 6 個曆月。");
+    expect(
+      errorMessage(
+        { code: "SOME_OTHER_CODE", message: "English only" },
+        409,
+        "zh",
+      ),
+    ).toBe("查詢失敗（HTTP 409）：SOME_OTHER_CODE");
+    expect(
+      errorMessage(
+        { code: "SOME_OTHER_CODE", message: "English only" },
+        409,
+        "en",
+      ),
+    ).toBe("English only");
 
     const zhNav = getAgencyNav("zh");
     const enNav = getAgencyNav("en");
