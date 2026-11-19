@@ -5,6 +5,8 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
+import { performance } from "node:perf_hooks";
+
 import { ApiRequestError } from "../../common/api-envelope";
 
 import type {
@@ -70,6 +72,14 @@ type MonthlyOperationsSummaryRebuildResult = {
   records: MonthlyOperationsSummaryRecord[];
 };
 
+/** Phase sizes and durations of one monthly summary rebuild (ms). */
+type MonthlyOperationsSummaryRebuildTimings = {
+  snapshots?: number;
+  loadSnapshotsMs?: number;
+  buildMs?: number;
+  persistMs?: number;
+};
+
 type OrderReportingDimension = {
   order: OwnedOrderRecord;
   record: DispatchDailyRecord;
@@ -96,6 +106,47 @@ const TAIPEI_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
   month: "2-digit",
   day: "2-digit",
 });
+
+/**
+ * The canonical dispatch collections grouped by order. Each per-order list
+ * keeps the source order, so filtering and stably sorting it gives exactly
+ * what filtering the whole collection gave, without scanning every job,
+ * assignment, task and trace log once for each order.
+ */
+type OrderScopedSource = {
+  dispatchJobs: ReadonlyMap<string, readonly DispatchJobRecord[]>;
+  dispatchAssignments: ReadonlyMap<string, readonly DispatchAssignmentRecord[]>;
+  driverTasks: ReadonlyMap<string, readonly DriverTaskRecord[]>;
+  dispatchTraceLogs: ReadonlyMap<string, readonly DispatchTraceLogRecord[]>;
+};
+
+const NO_ORDER_RECORDS: readonly never[] = [];
+
+function groupByOrderId<T extends { orderId: string }>(
+  records: readonly T[],
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const record of records) {
+    const list = grouped.get(record.orderId);
+    if (list) {
+      list.push(record);
+    } else {
+      grouped.set(record.orderId, [record]);
+    }
+  }
+  return grouped;
+}
+
+function scopeSourceByOrder(
+  source: DispatchDailyRecordSource,
+): OrderScopedSource {
+  return {
+    dispatchJobs: groupByOrderId(source.dispatchJobs),
+    dispatchAssignments: groupByOrderId(source.dispatchAssignments),
+    driverTasks: groupByOrderId(source.driverTasks),
+    dispatchTraceLogs: groupByOrderId(source.dispatchTraceLogs),
+  };
+}
 
 function toTaipeiDate(value: string | null | undefined): string | null {
   if (!value) {
@@ -166,13 +217,14 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    const scoped = scopeSourceByOrder(source);
     const allBuilt = source.orders.map((order) => {
       const record = this.buildDispatchDailyRecord(
         order,
-        source.dispatchJobs,
-        source.dispatchAssignments,
-        source.driverTasks,
-        source.dispatchTraceLogs,
+        scoped.dispatchJobs.get(order.orderId) ?? NO_ORDER_RECORDS,
+        scoped.dispatchAssignments.get(order.orderId) ?? NO_ORDER_RECORDS,
+        scoped.driverTasks.get(order.orderId) ?? NO_ORDER_RECORDS,
+        scoped.dispatchTraceLogs.get(order.orderId) ?? NO_ORDER_RECORDS,
         vehiclePlateById,
         complaintCountByOrderId,
         generatedAt,
@@ -381,11 +433,14 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: MonthlyOperationsSummaryQuery = {},
     preloadedSource?: DispatchDailyRecordSource,
     rawSnapshotVehicleSumByKey?: Map<string, number>,
+    timings?: MonthlyOperationsSummaryRebuildTimings,
   ): Promise<MonthlyOperationsSummaryRebuildResult> {
     const generatedAt = new Date().toISOString();
     const source =
       preloadedSource ?? (await this.loadDailyDispatchRecordSource());
+    const snapshotsStartedAt = performance.now();
     const snapshots = await this.loadDispatchableSupplySnapshots();
+    const buildStartedAt = performance.now();
     const periods = this.resolveRequestedMonths(query);
     const vehicleAreaById = new Map(
       this.regulatoryRegistryService
@@ -401,6 +456,12 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       snapshots,
       rawSnapshotVehicleSumByKey,
     );
+    const persistStartedAt = performance.now();
+    if (timings) {
+      timings.snapshots = snapshots.length;
+      timings.loadSnapshotsMs = buildStartedAt - snapshotsStartedAt;
+      timings.buildMs = persistStartedAt - buildStartedAt;
+    }
 
     if (this.reportingRepository?.isEnabled()) {
       try {
@@ -435,6 +496,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         retained,
         records,
       );
+    }
+    if (timings) {
+      timings.persistMs = performance.now() - persistStartedAt;
     }
 
     return {
@@ -541,17 +605,22 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       monthlyQuery.serviceProductCode = query.serviceProductCode;
     }
 
+    const startedAt = performance.now();
     const source = await this.loadDailyDispatchRecordSource();
+    const sourceLoadedAt = performance.now();
     // One canonical source read feeds both the rebuilt monthly read model and
     // the derived R09/R10 figures below. Use rebuild.records directly rather
     // than re-querying PG so stale monthly rows can never mix with the new
     // six-month totals in the same response.
     const rawSnapshotVehicleSumByKey = new Map<string, number>();
+    const rebuildTimings: MonthlyOperationsSummaryRebuildTimings = {};
     const rebuild = await this.rebuildMonthlyOperationsSummaries(
       monthlyQuery,
       source,
       rawSnapshotVehicleSumByKey,
+      rebuildTimings,
     );
+    const rebuiltAt = performance.now();
     const monthly = rebuild.records
       .filter((record) => this.matchesMonthlySummaryQuery(record, monthlyQuery))
       .sort(
@@ -664,7 +733,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         ),
     );
 
-    return Array.from(grouped.values())
+    const attachedAt = performance.now();
+    const summaries = Array.from(grouped.values())
       .map((summary) => this.withOperationsMetricTotals(summary))
       .map((summary) => {
         const key = `${summary.businessArea ?? ""}:${summary.serviceProductCode ?? ""}`;
@@ -779,6 +849,42 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
             right.serviceProductCode ?? "",
           ),
       );
+    this.logOperationsSummaryTiming(source, {
+      maxMonths,
+      months: periods.length,
+      summaries: summaries.length,
+      loadSourceMs: sourceLoadedAt - startedAt,
+      ...rebuildTimings,
+      rebuildMs: rebuiltAt - sourceLoadedAt,
+      attachMetricsMs: attachedAt - rebuiltAt,
+      totalMs: performance.now() - startedAt,
+    });
+    return summaries;
+  }
+
+  /**
+   * One structured line per R09/R10 preview: collection sizes and phase
+   * durations only (no identifiers or record values), so slow report reads
+   * can be attributed from the request logs.
+   */
+  private logOperationsSummaryTiming(
+    source: DispatchDailyRecordSource,
+    figures: Record<string, number | undefined>,
+  ) {
+    const timing: Record<string, number | string> = {
+      event: "reporting.operations_summary.timing",
+    };
+    for (const [key, value] of Object.entries(figures)) {
+      if (typeof value !== "number") continue;
+      timing[key] = key.endsWith("Ms") ? Math.round(value) : value;
+    }
+    timing.orders = source.orders.length;
+    timing.dispatchJobs = source.dispatchJobs.length;
+    timing.dispatchAssignments = source.dispatchAssignments.length;
+    timing.driverTasks = source.driverTasks.length;
+    timing.dispatchTraceLogs = source.dispatchTraceLogs.length;
+    timing.complaintCases = source.complaintCases.length;
+    this.logger.log(JSON.stringify(timing));
   }
 
   private withOperationsMetricTotals(
@@ -992,14 +1098,18 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         (complaintCountByOrderId.get(complaintCase.relatedOrderId) ?? 0) + 1,
       );
     }
+    const scoped = scopeSourceByOrder(source);
+    const uniqueVehicleAreas = [...new Set(vehicleAreaById.values())];
     const dimensions = new Map<string, OrderReportingDimension>();
     for (const order of source.orders) {
+      const orderAssignments =
+        scoped.dispatchAssignments.get(order.orderId) ?? NO_ORDER_RECORDS;
       const record = this.buildDispatchDailyRecord(
         order,
-        source.dispatchJobs,
-        source.dispatchAssignments,
-        source.driverTasks,
-        source.dispatchTraceLogs,
+        scoped.dispatchJobs.get(order.orderId) ?? NO_ORDER_RECORDS,
+        orderAssignments,
+        scoped.driverTasks.get(order.orderId) ?? NO_ORDER_RECORDS,
+        scoped.dispatchTraceLogs.get(order.orderId) ?? NO_ORDER_RECORDS,
         vehiclePlateById,
         complaintCountByOrderId,
         generatedAt,
@@ -1017,8 +1127,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           toTaipeiMonth(orderEventTimestamp) ?? record.serviceDate.slice(0, 7),
         businessArea: this.resolveOrderBusinessArea(
           order,
-          source.dispatchAssignments,
+          orderAssignments,
           vehicleAreaById,
+          uniqueVehicleAreas,
         ),
         serviceProductCode: record.serviceProductCode,
       });
@@ -1900,6 +2011,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     order: OwnedOrderRecord,
     dispatchAssignments: readonly DispatchAssignmentRecord[],
     vehicleAreaById: ReadonlyMap<string, string>,
+    uniqueAreas: readonly string[] = [...new Set(vehicleAreaById.values())],
   ) {
     const assignments = dispatchAssignments
       .filter((assignment) => assignment.orderId === order.orderId)
@@ -1911,7 +2023,6 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const uniqueAreas = [...new Set(vehicleAreaById.values())];
     if (uniqueAreas.length === 1) {
       return uniqueAreas[0]!;
     }
