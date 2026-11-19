@@ -57,6 +57,15 @@ export function deepToCamelCase(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Agency data reads (six-month summaries, monthly statistics, qualification
+ * lists) aggregate the full window on the API: 8.4-10.1 s each on shared dev
+ * (2026-11-19 Cloud Run request log). The shared 10 s BFF deadline aborted
+ * some of them just before the API answered 200, which surfaced as 503
+ * AGENCY_API_UNAVAILABLE. Agency data calls get 30 s; auth calls keep 10 s.
+ */
+export const AGENCY_DATA_FETCH_TIMEOUT_MS = 30_000;
+
 export interface AgencyApiResult<T> {
   status: number;
   data: T | null;
@@ -83,10 +92,14 @@ export async function agencyApiGet<T>(
       url.searchParams.set(key, value.trim());
     }
   }
-  const response = await agencyAuthFetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-  });
+  const response = await agencyAuthFetch(
+    url.toString(),
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    },
+    { timeoutMs: AGENCY_DATA_FETCH_TIMEOUT_MS },
+  );
   const body = (await response.json().catch(() => null)) as {
     data?: T;
     error?: { code?: string; message?: string };
@@ -143,15 +156,19 @@ async function proxy(
     target.searchParams.set(key, value);
   });
   try {
-    const upstream = await agencyAuthFetch(target.toString(), {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+    const upstream = await agencyAuthFetch(
+      target.toString(),
+      {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(method === "POST" ? { body: await request.text() } : {}),
+        cache: "no-store",
       },
-      ...(method === "POST" ? { body: await request.text() } : {}),
-      cache: "no-store",
-    });
+      { timeoutMs: AGENCY_DATA_FETCH_TIMEOUT_MS },
+    );
     const body = await upstream.json().catch(() => null);
     return NextResponse.json(body, {
       status: upstream.status,
