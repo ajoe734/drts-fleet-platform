@@ -4299,6 +4299,14 @@ test(journeyName, async ({ browser, request }) => {
                   navigation.headers()["x-drts-candidate-sha"] === runtime,
                 "R09 actual reports page runtime",
               );
+              // /reports opens on the report-jobs tab; the six-month filters
+              // live only in the operational tab (OperationalReportsPanel).
+              // Hosted run 44420773723 timed out selecting the report type
+              // without this click, as the daily-report consumer already does.
+              await opsPage
+                .getByRole("button", { name: /^(營運報表|Operational)$/ })
+                .click();
+              step("operational-tab");
               await opsPage
                 .getByText(/^(Report type|報表類型)$/)
                 .locator("..")
