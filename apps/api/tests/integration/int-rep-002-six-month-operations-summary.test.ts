@@ -12,6 +12,7 @@ import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mob
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import type { PersistRegulatoryRegistryChanges } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
+import { summarizeSupplySnapshotsByMonth } from "../../src/modules/reporting/operations-metrics";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
@@ -657,9 +658,18 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
             complaintCases: [],
           };
         },
-        listDispatchableSupplySnapshots: async () => {
+        // One per-month supply totals read per preview, reduced exactly as
+        // the production SQL does.
+        summarizeDispatchableSupplySnapshotsByMonth: async (
+          periods: readonly string[],
+          filter: { businessArea?: string; serviceProductCode?: string } = {},
+        ) => {
           snapshotReads += 1;
-          return structuredClone(syntheticSnapshots);
+          return summarizeSupplySnapshotsByMonth(
+            structuredClone(syntheticSnapshots),
+            periods,
+            filter,
+          );
         },
         replaceMonthlyOperationsSummaries: async () => undefined,
         loadComplaintStatisticsSource: async () => ({
