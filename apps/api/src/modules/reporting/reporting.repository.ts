@@ -15,7 +15,10 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
-import type { ComplaintStatisticsSource } from "./operations-metrics";
+import type {
+  ComplaintStatisticsSource,
+  DispatchableSupplyMonthTotal,
+} from "./operations-metrics";
 
 const TAIPEI_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
   timeZone: COMPLAINT_STATISTICS_TIME_ZONE,
@@ -119,6 +122,18 @@ export type DispatchableSupplySnapshotQuery = {
   serviceProductCode?: string;
   sourceHealth?: DispatchableSupplySnapshotRecord["sourceHealth"];
 };
+
+/** First instant of a YYYY-MM month in Asia/Taipei (UTC+8, no DST). */
+function taipeiMonthStart(periodMonth: string) {
+  return `${periodMonth}-01T00:00:00+08:00`;
+}
+
+function nextMonth(periodMonth: string) {
+  const [year, month] = periodMonth.split("-").map(Number) as [number, number];
+  return month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}`;
+}
 
 // Punctuality and monthly complaint statistics are derived when the window is
 // previewed; the persisted monthly read model keeps its original columns.
@@ -1018,6 +1033,91 @@ export class ReportingRepository {
       );
 
     return result.rows.map((row) => this.mapSnapshotRow(row));
+  }
+
+  /**
+   * Per-month supply totals for the monthly operations summary, aggregated in
+   * PostgreSQL. The summary only needs counts and sums per Taipei month, area
+   * and product; loading every 15-minute snapshot row instead took several
+   * seconds per report read once the table held about a hundred thousand rows.
+   * `periods` are contiguous YYYY-MM months in ascending order.
+   */
+  async summarizeDispatchableSupplySnapshotsByMonth(
+    periods: readonly string[],
+    filter: { businessArea?: string; serviceProductCode?: string } = {},
+  ): Promise<DispatchableSupplyMonthTotal[]> {
+    if (!this.isEnabled() || periods.length === 0) {
+      return [];
+    }
+
+    const values: unknown[] = [
+      taipeiMonthStart(periods[0]!),
+      taipeiMonthStart(nextMonth(periods[periods.length - 1]!)),
+      [...periods],
+    ];
+    const bind = (value: unknown) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+    const filters: string[] = [];
+    if (filter.businessArea) {
+      filters.push(`AND business_area = ${bind(filter.businessArea)}`);
+    }
+    if (filter.serviceProductCode) {
+      filters.push(
+        `AND service_product_code = ${bind(filter.serviceProductCode)}`,
+      );
+    }
+
+    const result = await this.databaseService!.query<{
+      period_month: string;
+      business_area: string;
+      service_product_code: string;
+      snapshot_count: number | string;
+      valid_snapshot_count: number | string;
+      dispatchable_vehicle_sum: number | string;
+    }>(
+      `
+        SELECT
+          period_month,
+          business_area,
+          service_product_code,
+          count(*)::integer AS snapshot_count,
+          count(*) FILTER (WHERE source_health = 'complete')::integer
+            AS valid_snapshot_count,
+          COALESCE(
+            sum(dispatchable_vehicle_count)
+              FILTER (WHERE source_health = 'complete'),
+            0
+          )::bigint AS dispatchable_vehicle_sum
+        FROM (
+          SELECT
+            to_char(snapshot_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM')
+              AS period_month,
+            business_area,
+            service_product_code,
+            dispatchable_vehicle_count,
+            source_health
+          FROM reporting.dispatchable_supply_snapshots
+          WHERE snapshot_at >= $1::timestamptz
+            AND snapshot_at < $2::timestamptz
+            ${filters.join("\n            ")}
+        ) AS snapshots
+        WHERE period_month = ANY($3::text[])
+        GROUP BY period_month, business_area, service_product_code
+        ORDER BY period_month, business_area, service_product_code
+      `,
+      values,
+    );
+
+    return result.rows.map((row) => ({
+      periodMonth: row.period_month,
+      businessArea: row.business_area,
+      serviceProductCode: row.service_product_code,
+      snapshotCount: Number(row.snapshot_count),
+      validSnapshotCount: Number(row.valid_snapshot_count),
+      dispatchableVehicleSum: Number(row.dispatchable_vehicle_sum),
+    }));
   }
 
   async listMonthlyOperationsSummaries(
