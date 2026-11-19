@@ -41,9 +41,11 @@ import {
   buildComplaintMonthlyStatistics,
   emptyPunctualityMetrics,
   sortPunctualityMetrics,
+  summarizeSupplySnapshotsByMonth,
   toTaipeiMonth,
   totalComplaintMonthlyStatistics,
   type ComplaintStatisticsSource,
+  type DispatchableSupplyMonthTotal,
 } from "./operations-metrics";
 import {
   ReportingRepository,
@@ -75,6 +77,7 @@ type MonthlyOperationsSummaryRebuildResult = {
 /** Phase sizes and durations of one monthly summary rebuild (ms). */
 type MonthlyOperationsSummaryRebuildTimings = {
   snapshots?: number;
+  supplyTotals?: number;
   loadSnapshotsMs?: number;
   buildMs?: number;
   persistMs?: number;
@@ -438,10 +441,13 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     const generatedAt = new Date().toISOString();
     const source =
       preloadedSource ?? (await this.loadDailyDispatchRecordSource());
-    const snapshotsStartedAt = performance.now();
-    const snapshots = await this.loadDispatchableSupplySnapshots();
-    const buildStartedAt = performance.now();
     const periods = this.resolveRequestedMonths(query);
+    const snapshotsStartedAt = performance.now();
+    const supplyTotals = await this.loadDispatchableSupplyMonthTotals(
+      periods,
+      query,
+    );
+    const buildStartedAt = performance.now();
     const vehicleAreaById = new Map(
       this.regulatoryRegistryService
         .listVehicles()
@@ -453,12 +459,16 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       vehicleAreaById,
       generatedAt,
       query,
-      snapshots,
+      supplyTotals,
       rawSnapshotVehicleSumByKey,
     );
     const persistStartedAt = performance.now();
     if (timings) {
-      timings.snapshots = snapshots.length;
+      timings.snapshots = supplyTotals.reduce(
+        (sum, total) => sum + total.snapshotCount,
+        0,
+      );
+      timings.supplyTotals = supplyTotals.length;
       timings.loadSnapshotsMs = buildStartedAt - snapshotsStartedAt;
       timings.buildMs = persistStartedAt - buildStartedAt;
     }
@@ -1628,7 +1638,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     vehicleAreaById: ReadonlyMap<string, string>,
     generatedAt: string,
     query: MonthlyOperationsSummaryQuery,
-    snapshots: readonly DispatchableSupplySnapshotRecord[],
+    supplyTotals: readonly DispatchableSupplyMonthTotal[],
     rawSnapshotVehicleSumByKey?: Map<string, number>,
   ): MonthlyOperationsSummaryRecord[] {
     const recordsByOrderId = new Map<string, DispatchDailyRecord>();
@@ -1706,32 +1716,34 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    for (const snapshot of snapshots) {
-      const periodMonth =
-        toTaipeiMonth(snapshot.snapshotAt) ?? snapshot.snapshotAt.slice(0, 7);
+    // Supply arrives already reduced per Taipei month, area and product (see
+    // loadDispatchableSupplyMonthTotals). A month whose snapshots were all
+    // incomplete still opens its group, with no valid sample.
+    for (const total of supplyTotals) {
+      const { periodMonth } = total;
       if (!periods.includes(periodMonth)) {
         continue;
       }
       if (
-        (query.businessArea && snapshot.businessArea !== query.businessArea) ||
+        (query.businessArea && total.businessArea !== query.businessArea) ||
         (query.serviceProductCode &&
-          snapshot.serviceProductCode !== query.serviceProductCode)
+          total.serviceProductCode !== query.serviceProductCode)
       ) {
         continue;
       }
       const group = ensureGroup(
         periodMonth,
-        snapshot.businessArea,
-        snapshot.serviceProductCode,
+        total.businessArea,
+        total.serviceProductCode,
       );
-      if (snapshot.sourceHealth === "complete") {
-        group.validSnapshotCount += 1;
+      if (total.validSnapshotCount > 0) {
+        group.validSnapshotCount += total.validSnapshotCount;
         const nextRawVehicleSum =
           (group.averageDispatchableVehicleCount ?? 0) +
-          snapshot.dispatchableVehicleCount;
+          total.dispatchableVehicleSum;
         group.averageDispatchableVehicleCount = nextRawVehicleSum;
         rawSnapshotVehicleSumByKey?.set(
-          `${periodMonth}:${snapshot.businessArea}:${snapshot.serviceProductCode}`,
+          `${periodMonth}:${total.businessArea}:${total.serviceProductCode}`,
           nextRawVehicleSum,
         );
       }
@@ -2037,30 +2049,47 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async loadDispatchableSupplySnapshots(
-    query: DispatchableSupplySnapshotQuery = {},
-  ) {
+  /**
+   * Supply snapshot totals per Taipei month, area and product for the
+   * requested months. PostgreSQL reduces the snapshot rows itself; reading
+   * every 15-minute row and reducing it here took several seconds per report
+   * once the table held about a hundred thousand rows. Without stored rows for
+   * these months (or without the database), the in-process snapshots are
+   * reduced the same way.
+   */
+  private async loadDispatchableSupplyMonthTotals(
+    periods: readonly string[],
+    query: MonthlyOperationsSummaryQuery,
+  ): Promise<DispatchableSupplyMonthTotal[]> {
+    const filter = {
+      ...(query.businessArea ? { businessArea: query.businessArea } : {}),
+      ...(query.serviceProductCode
+        ? { serviceProductCode: query.serviceProductCode }
+        : {}),
+    };
     if (this.reportingRepository?.isEnabled()) {
       try {
-        const records =
-          await this.reportingRepository.listDispatchableSupplySnapshots(query);
-        if (records.length > 0) {
-          this.dispatchableSupplySnapshots =
-            this.mergeDispatchableSupplySnapshots(
-              this.dispatchableSupplySnapshots,
-              records,
-            );
-          return records;
+        const totals =
+          await this.reportingRepository.summarizeDispatchableSupplySnapshotsByMonth(
+            periods,
+            filter,
+          );
+        if (totals.length > 0) {
+          return totals;
         }
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
-          "load dispatchable supply snapshots",
+          "summarize dispatchable supply snapshots",
         );
       }
     }
 
-    return this.readDispatchableSupplySnapshots(query);
+    return summarizeSupplySnapshotsByMonth(
+      this.readDispatchableSupplySnapshots(),
+      periods,
+      filter,
+    );
   }
 
   private roundTo(value: number, digits: number) {

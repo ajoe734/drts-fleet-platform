@@ -10,6 +10,7 @@ import type {
   ComplaintMonthlyStatistic,
   DispatchDailyRecord,
   DispatchSemantics,
+  DispatchableSupplySnapshotRecord,
   OperationsPunctualityMetrics,
   OperationsPunctualityOutcome,
 } from "@drts/contracts";
@@ -153,6 +154,66 @@ export function toTaipeiMonth(value: string | null | undefined) {
   const year = parts.find((part) => part.type === "year")?.value;
   const month = parts.find((part) => part.type === "month")?.value;
   return year && month ? `${year}-${month}` : null;
+}
+
+/**
+ * Dispatchable supply snapshots of one Asia/Taipei calendar month and one
+ * business area / service product, reduced to what the monthly operations
+ * summary needs: how many snapshots there were, how many were complete, and
+ * the sum of the complete snapshots' dispatchable vehicle counts.
+ */
+export type DispatchableSupplyMonthTotal = {
+  periodMonth: string;
+  businessArea: string;
+  serviceProductCode: string;
+  snapshotCount: number;
+  validSnapshotCount: number;
+  dispatchableVehicleSum: number;
+};
+
+/**
+ * In-memory counterpart of
+ * ReportingRepository.summarizeDispatchableSupplySnapshotsByMonth: per Taipei
+ * month, area and product, the snapshot count, the complete-snapshot count and
+ * the sum of the complete snapshots' dispatchable vehicle counts.
+ */
+export function summarizeSupplySnapshotsByMonth(
+  snapshots: readonly DispatchableSupplySnapshotRecord[],
+  periods: readonly string[],
+  filter: { businessArea?: string; serviceProductCode?: string },
+): DispatchableSupplyMonthTotal[] {
+  const totals = new Map<string, DispatchableSupplyMonthTotal>();
+  for (const snapshot of snapshots) {
+    const periodMonth =
+      toTaipeiMonth(snapshot.snapshotAt) ?? snapshot.snapshotAt.slice(0, 7);
+    if (
+      !periods.includes(periodMonth) ||
+      (filter.businessArea && snapshot.businessArea !== filter.businessArea) ||
+      (filter.serviceProductCode &&
+        snapshot.serviceProductCode !== filter.serviceProductCode)
+    ) {
+      continue;
+    }
+    const key = `${periodMonth}:${snapshot.businessArea}:${snapshot.serviceProductCode}`;
+    let total = totals.get(key);
+    if (!total) {
+      total = {
+        periodMonth,
+        businessArea: snapshot.businessArea,
+        serviceProductCode: snapshot.serviceProductCode,
+        snapshotCount: 0,
+        validSnapshotCount: 0,
+        dispatchableVehicleSum: 0,
+      };
+      totals.set(key, total);
+    }
+    total.snapshotCount += 1;
+    if (snapshot.sourceHealth === "complete") {
+      total.validSnapshotCount += 1;
+      total.dispatchableVehicleSum += snapshot.dispatchableVehicleCount;
+    }
+  }
+  return [...totals.values()];
 }
 
 type CountSets = {
