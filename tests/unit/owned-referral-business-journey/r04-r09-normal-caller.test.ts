@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as ts from "typescript";
 import type { Page } from "@playwright/test";
+import { Evidence } from "../../e2e/owned-referral-business-journey/protocol";
 import { describe, expect, it } from "vitest";
 import type {
   ComplaintCaseRecord,
@@ -770,6 +771,7 @@ function actualCallerSource() {
 describe("actual normal caller AST wiring", () => {
   it("passes exact pre-existing subjects to both helpers and closes pages", async () => {
     const trace: string[] = [];
+    const allowlisted = new Evidence();
     const selectedHandling: string[] = [];
     const uiRows = [
       {
@@ -902,7 +904,9 @@ describe("actual normal caller AST wiring", () => {
       },
       driverId: "own-driver",
       evidence: {
-        record: (value: { stage: string }) => {
+        // Enforce the real evidence allowlist, not a permissive stub.
+        record: (value: Parameters<Evidence["record"]>[0]) => {
+          allowlisted.record(value);
           trace.push(value.stage);
         },
       },
@@ -916,7 +920,14 @@ describe("actual normal caller AST wiring", () => {
         await ports.dismiss("own-record", "synthetic reason");
         expect(selectedHandling).toEqual(["coaching", "coaching", "coaching"]);
         trace.push("r04");
-        return { recordId: "own-record" };
+        // Same shape as the real R04 result, including non-event fields.
+        return {
+          month: "2026-10",
+          orderId: "main-order",
+          driverId: "own-driver",
+          recordId: "own-record",
+          auditId: "own-audit",
+        };
       },
       runR09OwnComplaintLifecycle: async (ports: R09Ports) => {
         expect(ports.cases.map((own) => own.caseNo)).toEqual([
