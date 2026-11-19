@@ -1159,6 +1159,58 @@ describe("startup Ops HTML readiness deadline", () => {
     });
   });
 
+  it.each([
+    [
+      "ops",
+      "/control-plane-proxy/reports/operations-summary/preview?from=2026-06&to=2026-11",
+      60_000,
+    ],
+    [
+      "admin",
+      "/control-plane-proxy/reports/operations-summary/preview?from=2026-06&to=2026-11",
+      60_000,
+    ],
+    [
+      "ops",
+      "/control-plane-proxy/reports/operations-summary/preview?from=2026-06&extra=1",
+      15_000,
+    ],
+    [
+      "ops",
+      "/control-plane-proxy/reports/operations-summary/preview/other",
+      15_000,
+    ],
+    ["ops", "/control-plane-proxy/reports/jobs", 15_000],
+    [
+      "api",
+      "/api/reports/operations-summary/preview?from=2026-06&to=2026-11",
+      15_000,
+    ],
+  ] as const)(
+    "chooses the %s deadline for %s (%i ms)",
+    async (role, path, expected) => {
+      const { tx, fetcher } = setup();
+      tx.setSession(role, "synthetic-session");
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+      try {
+        fetcher.mockImplementationOnce(
+          async () =>
+            new Response(JSON.stringify({ data: { items: [] } }), {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+                "x-drts-candidate-sha": SHA,
+              },
+            }),
+        );
+        await tx.call(role, path);
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(expected);
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
   it("does not turn a startup 200 with the wrong runtime SHA into readiness", async () => {
     const { tx, fetcher } = setup();
     const timeout = vi.spyOn(AbortSignal, "timeout");

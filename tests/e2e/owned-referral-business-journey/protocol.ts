@@ -1464,6 +1464,12 @@ const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 32 * DEFAULT_RESPONSE_BYTE_LIMIT;
 // the Admin/Ops BFF gets this cap; by-id reads keep the ordinary one.
 const RECENT_AUDIT_FEED_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
 export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
+// The six-month operations summary preview aggregates every order, task and
+// complaint in the window. On shared dev the API itself took 7.4-9.4 s and the
+// Ops BFF 15.8 s on 2026-11-19 (Cloud Run request log), so hosted run
+// 44426115240 aborted R09's canonical preview read at 15 s. Only that exact
+// Ops/Admin BFF GET gets this budget; one request, one deadline, no retry.
+const SIX_MONTH_SUMMARY_PREVIEW_TIMEOUT_MS = 60_000;
 // Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
 // not a business deadline). No retry is added; one request, one deadline.
 const HTML_READINESS_TIMEOUT_MS = 30_000;
@@ -1575,10 +1581,30 @@ export class NativeTransport {
       options.raw === true &&
       options.expected?.length === 1 &&
       options.expected[0] === 200;
+    const summaryPreview = (() => {
+      if (
+        (role !== "ops" && role !== "admin") ||
+        (options.method ?? "GET") !== "GET" ||
+        options.body !== undefined ||
+        options.raw
+      )
+        return false;
+      const [pathname, query = ""] = path.split("?");
+      if (
+        pathname !== "/control-plane-proxy/reports/operations-summary/preview"
+      )
+        return false;
+      const keys = [...new URLSearchParams(query).keys()];
+      return keys.every((key) =>
+        ["from", "to", "businessArea", "serviceProductCode"].includes(key),
+      );
+    })();
     const requestSignal = AbortSignal.timeout(
       preSessionOpsStartupProbe || ownFleetPreSupplyHtmlReadiness
         ? HTML_READINESS_TIMEOUT_MS
-        : NATIVE_REQUEST_TIMEOUT_MS,
+        : summaryPreview
+          ? SIX_MONTH_SUMMARY_PREVIEW_TIMEOUT_MS
+          : NATIVE_REQUEST_TIMEOUT_MS,
     );
     const requestStartedAt = performance.now();
     let response: Response;
