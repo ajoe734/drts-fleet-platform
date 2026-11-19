@@ -8,6 +8,7 @@ import {
   projectAgencyComplaintMonthlyStatistics,
   projectAgencyOperationsSummary,
 } from "../../src/modules/agency-access/agency-projections";
+import { summarizeSupplySnapshotsByMonth } from "../../src/modules/reporting/operations-metrics";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 
 function buildBoundaryHarness(options: {
@@ -147,6 +148,18 @@ function buildBoundaryHarness(options: {
     isEnabled: vi.fn(() => true),
     listDailyDispatchRecords: vi.fn(async () => []),
     listDispatchableSupplySnapshots: vi.fn(async () => options.snapshots ?? []),
+    // Per-month supply totals, reduced exactly as the production SQL does.
+    summarizeDispatchableSupplySnapshotsByMonth: vi.fn(
+      async (
+        periods: readonly string[],
+        filter: { businessArea?: string; serviceProductCode?: string } = {},
+      ) =>
+        summarizeSupplySnapshotsByMonth(
+          (options.snapshots ?? []) as never,
+          periods,
+          filter,
+        ),
+    ),
     listMonthlyOperationsSummaries: vi.fn(
       async () => persistedMonthly as never,
     ),

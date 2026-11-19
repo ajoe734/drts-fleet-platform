@@ -111,6 +111,53 @@ export async function reportFixture(
       );
       return { rows: structuredClone(rows), rowCount: rows.length };
     }
+    if (
+      table === "reporting.dispatchable_supply_snapshots" &&
+      /GROUP BY period_month/.test(sql)
+    ) {
+      // The monthly summary's per-month supply totals: the same bounds,
+      // Asia/Taipei month, filters and reductions as the production SQL
+      // (whose PostgreSQL behaviour supply-month-totals.postgres.test.ts pins).
+      const [from, to, periods] = values as [string, string, string[]];
+      const filters = [
+        ...sql.matchAll(/AND (business_area|service_product_code) = \$(\d+)/g),
+      ].map(([, column, index]) => [column!, values[Number(index) - 1]]);
+      const totals = new Map<string, Data>();
+      for (const row of snapshotRows) {
+        const at = Date.parse(String(row.snapshot_at));
+        const periodMonth = new Date(at + 8 * 3600_000)
+          .toISOString()
+          .slice(0, 7);
+        if (
+          at < Date.parse(from) ||
+          at >= Date.parse(to) ||
+          !periods.includes(periodMonth) ||
+          filters.some(([column, value]) => row[column as string] !== value)
+        )
+          continue;
+        const key = `${periodMonth}:${row.business_area}:${row.service_product_code}`;
+        const total = totals.get(key) ?? {
+          period_month: periodMonth,
+          business_area: row.business_area,
+          service_product_code: row.service_product_code,
+          snapshot_count: 0,
+          valid_snapshot_count: 0,
+          dispatchable_vehicle_sum: "0",
+        };
+        total.snapshot_count = Number(total.snapshot_count) + 1;
+        if (row.source_health === "complete") {
+          total.valid_snapshot_count = Number(total.valid_snapshot_count) + 1;
+          // bigint arrives from pg as a string.
+          total.dispatchable_vehicle_sum = String(
+            Number(total.dispatchable_vehicle_sum) +
+              Number(row.dispatchable_vehicle_count),
+          );
+        }
+        totals.set(key, total);
+      }
+      const rows = [...totals.values()];
+      return { rows, rowCount: rows.length };
+    }
     if (table === "reporting.dispatchable_supply_snapshots")
       return {
         rows: structuredClone(snapshotRows),
