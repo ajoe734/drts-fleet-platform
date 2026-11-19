@@ -9,9 +9,13 @@ export function resolveTenantApiUrl(): string {
   );
 }
 
+/** Default upstream deadline for portal BFF calls (auth exchanges, sessions). */
+export const TENANT_AUTH_FETCH_TIMEOUT_MS = 10_000;
+
 export async function tenantAuthFetch(
   url: string,
   init: RequestInit = {},
+  options: { timeoutMs?: number } = {},
 ): Promise<Response> {
   const target = new URL(url);
   if (target.origin !== new URL(resolveTenantApiUrl()).origin) {
@@ -43,6 +47,8 @@ export async function tenantAuthFetch(
     headers,
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(
+      options.timeoutMs ?? TENANT_AUTH_FETCH_TIMEOUT_MS,
+    ),
   });
 }
