@@ -575,6 +575,10 @@ export class OwnedMobilityService
 
   private queueEntries: QueueEntryRecord[] = [];
   private readonly queueCommands = new Map<string, Promise<unknown>>();
+  private readonly waypointCommands = new Map<
+    string,
+    Promise<DriverTaskRecord>
+  >();
 
   // Per-observation route reads are shared by the existing 3-second SSE readers.
   // Bound both cached promises and outstanding provider work, including timeouts.
@@ -1979,6 +1983,43 @@ export class OwnedMobilityService
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
+
+    const routeStops =
+      command.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? command.partnerBookingDetails.routeStops
+        : undefined;
+    if (
+      routeStops !== undefined &&
+      command.businessDispatchSubtype !== "travel_agency_transfer"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops are only available for travel bookings",
+      );
+    }
+    if (
+      routeStops !== undefined &&
+      (!Array.isArray(routeStops) ||
+        routeStops.some(
+          (stop) =>
+            !stop ||
+            typeof stop.address !== "string" ||
+            !stop.address.trim() ||
+            typeof stop.lat !== "number" ||
+            !Number.isFinite(stop.lat) ||
+            Math.abs(stop.lat) > 90 ||
+            typeof stop.lng !== "number" ||
+            !Number.isFinite(stop.lng) ||
+            Math.abs(stop.lng) > 180,
+        ))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_ROUTE_STOPS_INVALID",
+        "routeStops must contain selected places with valid coordinates",
+      );
+    }
 
     this.assertBookingRules(
       command.businessDispatchSubtype,
@@ -8644,6 +8685,15 @@ export class OwnedMobilityService
     command: DriverDepartTaskCommand,
     requestId?: string,
   ) {
+    if (command.waypointSequence !== undefined) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "depart",
+        command.waypointSequence,
+        command.departedAt,
+        requestId,
+      );
+    }
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
     this.assertDriverTaskTransition(task, "enroute_pickup");
@@ -8685,6 +8735,383 @@ export class OwnedMobilityService
     );
     await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
+  }
+
+  /** Only the existing owned travel route is locally writable; forwarded routes remain source-owned. */
+  private getOwnedTravelWaypoints(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+  ) {
+    const details = order.partnerBookingDetails;
+    if (
+      task.sourcePlatform != null ||
+      this.forwarderSourceMap.has(order.orderId) ||
+      order.orderDomain !== "owned" ||
+      order.businessDispatchSubtype !== "travel_agency_transfer" ||
+      details?.subtype !== "travel_agency_transfer" ||
+      details.routeStops == null
+    )
+      return null;
+    if (Array.isArray(details.routeStops) && details.routeStops.length === 0)
+      return null;
+    const fail = () => {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TRAVEL_WAYPOINTS_RECONCILIATION_REQUIRED",
+        "The canonical travel waypoint sequence requires reconciliation.",
+      );
+    };
+    if (!Array.isArray(details.routeStops) || !Array.isArray(task.waypoints))
+      return fail();
+    const places = [order.pickup, ...details.routeStops, order.dropoff];
+    if (
+      task.orderId !== order.orderId ||
+      !task.routeProvided ||
+      task.waypoints.length !== places.length ||
+      task.waypoints.some(
+        (point, index) =>
+          !point ||
+          point.sequence !== index ||
+          point.address !== places[index]?.address ||
+          point.lat !== places[index]?.lat ||
+          point.lng !== places[index]?.lng ||
+          typeof point.lat !== "number" ||
+          !Number.isFinite(point.lat) ||
+          Math.abs(point.lat) > 90 ||
+          typeof point.lng !== "number" ||
+          !Number.isFinite(point.lng) ||
+          Math.abs(point.lng) > 180,
+      )
+    )
+      return fail();
+    return task.waypoints;
+  }
+
+  private waypointTimestamp(value: string, minimum?: string | null) {
+    const instant = typeof value === "string" ? Date.parse(value) : Number.NaN;
+    if (
+      !Number.isFinite(instant) ||
+      !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ||
+      (minimum != null &&
+        (!Number.isFinite(Date.parse(minimum)) ||
+          instant < Date.parse(minimum)))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRAVEL_WAYPOINT_TIMESTAMP_INVALID",
+        "A waypoint event must have a valid timestamp after its preceding event.",
+      );
+    }
+    return instant;
+  }
+
+  private assertOwnedTravelVisitsComplete(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+    completedAt: string,
+  ) {
+    const route = this.getOwnedTravelWaypoints(task, order);
+    if (!route) return;
+    let previous: string | null = null;
+    for (const [index, point] of route.entries()) {
+      if (!point.arrivedAt || (index < route.length - 1 && !point.departedAt)) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "TRAVEL_WAYPOINTS_INCOMPLETE",
+          "Report each travel stop arrival and intermediate departure before completing this task.",
+        );
+      }
+      this.waypointTimestamp(point.arrivedAt, previous);
+      previous = point.arrivedAt;
+      if (index < route.length - 1) {
+        this.waypointTimestamp(point.departedAt!, previous);
+        previous = point.departedAt;
+      }
+    }
+    this.waypointTimestamp(completedAt, previous);
+  }
+
+  private async recordOwnedWaypointVisit(
+    taskId: string,
+    phase: "pickup_arrive" | "pickup_depart" | "arrive" | "depart",
+    sequence: number,
+    timestamp: string,
+    requestId?: string,
+  ): Promise<DriverTaskRecord> {
+    const execute = async () => {
+      const prepare = (bundle: DriverTaskCompletionBundleRecord) => {
+        const task = {
+          ...this.cloneTask(bundle.task),
+          waypoints: bundle.task.waypoints.map((point) => ({ ...point })),
+        };
+        const order = this.cloneOrder(bundle.order);
+        const route = this.getOwnedTravelWaypoints(task, order);
+        if (!route)
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "TRAVEL_WAYPOINTS_UNAVAILABLE",
+            "Local waypoint commands are only available for this owned travel task.",
+          );
+        const last = route.length - 1;
+        const pickup = phase === "pickup_arrive" || phase === "pickup_depart";
+        const arriving = phase === "pickup_arrive" || phase === "arrive";
+        if (
+          !Number.isSafeInteger(sequence) ||
+          (pickup
+            ? sequence !== 0
+            : sequence < 1 ||
+              sequence > last ||
+              (!arriving && sequence === last))
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "TRAVEL_WAYPOINT_SEQUENCE_INVALID",
+            "The waypoint sequence is outside this command's canonical route.",
+          );
+        }
+        const assignment = bundle.assignment;
+        const reconciled = this.isReconciledAssignmentTask(assignment, task);
+        const completedPair =
+          task.status === "completed" &&
+          order.status === "completed" &&
+          assignment.status === "completed" &&
+          task.assignmentId === assignment.assignmentId &&
+          task.taskId === assignment.taskId &&
+          task.orderId === assignment.orderId &&
+          task.dispatchJobId === assignment.dispatchJobId &&
+          task.driverId === assignment.driverId &&
+          task.vehicleId === assignment.vehicleId;
+        if (
+          task.taskId !== taskId ||
+          (!reconciled && !completedPair) ||
+          bundle.dispatchJob.orderId !== order.orderId ||
+          bundle.dispatchJob.dispatchJobId !== task.dispatchJobId
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+            "Waypoint command assignment task requires reconciliation.",
+          );
+        }
+        const point = route[sequence]!;
+        const field = arriving ? "arrivedAt" : "departedAt";
+        // A retry returns its original reported phase even after later visits. Never rewrite it.
+        if (point[field] != null)
+          return {
+            bundle: { ...bundle, task, order },
+            replayed: true,
+            traceLog: null,
+            outbox: null,
+          };
+        const expectedStatus =
+          phase === "pickup_arrive"
+            ? "enroute_pickup"
+            : phase === "pickup_depart"
+              ? "arrived_pickup"
+              : "on_trip";
+        if (task.status !== expectedStatus || order.status !== expectedStatus) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "TRAVEL_WAYPOINT_TASK_NOT_ACTIVE",
+            "This waypoint action does not match the current task state.",
+          );
+        }
+        if (!pickup) {
+          const next = route.findIndex(
+            (stop, index) =>
+              index > 0 &&
+              (index === last
+                ? stop.arrivedAt == null
+                : stop.departedAt == null),
+          );
+          if (sequence !== next || (!arriving && point.arrivedAt == null)) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "TRAVEL_WAYPOINT_OUT_OF_ORDER",
+              "Arrive and depart each canonical stop in order.",
+            );
+          }
+        }
+        const previous = arriving
+          ? sequence === 0
+            ? task.departedAt
+            : (route[sequence - 1]?.departedAt ?? task.startedAt)
+          : point.arrivedAt;
+        if (!previous)
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "TRAVEL_WAYPOINT_OUT_OF_ORDER",
+            "The preceding travel event has not been reported.",
+          );
+        this.waypointTimestamp(timestamp, previous);
+        point[field] = timestamp;
+        if (phase === "pickup_arrive") {
+          task.status = "arrived_pickup";
+          task.arrivedPickupAt = timestamp;
+          order.status = "arrived_pickup";
+        }
+        if (phase === "pickup_depart") {
+          task.status = "on_trip";
+          task.startedAt = timestamp;
+          order.status = "on_trip";
+        }
+        const now = new Date().toISOString();
+        order.updatedAt = now;
+        const event =
+          phase === "pickup_arrive"
+            ? "driver.arrived_pickup"
+            : phase === "pickup_depart"
+              ? "driver.started_trip"
+              : arriving
+                ? "driver.waypoint_arrived"
+                : "driver.waypoint_departed";
+        const traceLog = this.buildTraceLog(order.orderId, event, {
+          taskId,
+          waypointSequence: sequence,
+          reportedAt: timestamp,
+          ...(requestId ? { requestId } : {}),
+        });
+        const outbox: ConsumerNotificationOutboxRecord | null =
+          phase === "pickup_arrive"
+            ? {
+                outboxId: randomUUID(),
+                orderId: order.orderId,
+                passengerSubjectRef: resolvePassengerSubjectRef(
+                  order.passenger,
+                ),
+                eventType: "driver_arrived",
+                assignmentVersion: null,
+                payload: { taskId },
+                status: "pending",
+                attemptCount: 0,
+                nextAttemptAt: now,
+                createdAt: now,
+                deliveredAt: null,
+              }
+            : null;
+        return {
+          bundle: { ...bundle, task, order },
+          replayed: false,
+          traceLog,
+          outbox,
+        };
+      };
+      const repository = this.ownedMobilityRepository;
+      const result = repository?.isEnabled()
+        ? await repository.withTransaction(async (tx) => {
+            const bundle =
+              await repository.loadDriverTaskCompletionBundleForUpdate(
+                tx,
+                taskId,
+              );
+            if (!bundle)
+              throw new ApiRequestError(
+                HttpStatus.NOT_FOUND,
+                "DRIVER_TASK_NOT_FOUND",
+                "Driver task was not found.",
+                { taskId },
+              );
+            const prepared = prepare(bundle);
+            if (!prepared.replayed)
+              await repository.persistOrderWorkflow(tx, {
+                orders: [prepared.bundle.order],
+                driverTasks: [prepared.bundle.task],
+                dispatchTraceLogs: [prepared.traceLog!],
+                ...(prepared.outbox
+                  ? { consumerNotificationOutbox: [prepared.outbox] }
+                  : {}),
+              });
+            return prepared;
+          })
+        : await (async () => {
+            const task = this.requireTask(taskId);
+            const prepared = prepare({
+              task,
+              order: this.requireOrder(task.orderId),
+              assignment: this.requireAssignment(task.assignmentId),
+              dispatchJob: this.requireDispatchJob(task.dispatchJobId),
+            });
+            if (!prepared.replayed)
+              await this.persistChangesRequired(
+                {
+                  orders: [prepared.bundle.order],
+                  driverTasks: [prepared.bundle.task],
+                  dispatchTraceLogs: [prepared.traceLog!],
+                  ...(prepared.outbox
+                    ? { consumerNotificationOutbox: [prepared.outbox] }
+                    : {}),
+                },
+                "record_waypoint_visit",
+              );
+            // An in-memory cancellation during the persistence await must not be resurrected.
+            if (
+              !prepared.replayed &&
+              !this.isReconciledAssignmentTask(
+                this.requireAssignment(task.assignmentId),
+                this.requireTask(taskId),
+              )
+            ) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+                "The waypoint task changed before commit.",
+              );
+            }
+            return prepared;
+          })();
+      this.applyReplayedDriverTaskCompletionBundle(result.bundle);
+      if (result.replayed) return this.cloneTask(result.bundle.task);
+      this.dispatchTraceLogs = [result.traceLog!, ...this.dispatchTraceLogs];
+      if (result.outbox)
+        this.consumerNotificationOutbox = [
+          result.outbox,
+          ...this.consumerNotificationOutbox,
+        ];
+      await this.recordAudit(
+        {
+          actorId: result.bundle.task.driverId,
+          actorType: "ops_user",
+          tenantId: result.bundle.order.tenantId,
+          moduleName: "driver-task",
+          actionName:
+            phase === "pickup_arrive"
+              ? "arrive_pickup"
+              : phase === "pickup_depart"
+                ? "start_trip"
+                : phase === "arrive"
+                  ? "arrive_waypoint"
+                  : "depart_waypoint",
+          resourceType: "driver_task",
+          resourceId: taskId,
+          newValuesSummary: {
+            status: result.bundle.task.status,
+            waypointSequence: sequence,
+            reportedAt: timestamp,
+          },
+        },
+        requestId,
+      );
+      await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+        result.bundle.task,
+        result.bundle.order,
+        requestId,
+      );
+      await this.publishLatestDispatchJobUpdate(
+        result.bundle.order.orderId,
+        requestId,
+      );
+      return this.cloneTask(result.bundle.task);
+    };
+    // The DB row locks serialize replicas. The same local ordering also keeps noDB retries deterministic.
+    const previous = this.waypointCommands.get(taskId) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(execute);
+    this.waypointCommands.set(taskId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.waypointCommands.get(taskId) === pending)
+        this.waypointCommands.delete(taskId);
+    }
   }
 
   async updateDriverTaskEta(
@@ -8786,6 +9213,24 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (command.waypointSequence !== undefined) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "arrive",
+        command.waypointSequence,
+        command.arrivedAt,
+        requestId,
+      );
+    }
+    if (this.getOwnedTravelWaypoints(task, this.requireOrder(task.orderId))) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "pickup_arrive",
+        0,
+        command.arrivedAt,
+        requestId,
+      );
+    }
     if (task.status === "arrived_pickup") {
       return this.cloneTask(task);
     }
@@ -8852,6 +9297,15 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (this.getOwnedTravelWaypoints(task, this.requireOrder(task.orderId))) {
+      return this.recordOwnedWaypointVisit(
+        taskId,
+        "pickup_depart",
+        0,
+        command.startedAt,
+        requestId,
+      );
+    }
     if (task.status !== "arrived_pickup") {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -8961,6 +9415,8 @@ export class OwnedMobilityService
         },
       );
     }
+
+    this.assertOwnedTravelVisitsComplete(task, order, command.completedAt);
 
     if (
       order.fixedPrice &&
@@ -9280,6 +9736,12 @@ export class OwnedMobilityService
         },
       );
     }
+
+    this.assertOwnedTravelVisitsComplete(
+      task,
+      order,
+      params.command.completedAt,
+    );
 
     if (
       order.fixedPrice &&
@@ -12919,6 +13381,15 @@ export class OwnedMobilityService
       createdAt: now,
       updatedAt: now,
     };
+    const selectedStops =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? (order.partnerBookingDetails.routeStops ?? [])
+        : [];
+    const routePlaces =
+      !this.forwarderSourceMap.has(order.orderId) && selectedStops.length
+        ? [order.pickup, ...selectedStops, order.dropoff]
+        : [];
     const task: DriverTaskRecord = {
       ...(order.serviceSelection
         ? { serviceSelection: { ...order.serviceSelection } }
@@ -12937,8 +13408,31 @@ export class OwnedMobilityService
       driverId,
       vehicleId,
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
-      routeProvided: false,
-      waypoints: [],
+      routeProvided:
+        routePlaces.length > 0 &&
+        routePlaces.every(
+          (place) =>
+            typeof place.lat === "number" &&
+            Number.isFinite(place.lat) &&
+            Math.abs(place.lat) <= 90 &&
+            typeof place.lng === "number" &&
+            Number.isFinite(place.lng) &&
+            Math.abs(place.lng) <= 180,
+        ),
+      waypoints: routePlaces.map((place, sequence) => ({
+        sequence,
+        label:
+          sequence === 0
+            ? "上車點"
+            : sequence === routePlaces.length - 1
+              ? "下車點"
+              : `停靠點 ${sequence}`,
+        address: place.address,
+        lat: place.lat ?? null,
+        lng: place.lng ?? null,
+        arrivedAt: null,
+        departedAt: null,
+      })),
       status: "pending_acceptance",
       acceptedAt: null,
       departedAt: null,
@@ -14555,15 +15049,50 @@ export class OwnedMobilityService
   }
 
   private bookingRequirementCandidateAllowed(
-    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
     preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ): boolean {
-    if (!order.bookingRequirements && !order.serviceSelection) return true;
+    const travelDetails =
+      order.businessDispatchSubtype === "travel_agency_transfer" &&
+      order.partnerBookingDetails?.subtype === "travel_agency_transfer"
+        ? order.partnerBookingDetails
+        : null;
+    const travelPassengers = travelDetails?.groupSize;
+    const travelLuggage =
+      order.businessDispatchSubtype === "travel_agency_transfer"
+        ? order.luggageCount
+        : null;
+    // Compare only this booking's declared load. Legacy absent demands stay
+    // absent; planned tour/vehicle metadata is not actual vehicle capacity.
+    const needsTravelLuggageCapacity =
+      travelLuggage != null && travelLuggage > 0;
+    const hasTravelLoad =
+      travelPassengers != null || needsTravelLuggageCapacity;
+    if (!order.bookingRequirements && !order.serviceSelection && !hasTravelLoad)
+      return true;
     const capability =
       this.vehicleEligibilityService?.resolveRuntimeVehicleCapability(
         vehicleId,
       ) ?? null;
+    if (
+      hasTravelLoad &&
+      (!capability?.active ||
+        (travelPassengers != null &&
+          (!Number.isInteger(capability.seatCount) ||
+            capability.seatCount < travelPassengers)) ||
+        (needsTravelLuggageCapacity &&
+          (!Number.isInteger(capability.luggageCapacity) ||
+            capability.luggageCapacity < travelLuggage)))
+    )
+      return false;
     const vehicleForm = preparedVehicleForms
       ? (preparedVehicleForms.get(vehicleId) ?? null)
       : capability?.vehicleForm;
@@ -14580,7 +15109,14 @@ export class OwnedMobilityService
   }
 
   private assertBookingRequirementCandidate(
-    order: Pick<OwnedOrderRecord, "bookingRequirements" | "serviceSelection">,
+    order: Pick<
+      OwnedOrderRecord,
+      | "bookingRequirements"
+      | "serviceSelection"
+      | "businessDispatchSubtype"
+      | "partnerBookingDetails"
+      | "luggageCount"
+    >,
     vehicleId: string,
     preparedVehicleForms?: ReadonlyMap<string, VehicleForm | null>,
   ) {

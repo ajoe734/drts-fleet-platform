@@ -9,9 +9,11 @@ import { type Locale, t } from "@/lib/translations";
 export function PartnerPaymentReceipt({
   receipt,
   locale,
+  tourIncluded = false,
 }: {
   receipt: PartnerOrderReceiptRecord;
   locale: Locale;
+  tourIncluded?: boolean;
 }) {
   const label = (key: string) => t(key, undefined, locale);
   const money = (amount: MoneyAmount | null) =>
@@ -38,11 +40,15 @@ export function PartnerPaymentReceipt({
       data-booking-id={receipt.bookingId ?? undefined}
     >
       <section
-        aria-label={label("receipt.actualTrip")}
+        aria-label={label(
+          tourIncluded ? "receipt.completedTrip" : "receipt.actualTrip",
+        )}
         data-testid="partner-task-fare"
         data-task-id={completion?.taskId}
       >
-        <h2>{label("receipt.actualTrip")}</h2>
+        <h2>
+          {label(tourIncluded ? "receipt.completedTrip" : "receipt.actualTrip")}
+        </h2>
         {completion ? (
           <dl>
             <div>
@@ -53,27 +59,33 @@ export function PartnerPaymentReceipt({
               <dt>{label("receipt.completedAt")}</dt>
               <dd>{completion.completedAt ?? label("receipt.notProvided")}</dd>
             </div>
-            <div>
-              <dt>{label("receipt.actualFare")}</dt>
-              <dd data-testid="partner-actual-fare">{money(actual ?? null)}</dd>
-            </div>
-            {breakdown && actual ? (
-              parts.map(([key, title]) => (
-                <div key={key}>
-                  <dt>{label(title)}</dt>
-                  <dd>
-                    {money({
-                      currency: actual.currency,
-                      amountMinor: breakdown[key],
-                    })}
+            {tourIncluded ? null : (
+              <>
+                <div>
+                  <dt>{label("receipt.actualFare")}</dt>
+                  <dd data-testid="partner-actual-fare">
+                    {money(actual ?? null)}
                   </dd>
                 </div>
-              ))
-            ) : (
-              <div>
-                <dt>{label("receipt.breakdown")}</dt>
-                <dd>{label("receipt.notProvided")}</dd>
-              </div>
+                {breakdown && actual ? (
+                  parts.map(([key, title]) => (
+                    <div key={key}>
+                      <dt>{label(title)}</dt>
+                      <dd>
+                        {money({
+                          currency: actual.currency,
+                          amountMinor: breakdown[key],
+                        })}
+                      </dd>
+                    </div>
+                  ))
+                ) : (
+                  <div>
+                    <dt>{label("receipt.breakdown")}</dt>
+                    <dd>{label("receipt.notProvided")}</dd>
+                  </div>
+                )}
+              </>
             )}
             <div>
               <dt>{label("receipt.distanceKm")}</dt>
