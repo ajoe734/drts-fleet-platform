@@ -83,6 +83,7 @@ vi.mock("@/components/canvas-primitives", () => ({
 import DriverTripMap from "../../components/driver-trip-map";
 import DriverTripMapWeb from "../../components/driver-trip-map.web";
 import MapView from "react-native-maps";
+import { Linking } from "react-native";
 
 function buildTask(
   overrides: Partial<DriverTaskRecord> = {},
@@ -206,7 +207,276 @@ function renderDriverTripMapText(
   return collectText(React.createElement(DriverTripMap, props)).join(" ");
 }
 
+function collectHostElements(
+  node: unknown,
+): React.ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) {
+    return node.flatMap(collectHostElements);
+  }
+  if (!React.isValidElement(node)) {
+    return [];
+  }
+  const element = node as React.ReactElement<Record<string, unknown>>;
+  if (typeof element.type === "function") {
+    const renderFunction = element.type as (
+      props: typeof element.props,
+    ) => React.ReactNode;
+    return collectHostElements(renderFunction(element.props));
+  }
+  return [element, ...collectHostElements(element.props.children)];
+}
+
 describe("DriverTripMap", () => {
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "retains pickup and dropoff navigation when canonical waypoints are empty in the %s component",
+    (_platform, Component) => {
+      const hosts = collectHostElements(
+        React.createElement(Component, {
+          task: buildTask({ waypoints: [] }),
+          order: buildOrder(),
+          driverLocation: null,
+        }),
+      );
+      expect(
+        hosts
+          .filter(
+            (host) =>
+              typeof host.props.accessibilityLabel === "string" &&
+              host.props.accessibilityLabel.startsWith("Google navigation to "),
+          )
+          .map((host) => host.props.accessibilityLabel),
+      ).toEqual([
+        "Google navigation to pickup",
+        "Google navigation to dropoff",
+      ]);
+    },
+  );
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "renders every canonical stop and hands each actual coordinate to navigation in the %s component",
+    async (platform, Component) => {
+      const waypoints: DriverTaskRecord["waypoints"] = [
+        {
+          sequence: 0,
+          label: "行程起點",
+          address: "台北車站",
+          lat: 25.0478,
+          lng: 121.517,
+          arrivedAt: null,
+          departedAt: null,
+        },
+        {
+          sequence: 1,
+          label: "中途景點",
+          address: "實際選定景點",
+          lat: 25.8,
+          lng: 121.8,
+          arrivedAt: null,
+          departedAt: null,
+        },
+        {
+          sequence: 2,
+          label: "再次停靠",
+          address: "台北車站",
+          lat: 25.0478,
+          lng: 121.517,
+          arrivedAt: null,
+          departedAt: null,
+        },
+        {
+          sequence: 3,
+          label: "行程終點",
+          address: "松山機場",
+          lat: 25.0697,
+          lng: 121.5525,
+          arrivedAt: null,
+          departedAt: null,
+        },
+      ];
+      const element = React.createElement(Component, {
+        task: buildTask({ waypoints }),
+        order: buildOrder(),
+        driverLocation: null,
+        nativeMapAvailable: true,
+      });
+      const text = collectText(element).join(" ");
+      expect(text.indexOf("行程起點")).toBeLessThan(text.indexOf("中途景點"));
+      expect(text.indexOf("中途景點")).toBeLessThan(text.indexOf("再次停靠"));
+      expect(text.indexOf("再次停靠")).toBeLessThan(text.indexOf("行程終點"));
+      expect(text).toContain("不代表已計算路線、ETA 或行程進度");
+
+      const hosts = collectHostElements(element);
+      const buttons = hosts.filter(
+        (host) =>
+          typeof host.props.accessibilityLabel === "string" &&
+          host.props.accessibilityLabel.startsWith("Google navigation to "),
+      );
+      expect(buttons.map((button) => button.props.accessibilityLabel)).toEqual([
+        "Google navigation to waypoint-0",
+        "Google navigation to waypoint-1",
+        "Google navigation to waypoint-2",
+        "Google navigation to waypoint-3",
+      ]);
+      vi.mocked(Linking.canOpenURL).mockResolvedValue(false);
+      vi.mocked(Linking.openURL).mockClear().mockResolvedValue(undefined);
+      for (const button of buttons) {
+        expect(typeof button.props.onPress).toBe("function");
+        (button.props.onPress as () => void)();
+      }
+      await vi.waitFor(() => expect(Linking.openURL).toHaveBeenCalledTimes(4));
+      expect(vi.mocked(Linking.openURL).mock.calls.map(([url]) => url)).toEqual(
+        [
+          "https://www.google.com/maps/dir/?api=1&destination=25.0478%2C121.517&travelmode=driving",
+          "https://www.google.com/maps/dir/?api=1&destination=25.8%2C121.8&travelmode=driving",
+          "https://www.google.com/maps/dir/?api=1&destination=25.0478%2C121.517&travelmode=driving",
+          "https://www.google.com/maps/dir/?api=1&destination=25.0697%2C121.5525&travelmode=driving",
+        ],
+      );
+
+      if (platform === "native") {
+        const markers = hosts.filter((host) => host.type === "Marker");
+        expect(markers.map((marker) => marker.props.coordinate)).toEqual([
+          { latitude: 25.0478, longitude: 121.517 },
+          { latitude: 25.8, longitude: 121.8 },
+          { latitude: 25.0478, longitude: 121.517 },
+          { latitude: 25.0697, longitude: 121.5525 },
+        ]);
+        expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
+          initialRegion: {
+            latitude: (25.0478 + 25.8) / 2,
+            longitude: (121.517 + 121.8) / 2,
+            latitudeDelta: (25.8 - 25.0478) * 1.6,
+            longitudeDelta: (121.8 - 121.517) * 1.6,
+          },
+        });
+      } else {
+        expect(hosts.some((host) => host.type === "MapView")).toBe(false);
+      }
+    },
+  );
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "keeps an invalid intermediate stop visible and disables its navigation in the %s component",
+    async (_platform, Component) => {
+      const element = React.createElement(Component, {
+        task: buildTask({
+          waypoints: [
+            {
+              sequence: 0,
+              label: "行程起點",
+              address: "起點地址",
+              lat: 25,
+              lng: 121,
+              arrivedAt: null,
+              departedAt: null,
+            },
+            {
+              sequence: 1,
+              label: "待確認中途站",
+              address: "中途地址文字",
+              lat: 91,
+              lng: 121.8,
+              arrivedAt: null,
+              departedAt: null,
+            },
+            {
+              sequence: 2,
+              label: "行程終點",
+              address: "終點地址",
+              lat: 26,
+              lng: 122,
+              arrivedAt: null,
+              departedAt: null,
+            },
+          ],
+        }),
+        order: buildOrder(),
+        driverLocation: null,
+        nativeMapAvailable: true,
+      });
+      const text = collectText(element).join(" ");
+      expect(text).toContain("待確認中途站");
+      expect(text).toContain("中途地址文字");
+      expect(text).toContain("座標缺失");
+      expect(text).toContain("無有效座標時不使用地址猜測導航");
+      const hosts = collectHostElements(element);
+      const labels = hosts.map((host) => host.props.accessibilityLabel);
+      expect(labels).not.toContain("Google navigation to waypoint-1");
+      expect(labels).not.toContain("System navigation to waypoint-1");
+      const destinationButton = hosts.find(
+        (host) =>
+          host.props.accessibilityLabel === "Google navigation to waypoint-2",
+      );
+      expect(destinationButton).toBeDefined();
+      vi.mocked(Linking.canOpenURL).mockResolvedValue(false);
+      vi.mocked(Linking.openURL).mockClear().mockResolvedValue(undefined);
+      (destinationButton?.props.onPress as () => void)();
+      await vi.waitFor(() =>
+        expect(Linking.openURL).toHaveBeenCalledWith(
+          "https://www.google.com/maps/dir/?api=1&destination=26%2C122&travelmode=driving",
+        ),
+      );
+    },
+  );
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "preserves the forwarded platform stop order and route lock in the actual %s component",
+    (_platform, Component) => {
+      const task = buildTask({
+        sourcePlatform: "grab",
+        routeProvided: false,
+        waypoints: [
+          {
+            sequence: 9,
+            label: "來源第一站",
+            address: "來源地址甲",
+            lat: 24,
+            lng: 120,
+            arrivedAt: null,
+            departedAt: null,
+          },
+          {
+            sequence: 2,
+            label: "來源第二站",
+            address: "來源地址乙",
+            lat: 25,
+            lng: 121,
+            arrivedAt: null,
+            departedAt: null,
+          },
+        ],
+      });
+      const before = JSON.stringify(task);
+      const text = collectText(
+        React.createElement(Component, {
+          task,
+          order: buildOrder(),
+          driverLocation: null,
+        }),
+      ).join(" ");
+      expect(text.indexOf("來源第一站")).toBeLessThan(
+        text.indexOf("來源第二站"),
+      );
+      expect(text).toContain("Forwarded route - source platform authority");
+      expect(text).toContain("來源平台路線鎖定");
+      expect(text).toContain("改路線需聯絡派車台或來源平台");
+      expect(text).not.toContain("台北車站");
+      expect(JSON.stringify(task)).toBe(before);
+    },
+  );
+
   it("shows the native Google map with real pickup/dropoff coordinates", () => {
     const text = renderDriverTripMapText({
       task: buildTask(),

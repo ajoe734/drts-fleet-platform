@@ -110,6 +110,7 @@ import {
   driverTripActionSuccessLabels,
 } from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
+import { buildDriverTripNavigationModel } from "@/lib/driver-navigation";
 
 function ActionButton({
   label,
@@ -404,6 +405,10 @@ function getPartnerFulfillmentRows(
         row(copy.groupSize, count(details?.groupSize)),
         row(copy.meetingPoint, text(details?.meetingPoint)),
         row(copy.itineraryLink, text(details?.itineraryLink)),
+        row(copy.guideName, text(order.onsiteContact?.name)),
+        row(copy.guidePhone, text(order.onsiteContact?.phone)),
+        row(copy.plannedStops, text((details?.viaStops ?? []).join(" → "))),
+        row(copy.signage, text(details?.signage)),
         row(
           copy.rosterPassengers,
           text((details?.rosterPassengers ?? []).join("、")),
@@ -436,6 +441,55 @@ function getPartnerFulfillmentRows(
     default:
       return null;
   }
+}
+
+// Ordinary phone fulfillment uses the selected task's canonical requirements.
+// Never substitute the passenger profile for a missing selected contact.
+function getPhoneFulfillmentRows(
+  order: OwnedOrderRecord | null,
+  task: DriverTaskRecord | null,
+): { label: string; value: string }[] | null {
+  if (!order || order.orderSource !== "phone") return null;
+  const requirements =
+    task?.orderId === order.orderId
+      ? (task.bookingRequirements ?? order.bookingRequirements)
+      : order.bookingRequirements;
+  const copy = driverStrings.trip.fulfillment;
+  const text = (value: string | null | undefined) =>
+    typeof value === "string" && value.trim() ? value.trim() : copy.notProvided;
+  const count = (value: number | null | undefined) =>
+    value == null ? copy.notProvided : String(value);
+  const role = requirements?.driverContactRole;
+  const contact =
+    role === "booker"
+      ? requirements?.bookerContact
+      : role === "passenger"
+        ? requirements?.passengerContact
+        : undefined;
+  return [
+    {
+      label: copy.contactRole,
+      value:
+        role === "booker"
+          ? copy.bookerContact
+          : role === "passenger"
+            ? copy.passengerContact
+            : copy.notProvided,
+    },
+    { label: copy.contactName, value: text(contact?.name) },
+    { label: copy.contactPhone, value: text(contact?.phone) },
+    { label: copy.passengerCount, value: count(requirements?.passengerCount) },
+    { label: copy.luggageCount, value: count(requirements?.luggageCount) },
+    {
+      label: copy.luggageSize,
+      value:
+        requirements?.luggageSize === "standard"
+          ? copy.standardLuggage
+          : requirements?.luggageSize === "oversized"
+            ? copy.oversizedLuggage
+            : copy.notProvided,
+    },
+  ];
 }
 
 function formatPickupStopTime(order: OwnedOrderRecord | null): string {
@@ -939,6 +993,7 @@ export default function TripScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const waypointActionInFlightRef = useRef<string | null>(null);
   const [ownedRejectionOpen, setOwnedRejectionOpen] = useState(false);
   const [ownedRejectionError, setOwnedRejectionError] = useState<string | null>(
     null,
@@ -977,9 +1032,14 @@ export default function TripScreen() {
 
   const completionOrder =
     orderDetail?.orderId === taskDetail?.orderId ? orderDetail : null;
+  const waypointProgress = buildDriverTripNavigationModel({
+    task: taskDetail,
+    order: completionOrder,
+  }).waypointProgress;
   const fulfillmentRows = isForwardedTask(taskDetail)
     ? null
-    : getPartnerFulfillmentRows(completionOrder);
+    : (getPhoneFulfillmentRows(completionOrder, taskDetail) ??
+      getPartnerFulfillmentRows(completionOrder));
   const actualFareDraft =
     actualFareState.taskId === taskDetail?.taskId
       ? actualFareState.draft
@@ -1049,10 +1109,24 @@ export default function TripScreen() {
     baseTripExperienceState,
     forwardedActionResult,
   );
-  const primaryTripAction = getPrimaryTripAction(
+  const basePrimaryTripAction = getPrimaryTripAction(
     taskDetail,
     tripExperienceState,
   );
+  const nextWaypointVisit = waypointProgress.next;
+  const primaryTripAction =
+    basePrimaryTripAction?.action === "complete" && nextWaypointVisit
+      ? {
+          action: nextWaypointVisit.action,
+          label:
+            (nextWaypointVisit.action === "arrived"
+              ? driverStrings.trip.waypointVisits.arrive
+              : driverStrings.trip.waypointVisits.depart) +
+            nextWaypointVisit.stop.label,
+          title: driverStrings.trip.waypointVisits.title,
+          helperText: driverStrings.trip.waypointVisits.hint,
+        }
+      : basePrimaryTripAction;
   const tripStatusPresentation = getTripStatusPresentation(
     tripExperienceState,
     taskDetail,
@@ -1184,6 +1258,9 @@ export default function TripScreen() {
     dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
   });
   const footerNotice =
+    (waypointProgress.unavailable && isTripInProgress
+      ? driverStrings.trip.waypointVisits.unavailable
+      : null) ??
     actualFareError ??
     (completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
@@ -1212,7 +1289,8 @@ export default function TripScreen() {
                           : tripStatusPresentation.detail);
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
-      ? Boolean(actualFareError) ||
+      ? (waypointProgress.required && !waypointProgress.complete) ||
+        Boolean(actualFareError) ||
         shouldDisableCompleteTripAction({
           submittingAction,
           proofRequirementsUnavailable,
@@ -1495,6 +1573,7 @@ export default function TripScreen() {
   useEffect(() => {
     resetCompletionDraft();
     setForwardedActionResult(null);
+    setSubmittingAction(null);
   }, [taskDetail?.taskId]);
 
   useEffect(() => {
@@ -1762,7 +1841,33 @@ export default function TripScreen() {
   }
 
   async function handleAction(action: TripPrimaryActionKey) {
-    if (!taskDetail?.taskId) {
+    if (
+      !taskDetail?.taskId ||
+      submittingAction !== null ||
+      waypointActionInFlightRef.current === taskDetail.taskId
+    ) {
+      return;
+    }
+
+    const waypointVisit =
+      !isForwardedTrip &&
+      taskDetail.status === "on_trip" &&
+      (action === "arrived" || action === "depart")
+        ? nextWaypointVisit
+        : null;
+    if (
+      (action === "complete" &&
+        waypointProgress.required &&
+        !waypointProgress.complete) ||
+      (!isForwardedTrip &&
+        taskDetail.status === "on_trip" &&
+        (action === "arrived" || action === "depart") &&
+        (!waypointVisit || waypointVisit.action !== action))
+    ) {
+      Alert.alert(
+        driverStrings.trip.waypointVisits.title,
+        driverStrings.trip.waypointVisits.completionBlocked,
+      );
       return;
     }
 
@@ -1774,7 +1879,10 @@ export default function TripScreen() {
       selectedTaskIdRef.current === selectedTaskId &&
       taskDetailRef.current?.taskId === actionTaskId;
 
+    if (!isCurrentTask()) return;
+
     try {
+      waypointActionInFlightRef.current = actionTaskId;
       setSubmittingAction(action);
 
       switch (action) {
@@ -1782,10 +1890,20 @@ export default function TripScreen() {
           await client.acceptTask(taskDetail.taskId, { acceptedAt: now });
           break;
         case "depart":
-          await client.departTask(taskDetail.taskId, { departedAt: now });
+          await client.departTask(taskDetail.taskId, {
+            departedAt: now,
+            ...(waypointVisit
+              ? { waypointSequence: waypointVisit.sequence }
+              : {}),
+          });
           break;
         case "arrived":
-          await client.arrivedPickupTask(taskDetail.taskId, { arrivedAt: now });
+          await client.arrivedPickupTask(taskDetail.taskId, {
+            arrivedAt: now,
+            ...(waypointVisit
+              ? { waypointSequence: waypointVisit.sequence }
+              : {}),
+          });
           break;
         case "start":
           await client.startTask(taskDetail.taskId, { startedAt: now });
@@ -1862,7 +1980,7 @@ export default function TripScreen() {
 
       Alert.alert(
         "成功",
-        `已完成操作：${formatTripActionSuccessLabel(action)}`,
+        `已完成操作：${waypointVisit ? primaryTripAction?.label : formatTripActionSuccessLabel(action)}`,
       );
       await loadTrip(false);
     } catch (actionError) {
@@ -1875,7 +1993,7 @@ export default function TripScreen() {
 
       if (!isCurrentTask()) return;
 
-      if (shouldReloadTripAfterFailedAction(action)) {
+      if (waypointVisit || shouldReloadTripAfterFailedAction(action)) {
         try {
           await loadTrip(false);
         } catch (reloadError) {
@@ -1889,7 +2007,9 @@ export default function TripScreen() {
       if (!isCurrentTask()) return;
       Alert.alert("錯誤", actionErrorMessage);
     } finally {
-      setSubmittingAction(null);
+      if (waypointActionInFlightRef.current === actionTaskId)
+        waypointActionInFlightRef.current = null;
+      if (isCurrentTask()) setSubmittingAction(null);
     }
   }
 

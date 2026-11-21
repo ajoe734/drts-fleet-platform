@@ -425,6 +425,16 @@ function assertSnapshot(
   expect(data.booking.partnerBookingDetails).toEqual(details);
   expect(data.order.partnerBookingDetails).toEqual(details);
   expect(data.stored.partnerBookingDetails).toEqual(details);
+  if (details.subtype === "travel_agency_transfer") {
+    const onsiteContact = {
+      name: details.guideName,
+      phone: details.guidePhone,
+    };
+    expect(onsiteContact.name).toBeTruthy();
+    expect(onsiteContact.phone).toBeTruthy();
+    for (const record of [data.booking, data.order, data.stored])
+      expect(record.onsiteContact).toEqual(onsiteContact);
+  }
   expect(data.booking.eligibilityVerificationId).toBeTruthy();
   expect(data.order.eligibilityVerificationId).toBe(
     data.booking.eligibilityVerificationId,
@@ -559,7 +569,9 @@ async function readPersistedPages(
     for (const [key, value] of Object.entries(details)) {
       if (key === "subtype") continue;
       for (const text of Array.isArray(value) ? value : [String(value)]) {
-        await expect(fields).toContainText(text);
+        await expect(fields).toContainText(
+          typeof text === "string" ? text : text.address,
+        );
       }
     }
   };
@@ -717,6 +729,10 @@ async function runNormalBooking(
       itineraryLink: "https://travel.example.test/itinerary/" + marker,
       rosterPassengers: ["SIM Traveller One", "SIM Traveller Two"],
       meetingPoint: "SIM Taipei 101 entrance",
+      guideName: "SIM Separate C032 Guide",
+      guidePhone: "0900000088",
+      viaStops: ["SIM C032 museum stop", "SIM C032 hotel stop"],
+      signage: "SIM C032 group sign",
     };
     await page
       .getByLabel("Group / order reference", { exact: true })
@@ -732,6 +748,27 @@ async function runNormalBooking(
       .getByLabel("Meeting point", { exact: true })
       .fill(details.meetingPoint);
     await page.getByLabel("Luggage count", { exact: true }).fill("2");
+    if (
+      !details.guideName ||
+      !details.guidePhone ||
+      !details.viaStops ||
+      !details.signage
+    )
+      throw new Error(
+        "Expected the distinct SIM tour guide and planned instructions",
+      );
+    await page
+      .getByLabel("Tour guide contact name", { exact: true })
+      .fill(details.guideName);
+    await page
+      .getByLabel("Tour guide contact phone", { exact: true })
+      .fill(details.guidePhone);
+    await page
+      .getByLabel("Planned intermediate stops", { exact: true })
+      .fill(details.viaStops.join("\n"));
+    await page
+      .getByLabel("Pickup signage", { exact: true })
+      .fill(details.signage);
   } else {
     details = {
       subtype,
@@ -796,7 +833,10 @@ async function runNormalBooking(
   createdIds.add(orderId);
   for (const value of Object.values(details)) {
     if (Array.isArray(value)) {
-      for (const name of value) await expect(confirmation).toContainText(name);
+      for (const name of value)
+        await expect(confirmation).toContainText(
+          typeof name === "string" ? name : name.address,
+        );
     } else if (value !== subtype)
       await expect(confirmation).toContainText(String(value));
   }
