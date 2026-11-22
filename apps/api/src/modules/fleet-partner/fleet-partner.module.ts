@@ -3,12 +3,13 @@ import { ControlledDownloadModule } from "../controlled-download/controlled-down
 import { Module } from "@nestjs/common";
 
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
-import { DriverOnboardingModule } from "../driver-onboarding/driver-onboarding.module";
 import { DatabaseModule } from "../../common/db";
 import { DatabaseService } from "../../common/db/database.service";
 import { IdempotencyModule } from "../../common/idempotency";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
+// Onboarding reaches AuthModule; load mobility first, including for CI preloads.
+import { DriverOnboardingModule } from "../driver-onboarding/driver-onboarding.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
