@@ -41,6 +41,8 @@
 
 本 worktree 最初沿用 canonical checkout 的舊依賴，`build-before.log` 記錄其 Zod `3.25.76` 不支援 `guid()` 的建置失敗，不能當作產品重現。之後僅將本 worktree 的 ignored `node_modules` symlink 指向原候選既有、符合 lockfile 的依賴（Zod `4.6.7`）；未改共用 checkout、package.json 或 lockfile。詳見 `dependency-links.json`。
 
+本輪六個套件（contracts、API、Driver App、Fleet Portal、Platform Admin、API client）的 typecheck 均為 exit 0，完整結果見 `typechecks.log`。各項檢查的退出碼另存同名 `.exit`；新候選仍須 Gemini exact-SHA review 與對應 hosted CI／merge，尚未宣稱整體任務完成。
+
 可重跑的窄範圍檢查如下；所有必要檢查須讀取完成結果，不能將 scoped pass 當作 hosted CI、部署或外部驗收通過：
 
 ```bash
