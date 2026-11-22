@@ -384,4 +384,58 @@ describe("exchangePartnerCallbackSession recognizes records built with the new s
     const result = await login();
     expect(result.identity.membershipId).toBeUndefined();
   });
+
+  it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: reuses the existing fleet_staff_invitation link on re-verification and reads back the updated Fleet role on ordinary login", async () => {
+    const { repository, login } = await setup();
+    const now = "2026-11-14T10:05:00.000Z";
+
+    await repository.ensurePrincipalRecord({
+      principalId: INVITED_PRINCIPAL_ID,
+      sourceRef: buildFleetPartnerPrincipalSourceRef(INVITED_PRINCIPAL_ID),
+      issuer: "google",
+      subject: OIDC_SUB,
+      principalType: "human",
+      email: "fleet.staff.sourceref@example.com",
+      emailVerified: true,
+      displayName: "Fleet Staff SourceRef Fixture",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    } as CanonicalIdentityPrincipalRecord);
+    const membership = await repository.ensureMembershipRecord({
+      membershipId: "fleet-sourceref-reinvite-membership",
+      sourceRef: buildFleetMemberSourceRef(ENTRY, INVITED_PRINCIPAL_ID),
+      principalId: INVITED_PRINCIPAL_ID,
+      realm: "partner",
+      scopeRef: buildFleetScopeRef(ENTRY),
+      tenantId: null,
+      partnerId: "fleet-demo-001",
+      status: "active",
+      invitedByPrincipalId: "manager",
+      invitationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repository.ensureRoleBindingRecord({
+      roleBindingId: "fleet-sourceref-reinvite-binding",
+      sourceRef: buildFleetRoleBindingSourceRef(ENTRY, INVITED_PRINCIPAL_ID),
+      membershipId: membership.membershipId,
+      roleCode: "fleet_partner_finance",
+      grantedByPrincipalId: "manager",
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const granted = await login();
+    expect(granted.identity).toMatchObject({
+      principalId: INVITED_PRINCIPAL_ID,
+      membershipId: membership.membershipId,
+      partnerId: "fleet-demo-001",
+      partnerEntrySlug: ENTRY,
+      roles: ["fleet_partner_finance"],
+    });
+  });
 });

@@ -179,8 +179,48 @@ describe("FLEET-ONB-007 Fleet staff invitation Google-bind: email_verified and p
         return { rows: active === undefined ? [] : [{ active }] };
       }
       if (text.includes("INSERT INTO admin.phase1_partner_user_identity_links")) {
-        const key = `${params[0]}::${params[1]}`;
-        if (links.has(key)) return { rows: [] };
+        const entrySlug = params[0] as string;
+        const partnerUserRef = params[1] as string;
+        const drtsPassengerId = params[2] as string;
+        const key = `${entrySlug}::${partnerUserRef}`;
+        for (const existing of links.values()) {
+          const rec = existing as {
+            entrySlug?: string;
+            partnerUserRef?: string;
+            drtsPassengerId: string;
+            status?: string;
+            consentScope?: string;
+          };
+          if (
+            rec.entrySlug === entrySlug &&
+            rec.drtsPassengerId === drtsPassengerId &&
+            rec.consentScope === "fleet_staff_invitation" &&
+            rec.partnerUserRef !== partnerUserRef
+          ) {
+            return { rows: [] };
+          }
+        }
+        const existingForKey = links.get(key) as
+          | {
+              entrySlug?: string;
+              partnerUserRef?: string;
+              drtsPassengerId: string;
+              status?: string;
+              consentScope?: string;
+            }
+          | undefined;
+        if (existingForKey) {
+          if (
+            existingForKey.entrySlug === entrySlug &&
+            existingForKey.partnerUserRef === partnerUserRef &&
+            existingForKey.drtsPassengerId === drtsPassengerId &&
+            existingForKey.status === "active" &&
+            existingForKey.consentScope === "fleet_staff_invitation"
+          ) {
+            return { rows: [{ record: existingForKey }] };
+          }
+          return { rows: [] };
+        }
         const record = JSON.parse(params[4] as string);
         links.set(key, record);
         return { rows: [{ record }] };

@@ -48,7 +48,16 @@ function createFleetInvitationClientMock() {
   >();
   const invitationsById = new Map<string, CanonicalIdentityInvitationRecord>();
   const fleetPartnersActive = new Map<string, boolean>();
-  const links = new Map<string, { drtsPassengerId: string }>();
+  const links = new Map<
+    string,
+    {
+      entrySlug: string;
+      partnerUserRef: string;
+      drtsPassengerId: string;
+      status: string;
+      consentScope: string;
+    }
+  >();
   const passwordCredentials = new Map<
     string,
     { passwordHash: string; passwordAlgo: string; pepperVersion: string }
@@ -187,9 +196,38 @@ function createFleetInvitationClientMock() {
     if (text.includes("INSERT INTO admin.phase1_partner_user_identity_links")) {
       const entrySlug = params[0] as string;
       const partnerUserRef = params[1] as string;
+      const drtsPassengerId = params[2] as string;
       const key = `${entrySlug}::${partnerUserRef}`;
-      if (links.has(key)) return { rows: [] };
-      const record = JSON.parse(params[4] as string) as { drtsPassengerId: string };
+      for (const existing of links.values()) {
+        if (
+          existing.entrySlug === entrySlug &&
+          existing.drtsPassengerId === drtsPassengerId &&
+          existing.consentScope === "fleet_staff_invitation" &&
+          existing.partnerUserRef !== partnerUserRef
+        ) {
+          return { rows: [] };
+        }
+      }
+      const existingForKey = links.get(key);
+      if (existingForKey) {
+        if (
+          existingForKey.entrySlug === entrySlug &&
+          existingForKey.partnerUserRef === partnerUserRef &&
+          existingForKey.drtsPassengerId === drtsPassengerId &&
+          existingForKey.status === "active" &&
+          existingForKey.consentScope === "fleet_staff_invitation"
+        ) {
+          return { rows: [{ record: existingForKey }] };
+        }
+        return { rows: [] };
+      }
+      const record = JSON.parse(params[4] as string) as {
+        entrySlug: string;
+        partnerUserRef: string;
+        drtsPassengerId: string;
+        status: string;
+        consentScope: string;
+      };
       links.set(key, record);
       return { rows: [{ record }] };
     }

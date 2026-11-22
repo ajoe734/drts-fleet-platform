@@ -277,10 +277,12 @@ export interface FleetMembershipSnapshot {
 }
 
 /** The minimal surface `acceptFleetStaffOidcInvitation` needs from a
- * `PartnerUserIdentityLinkRepository` to create the `(entrySlug, sub)` link
- * inside its own transaction (SA/SD §3 step 4), without this file importing
- * the whole class as a constructor dependency. A real
- * `PartnerUserIdentityLinkRepository` instance satisfies this structurally. */
+ * `PartnerUserIdentityLinkRepository` to create or re-verify the
+ * `(entrySlug, sub)` link for the invited canonical Fleet principal inside
+ * its own transaction (SA/SD §3 step 4, updated per 2026-11-22 product
+ * decision), without this file importing the whole class as a constructor
+ * dependency. A real `PartnerUserIdentityLinkRepository` instance satisfies
+ * this structurally. */
 export interface FleetStaffIdentityLinkWriter {
   createForInvitedPrincipal(
     entrySlug: string,
@@ -293,7 +295,13 @@ export interface FleetStaffIdentityLinkWriter {
         values?: readonly unknown[],
       ): Promise<{ rows: T[] }>;
     },
-  ): Promise<unknown>;
+  ): Promise<{
+    entrySlug?: string;
+    partnerUserRef?: string;
+    drtsPassengerId: string;
+    status?: string;
+    consentScope?: string;
+  } | null>;
 }
 
 /**
@@ -6059,13 +6067,17 @@ export class IdentityRepository implements OnModuleInit {
   }
 
   /**
-   * FLEET-ONB-004 SA/SD §3: one transaction owns Fleet invitation
-   * consumption, the (issuer, sub) Google binding, the
+   * FLEET-ONB-004 SA/SD §3 (updated per 2026-11-22 product decision,
+   * FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122): one transaction owns Fleet
+   * invitation consumption, the (issuer, sub) Google binding, the
    * `admin.phase1_partner_user_identity_links` row this (entrySlug, sub)
-   * pair has never had before (step 4 -- never through `resolveOrCreate`,
+   * pair creates on first acceptance or re-verifies for the same canonical
+   * Fleet member on re-invitation (step 4 -- never through `resolveOrCreate`,
    * see the decision record §3), and activation. Any failed check -- wrong
    * email, wrong entry, revoked/expired/already-used invitation, an
-   * inactive fleet partner, an already-linked (entrySlug, sub), or an
+   * inactive fleet partner, an (entrySlug, sub) linked to another principal
+   * or non-invitation consent scope, a different Google sub presented for a
+   * principal that already holds an original Google link in this entry, or an
    * (issuer, sub) already bound elsewhere -- rolls back the whole
    * transaction without consuming the invitation or creating a link.
    *
@@ -6216,9 +6228,14 @@ export class IdentityRepository implements OnModuleInit {
         await client.query("ROLLBACK");
         return null;
       }
-      // SA/SD §3 step 4: an (entrySlug, sub) link that already exists --
-      // whether created by a prior referral handoff or another employee
-      // record -- must never be silently reused or overwritten.
+      // SA/SD §3 step 4 (updated per 2026-11-22 product decision): a fresh
+      // invitation for the same canonical Fleet member in the same entry may
+      // re-verify and reuse that member's own active fleet_staff_invitation
+      // link for (entrySlug, sub). Any link belonging to another principal,
+      // created for another consentScope (such as a referral handoff), not
+      // active, or any attempt to bind a different Google sub when this
+      // member already holds an original Google link in this entry, must fail
+      // and roll back the whole transaction.
       const link = await partnerUserIdentityLinkRepo.createForInvitedPrincipal(
         entrySlug,
         proof.subject,
@@ -6226,7 +6243,16 @@ export class IdentityRepository implements OnModuleInit {
         now,
         client,
       );
-      if (!link) {
+      if (
+        !link ||
+        link.drtsPassengerId !== principal.principalId ||
+        (link.entrySlug !== undefined && link.entrySlug !== entrySlug) ||
+        (link.partnerUserRef !== undefined &&
+          link.partnerUserRef !== proof.subject) ||
+        (link.status !== undefined && link.status !== "active") ||
+        (link.consentScope !== undefined &&
+          link.consentScope !== "fleet_staff_invitation")
+      ) {
         await client.query("ROLLBACK");
         return null;
       }
