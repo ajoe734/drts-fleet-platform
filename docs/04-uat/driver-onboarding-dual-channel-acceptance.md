@@ -98,10 +98,35 @@ Gemini 已於 `2026-11-22T15:15:32Z` 核准候選 `982e0357b934dcb4167f015a9936e
 
 修正邊界為在上述 ledger 追加 `driver_onboarding_allocations`，逐項登記三個既有 migration 的 task、確切檔名、schema／table 與 invariants；保留全部既有分配和 amendment，再讓兩份既有檢查的 allocation collectors 納入新群組。必要回歸包括版本不碰撞、檔名唯一且相符，以及最高 migration 不超過已登記分配；保留原 assertion。這三個 migration 在原候選均由 DRV-ONB-013 新增，查核到的 `origin/dev`（`b58970da4c69a66053284e1f5f8198619966829c`）ledger 同樣止於 V0139。此靜態查核不能代替 Supervisor 的正式 scope 協調。
 
-本機只恢復此 isolated worktree 的 ignored root／contracts 依賴連結，沿用前輪符合 lockfile 的安裝；變更位置與前後連結記錄於 `dependency-links.json`。未新增工作副本、未修改共用依賴或 lockfile、未啟動任何產品／browser／DB 服務。本輪只完成缺漏定位，不將 checkpoint 當作可交審候選；共享 dev 與簽署實機驗收仍由 DRV-ONB-012 追蹤。
+此定位 checkpoint `26e646c238838c085af477882d357a4c8e28c439` 只修改本驗收文件；產品碼與原候選相同。依賴連結與後續產品修復詳見下一節。allocation 缺漏仍未修復，此 checkpoint 不作為可交審候選；共享 dev 與簽署實機驗收仍由 DRV-ONB-012 追蹤。
 
 ```bash
 timeout 120s pnpm exec vitest run \
   tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts \
   tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts
+```
+
+### 舊版司機草稿還原修復（allocation 尚待協調）
+
+同一原候選的 [root unit shard 1 job 137263014596](https://github.com/ajoe734/drts-fleet-platform/actions/runs/45036968286/job/137263014596) 另回報正式 Fleet create caller 收到 400（預期 200），以及前節相同的 allocation 缺漏。此 caller finding 可在原 scope 的 `fleet-supply-workspace.tsx` 獨立修復，故先完成此單元；未用 allocation 的範圍等待取代可執行的產品修復。
+
+| Finding／驗收項                                                                                   | 原始碼依據與修改位置                                                                                                                                                                                                                                                                                                                          | 舊版重現 → 修正版結果                                                                                                                                                                                                                                                                                                                             | 命令、退出碼、執行版本與證據位置                                                                                                                                                                                                                                                                                                                               | 未驗項與具體限制                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新增 Email 欄位後，舊版 sessionStorage 司機草稿缺少 email，還原時被整份丟棄，實際建立請求回傳 400 | `NEW_DRIVER_INITIAL_FORM` 新增 `email: ""`；`restoreSupplyDraft` 要求初始模型的每個 key 都有正確型別。`NewDriverSubmissionForm` → `useSupplyDraft` 原先直接以新模型驗證舊草稿。修正新增 `restoreDriverOnboardingDraft`，僅替缺少 email 的 object 補空字串，再呼叫原驗證器；只有 Driver form 傳入此 callback，Vehicle 與共用驗證器維持原行為。 | 產品碼等同原候選的 checkpoint `26e646c238838c085af477882d357a4c8e28c439`：正式 `caller-boundaries.test.ts` 7 cases 中 6 pass、1 fail，唯一失敗為 400／200；production hook probe 7 pass、2 fail。修正 anchor `215ae4990058bf79f1de0e58a46eba252b71f939`：正式 caller／draft／principal 回歸 6 files、72 cases 全通過；同一 probe 9 cases 全通過。 | 本節沿用 `EVIDENCE_DIR/unit-shard-repair/`。`caller-before-consistent-deps.*`、`draft-probe-before.*` exit 1；`caller-and-draft-fixed.*`、`draft-probe-fixed.*`、`fleet-typecheck-fixed.*`、`fleet-lint-fixed.*` exit 0。Node `22.23.2`、pnpm `10.33.0`、Vitest `4.1.4`。完整命令／SHA／diff hash 記錄於同名 `.json`；probe 為 `draft-restoration-probe.cjs`。 | 正式 caller 測試使用 socket-free HTTP／cookie／供應商邊界 adapter，執行實際 UI、middleware、proxy、JWT guard、controller 與 service；probe 執行正式還原函式、hook 與共用驗證器，僅替換 React lifecycle／storage 邊界。未啟動 browser／產品服務，未宣稱 hosted CI 或完整 root regression 通過。 |
+
+probe 同時驗證舊草稿保留全部欄位、已填 Email 不被覆蓋、缺少原必填欄位／Email 型別錯誤／原欄位型別錯誤／損壞 JSON／array／null 皆被拒絕，以及移除注入的未知 scope key。既有 72 cases 另涵蓋 storage 寫入失敗、SPA remount、BFCache、清除草稿，以及有效與拒絕的 caller 授權路徑。修復沒有新增畫面、改動 JSX、顏色或字體；已核對 `packages/ui-tokens/src/realms.ts` 與 `docs/05-ui/drts-design-canvas/fleet-supply.jsx` 的既有 Driver draft 畫面。
+
+最初 `caller-before.log` 因 worker 缺少 argon2 無法執行案例；`caller-before-complete-deps.log` 雖重現原 400，仍有 React／Next 版本混用導致的另三項環境失敗。這兩次均不作為完整回歸證據。其後僅將本 worktree 的 ignored root、contracts、API、Fleet Portal 與 UI Web 依賴連結指向前輪符合 lockfile 的既有安裝，變更記錄見 `dependency-links.json`，才取得唯一原產品失敗與修正版全綠結果。未改共用 checkout、套件契約或 lockfile。Fleet typecheck 產生的 `next-env.d.ts` 額外 import 已逐行核對並還原，差異保留於 `next-typegen-generated.patch`，未納入候選。
+
+所有本輪啟動的本機必要檢查均已結束並讀取結果。allocation finding 仍明確保留，待 Supervisor 擴充前節三個檔案的 scope 後，由原 owner 續做；目前分支只有 checkpoint，尚不 handoff 不完整候選。新 SHA 的完整 CI、Gemini review 與 merge 仍須在全部修復完成後重新取得。
+
+```bash
+timeout 180s pnpm exec vitest run \
+  tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015 \
+  tests/unit/system-remediation/sr-fleet-form-001
+timeout 30s node "$EVIDENCE_DIR/unit-shard-repair/draft-restoration-probe.cjs"
+timeout 180s env NODE_OPTIONS=--max-old-space-size=6144 \
+  pnpm --filter @drts/fleet-partner-portal-web typecheck
+timeout 90s pnpm exec eslint \
+  apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx --max-warnings=0
 ```
