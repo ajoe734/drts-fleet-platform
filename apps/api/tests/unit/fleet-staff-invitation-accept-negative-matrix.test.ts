@@ -55,8 +55,23 @@ function createFleetInvitationClientMock() {
   >();
 
   function upsertPrincipalRow(record: CanonicalIdentityPrincipalRecord) {
-    principals.set(record.principalId, record);
-    principalsByIssuerSubject.set(`${record.issuer}::${record.subject}`, record);
+    const prior = principals.get(record.principalId);
+    if (prior) {
+      principalsByIssuerSubject.delete(`${prior.issuer}::${prior.subject}`);
+    }
+    const persisted = prior
+      ? {
+          ...record,
+          principalId: prior.principalId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    principals.set(persisted.principalId, persisted);
+    principalsByIssuerSubject.set(
+      `${persisted.issuer}::${persisted.subject}`,
+      persisted,
+    );
+    return persisted;
   }
   function upsertMembershipRow(record: CanonicalIdentityMembershipRecord) {
     memberships.set(record.membershipId, record);
@@ -93,6 +108,40 @@ function createFleetInvitationClientMock() {
       return { rows: [] };
     }
 
+    if (
+      text.includes("FROM iam.identity_principals p") &&
+      text.includes(
+        "JOIN iam.identity_memberships m ON m.principal_id = p.principal_id",
+      )
+    ) {
+      const [scopeRef, partnerId, emailNormalized, entrySlug] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const rows: Array<{ principal_id: string }> = [];
+      for (const m of memberships.values()) {
+        if (
+          m.realm !== "partner" ||
+          m.scopeRef !== scopeRef ||
+          m.partnerId !== partnerId
+        ) {
+          continue;
+        }
+        const p = principals.get(m.principalId);
+        if (
+          p &&
+          p.email?.toLowerCase() === emailNormalized &&
+          p.principalType === "human" &&
+          p.sourceRef === `jwt_principal:partner:${p.principalId}` &&
+          m.sourceRef === `fleet_member:${entrySlug}:${p.principalId}`
+        ) {
+          rows.push({ principal_id: p.principalId });
+        }
+      }
+      return { rows };
+    }
     if (text.startsWith("SELECT principal_id FROM iam.identity_principals")) {
       const rec = principals.get(params[0] as string);
       return { rows: rec ? [{ principal_id: rec.principalId }] : [] };
