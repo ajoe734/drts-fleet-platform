@@ -960,9 +960,36 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
   );
 }
 
+function restoreDriverOnboardingDraft(
+  raw: string | null,
+  initial: DriverDraftInput,
+): DriverDraftInput {
+  if (!raw) return initial;
+  try {
+    const saved: unknown = JSON.parse(raw);
+    // Drafts saved before onboarding email was added still have valid input.
+    // Only migrate the absent optional field; validate every other field below.
+    if (
+      saved &&
+      typeof saved === "object" &&
+      !Array.isArray(saved) &&
+      !Object.hasOwn(saved, "email")
+    ) {
+      raw = JSON.stringify({ ...saved, email: "" });
+    }
+  } catch {
+    return initial;
+  }
+  return restoreSupplyDraft(raw, initial);
+}
+
 // In-memory fallback retains drafts across SPA history navigation when storage is unavailable.
 const supplyDraftMemory = new Map<string, string>();
-function useSupplyDraft<T extends object>(key: string, initial: T) {
+function useSupplyDraft<T extends object>(
+  key: string,
+  initial: T,
+  restoreDraft: (raw: string | null, initial: T) => T = restoreSupplyDraft,
+) {
   const [form, updateForm] = useState(initial);
   const current = useRef(initial);
   const [restoreVersion, setRestoreVersion] = useState(0);
@@ -975,7 +1002,7 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
       } catch {
         /* Memory fallback. */
       }
-      current.current = restoreSupplyDraft(raw, initial);
+      current.current = restoreDraft(raw, initial);
       updateForm(current.current);
       setRestoreVersion((version) => version + 1);
     }
@@ -987,7 +1014,7 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
     };
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
-  }, [key, initial]);
+  }, [key, initial, restoreDraft]);
   const setForm: Dispatch<SetStateAction<T>> = (next) => {
     const value =
       typeof next === "function"
@@ -1030,6 +1057,7 @@ export function NewDriverSubmissionForm({
   const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:driver`,
     NEW_DRIVER_INITIAL_FORM,
+    restoreDriverOnboardingDraft,
   );
 
   // Every edited value is protected, including optional fields and product choices (R25).
