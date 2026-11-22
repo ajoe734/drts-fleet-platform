@@ -16,12 +16,19 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
+  normalizeDriverOnboardingEmail,
+  normalizeDriverOnboardingMobile,
+} from "../../common/driver-onboarding-contact";
+import {
   IdempotencyRepository,
   IdempotencyService,
 } from "../../common/idempotency";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
-import type { SupplyReviewEventRecord } from "./supply-submission.repository";
+import type {
+  PersistSupplySubmissionChanges,
+  SupplyReviewEventRecord,
+} from "./supply-submission.repository";
 import { SupplySubmissionRepository } from "./supply-submission.repository";
 import type {
   CreateDriverSupplySubmissionCommand,
@@ -266,10 +273,10 @@ export class SupplySubmissionService implements OnModuleInit {
             taxiDriverRegistrationArea:
               latestDraft?.taxiDriverRegistrationArea ?? "台北市",
             taxiDriverRegistrationExpiry,
-            supportedServiceProductCodes:
-              latestDraft?.supportedServiceProductCodes?.length
-                ? [...latestDraft.supportedServiceProductCodes]
-                : ["taxi_realtime"],
+            supportedServiceProductCodes: latestDraft
+              ?.supportedServiceProductCodes?.length
+              ? [...latestDraft.supportedServiceProductCodes]
+              : ["taxi_realtime"],
             lifecycleStatus: driver.lifecycleStatus,
             licensesValid: driver.licensesValid,
             ready: readiness
@@ -308,9 +315,7 @@ export class SupplySubmissionService implements OnModuleInit {
           const contractEndDate = contract.endAt
             ? contract.endAt.slice(0, 10)
             : null;
-          const policyEndDate = policy.endAt
-            ? policy.endAt.slice(0, 10)
-            : null;
+          const policyEndDate = policy.endAt ? policy.endAt.slice(0, 10) : null;
           const fallbackReasons: SupplyReadinessReasonCode[] = [];
           if (contract.lifecycleStatus === "missing") {
             fallbackReasons.push("CONTRACT_MISSING");
@@ -344,10 +349,10 @@ export class SupplySubmissionService implements OnModuleInit {
             seatCount: latestDraft?.seatCount ?? 4,
             luggageCapacity: latestDraft?.luggageCapacity ?? 2,
             businessArea: latestDraft?.businessArea ?? "台北市",
-            supportedServiceProductCodes:
-              latestDraft?.supportedServiceProductCodes?.length
-                ? [...latestDraft.supportedServiceProductCodes]
-                : ["taxi_realtime"],
+            supportedServiceProductCodes: latestDraft
+              ?.supportedServiceProductCodes?.length
+              ? [...latestDraft.supportedServiceProductCodes]
+              : ["taxi_realtime"],
             airportTransferEligible:
               latestDraft?.airportTransferEligible ?? false,
             fixedFareAllowed: latestDraft?.fixedFareAllowed ?? false,
@@ -501,6 +506,10 @@ export class SupplySubmissionService implements OnModuleInit {
           command.driverDraft?.mobile ??
           latestDriverDraft?.mobile ??
           "0912345678",
+        email:
+          command.driverDraft?.email === undefined
+            ? (latestDriverDraft?.email ?? null)
+            : command.driverDraft.email,
         professionalDriverLicenseNo:
           command.driverDraft?.professionalDriverLicenseNo ??
           latestDriverDraft?.professionalDriverLicenseNo ??
@@ -822,6 +831,10 @@ export class SupplySubmissionService implements OnModuleInit {
       const merged: CreateDriverSupplySubmissionCommand = {
         name: command.driverDraft?.name ?? draft.name,
         mobile: command.driverDraft?.mobile ?? draft.mobile,
+        email:
+          command.driverDraft?.email === undefined
+            ? (draft.email ?? null)
+            : command.driverDraft.email,
         professionalDriverLicenseNo:
           command.driverDraft?.professionalDriverLicenseNo ??
           draft.professionalDriverLicenseNo,
@@ -837,10 +850,10 @@ export class SupplySubmissionService implements OnModuleInit {
         taxiDriverRegistrationExpiry:
           command.driverDraft?.taxiDriverRegistrationExpiry ??
           draft.taxiDriverRegistrationExpiry,
-        supportedServiceProductCodes:
-          command.driverDraft?.supportedServiceProductCodes ?? [
-            ...draft.supportedServiceProductCodes,
-          ],
+        supportedServiceProductCodes: command.driverDraft
+          ?.supportedServiceProductCodes ?? [
+          ...draft.supportedServiceProductCodes,
+        ],
         preferredVehicleSubmissionId:
           command.driverDraft?.preferredVehicleSubmissionId !== undefined
             ? command.driverDraft.preferredVehicleSubmissionId
@@ -915,10 +928,10 @@ export class SupplySubmissionService implements OnModuleInit {
       luggageCapacity:
         command.vehicleDraft?.luggageCapacity ?? draft.luggageCapacity,
       businessArea: command.vehicleDraft?.businessArea ?? draft.businessArea,
-      supportedServiceProductCodes:
-        command.vehicleDraft?.supportedServiceProductCodes ?? [
-          ...draft.supportedServiceProductCodes,
-        ],
+      supportedServiceProductCodes: command.vehicleDraft
+        ?.supportedServiceProductCodes ?? [
+        ...draft.supportedServiceProductCodes,
+      ],
       airportTransferEligible:
         command.vehicleDraft?.airportTransferEligible ??
         draft.airportTransferEligible,
@@ -1062,11 +1075,25 @@ export class SupplySubmissionService implements OnModuleInit {
 
     const draft = this.requireDriverDraft(submissionId);
     const previous = { ...draft };
-    Object.assign(draft, this.normalizeDriverDraft(command));
+    const expectedSubmission = { ...submission };
+    Object.assign(
+      draft,
+      this.normalizeDriverDraft({
+        ...command,
+        email:
+          command.email === undefined ? (draft.email ?? null) : command.email,
+      }),
+    );
     this.bumpSubmissionRevision(submission);
 
     await this.persistChanges(
-      { submissions: [submission], driverDrafts: [draft] },
+      {
+        submissions: [submission],
+        driverDrafts: [draft],
+        ...(submission.submissionType === "driver_onboarding"
+          ? { expectedSubmission }
+          : {}),
+      },
       "update driver draft",
     );
     this.recordAudit(
@@ -1095,7 +1122,11 @@ export class SupplySubmissionService implements OnModuleInit {
   ) {
     await this.syncState();
     this.validateVehicleDraft(command);
-    this.assertVehiclePlateAvailable(command.plateNo, undefined, fleetPartnerId);
+    this.assertVehiclePlateAvailable(
+      command.plateNo,
+      undefined,
+      fleetPartnerId,
+    );
 
     const now = new Date().toISOString();
     const submissionId = randomUUID();
@@ -1245,6 +1276,7 @@ export class SupplySubmissionService implements OnModuleInit {
     }
     this.assertSubmissionComplete(submission);
 
+    const expectedSubmission = { ...submission };
     const previousStatus = submission.status;
     submission.status = "submitted";
     submission.revisionNo += 1;
@@ -1271,6 +1303,9 @@ export class SupplySubmissionService implements OnModuleInit {
       {
         submissions: [submission],
         reviewEvents: [event],
+        ...(submission.submissionType === "driver_onboarding"
+          ? { expectedSubmission }
+          : {}),
         ...(updatedDriverDraft ? { driverDrafts: [updatedDriverDraft] } : {}),
       },
       "submit supply submission",
@@ -1572,6 +1607,18 @@ export class SupplySubmissionService implements OnModuleInit {
   private validateDriverDraft(command: CreateDriverSupplySubmissionCommand) {
     this.assertNonBlank(command.name, "name");
     this.assertNonBlank(command.mobile, "mobile");
+    if (
+      command.email != null &&
+      !(typeof command.email === "string" && !command.email.trim()) &&
+      !normalizeDriverOnboardingEmail(command.email)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "DRIVER_ONBOARDING_EMAIL_INVALID",
+        "Enter a valid driver email address.",
+        { fieldName: "email" },
+      );
+    }
     this.assertNonBlank(
       command.professionalDriverLicenseNo,
       "professionalDriverLicenseNo",
@@ -1630,7 +1677,10 @@ export class SupplySubmissionService implements OnModuleInit {
     return {
       ...command,
       name: command.name.trim(),
-      mobile: command.mobile.trim(),
+      mobile:
+        normalizeDriverOnboardingMobile(command.mobile) ??
+        command.mobile.trim(),
+      email: normalizeDriverOnboardingEmail(command.email),
       professionalDriverLicenseNo: command.professionalDriverLicenseNo.trim(),
       professionalDriverLicenseExpiry:
         command.professionalDriverLicenseExpiry.trim(),
@@ -1805,7 +1855,7 @@ export class SupplySubmissionService implements OnModuleInit {
     if (existingVehicle) {
       const fleetPartnerOwned = Boolean(
         fleetPartnerId &&
-          this.isVehicleOwnedByFleet(existingVehicle.vehicleId, fleetPartnerId),
+        this.isVehicleOwnedByFleet(existingVehicle.vehicleId, fleetPartnerId),
       );
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1861,6 +1911,26 @@ export class SupplySubmissionService implements OnModuleInit {
   }
 
   private assertSubmissionComplete(submission: SupplySubmissionRecord) {
+    if (
+      submission.submissionType === "driver_onboarding" &&
+      process.env.DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED === "true"
+    ) {
+      const draft = this.requireDriverDraft(submission.submissionId);
+      if (!normalizeDriverOnboardingEmail(draft.email)) {
+        throw this.conflict(
+          "DRIVER_ONBOARDING_EMAIL_INVALID",
+          "Enter a valid driver email address before submitting.",
+          { fieldName: "email" },
+        );
+      }
+      if (!normalizeDriverOnboardingMobile(draft.mobile)) {
+        throw this.conflict(
+          "DRIVER_ONBOARDING_MOBILE_INVALID",
+          "Enter a valid Taiwan mobile number before submitting.",
+          { fieldName: "mobile" },
+        );
+      }
+    }
     if (submission.submissionType === "vehicle_onboarding") {
       const draft = this.vehicleDrafts.find(
         (candidate) => candidate.submissionId === submission.submissionId,
@@ -2102,13 +2172,7 @@ export class SupplySubmissionService implements OnModuleInit {
   }
 
   private async persistChanges(
-    changes: {
-      submissions?: readonly SupplySubmissionRecord[];
-      driverDrafts?: readonly DriverSupplyDraft[];
-      vehicleDrafts?: readonly VehicleSupplyDraft[];
-      documents?: readonly SupplyDocumentRecord[];
-      reviewEvents?: readonly SupplyReviewEventRecord[];
-    },
+    changes: PersistSupplySubmissionChanges,
     context: string,
   ) {
     try {
@@ -2127,6 +2191,15 @@ export class SupplySubmissionService implements OnModuleInit {
       return;
     }
     const log = { ...input };
+    for (const key of ["oldValuesSummary", "newValuesSummary"] as const) {
+      const summary = log[key];
+      if (summary && ("email" in summary || "mobile" in summary)) {
+        const safeSummary = { ...summary };
+        delete safeSummary.email;
+        delete safeSummary.mobile;
+        log[key] = safeSummary;
+      }
+    }
     if (requestId) {
       (log as { requestId?: string }).requestId = requestId;
     }

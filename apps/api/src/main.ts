@@ -18,7 +18,13 @@ async function bootstrap() {
   });
   app.enableShutdownHooks(["SIGTERM", "SIGINT"]);
   app.setGlobalPrefix("api", {
-    exclude: ["health", "metrics"],
+    exclude: [
+      "health",
+      "metrics",
+      ".well-known/apple-app-site-association",
+      ".well-known/assetlinks.json",
+      "driver-activate",
+    ],
   });
 
   registerDriverCompletionJsonMiddleware(app);

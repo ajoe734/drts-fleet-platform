@@ -239,13 +239,14 @@ export class DriverDeviceSessionRepository {
 
   async saveInvitation(
     record: DriverDeviceInvitationRecord,
+    executor?: TransactionQueryClient,
   ): Promise<DriverDeviceInvitationRecord> {
     if (!this.isEnabled()) {
       this.fallbackInvitations.set(record.invitationId, { ...record });
       return { ...record };
     }
 
-    const txClient = this.activeTransactionClient;
+    const txClient = executor ?? this.activeTransactionClient;
     const pooledClient = txClient
       ? null
       : await this.databaseService!.connect();
@@ -302,6 +303,78 @@ export class DriverDeviceSessionRepository {
     } finally {
       pooledClient?.release();
     }
+  }
+
+  async saveOnboardingInvitation(
+    invitation: DriverDeviceInvitationRecord,
+    executor?: TransactionQueryClient,
+  ): Promise<DriverDeviceInvitationRecord> {
+    if (this.isEnabled() && !executor) {
+      throw new Error("Driver onboarding requires the approval transaction");
+    }
+    if (executor && !this.isEnabled()) {
+      throw new Error("Driver onboarding requires persisted invitations");
+    }
+    const saved = await this.saveInvitation(invitation, executor);
+    if (executor) {
+      await executor.query(
+        `UPDATE iam.driver_device_invitations
+         SET onboarding_contact_hash = $2, activation_token_hash = $3
+         WHERE invitation_id = $1`,
+        [
+          saved.invitationId,
+          saved.onboardingContactHash,
+          saved.activationTokenHash,
+        ],
+      );
+    }
+    return saved;
+  }
+
+  async findOnboardingInvitation(
+    proof:
+      | { contactHash: string }
+      | { activationTokenHash: string }
+      | { invitationId: string },
+  ): Promise<DriverDeviceInvitationRecord | null> {
+    const [column, value] =
+      "contactHash" in proof
+        ? ["onboarding_contact_hash", proof.contactHash]
+        : "activationTokenHash" in proof
+          ? ["activation_token_hash", proof.activationTokenHash]
+          : ["invitation_id", proof.invitationId];
+    if (!this.isEnabled()) {
+      const candidates = Array.from(this.fallbackInvitations.values()).filter(
+        (invitation) => {
+          if (!invitation.activationTokenHash) return false;
+          if ("contactHash" in proof)
+            return invitation.onboardingContactHash === value;
+          if ("activationTokenHash" in proof)
+            return invitation.activationTokenHash === value;
+          return invitation.invitationId === value;
+        },
+      );
+      candidates.sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) ||
+          right.invitationId.localeCompare(left.invitationId),
+      );
+      return candidates[0] ? { ...candidates[0] } : null;
+    }
+    const lockClause = this.activeTransactionClient ? "FOR UPDATE" : "";
+    const result = await this.executeQuery<JsonRecordRow>(
+      `SELECT record FROM iam.driver_device_invitations
+       WHERE ${column} = $1 AND activation_token_hash IS NOT NULL
+       ORDER BY created_at DESC, invitation_id DESC
+       LIMIT 1 ${lockClause}`,
+      [value],
+    );
+    return result.rows.length
+      ? this.parseRecord<DriverDeviceInvitationRecord>(
+          result.rows[0]?.record,
+          "iam.driver_device_invitations",
+        )
+      : null;
   }
 
   async findInvitationByCodeHash(

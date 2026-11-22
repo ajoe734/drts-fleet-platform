@@ -37,6 +37,9 @@ const HEALTH_PATHS = new Set(["/health", "/api/health"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
+  "GET .well-known/apple-app-site-association",
+  "GET .well-known/assetlinks.json",
+  "GET driver-activate",
   "POST auth/tenant/oidc-session",
   "POST auth/tenant/bootstrap-session",
   "POST auth/partner/bootstrap-session",
@@ -58,6 +61,12 @@ const NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS = new Set([
 const NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS = new Set([
   "POST passenger-app/auth/refresh",
   "POST passenger-app/auth/logout",
+]);
+
+// Device registration and refresh verify their own proof after the native transport gate.
+const NATIVE_DRIVER_AUTH_ROUTE_KEYS = new Set([
+  "POST auth/driver/device/register",
+  "POST auth/driver/device/refresh",
 ]);
 
 const logger = new Logger("InternalKeyMiddleware");
@@ -106,13 +115,14 @@ function isExplicitPublicRequest(
 }
 
 /** Only raw Native transport; supplied credentials retain their existing verification path. */
-function isNativePassengerDirectAuthRequest(request: RequestLike): boolean {
+function isNativeDirectAuthRequest(request: RequestLike): boolean {
   const path = request.originalUrl ?? request.url;
   if (!request.method || !path) return false;
   const routeKey = `${request.method.toUpperCase()} ${normalizeRequestPath(path)}`;
   if (
     !NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS.has(routeKey) &&
-    !NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS.has(routeKey)
+    !NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS.has(routeKey) &&
+    !NATIVE_DRIVER_AUTH_ROUTE_KEYS.has(routeKey)
   )
     return false;
   return (
@@ -188,7 +198,7 @@ export async function validateInternalKey(
 
   if (
     options?.requireCredential !== true &&
-    isNativePassengerDirectAuthRequest(request)
+    isNativeDirectAuthRequest(request)
   ) {
     return;
   }
@@ -238,7 +248,7 @@ export async function verifyGoogleAssertionOrInternalKey(
   const requestMethod = request.method ?? "GET";
   if (
     options?.requireCredential !== true &&
-    isNativePassengerDirectAuthRequest(request)
+    isNativeDirectAuthRequest(request)
   ) {
     return;
   }

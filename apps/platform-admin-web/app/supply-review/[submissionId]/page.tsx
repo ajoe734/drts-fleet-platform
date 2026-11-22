@@ -18,6 +18,7 @@ import {
   type CanvasDLItem,
 } from "@drts/ui-web";
 import type {
+  DriverOnboardingDeliverySummary,
   DriverSupplyDraft,
   SupplyDocumentRecord,
   SupplySubmissionRecord,
@@ -128,6 +129,9 @@ export default function SupplyReviewDetailPage() {
     null,
   );
   const [documents, setDocuments] = useState<SupplyDocumentRecord[]>([]);
+  const [onboardingNotifications, setOnboardingNotifications] = useState<
+    DriverOnboardingDeliverySummary[]
+  >([]);
   const [canonicalDriver, setCanonicalDriver] = useState<Record<
     string,
     any
@@ -177,6 +181,7 @@ export default function SupplyReviewDetailPage() {
         setDriverDraft(data.driverDraft || null);
         setVehicleDraft(data.vehicleDraft || null);
         setDocuments(data.documents || []);
+        setOnboardingNotifications(data.onboardingNotifications ?? []);
         setCanonicalDriver(rawData.canonicalDriver || null);
         setCanonicalVehicle(rawData.canonicalVehicle || null);
       } else {
@@ -882,6 +887,37 @@ export default function SupplyReviewDetailPage() {
               body={t("supplyReview.detail.guardrailBody")}
             />
           </CanvasCard>
+
+          {currentStatus === "approved" &&
+            onboardingNotifications.length > 0 && (
+              <CanvasCard
+                title={t("supplyReview.onboarding.title")}
+                actions={
+                  <CanvasBtn
+                    variant="secondary"
+                    icon="refresh"
+                    onClick={loadDetail}
+                  >
+                    {t("supplyReview.detail.reload")}
+                  </CanvasBtn>
+                }
+              >
+                <CanvasDL
+                  cols={1}
+                  items={onboardingNotifications.map(
+                    ({ channel, maskedRecipient, status }) => ({
+                      k: t(`supplyReview.onboarding.${channel}`),
+                      v: [
+                        t(`supplyReview.onboarding.${status}`),
+                        maskedRecipient,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
+                    }),
+                  )}
+                />
+              </CanvasCard>
+            )}
 
           {/* VQ-6 Audit Receipt (when approved) */}
           {currentStatus === "approved" && (

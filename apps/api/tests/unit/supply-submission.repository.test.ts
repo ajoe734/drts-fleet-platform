@@ -219,7 +219,7 @@ describe("supply submission repository", () => {
 
     await repository.persistChanges({
       submissions: [createSubmission()],
-      driverDrafts: [createDriverDraft()],
+      driverDrafts: [createDriverDraft({ email: "test.driver@example.test" })],
       vehicleDrafts: [createVehicleDraft()],
       documents: [createDocument()],
       reviewEvents: [
@@ -239,23 +239,32 @@ describe("supply submission repository", () => {
 
     const sqlTexts = query.mock.calls.map(([sql]) => String(sql));
     expect(
-      sqlTexts.some((sql) => sql.includes("INSERT INTO fleet.supply_submissions")),
+      sqlTexts.some((sql) =>
+        sql.includes("INSERT INTO fleet.supply_submissions"),
+      ),
+    ).toBe(true);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO fleet.driver_supply_drafts"),
+      expect.arrayContaining(["test.driver@example.test"]),
+    );
+    expect(
+      sqlTexts.some((sql) =>
+        sql.includes("INSERT INTO fleet.vehicle_supply_drafts"),
+      ),
     ).toBe(true);
     expect(
-      sqlTexts.some((sql) => sql.includes("INSERT INTO fleet.driver_supply_drafts")),
+      sqlTexts.some((sql) =>
+        sql.includes("INSERT INTO fleet.supply_documents"),
+      ),
     ).toBe(true);
     expect(
-      sqlTexts.some((sql) => sql.includes("INSERT INTO fleet.vehicle_supply_drafts")),
+      sqlTexts.some((sql) =>
+        sql.includes("INSERT INTO fleet.supply_review_events"),
+      ),
     ).toBe(true);
     expect(
-      sqlTexts.some((sql) => sql.includes("INSERT INTO fleet.supply_documents")),
-    ).toBe(true);
-    expect(
-      sqlTexts.some((sql) => sql.includes("INSERT INTO fleet.supply_review_events")),
-    ).toBe(true);
-    expect(
-      sqlTexts.some(
-        (sql) => sql.includes("INSERT INTO fleet.vehicle_fleet_affiliations"),
+      sqlTexts.some((sql) =>
+        sql.includes("INSERT INTO fleet.vehicle_fleet_affiliations"),
       ),
     ).toBe(true);
   });

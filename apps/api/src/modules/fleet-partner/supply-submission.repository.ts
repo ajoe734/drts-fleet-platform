@@ -41,6 +41,7 @@ type DriverSupplyDraftRow = {
   submission_id: string;
   name: string;
   mobile: string;
+  email?: string | null;
   professional_driver_license_no: string;
   professional_driver_license_expiry: string | Date;
   taxi_driver_registration_no: string;
@@ -148,6 +149,10 @@ export type SupplySubmissionScopedState = Omit<
 >;
 
 export type PersistSupplySubmissionChanges = {
+  expectedSubmission?: Pick<
+    SupplySubmissionRecord,
+    "submissionId" | "fleetPartnerId" | "revisionNo" | "status"
+  >;
   submissions?: readonly SupplySubmissionRecord[];
   driverDrafts?: readonly DriverSupplyDraft[];
   vehicleDrafts?: readonly VehicleSupplyDraft[];
@@ -350,12 +355,65 @@ export class SupplySubmissionRepository {
   }
 
   async persistChanges(changes: PersistSupplySubmissionChanges) {
+    const expected = changes.expectedSubmission;
     if (!this.isEnabled()) {
+      if (expected) {
+        const current = this.inMemoryState.submissions.find(
+          (row) =>
+            row.submissionId === expected.submissionId &&
+            row.fleetPartnerId === expected.fleetPartnerId,
+        );
+        this.assertExpectedSubmission(current, expected);
+      }
       this.applyInMemoryChanges(changes);
       return;
     }
 
+    if (expected) {
+      await this.withTransaction(async (executor) => {
+        const current = await this.loadFleetScopedSubmission(
+          executor,
+          expected.submissionId,
+          expected.fleetPartnerId,
+          { forUpdate: true },
+        );
+        this.assertExpectedSubmission(current, expected);
+        await this.persistChangesWithExecutor(executor, changes);
+      });
+      return;
+    }
+
     await this.persistChangesWithExecutor(this.databaseService!, changes);
+  }
+
+  private assertExpectedSubmission(
+    current: SupplySubmissionRecord | undefined,
+    expected: NonNullable<PersistSupplySubmissionChanges["expectedSubmission"]>,
+  ) {
+    if (!current) {
+      throw this.notFound(
+        "Supply submission was not found in the fleet partner scope.",
+        {
+          submissionId: expected.submissionId,
+          fleetPartnerId: expected.fleetPartnerId,
+        },
+      );
+    }
+    if (
+      current.revisionNo !== expected.revisionNo ||
+      current.status !== expected.status
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SUBMISSION_REVISION_CONFLICT",
+        "The supply submission revision is stale.",
+        {
+          submissionId: expected.submissionId,
+          expectedRevisionNo: expected.revisionNo,
+          actualRevisionNo: current.revisionNo,
+        },
+      );
+    }
   }
 
   async persistSubmissionWorkflow(
@@ -928,9 +986,10 @@ export class SupplySubmissionRepository {
             taxi_driver_registration_expiry,
             supported_service_product_codes,
             preferred_vehicle_submission_id,
+            email,
             updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, now()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, now()
           )
           ON CONFLICT (submission_id) DO UPDATE SET
             name = EXCLUDED.name,
@@ -942,6 +1001,7 @@ export class SupplySubmissionRepository {
             taxi_driver_registration_expiry = EXCLUDED.taxi_driver_registration_expiry,
             supported_service_product_codes = EXCLUDED.supported_service_product_codes,
             preferred_vehicle_submission_id = EXCLUDED.preferred_vehicle_submission_id,
+            email = EXCLUDED.email,
             updated_at = now()
         `,
         [
@@ -955,6 +1015,7 @@ export class SupplySubmissionRepository {
           draft.taxiDriverRegistrationExpiry,
           JSON.stringify(draft.supportedServiceProductCodes),
           draft.preferredVehicleSubmissionId,
+          draft.email ?? null,
         ],
       );
     }
@@ -1209,6 +1270,7 @@ export class SupplySubmissionRepository {
       submissionId: row.submission_id,
       name: row.name,
       mobile: row.mobile,
+      ...(row.email === undefined ? {} : { email: row.email }),
       professionalDriverLicenseNo: row.professional_driver_license_no,
       professionalDriverLicenseExpiry: this.requireDateOnlyString(
         row.professional_driver_license_expiry,

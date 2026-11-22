@@ -9,6 +9,7 @@ import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { AuthController } from "./auth.controller";
 import { BreakGlassController } from "./break-glass.controller";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
+import { DriverActivationLinksController } from "./driver-activation-links.controller";
 import { DriverDeviceSessionRepository } from "./driver-device-session.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { GoogleWorkloadIdentityAdapter } from "./google-workload-identity.adapter";
@@ -30,7 +31,12 @@ import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
     IdentityModule,
     IdempotencyModule,
   ],
-  controllers: [AuthController, BreakGlassController, TotpController],
+  controllers: [
+    AuthController,
+    BreakGlassController,
+    TotpController,
+    DriverActivationLinksController,
+  ],
   providers: [
     JwtAuthService,
     DriverDeviceSessionRepository,
