@@ -1526,7 +1526,8 @@ jobs:
           api_secrets="${{ steps.api_secrets.outputs.api }}"
           passenger_secrets="${{ steps.passenger_secrets.outputs.api }}"
           if [[ -n "$passenger_secrets" ]]; then
-            api_secrets="$(printf '%s,%s' "$api_secrets" "$passenger_secrets" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
+            api_secrets="${api_secrets},${passenger_secrets}"
+            api_secrets="$(printf '%s' "$api_secrets" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
           fi
 
           # gcloud applies literal env changes before secret changes, so one
