@@ -4,6 +4,27 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-DRV-ONB-013-20261122 — planning settled; Supervisor scope coordination pending
+
+DRV-ONB-013 的實際 blocker 是 V0140–V0142 尚未登記於共用 schema
+allocation ledger，且修正所需 ledger／兩份既有 guards 不在原任務
+write_scopes。沒有新的產品／契約選擇或 scope cut；保留雙通道通知、
+一次性邀請、交易一致性、strict ingress 及 DRV-ONB-012 實收／實機驗收。
+
+Supervisor 依協作規範 §0.7 核對平行衝突後，擴充原任務三檔 scope。
+原 owner Codex2 再於原分支／PR #3358 追加 driver_onboarding_allocations
+及 amendment、補齊兩份 guards 六處 collectors，保留 assertions，執行
+正式 guards／受影響回歸，更新原 finding 表並以新 SHA 交 Gemini 審查。
+目前 56 pass／2 fail 是原 allocation 缺漏重現；proposal 尚未套用。
+
+本次 worker 對 parent note 與 helper disposition 的正式 CLI 寫入均遭
+dispatch guard 拒絕。genuine Supervisor 必須先寫入具體 parent next、
+範圍聯集與 helper `resolved_parent_status: blocked`、
+`resolved_parent_waiting_for: Codex2` 及相同 `resolved_parent_next`，讀回後
+才可 helper handoff／merge。scope 協調完成前 parent 保持 blocked；不得
+以 helper 合併自動恢復或繞過範圍。
+詳見[決策、逐 finding 證據與精確 Supervisor CLI 請求](support/unblock/DRV-ONB-013/DRV-ONB-013-UNBLOCK-PLANNING-DECISION.md)。
+
 ### Q-BUREAU-R12-20261025 — planning settled; original hosted acceptance remains blocked
 
 The R12 v5 task specification and recorded user instruction already settle the
