@@ -47,7 +47,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const fleetPartnerIds: string[] = [];
     const entrySlugs: string[] = [];
 
-    async function fixture(entrySlug = `fleet-pg-${randomUUID()}`) {
+    async function fixture(
+      entrySlug = `fleet-pg-${randomUUID()}`,
+      emailOverride?: string,
+    ) {
       const database = new DatabaseService();
       databases.push(database);
       const repository = new IdentityRepository(database);
@@ -63,7 +66,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const id = randomUUID();
       const rawToken = `fi_${id}`;
       const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-      const email = `${id}@fleet.example.org`;
+      const email = emailOverride ?? `${id}@fleet.example.org`;
       const issued = await repository.issueFleetStaffInvitation({
         entrySlug,
         fleetPartnerId,
@@ -784,6 +787,94 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(
         new Date(passwordAccepted!.membership.createdAt).toISOString(),
       ).toBe(new Date(f.issued.membership.createdAt).toISOString());
+    });
+
+    it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: denies Fleet B while Fleet A's principal actively holds (issuer, sub), then accepts Fleet B's independent first invitation with its own principal and link once Fleet A deactivation and re-invitation release (issuer, sub), preserving Fleet A's historical link", async () => {
+      const fleetA = await fixture();
+      const fleetB = await fixture(undefined, fleetA.email);
+      const link = new PartnerUserIdentityLinkRepository(fleetA.database);
+      const sharedGoogleSub = fleetA.proof.subject;
+
+      const acceptedA = await fleetA.repository.acceptFleetStaffOidcInvitation(
+        fleetA.tokenHash,
+        fleetA.proof,
+        link,
+      );
+      expect(acceptedA).not.toBeNull();
+
+      // While Fleet A's principal actively holds (issuer, sharedGoogleSub),
+      // Fleet B's invitation acceptance rolls back on the (issuer, subject)
+      // unique constraint without consuming Fleet B's invitation or persisting
+      // a link in Fleet B.
+      const deniedWhileActive =
+        await fleetB.repository.acceptFleetStaffOidcInvitation(
+          fleetB.tokenHash,
+          {
+            ...fleetB.proof,
+            issuer: fleetA.proof.issuer,
+            subject: sharedGoogleSub,
+          },
+          link,
+        );
+      expect(deniedWhileActive).toBeNull();
+      expect(await link.find(fleetB.entrySlug, sharedGoogleSub)).toBeNull();
+
+      // Deactivating and re-inviting Fleet A resets Fleet A's principal back
+      // to FLEET_INVITATION_ISSUER while retaining Fleet A's historical link.
+      await fleetA.repository.deactivateFleetStaffMembership(
+        fleetA.entrySlug,
+        fleetA.fleetPartnerId,
+        fleetA.issued.membership.membershipId,
+        null,
+      );
+      const reissuedA = await fleetA.repository.issueFleetStaffInvitation({
+        entrySlug: fleetA.entrySlug,
+        fleetPartnerId: fleetA.fleetPartnerId,
+        email: fleetA.email,
+        roleCode: "fleet_partner_finance",
+        validTo: null,
+        tokenHash: createHash("sha256")
+          .update(`fi_${randomUUID()}`)
+          .digest("hex"),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        issuerPrincipalId: null,
+      });
+      expect(reissuedA).not.toBeNull();
+      expect(reissuedA!.principal.issuer).toBe(FLEET_INVITATION_ISSUER);
+
+      // Now Fleet B's independent first invitation succeeds with its own
+      // distinct principal and creates Fleet B's own link while preserving
+      // Fleet A's historical link intact.
+      const acceptedB = await fleetB.repository.acceptFleetStaffOidcInvitation(
+        fleetB.tokenHash,
+        {
+          ...fleetB.proof,
+          issuer: fleetA.proof.issuer,
+          subject: sharedGoogleSub,
+        },
+        link,
+      );
+      expect(acceptedB).not.toBeNull();
+      expect(acceptedB!.principal.principalId).toBe(
+        fleetB.issued.principal.principalId,
+      );
+      expect(acceptedB!.principal.principalId).not.toBe(
+        fleetA.issued.principal.principalId,
+      );
+      expect(await link.find(fleetB.entrySlug, sharedGoogleSub)).toMatchObject({
+        entrySlug: fleetB.entrySlug,
+        partnerUserRef: sharedGoogleSub,
+        drtsPassengerId: fleetB.issued.principal.principalId,
+        status: "active",
+        consentScope: "fleet_staff_invitation",
+      });
+      expect(await link.find(fleetA.entrySlug, sharedGoogleSub)).toMatchObject({
+        entrySlug: fleetA.entrySlug,
+        partnerUserRef: sharedGoogleSub,
+        drtsPassengerId: fleetA.issued.principal.principalId,
+        status: "active",
+        consentScope: "fleet_staff_invitation",
+      });
     });
   },
 );

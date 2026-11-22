@@ -194,15 +194,8 @@ describe("FLEET-ONB-007 Fleet staff invitation Google-bind: email_verified and p
           if (
             rec.entrySlug === entrySlug &&
             rec.drtsPassengerId === drtsPassengerId &&
-            rec.partnerUserRef !== partnerUserRef
-          ) {
-            return { rows: [] };
-          }
-          if (
-            rec.partnerUserRef === partnerUserRef &&
             rec.consentScope === "fleet_staff_invitation" &&
-            (rec.entrySlug !== entrySlug ||
-              rec.drtsPassengerId !== drtsPassengerId)
+            rec.partnerUserRef !== partnerUserRef
           ) {
             return { rows: [] };
           }

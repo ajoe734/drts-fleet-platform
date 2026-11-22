@@ -137,13 +137,46 @@ function createFleetInvitationClientMock() {
     invitationsByTokenHash.set(record.tokenHash, record);
   }
 
+  let txLinksSnapshot: Map<
+    string,
+    {
+      entrySlug: string;
+      partnerUserRef: string;
+      drtsPassengerId: string;
+      status: string;
+      consentScope: string;
+      linkedAt?: string;
+      lastSeenAt?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  > | null = null;
+
   const query = vi.fn(async (sql: string, params: unknown[] = []) => {
     const text = sql.trim();
 
+    if (text.startsWith("BEGIN")) {
+      txLinksSnapshot = new Map(links);
+      return { rows: [] };
+    }
+    if (text.startsWith("COMMIT")) {
+      txLinksSnapshot = null;
+      return { rows: [] };
+    }
     if (
-      text.startsWith("BEGIN") ||
-      text.startsWith("COMMIT") ||
-      text.startsWith("ROLLBACK") ||
+      text.startsWith("ROLLBACK") &&
+      !text.startsWith("ROLLBACK TO SAVEPOINT")
+    ) {
+      if (txLinksSnapshot) {
+        links.clear();
+        for (const [k, v] of txLinksSnapshot) {
+          links.set(k, v);
+        }
+        txLinksSnapshot = null;
+      }
+      return { rows: [] };
+    }
+    if (
       text.startsWith("SAVEPOINT") ||
       text.startsWith("ROLLBACK TO SAVEPOINT")
     ) {
@@ -293,15 +326,8 @@ function createFleetInvitationClientMock() {
         if (
           existing.entrySlug === entrySlug &&
           existing.drtsPassengerId === drtsPassengerId &&
-          existing.partnerUserRef !== partnerUserRef
-        ) {
-          return { rows: [] };
-        }
-        if (
-          existing.partnerUserRef === partnerUserRef &&
           existing.consentScope === "fleet_staff_invitation" &&
-          (existing.entrySlug !== entrySlug ||
-            existing.drtsPassengerId !== drtsPassengerId)
+          existing.partnerUserRef !== partnerUserRef
         ) {
           return { rows: [] };
         }
@@ -1279,7 +1305,7 @@ describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation aft
     expect(mock.getInvitation(secondTokenHash)?.acceptedAt).not.toBeNull();
   });
 
-  it("preserves historical link compatibility for existing fleet_staff_invitation rows while rejecting non-invitation consentScope, non-active status, or cross-Fleet Google sub collisions", async () => {
+  it("preserves historical link compatibility for existing fleet_staff_invitation rows, rejects target-entry non-invitation/non-active links and active cross-Fleet (issuer, sub) collisions, and accepts an independent first invitation in Fleet B once Fleet A deactivation and re-invitation release (issuer, sub)", async () => {
     const mock = createFleetInvitationClientMock();
     const databaseService = {
       isEnabled: () => true,
@@ -1297,10 +1323,14 @@ describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation aft
       fleetPartnerId: `fleet-partner-hist-b-${randomUUID()}`,
       entrySlug: `fleet-entry-hist-b-${randomUUID()}`,
     };
+    const fleetC = {
+      fleetPartnerId: `fleet-partner-hist-c-${randomUUID()}`,
+      entrySlug: `fleet-entry-hist-c-${randomUUID()}`,
+    };
     const { service, manager, deliveredTokens } = createFleetServiceOverMock(
       mock,
       repository,
-      [fleetA, fleetB],
+      [fleetA, fleetB, fleetC],
     );
 
     // 1. Seed a historical fleet_staff_invitation link for a member in Fleet A
@@ -1345,24 +1375,10 @@ describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation aft
     );
     expect(mock.getLinkCount()).toBe(1);
 
-    // 2. Even if Fleet A's member is deactivated and re-invited (so their
-    // principal temporarily sits at FLEET_INVITATION_ISSUER), Fleet B cannot
-    // bind that member's historical Google sub to a Fleet B invitation.
-    await service.deactivateFleetStaffMember(
-      fleetA.fleetPartnerId,
-      fleetA.entrySlug,
-      issuedA.member.membershipId,
-      manager,
-    );
-    await service.inviteFleetStaff(
-      fleetA.fleetPartnerId,
-      {
-        entrySlug: fleetA.entrySlug,
-        email: emailA,
-        roleCode: "fleet_partner_finance",
-      },
-      manager,
-    );
+    // 2. While Fleet A's member actively holds ('https://accounts.google.com', historicalSub)
+    // on iam.identity_principals, a separate first invitation in Fleet B for the same
+    // Google account is denied by the global (issuer, subject) uniqueness constraint
+    // without consuming Fleet B's invitation or leaving a link in Fleet B.
     const issuedB = await service.inviteFleetStaff(
       fleetB.fleetPartnerId,
       {
@@ -1374,7 +1390,7 @@ describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation aft
     );
     expect(issuedB.member.principalId).not.toBe(issuedA.member.principalId);
     const tokenHashB = createHash("sha256")
-      .update(deliveredTokens[2]!.rawToken)
+      .update(deliveredTokens[1]!.rawToken)
       .digest("hex");
 
     expect(
@@ -1392,25 +1408,93 @@ describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation aft
     expect(mock.getInvitation(tokenHashB)?.acceptedAt).toBeNull();
     expect(mock.getLink(fleetB.entrySlug, historicalSub)).toBeNull();
 
-    // 3. A historical link with status !== "active" or consentScope !== "fleet_staff_invitation"
-    // is rejected even if drtsPassengerId matches the invited principal.
+    // 3. A historical link in the target entry with status !== "active" or
+    // consentScope !== "fleet_staff_invitation" is rejected even if drtsPassengerId
+    // matches the invited principal.
+    const issuedC = await service.inviteFleetStaff(
+      fleetC.fleetPartnerId,
+      {
+        entrySlug: fleetC.entrySlug,
+        email: emailA,
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+    );
+    const tokenHashC = createHash("sha256")
+      .update(deliveredTokens[2]!.rawToken)
+      .digest("hex");
     const nonActiveSub = `google-sub-nonactive-${randomUUID()}`;
-    mock.seedLink(fleetB.entrySlug, nonActiveSub, issuedB.member.principalId, {
+    mock.seedLink(fleetC.entrySlug, nonActiveSub, issuedC.member.principalId, {
       status: "revoked",
       consentScope: "fleet_staff_invitation",
     });
     expect(
       await repository.acceptFleetStaffOidcInvitation(
-        tokenHashB,
+        tokenHashC,
         {
           issuer: "https://accounts.google.com",
           subject: nonActiveSub,
           email: emailA,
-          entrySlug: fleetB.entrySlug,
+          entrySlug: fleetC.entrySlug,
         },
         linkRepo,
       ),
     ).toBeNull();
-    expect(mock.getInvitation(tokenHashB)?.acceptedAt).toBeNull();
+    expect(mock.getInvitation(tokenHashC)?.acceptedAt).toBeNull();
+
+    // 4. Once Fleet A's member is deactivated and re-invited (releasing
+    // ('https://accounts.google.com', historicalSub) back to FLEET_INVITATION_ISSUER
+    // while retaining Fleet A's historical link), Fleet B's independent first
+    // invitation is accepted, creating Fleet B's own link for its distinct
+    // principal while preserving Fleet A's historical link intact.
+    await service.deactivateFleetStaffMember(
+      fleetA.fleetPartnerId,
+      fleetA.entrySlug,
+      issuedA.member.membershipId,
+      manager,
+    );
+    await service.inviteFleetStaff(
+      fleetA.fleetPartnerId,
+      {
+        entrySlug: fleetA.entrySlug,
+        email: emailA,
+        roleCode: "fleet_partner_finance",
+      },
+      manager,
+    );
+    expect(mock.getPrincipal(issuedA.member.principalId)?.issuer).toBe(
+      FLEET_INVITATION_ISSUER,
+    );
+
+    const acceptedB = await repository.acceptFleetStaffOidcInvitation(
+      tokenHashB,
+      {
+        issuer: "https://accounts.google.com",
+        subject: historicalSub,
+        email: emailA,
+        entrySlug: fleetB.entrySlug,
+      },
+      linkRepo,
+    );
+    expect(acceptedB).not.toBeNull();
+    expect(acceptedB!.principal.principalId).toBe(issuedB.member.principalId);
+    expect(acceptedB!.principal.principalId).not.toBe(
+      issuedA.member.principalId,
+    );
+    expect(mock.getInvitation(tokenHashB)?.acceptedAt).not.toBeNull();
+    expect(mock.getLink(fleetB.entrySlug, historicalSub)).toMatchObject({
+      entrySlug: fleetB.entrySlug,
+      partnerUserRef: historicalSub,
+      drtsPassengerId: issuedB.member.principalId,
+      status: "active",
+      consentScope: "fleet_staff_invitation",
+    });
+    expect(mock.getLink(fleetA.entrySlug, historicalSub)).toMatchObject({
+      entrySlug: fleetA.entrySlug,
+      partnerUserRef: historicalSub,
+      drtsPassengerId: issuedA.member.principalId,
+      status: "active",
+      consentScope: "fleet_staff_invitation",
+    });
   });
 });

@@ -389,15 +389,8 @@ describe("FLEET-ONB-004 Fleet staff invitation Google-bind: strict negative cont
           if (
             existing.entrySlug === entrySlug &&
             existing.drtsPassengerId === drtsPassengerId &&
-            existing.partnerUserRef !== partnerUserRef
-          ) {
-            return { rows: [] };
-          }
-          if (
-            existing.partnerUserRef === partnerUserRef &&
             existing.consentScope === "fleet_staff_invitation" &&
-            (existing.entrySlug !== entrySlug ||
-              existing.drtsPassengerId !== drtsPassengerId)
+            existing.partnerUserRef !== partnerUserRef
           ) {
             return { rows: [] };
           }

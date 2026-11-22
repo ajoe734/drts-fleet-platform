@@ -160,13 +160,16 @@ export class PartnerUserIdentityLinkRepository {
    * When the exact same canonical Fleet member (`drtsPassengerId`) in the
    * same `entrySlug` re-verifies their original Google account
    * (`partnerUserRef`) via a fresh invitation, their existing active
-   * `fleet_staff_invitation` link is reused without duplicating rows or
-   * overwriting original timestamps. Any conflicting link — whether owned by
-   * another principal, created for another `consent_scope` (e.g. a prior
-   * referral handoff), not `active`, bound as `fleet_staff_invitation` in
-   * another Fleet entry, or presenting a different `partnerUserRef` when
-   * `drtsPassengerId` already holds an original Google link in `entrySlug` —
+   * `fleet_staff_invitation` link in `entrySlug` is reused without
+   * duplicating rows or overwriting original timestamps. Any conflicting link
+   * in `entrySlug` — whether owned by another principal, created for another
+   * `consent_scope` (e.g. a prior referral handoff), not `active`, or
+   * presenting a different `partnerUserRef` when `drtsPassengerId` already
+   * holds an original `fleet_staff_invitation` Google link in `entrySlug` —
    * returns `null` so the caller rolls back the whole accept transaction.
+   * Global uniqueness of an active Google `(issuer, sub)` across principals
+   * is enforced on `iam.identity_principals`, not by historical link rows in
+   * other Fleet entries.
    *
    * An optional `executor` (the caller's own `PoolClient`) lets this insert
    * run inside FLEET-ONB-004's invitation-accept transaction, so a conflict
@@ -207,15 +210,8 @@ export class PartnerUserIdentityLinkRepository {
         if (
           existing.entrySlug === entrySlug &&
           existing.drtsPassengerId === drtsPassengerId &&
-          existing.partnerUserRef !== partnerUserRef
-        ) {
-          return null;
-        }
-        if (
-          existing.partnerUserRef === partnerUserRef &&
           existing.consentScope === "fleet_staff_invitation" &&
-          (existing.entrySlug !== entrySlug ||
-            existing.drtsPassengerId !== drtsPassengerId)
+          existing.partnerUserRef !== partnerUserRef
         ) {
           return null;
         }
@@ -249,17 +245,11 @@ export class PartnerUserIdentityLinkRepository {
           WHERE NOT EXISTS (
             SELECT 1
             FROM admin.phase1_partner_user_identity_links existing_any
-            WHERE (
-              existing_any.entry_slug = $1
+            WHERE existing_any.entry_slug = $1
               AND existing_any.drts_passenger_id = $3
-            ) OR (
-              existing_any.partner_user_ref = $2
               AND existing_any.consent_scope = 'fleet_staff_invitation'
-              AND (
-                existing_any.entry_slug <> $1
-                OR existing_any.drts_passenger_id <> $3
-              )
-            )
+              AND COALESCE(existing_any.record->>'consentScope', existing_any.consent_scope) = 'fleet_staff_invitation'
+              AND existing_any.partner_user_ref <> $2
           )
           ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
           RETURNING record
@@ -282,18 +272,11 @@ export class PartnerUserIdentityLinkRepository {
           AND NOT EXISTS (
             SELECT 1
             FROM admin.phase1_partner_user_identity_links other_link
-            WHERE (
-              other_link.entry_slug = $1
+            WHERE other_link.entry_slug = $1
               AND other_link.drts_passenger_id = $3
-              AND other_link.partner_user_ref <> $2
-            ) OR (
-              other_link.partner_user_ref = $2
               AND other_link.consent_scope = 'fleet_staff_invitation'
-              AND (
-                other_link.entry_slug <> $1
-                OR other_link.drts_passenger_id <> $3
-              )
-            )
+              AND COALESCE(other_link.record->>'consentScope', other_link.consent_scope) = 'fleet_staff_invitation'
+              AND other_link.partner_user_ref <> $2
           )
         LIMIT 1
       `,
