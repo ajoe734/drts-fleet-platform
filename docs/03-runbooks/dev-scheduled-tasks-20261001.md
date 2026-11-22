@@ -32,7 +32,7 @@ it. Either order of 2/3 leaves a short window where one side references the
 other before it exists; that window is harmless (a nonexistent principal
 just can't verify yet, same as any not-yet-onboarded caller — see
 §7.9's unregistered-caller fallback), but step 1 must come before either,
-and a job firing before *both* 2 and 3 are done will fail closed
+and a job firing before _both_ 2 and 3 are done will fail closed
 (`WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` or `WORKLOAD_PRINCIPAL_NOT_REGISTERED`),
 not open a security hole.
 
@@ -126,11 +126,11 @@ not nested under `status` — `status` is a `google.rpc.Status` and only its
 `--format=value(...)` silently prints nothing.) **Do not stop here.**
 `jobs run` returns as soon as Cloud Scheduler has dispatched the HTTP call,
 before the target responds, and `lastAttemptTime` is bumped the instant the
-attempt *starts*, not when it finishes
+attempt _starts_, not when it finishes
 (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs).
 Immediately after `jobs run`, `state=ENABLED` plus `status.code` absent or
 `0` is consistent with the attempt having already failed-closed, still being
-in flight, *or* having genuinely succeeded — the three are indistinguishable
+in flight, _or_ having genuinely succeeded — the three are indistinguishable
 from this describe output alone. Treat the two commands above only as "the
 attempt started"; they are not a completed-success check.
 
@@ -167,7 +167,7 @@ unrecognized but whose own `httpRequest.status` was in the 2xx range — a
 successful HTTP-target invocation can omit the scalar field entirely and
 report the outcome only via `httpRequest.status`
 (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs#HttpTarget),
-and this script checks that field on the *same* record before giving up, not
+and this script checks that field on the _same_ record before giving up, not
 the separate (and never decisive) Cloud Run diagnostic described above. Exit
 `1` means a matching record with a recognized non-`OK` `google.rpc.Code`
 name was found (the script prints it) — a recognized scalar failure always
@@ -206,7 +206,7 @@ gcloud logging read \
 
 Repeat for `drts-dev-approval-timeout-reminders-run` (substitute its own
 route in the `textPayload` filter). Only a line matching both the expected
-time window and the specific route confirms that *this* attempt reached the
+time window and the specific route confirms that _this_ attempt reached the
 handler as the scheduler principal — an older, unrelated log for the same
 principal is not evidence the current attempt worked.
 
@@ -234,7 +234,7 @@ The logged `reason=` value is the adapter's `ApiRequestError` code (or
   against a route that is not on the replay-tolerant allowlist
   (`REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS` in `bootstrap-auth.guard.ts`). The two
   scheduled-task routes in this runbook are on that allowlist; `POST
-  /api/auth/token` deliberately is not. If the drain/reminder jobs are
+/api/auth/token` deliberately is not. If the drain/reminder jobs are
   hitting this, confirm the deployed revision actually matches this fix
   (step 5) and is not an older build still enforcing one-time use on them.
 - `reason=WORKLOAD_AUDIENCE_MISMATCH` — the job's OIDC audience does not
@@ -259,3 +259,165 @@ Once `confirm-job-attempt.sh` reports a completed success (exit `0`) for
 both jobs and the combined query above shows a matching, route-specific
 `AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` line for each, leave the jobs on their
 configured schedule; no further manual trigger is needed.
+
+## 5. Opt-in: Driver onboarding dual-channel notification drain (`DRV-ONB-006`)
+
+`DRV-ONB-006` prepares the opt-in Cloud Run deployment gate and scale-to-zero
+Cloud Scheduler job definition for first-approval driver onboarding
+notifications (6-digit registration code + HTTPS App Link sent via Email and
+SMS):
+
+- Scheduled drain endpoint:
+  `POST /api/internal/scheduled-tasks/driver-onboarding-notifications/drain`
+- System realm only (`allowedRealms: ["system"]`), replay-tolerant across Cloud
+  Scheduler's cached OIDC token window
+  (`internal:scheduled-tasks:driver-onboarding-notifications:drain` in
+  `REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS`).
+- Required system scope: `driver:onboarding:notify`
+- Exact route scope pattern:
+  `"POST internal/scheduled-tasks/driver-onboarding-notifications/drain"`
+
+### 5.1 Fail-closed Cloud Run configuration (`.github/workflows/deploy-dev.yml`)
+
+`DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED` (configured via GitHub variable
+`DEV_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED` or
+`DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED`) defaults to `false`.
+
+- **When `false` (default)**: existing deployments set
+  `DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=false`, do not mount
+  `DRIVER_ONBOARDING_CODE_PEPPER` or `DRIVER_ONBOARDING_DELIVERY_KEY`, and do
+  not require `DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS` or
+  `DRIVER_ONBOARDING_IOS_APP_ID`.
+- **When `true` (opt-in enabled)**: `.github/workflows/deploy-dev.yml` fails
+  closed (`exit 1`) unless all of the following security and app-association
+  configurations are present and valid (probed via `gcloud secrets describe`
+  metadata only — never creating, reading, or printing secret values):
+  1. `DRIVER_ONBOARDING_CODE_PEPPER` mounted from Secret Manager secret
+     `${DEV_SECRET_PREFIX:-drts-dev}-driver-onboarding-code-pepper:latest`
+     (at least 32 bytes; HMAC-SHA256 pepper for 6-digit registration codes and
+     contact proofs).
+  2. `DRIVER_ONBOARDING_DELIVERY_KEY` mounted from Secret Manager secret
+     `${DEV_SECRET_PREFIX:-drts-dev}-driver-onboarding-delivery-key:latest`
+     (64 hex characters / 32-byte AES-256-GCM key for encrypted delivery
+     snapshots).
+  3. Complete existing Remote SMTP secret group (`drts-dev-smtp-host`,
+     `drts-dev-smtp-port`, `drts-dev-smtp-username`, `drts-dev-smtp-password`,
+     `drts-dev-smtp-from-email`, `drts-dev-smtp-recipient-allowlist`) mounted
+     as `REMOTE_SMTP_*` and `NOTIFICATION_FROM_EMAIL`.
+  4. Complete existing Twilio SMS secret group
+     (`${DEV_SECRET_PREFIX:-drts-dev}-twilio-account-sid`,
+     `${DEV_SECRET_PREFIX:-drts-dev}-twilio-api-key-sid`,
+     `${DEV_SECRET_PREFIX:-drts-dev}-twilio-api-key-secret`,
+     `${DEV_SECRET_PREFIX:-drts-dev}-twilio-from-number`) mounted as
+     `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, and
+     `TWILIO_FROM_NUMBER`.
+  5. `DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS` (via
+     `DEV_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS` or
+     `DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS`): comma-separated SHA-256
+     signing certificate fingerprints (`AA:BB:...:FF`, 32 colon-separated hex
+     byte pairs) published by
+     `GET https://api.smarttransport.tw/.well-known/assetlinks.json` for
+     Android package `com.cctechsupport.drts.driver`.
+  6. `DRIVER_ONBOARDING_IOS_APP_ID` (via `DEV_DRIVER_ONBOARDING_IOS_APP_ID` or
+     `DRIVER_ONBOARDING_IOS_APP_ID`):
+     `<TEAMID>.com.cctechsupport.drts.driver` (10-character uppercase
+     alphanumeric Apple Team ID + bundle identifier) published by
+     `GET https://api.smarttransport.tw/.well-known/apple-app-site-association`
+     for `/driver-activate`.
+
+The API formats the activation link in both Email and SMS notifications as
+`https://api.smarttransport.tw/driver-activate#token=<token>` so the one-time
+token remains in the URL fragment (never sent in HTTP GET requests or consumed
+by link previews), while `GET https://api.smarttransport.tw/driver-activate`
+serves a static `no-store` fallback page.
+
+### 5.2 Least-privilege workload grant (`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`)
+
+When enabling driver onboarding notifications in shared dev, extend Entry C
+(`drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`,
+`principalId: "dev-scheduler"`) in the Secret Manager secret
+`${DEV_SECRET_PREFIX:-drts-dev}-workload-identity-google-service-principals`
+with the exact route scope
+`"POST internal/scheduled-tasks/driver-onboarding-notifications/drain"`,
+least-privilege system scope `"driver:onboarding:notify"`, and the live API
+Cloud Run origin audience:
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-scheduler",
+  "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+  "routeScopes": [
+    "POST internal/scheduled-tasks/mail-outbox/drain",
+    "POST internal/scheduled-tasks/approval-timeout-reminders/run",
+    "POST internal/scheduled-tasks/regulatory-expiry/run",
+    "POST internal/scheduled-tasks/driver-onboarding-notifications/drain"
+  ],
+  "scopes": [
+    "notification-delivery:drain",
+    "tenant-partner:approval-timeout-reminders:run",
+    "regulatory:write",
+    "driver:onboarding:notify"
+  ]
+}
+```
+
+### 5.3 Authorized shared-dev rollout & opt-in scheduler provisioning
+
+All cloud mutations and provisioning commands must be executed only as part of
+an authorized shared-dev release (never from a code-only worker session, and
+never against the retired project `nodal-alloy-503700-s3`):
+
+1. Verify live GitHub repository variables (`gh variable get DEV_GCP_PROJECT_ID`
+   -> `drts-dev-devcc-20260825`, `gh variable get DEV_GCP_REGION` ->
+   `us-central1`), confirm the required Secret Manager entries and updated
+   `drts-dev-workload-identity-google-service-principals` secret version exist,
+   and set `DEV_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS`,
+   `DEV_DRIVER_ONBOARDING_IOS_APP_ID`, and
+   `DEV_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true`.
+2. Deploy the approved immutable `publish/v*`, `release/v*`, or full 40-char
+   commit SHA through `.github/workflows/deploy-dev.yml`:
+
+   ```bash
+   gh workflow run deploy-dev.yml --repo ajoe734/drts-fleet-platform \
+     -f source_ref=<publish/vYYYY.MM.DD.N or full 40-char SHA>
+   ```
+
+3. Provision the opt-in Cloud Scheduler HTTP job
+   (`drts-dev-driver-onboarding-notifications-drain`, default schedule
+   `* * * * *`, OIDC service account
+   `drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`,
+   audience `${API_ORIGIN}`):
+
+   ```bash
+   PROJECT_ID=drts-dev-devcc-20260825 REGION=us-central1 \
+     DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true \
+     infra/gcp/dev/scheduler/provision-dev-scheduler.sh
+   ```
+
+   When `DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED` is omitted or `false`,
+   `provision-dev-scheduler.sh` leaves existing jobs untouched and skips
+   creating `drts-dev-driver-onboarding-notifications-drain`.
+
+4. Confirm end-to-end scheduled execution and workload identity authorization
+   (for `DRV-ONB-012` live shared-dev acceptance):
+
+   ```bash
+   infra/gcp/dev/scheduler/confirm-job-attempt.sh \
+     drts-dev-driver-onboarding-notifications-drain \
+     internal/scheduled-tasks/driver-onboarding-notifications/drain
+
+   gcloud logging read \
+     'resource.type="cloud_run_revision"
+      resource.labels.service_name="drts-dev-api"
+      textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_(USED|ROUTE_SCOPE_DENIED)\].*principalId=dev-scheduler.*route=POST /api/internal/scheduled-tasks/driver-onboarding-notifications/drain"' \
+     --project=drts-dev-devcc-20260825 --limit=5 --format='value(timestamp,textPayload)'
+   ```
+
+### 5.4 Verification & Evidence (`DRV-ONB-006`)
+
+| Finding／驗收項                                                                                                                                                                                                           | 原始碼依據與修改位置                                                                                                                                                  | 舊版重現 → 修正版結果                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 命令、退出碼、執行版本與證據位置                                                                                                                                                                                                                                                     | 未驗項與具體限制                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED` default `false` & fail-closed Secret Manager mounts (`DRIVER_ONBOARDING_CODE_PEPPER`, `DRIVER_ONBOARDING_DELIVERY_KEY`, `REMOTE_SMTP_*`, `NOTIFICATION_FROM_EMAIL`, `TWILIO_*`) | `.github/workflows/deploy-dev.yml` (`env`, `Resolve dev config`, `Resolve API secret mounts`, `Build API env vars`, `Deploy — api`)                                   | Before (`134df5cc4`): no `DRIVER_ONBOARDING_*` secret resolution, env wiring, or fail-closed enable guard existed in `deploy-dev.yml`. After: defaults `DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=false`; when `true`, verifies metadata via `gcloud secrets describe` (never reads or prints secret values) and refuses enable (`exit 1`) if any required secret or app-link variable is missing/invalid; deduplicates `TWILIO_*` mounts across `api_secrets` and `passenger_secrets`.                                                                                        | `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh` (exit 0); `timeout 90s pnpm exec prettier --check .github/workflows/deploy-dev.yml docs/03-runbooks/dev-scheduled-tasks-20261001.md` (exit 0); workflow shell & unit regression suite via `vitest` (exit 0).            | Live shared-dev Secret Manager creation, workflow dispatch, and real dual-channel delivery are reserved for authorized shared-dev acceptance (`DRV-ONB-012`) per task guardrails.  |
+| Android & iOS App Links association variables (`DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS`, `DRIVER_ONBOARDING_IOS_APP_ID`) for `api.smarttransport.tw`                                                                 | `.github/workflows/deploy-dev.yml` (`Resolve dev config`, `Resolve API secret mounts`, `Build API env vars`); `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §5.1 | Before (`134df5cc4`): `DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS` and `DRIVER_ONBOARDING_IOS_APP_ID` were not wired in `deploy-dev.yml`. After: optional/unrequired when flag is `false`; required and format-validated (`^([A-F0-9]{2}:){31}[A-F0-9]{2}$` CSV and `^[A-Z0-9]{10}\.com\.cctechsupport\.drts\.driver$`) when flag is `true`.                                                                                                                                                                                                                                | `timeout 90s pnpm exec vitest run tests/unit/deploy-dev-password-login.test.ts tests/unit/notification-delivery/deploy-dev-smtp.test.ts tests/unit/dev-pax-review-env-transport-20261016/transport.test.ts tests/unit/pax-web-deploy-20261009/deployment-contract.test.ts` (exit 0). | Live `https://api.smarttransport.tw/.well-known/*` and `/driver-activate` probes require authorized shared-dev deployment (`DRV-ONB-012`).                                         |
+| Opt-in Cloud Scheduler OIDC drain job & least-privilege `driver:onboarding:notify` workload grant (`driver_onboarding_cloud_runtime_definition_checks`)                                                                   | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh`; `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §5.2–§5.3                                                    | Before (`134df5cc4`): `provision-dev-scheduler.sh` and the runbook only covered mail-outbox, approval-timeout-reminders, and regulatory-expiry. After: defines opt-in `drts-dev-driver-onboarding-notifications-drain` (`POST /api/internal/scheduled-tasks/driver-onboarding-notifications/drain`, OIDC SA `drts-dev-scheduler@...`, audience `${API_ORIGIN}`), preserves existing jobs when `DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=false`, refuses suspended `nodal-alloy-503700-s3`, and documents the exact route/scope/audience workload grant and completion probes. | `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh` (exit 0); `timeout 90s pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts tests/unit/bureau-r14-expiry-reminders-20261024/scheduler-and-route.test.ts` (exit 0).                              | Live Cloud Scheduler job provisioning and `confirm-job-attempt.sh` execution against `drts-dev-devcc-20260825` are performed during authorized shared-dev rollout (`DRV-ONB-012`). |
