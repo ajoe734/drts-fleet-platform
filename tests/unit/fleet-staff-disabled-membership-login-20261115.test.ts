@@ -156,6 +156,132 @@ describe("FLEET-ONB-007 SA/SD §9: a disabled Fleet staff membership blocks the 
     expect(denied.identity.roles).not.toContain("fleet_partner_ops");
     expect(denied.identity.scopes).not.toContain("fleet:read");
   });
+
+  it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: blocks direct ordinary Google login while a re-invited member is in 'invited' status before re-verifying the fresh invitation, then restores login with the newly granted role once re-verified", async () => {
+    const repository = new IdentityRepository();
+    const link = new PartnerUserIdentityLinkRepository();
+    const tenant = new TenantPartnerService(new AuditNotificationService());
+    const jwt = new JwtAuthService(
+      repository,
+      tenant,
+      undefined,
+      undefined,
+      link,
+    );
+    const oidc = new OidcPkceService(
+      jwt,
+      tenant,
+      undefined,
+      link,
+      undefined,
+      repository,
+    );
+    const now = "2026-11-14T10:00:00.000Z";
+
+    await link.createForInvitedPrincipal(ENTRY, OIDC_SUB, PRINCIPAL_ID, now);
+    // Simulate state right after deactivation + re-invitation (issueFleetStaffInvitation),
+    // before the member re-verifies the fresh invitation.
+    await repository.ensurePrincipalRecord({
+      principalId: PRINCIPAL_ID,
+      sourceRef: `jwt_principal:partner:${PRINCIPAL_ID}`,
+      issuer: "fleet_invitation",
+      subject: `fleet:${ENTRY}:email:disabled-fleet-staff@example.com`,
+      principalType: "human",
+      email: "disabled-fleet-staff@example.com",
+      emailVerified: false,
+      displayName: "Re-invited Fleet Staff Fixture",
+      status: "invited",
+      createdAt: now,
+      updatedAt: now,
+    } as CanonicalIdentityPrincipalRecord);
+    const membership = await repository.ensureMembershipRecord({
+      membershipId: "fleet-reinvited-pending-membership",
+      sourceRef: `fleet_member:${ENTRY}:${PRINCIPAL_ID}`,
+      principalId: PRINCIPAL_ID,
+      realm: "partner",
+      scopeRef: `fleet:${ENTRY}`,
+      tenantId: null,
+      partnerId: "fleet-demo-001",
+      status: "invited",
+      invitedByPrincipalId: "manager",
+      invitationId: "invitation_reinvited_pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repository.ensureRoleBindingRecord({
+      roleBindingId: "fleet-reinvited-pending-binding",
+      sourceRef: `fleet_role:${ENTRY}:${PRINCIPAL_ID}`,
+      membershipId: membership.membershipId,
+      roleCode: "fleet_partner_finance",
+      grantedByPrincipalId: "manager",
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const attemptOrdinaryLogin = async () => {
+      const state = oidc.generateLoginParameters("partner", {
+        partnerId: ENTRY,
+      });
+      return oidc.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          code: OIDC_CODE,
+          state: state.state,
+          partnerId: ENTRY,
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+        },
+        { stateToken: state.stateToken },
+      );
+    };
+
+    // Cannot log in directly before re-verifying the fresh invitation.
+    await expect(attemptOrdinaryLogin()).rejects.toMatchObject({
+      code: "IAM_PRINCIPAL_NOT_ACTIVE",
+    });
+
+    // Re-verifying the same original Google account reuses the existing link
+    // and re-activates the canonical principal and membership.
+    const reverifiedLink = await link.createForInvitedPrincipal(
+      ENTRY,
+      OIDC_SUB,
+      PRINCIPAL_ID,
+      "2026-11-22T12:00:00.000Z",
+    );
+    expect(reverifiedLink).not.toBeNull();
+    expect(reverifiedLink?.drtsPassengerId).toBe(PRINCIPAL_ID);
+
+    const reactivatedAt = "2026-11-22T12:00:00.000Z";
+    await repository.ensurePrincipalRecord({
+      principalId: PRINCIPAL_ID,
+      sourceRef: `jwt_principal:partner:${PRINCIPAL_ID}`,
+      issuer: "google",
+      subject: OIDC_SUB,
+      principalType: "human",
+      email: "disabled-fleet-staff@example.com",
+      emailVerified: true,
+      displayName: "Re-invited Fleet Staff Fixture",
+      status: "active",
+      createdAt: now,
+      updatedAt: reactivatedAt,
+    } as CanonicalIdentityPrincipalRecord);
+    await repository.ensureMembershipRecord({
+      ...membership,
+      status: "active",
+      updatedAt: reactivatedAt,
+    });
+
+    const restored = await attemptOrdinaryLogin();
+    expect(restored.identity).toMatchObject({
+      principalId: PRINCIPAL_ID,
+      membershipId: membership.membershipId,
+      partnerId: "fleet-demo-001",
+      partnerEntrySlug: ENTRY,
+      roles: ["fleet_partner_finance"],
+    });
+  });
 });
 
 describe("FLEET-ONB-007 SA/SD §9: a disabled Fleet staff membership blocks the password login branch", () => {

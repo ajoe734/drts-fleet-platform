@@ -150,14 +150,23 @@ export class PartnerUserIdentityLinkRepository {
   }
 
   /**
-   * FLEET-ONB-002 SA/SD §2 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md):
+   * FLEET-ONB-002 SA/SD §2 (docs/02-architecture/fleet-staff-onboarding-20261114/01_system_sa_sd.md),
+   * updated per 2026-11-22 product decision (FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122):
    * accepting a Fleet staff invitation's Google-bound identity link. Unlike
    * `resolveOrCreate`, `drtsPassengerId` is the caller's already-created
    * invited principal, not a fresh random passenger id, and this never
-   * overwrites a conflicting existing row — it returns `null` so the caller
-   * rolls back the whole accept transaction instead of silently reusing (and
-   * rebinding) someone else's link, e.g. one created by a prior referral
-   * handoff for the same `(entrySlug, partnerUserRef)`.
+   * overwrites a conflicting existing row.
+   *
+   * When the exact same canonical Fleet member (`drtsPassengerId`) in the
+   * same `entrySlug` re-verifies their original Google account
+   * (`partnerUserRef`) via a fresh invitation, their existing active
+   * `fleet_staff_invitation` link is reused without duplicating rows or
+   * overwriting original timestamps. Any conflicting link — whether owned by
+   * another principal, created for another `consent_scope` (e.g. a prior
+   * referral handoff), not `active`, bound as `fleet_staff_invitation` in
+   * another Fleet entry, or presenting a different `partnerUserRef` when
+   * `drtsPassengerId` already holds an original Google link in `entrySlug` —
+   * returns `null` so the caller rolls back the whole accept transaction.
    *
    * An optional `executor` (the caller's own `PoolClient`) lets this insert
    * run inside FLEET-ONB-004's invitation-accept transaction, so a conflict
@@ -194,7 +203,34 @@ export class PartnerUserIdentityLinkRepository {
 
     if (!executor && !this.isEnabled()) {
       const key = this.buildKey(entrySlug, partnerUserRef);
-      if (this.fallbackLinks.has(key)) {
+      for (const existing of this.fallbackLinks.values()) {
+        if (
+          existing.entrySlug === entrySlug &&
+          existing.drtsPassengerId === drtsPassengerId &&
+          existing.partnerUserRef !== partnerUserRef
+        ) {
+          return null;
+        }
+        if (
+          existing.partnerUserRef === partnerUserRef &&
+          existing.consentScope === "fleet_staff_invitation" &&
+          (existing.entrySlug !== entrySlug ||
+            existing.drtsPassengerId !== drtsPassengerId)
+        ) {
+          return null;
+        }
+      }
+      const existingForKey = this.fallbackLinks.get(key);
+      if (existingForKey) {
+        if (
+          existingForKey.entrySlug === entrySlug &&
+          existingForKey.partnerUserRef === partnerUserRef &&
+          existingForKey.drtsPassengerId === drtsPassengerId &&
+          existingForKey.status === "active" &&
+          existingForKey.consentScope === "fleet_staff_invitation"
+        ) {
+          return this.clone(existingForKey);
+        }
         return null;
       }
       this.fallbackLinks.set(key, record);
@@ -204,18 +240,91 @@ export class PartnerUserIdentityLinkRepository {
     const exec = executor ?? this.databaseService!;
     const result = await exec.query<JsonRecordRow>(
       `
-        INSERT INTO admin.phase1_partner_user_identity_links (
-          entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,
-          linked_at, last_seen_at, created_at, updated_at, record
-        ) VALUES ($1, $2, $3, 'active', 'fleet_staff_invitation', $4, $4, $4, $4, $5::jsonb)
-        ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
-        RETURNING record
+        WITH inserted AS (
+          INSERT INTO admin.phase1_partner_user_identity_links (
+            entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,
+            linked_at, last_seen_at, created_at, updated_at, record
+          )
+          SELECT $1, $2, $3, 'active', 'fleet_staff_invitation', $4, $4, $4, $4, $5::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM admin.phase1_partner_user_identity_links existing_any
+            WHERE (
+              existing_any.entry_slug = $1
+              AND existing_any.drts_passenger_id = $3
+            ) OR (
+              existing_any.partner_user_ref = $2
+              AND existing_any.consent_scope = 'fleet_staff_invitation'
+              AND (
+                existing_any.entry_slug <> $1
+                OR existing_any.drts_passenger_id <> $3
+              )
+            )
+          )
+          ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
+          RETURNING record
+        )
+        SELECT record
+        FROM inserted
+        UNION ALL
+        SELECT existing.record
+        FROM admin.phase1_partner_user_identity_links existing
+        WHERE existing.entry_slug = $1
+          AND existing.partner_user_ref = $2
+          AND existing.drts_passenger_id = $3
+          AND existing.status = 'active'
+          AND existing.consent_scope = 'fleet_staff_invitation'
+          AND COALESCE(existing.record->>'entrySlug', existing.entry_slug) = $1
+          AND COALESCE(existing.record->>'partnerUserRef', existing.partner_user_ref) = $2
+          AND COALESCE(existing.record->>'drtsPassengerId', existing.drts_passenger_id) = $3
+          AND COALESCE(existing.record->>'status', existing.status) = 'active'
+          AND COALESCE(existing.record->>'consentScope', existing.consent_scope) = 'fleet_staff_invitation'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM admin.phase1_partner_user_identity_links other_link
+            WHERE (
+              other_link.entry_slug = $1
+              AND other_link.drts_passenger_id = $3
+              AND other_link.partner_user_ref <> $2
+            ) OR (
+              other_link.partner_user_ref = $2
+              AND other_link.consent_scope = 'fleet_staff_invitation'
+              AND (
+                other_link.entry_slug <> $1
+                OR other_link.drts_passenger_id <> $3
+              )
+            )
+          )
+        LIMIT 1
       `,
       [entrySlug, partnerUserRef, drtsPassengerId, now, JSON.stringify(record)],
     );
 
     const row = result.rows[0];
-    return row ? this.parseRecord(row.record) : null;
+    if (!row) {
+      return null;
+    }
+    const parsed = this.parseRecord(row.record);
+    if (
+      (parsed.entrySlug !== undefined && parsed.entrySlug !== entrySlug) ||
+      (parsed.partnerUserRef !== undefined &&
+        parsed.partnerUserRef !== partnerUserRef) ||
+      parsed.drtsPassengerId !== drtsPassengerId ||
+      (parsed.status !== undefined && parsed.status !== "active") ||
+      (parsed.consentScope !== undefined &&
+        parsed.consentScope !== "fleet_staff_invitation")
+    ) {
+      return null;
+    }
+    return {
+      ...record,
+      ...parsed,
+      entrySlug,
+      partnerUserRef,
+      drtsPassengerId,
+      status: "active",
+      consentScope: "fleet_staff_invitation",
+    };
   }
 
   async touchLastSeen(

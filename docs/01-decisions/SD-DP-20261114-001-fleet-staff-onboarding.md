@@ -24,14 +24,15 @@
 
 1. **2026-11-13（選項 C——Google 與帳密並存）**：四個外部後台都保留既有 Google 登入，另外新增帳號密碼登入；帳號沿用邀請信，使用者自設密碼，管理員與系統都不經手明文密碼。四個入口包含車行入口（`fleet-partner-portal-web`，對應 API `partner` realm）。完整五項決定見 [SD-DP-20261113-001](SD-DP-20261113-001-portal-password-login.md) §2，本決策不重複改寫，僅引用其對車行入口的適用範圍。
 2. **2026-11-14（本次要求的來源）**：車行入口已在 shared dev 對外開放並強制登入（PR #3239），使用者要求完成四個入口的真實 Google 登入測試。車行入口目前完全無法完成這個測試，因為沒有任何流程能讓真人 Google 帳號開通——這是本任務存在的直接原因，也是本決策與其 SA/SD、實作任務包要解決的問題範圍。
+3. **2026-11-22（同車隊成員停用後重新邀請的原 Google 帳號重新驗證，`FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122`）**：允許同一人在同車隊（同一 `entrySlug` 與 `fleetPartnerId`）於成員停用並重新核發新邀請後，以原本已綁定的同一 Google 帳號（同一 OIDC `(issuer, sub)` proof 與核實 email）透過新邀請重新驗證並登入；原 canonical `principalId`、`membershipId`、`roleBindingId` 與各自的 `createdAt` 延續，既有屬於該成員且 `status === "active"`、`consent_scope === "fleet_staff_invitation"` 的 `(entrySlug, sub)` identity link 原地重用（不產生重複列、不覆寫建立時間），新邀請僅消耗一次，原已接受邀請與已撤銷 session 的歷史完整保留。對其他人員、不同車隊、其他 `consent_scope`（如乘客 referral handoff）或非 active 的既有 link，以及同車隊此人已保留原 Google 綁定但新 proof 呈現不同 Google `sub`（即使 email 相同）的情形，維持拒絕並整段回滾（不消耗新邀請、不建立第二條跨人關聯）。
 
 使用者在 2026-11-13 已明確要求「這些是使用者的產品決定，不得在設計中改寫或縮減；若技術上有衝突，寫進決策紀錄的『待使用者決定』段落，不得自行裁決」。本決策與其附帶文件延續同一原則。
 
 ## 3. 明確排除事項
 
-**不得以 referral 乘客同意交接（`partner/ingress/handoff`）作為車行人員開通機制。** 現況程式中唯一會呼叫 `PartnerUserIdentityLinkRepository.resolveOrCreate`（`apps/api/src/modules/tenant-partner/partner-user-identity-link.repository.ts:37-131`）的生產路徑是 `issuePartnerIngressHandoff`（`tenant-partner.service.ts:6561-6620`）與 `POST /api/partner/ingress/handoff`——這是「乘客」透過 referral 夥伴（如物業、銀行）的嵌入頁面建立一次性乘客身分連結的機制，語意是「乘客同意」，不是「車行人員身分核實後開通後台存取」。把兩者混用會讓一個未經核實、原本給乘客用的一次性連結直接具備管理車行營運資料的權限，是嚴重的權限邊界錯誤。本決策與其 SA/SD 設計一套新的、獨立於 referral handoff 的車行人員邀請機制（見 SA/SD §2），`resolveOrCreate` 的既有呼叫方與語意保持不變，不被本決策影響或重用。
+**不得以 referral 乘客同意交接（`partner/ingress/handoff`）作為車行人員開通機制。** 現況程式中唯一會呼叫 `PartnerUserIdentityLinkRepository.resolveOrCreate`（`apps/api/src/modules/tenant-partner/partner-user-identity-link.repository.ts:37-131`）的生產路徑是 `issuePartnerIngressHandoff`（`tenant-partner.service.ts:6561-6620`）與 `POST /api/partner/ingress/handoff`——這是「乘客」透過 referral 夥伴（如物業、銀行）的嵌入頁面建立一次性乘客身分連結的機制，語意是「乘客同意」，不是「車行人員身分核實後開通後台存取」。把兩者混用會讓一個未經核實、原本給乘客用的一次性連結直接具備管理車行營運資料的權限，是嚴重的權限邊界錯誤。本決策與其 SA/SD 設計一套新的、獨立於 referral handoff 的車行人員邀請機制（見 SA/SD §2），`resolveOrCreate` 的既有呼叫方與語意保持不變，不被本決策影響或重用；2026-11-22 對同車隊成員重邀重用既有 link 的修正僅限該成員本人先前由 `createForInvitedPrincipal` 建立的 `consent_scope === "fleet_staff_invitation"` active link，任何 referral 乘客 link 仍一律拒絕覆寫或重用。
 
-**不得只憑 email 自動合併身分。** 與 [SD-DP-20261113-001](SD-DP-20261113-001-portal-password-login.md) §7、[BUREAU-R13](../02-architecture/bureau-agency-readonly-20261024.md) §2.4 一致：接受邀請時的身分綁定必須核對邀請當時鎖定的 email 與 OIDC proof 的 `email_verified`／`email`，不得只用 email 字串相等就合併或啟用一個既有 principal。見 SA/SD §3、§9。
+**不得只憑 email 自動合併身分或以另一 Google 身分代替原帳號。** 與 [SD-DP-20261113-001](SD-DP-20261113-001-portal-password-login.md) §7、[BUREAU-R13](../02-architecture/bureau-agency-readonly-20261024.md) §2.4 及 2026-11-22 產品決定一致：接受邀請時的身分綁定必須核對邀請當時鎖定的 email 與 OIDC proof 的 `email_verified`／`email` 及 Google `sub`，不得只用 email 字串相等就合併或啟用一個既有 principal，亦不得在該成員已保有原 Google `sub` 綁定時將同 email 的另一個 Google `sub` 當作原帳號接受。見 SA/SD §2、§3、§8、§9。
 
 ## 4. 本決策的限定範圍
 
