@@ -85,3 +85,23 @@ Gemini 已於 `2026-11-22T14:19:51Z` 核准候選 `f30312960704c39b35ed865cd5b6f
 timeout 600s env NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck
 # 既有後端 4 檔及 repository 1 檔的命令沿用上一節。
 ```
+
+### Migration allocation 缺漏定位（待 Supervisor 擴充 scope）
+
+Gemini 已於 `2026-11-22T15:15:32Z` 核准候選 `982e0357b934dcb4167f015a9936e47b6ac90ec2`。該候選的 hosted typecheck、lint、build、integration 與 API unit jobs 已通過，但 [CI run 45036968286 / root unit shard 3 job 137263014560](https://github.com/ajoe734/drts-fleet-platform/actions/runs/45036968286/job/137263014560) 回報 migration allocation 缺漏。這是另一個新 finding，並非前兩項修復再次失敗；其餘未結束的 hosted jobs 不列為通過。
+
+本輪 delta 證據沿用 `EVIDENCE_DIR/unit-shard-repair/`。原候選與遠端 task branch、PR head 在定位開始時皆為上述完整 SHA；未為同步 trunk 改寫 published history。
+
+| Finding／驗收項                                                                        | 原始碼依據與修改位置                                                                                                                                                                                                                                                                                                                                                                                                            | 舊版重現 → 修正版結果                                                                                                                                                       | 命令、退出碼、執行版本與證據位置                                                                                                                                                                                                   | 未驗項與具體限制                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新增 V0140–V0142 後，共用 allocation ledger 仍只登記至 V0139，導致 root unit gate 失敗 | 正式 migrations 為 `V0140__driver_supply_email.sql`、`V0141__driver_onboarding_invitation_proofs.sql`、`V0142__driver_onboarding_delivery.sql`。`docs/04-uat/system-remediation-20260906/schema-allocation.json` 缺少這三項。`sr-recovery-contracts-20260911.test.ts` 的 allocation collectors 與最高版本 assertion（原候選第 253 行）、`sr-partner-notify-con-20260917.test.ts` 的同類 assertion（第 549 行）均讀取該 ledger。 | 在原候選呼叫兩份既有正式測試，58 cases 中 56 pass、2 fail，兩者均為 `expected 142 to be less than or equal to 139`，exit 1。尚未修改 ledger／collectors，無修正版通過結果。 | `ci-original-shard3.log` 記錄 hosted 分片 3630 pass、1 fail、16 skip，exit 1；本機 `allocation-before.{log,json,exit}`、`run-check.py` 記錄命令、完整 SHA 與 diff hash。Node `22.23.2`、pnpm `10.33.0`、Vitest `4.1.4`；命令見下。 | 修正所需三個檔案均不在本 dispatch 的 `write_scopes`。已用正式 `progress` 向 Supervisor 提出範圍需求，依 §0.7 待其核對平行衝突並擴充原任務 scope；未自行修改範圍外檔案或改弱 assertion。 |
+
+修正邊界為在上述 ledger 追加 `driver_onboarding_allocations`，逐項登記三個既有 migration 的 task、確切檔名、schema／table 與 invariants；保留全部既有分配和 amendment，再讓兩份既有檢查的 allocation collectors 納入新群組。必要回歸包括版本不碰撞、檔名唯一且相符，以及最高 migration 不超過已登記分配；保留原 assertion。這三個 migration 在原候選均由 DRV-ONB-013 新增，查核到的 `origin/dev`（`b58970da4c69a66053284e1f5f8198619966829c`）ledger 同樣止於 V0139。此靜態查核不能代替 Supervisor 的正式 scope 協調。
+
+本機只恢復此 isolated worktree 的 ignored root／contracts 依賴連結，沿用前輪符合 lockfile 的安裝；變更位置與前後連結記錄於 `dependency-links.json`。未新增工作副本、未修改共用依賴或 lockfile、未啟動任何產品／browser／DB 服務。本輪只完成缺漏定位，不將 checkpoint 當作可交審候選；共享 dev 與簽署實機驗收仍由 DRV-ONB-012 追蹤。
+
+```bash
+timeout 120s pnpm exec vitest run \
+  tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts \
+  tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts
+```
