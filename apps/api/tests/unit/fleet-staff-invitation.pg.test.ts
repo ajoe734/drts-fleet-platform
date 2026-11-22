@@ -594,23 +594,31 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(reissued).not.toBeNull();
         expect(reissued!.principal).toMatchObject({
           principalId: f.issued.principal.principalId,
-          createdAt: f.issued.principal.createdAt,
+          createdAt: accepted!.principal.createdAt,
           issuer: FLEET_INVITATION_ISSUER,
           subject: `fleet:${f.entrySlug}:email:${f.email}`,
           status: "invited",
           emailVerified: false,
         });
+        expect(new Date(reissued!.principal.createdAt).toISOString()).toBe(
+          new Date(f.issued.principal.createdAt).toISOString(),
+        );
         expect(reissued!.membership).toMatchObject({
           membershipId: f.issued.membership.membershipId,
           createdAt: f.issued.membership.createdAt,
           status: "invited",
           invitationId: reissued!.invitation.invitationId,
         });
+        expect(new Date(reissued!.membership.createdAt).toISOString()).toBe(
+          new Date(f.issued.membership.createdAt).toISOString(),
+        );
         expect(reissued!.roleBinding).toMatchObject({
           roleBindingId: f.issued.roleBinding.roleBindingId,
-          createdAt: f.issued.roleBinding.createdAt,
           roleCode: "fleet_partner_finance",
         });
+        expect(new Date(reissued!.roleBinding.createdAt).toISOString()).toBe(
+          new Date(f.issued.roleBinding.createdAt).toISOString(),
+        );
 
         // Old accepted invitation and revoked session remain traceable.
         const firstInvitationRow = await f.database.query<{
@@ -656,16 +664,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(passwordAccepted).toMatchObject({
           principal: {
             principalId: f.issued.principal.principalId,
-            createdAt: f.issued.principal.createdAt,
+            createdAt: reissued!.principal.createdAt,
             issuer: FLEET_INVITATION_ISSUER,
             status: "active",
           },
           membership: {
             membershipId: f.issued.membership.membershipId,
-            createdAt: f.issued.membership.createdAt,
+            createdAt: reissued!.membership.createdAt,
             status: "active",
           },
         });
+        expect(
+          new Date(passwordAccepted!.principal.createdAt).toISOString(),
+        ).toBe(new Date(f.issued.principal.createdAt).toISOString());
+        expect(
+          new Date(passwordAccepted!.membership.createdAt).toISOString(),
+        ).toBe(new Date(f.issued.membership.createdAt).toISOString());
       } finally {
         await f.database.query(
           `DELETE FROM iam.identity_sessions WHERE session_id = $1`,
