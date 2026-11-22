@@ -532,6 +532,12 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     resourceConstraints: [DRIVER_CONSTRAINT, OBJECT_CONSTRAINT],
   },
   {
+    scope: "driver:onboarding:notify",
+    allowedRealms: ["system"],
+    description: "Drain the durable driver onboarding notification queue.",
+    resourceConstraints: [ACTOR_CONSTRAINT],
+  },
+  {
     scope: "driver:write",
     allowedRealms: ["system", "driver"],
     description: "Mutate driver profile and device-bound state.",

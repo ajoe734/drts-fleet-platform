@@ -929,11 +929,21 @@ export interface PartnerBootstrapSession {
   identity: IdentityContext;
 }
 
-export interface RegisterDriverDeviceCommand {
-  registrationCode: string;
+export type RegisterDriverDeviceCommand = {
   deviceId: string;
   deviceLabel?: string | null;
-}
+} & (
+  | {
+      registrationCode: string;
+      registrationContact?: string;
+      activationToken?: never;
+    }
+  | {
+      activationToken: string;
+      registrationCode?: never;
+      registrationContact?: never;
+    }
+);
 
 export interface RefreshDriverDeviceSessionCommand {
   refreshToken: string;
@@ -972,6 +982,9 @@ export interface DriverDeviceInvitationRecord {
   invitationId: string;
   driverId: string;
   registrationCodeHash: string;
+  onboardingContactHash?: string;
+  activationTokenHash?: string;
+  failedCodeAttempts?: number;
   status: "pending" | "used" | "expired" | "revoked";
   expiresAt: string;
   acceptedAt: string | null;

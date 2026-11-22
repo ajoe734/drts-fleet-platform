@@ -3,6 +3,7 @@ import { ControlledDownloadModule } from "../controlled-download/controlled-down
 import { Module } from "@nestjs/common";
 
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
+import { DriverOnboardingModule } from "../driver-onboarding/driver-onboarding.module";
 import { DatabaseModule } from "../../common/db";
 import { DatabaseService } from "../../common/db/database.service";
 import { IdempotencyModule } from "../../common/idempotency";
@@ -39,6 +40,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
     DatabaseModule,
     IdempotencyModule,
     DriverAcademyModule,
+    DriverOnboardingModule,
     BillingSettlementModule,
     OwnedMobilityModule,
     RegulatoryRegistryModule,

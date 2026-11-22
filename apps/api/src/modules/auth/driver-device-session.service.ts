@@ -1,4 +1,11 @@
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  timingSafeEqual,
+} from "node:crypto";
+import type { PoolClient } from "pg";
 
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -17,6 +24,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { normalizeDriverOnboardingMobile } from "../../common/driver-onboarding-contact";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
@@ -25,6 +33,48 @@ import { DriverDeviceSessionRepository } from "./driver-device-session.repositor
 const DRIVER_ACCESS_TOKEN_EXPIRES_IN = "15m";
 const DRIVER_REFRESH_TOKEN_EXPIRES_IN = "30d";
 const DRIVER_INVITATION_EXPIRES_IN_HOURS = 24;
+const MAX_DRIVER_ONBOARDING_CODE_ATTEMPTS = 5;
+const SHORT_CODE_PATTERN = /^\d{6}$/;
+const ACTIVATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+type DriverRegistrationProof =
+  | { kind: "legacy"; code: string; hash: string }
+  | { kind: "short_code"; code: string; hash: string }
+  | { kind: "activation_link"; hash: string };
+
+function invalidDriverRegistration() {
+  return new ApiRequestError(
+    403,
+    "DRIVER_REGISTRATION_INVALID",
+    "The device registration proof is invalid, expired, or already used.",
+  );
+}
+
+function onboardingProofHash(purpose: "contact" | "code", ...parts: string[]) {
+  const pepper = process.env.DRIVER_ONBOARDING_CODE_PEPPER?.trim();
+  if (!pepper || Buffer.byteLength(pepper) < 32) {
+    throw new ApiRequestError(
+      503,
+      "DRIVER_ONBOARDING_UNAVAILABLE",
+      "New driver registration is temporarily unavailable.",
+    );
+  }
+  return createHmac("sha256", pepper)
+    .update(JSON.stringify([purpose, ...parts]))
+    .digest("hex");
+}
+
+function isPendingInvitation(
+  invitation: DriverDeviceInvitationRecord,
+  now: number,
+) {
+  return (
+    invitation.status === "pending" &&
+    invitation.acceptedAt === null &&
+    invitation.revokedAt === null &&
+    Date.parse(invitation.expiresAt) > now
+  );
+}
 
 const DEMO_DRIVER_ALIASES: Record<string, string> = {
   "demo-driver": "drv-demo-001",
@@ -125,6 +175,174 @@ export class DriverDeviceSessionService implements OnModuleInit {
     };
   }
 
+  async issueOnboardingInvitation(
+    command: { driverId: string; mobile: string },
+    executor?: Pick<PoolClient, "query">,
+  ): Promise<{
+    invitation: DriverDeviceInvitationRecord;
+    registrationCode: string;
+    activationToken: string;
+  }> {
+    const driverId = command.driverId.trim();
+    const mobile = normalizeDriverOnboardingMobile(command.mobile);
+    if (!driverId || !mobile) {
+      throw new ApiRequestError(
+        400,
+        "DRIVER_ONBOARDING_CONTACT_INVALID",
+        "A valid driver and mobile number are required for registration.",
+      );
+    }
+    if (!this.repository) {
+      throw new ApiRequestError(
+        503,
+        "DRIVER_ONBOARDING_UNAVAILABLE",
+        "New driver registration is temporarily unavailable.",
+      );
+    }
+    const registrationCode = String(randomInt(1_000_000)).padStart(6, "0");
+    const activationToken = randomBytes(32).toString("base64url");
+    const invitationId = `drvinv_${randomBytes(16).toString("hex")}`;
+    const now = Date.now();
+    const timestamp = new Date(now).toISOString();
+    const invitation = await this.repository.saveOnboardingInvitation(
+      {
+        invitationId,
+        driverId,
+        registrationCodeHash: onboardingProofHash(
+          "code",
+          invitationId,
+          registrationCode,
+        ),
+        onboardingContactHash: onboardingProofHash("contact", mobile),
+        activationTokenHash: this.hashToken(activationToken),
+        status: "pending",
+        expiresAt: new Date(
+          now + DRIVER_INVITATION_EXPIRES_IN_HOURS * 60 * 60 * 1000,
+        ).toISOString(),
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      executor,
+    );
+    return { invitation, registrationCode, activationToken };
+  }
+
+  async canDeliverOnboardingInvitation(invitationId: string): Promise<boolean> {
+    const invitation = await this.repository?.findOnboardingInvitation({
+      invitationId,
+    });
+    if (!invitation || !isPendingInvitation(invitation, Date.now()))
+      return false;
+    try {
+      await this.assertDriverAuthEligible(invitation.driverId);
+      return true;
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        [403, 404].includes(error.getStatus())
+      )
+        return false;
+      throw error;
+    }
+  }
+
+  private resolveRegistrationProof(
+    command: RegisterDriverDeviceCommand,
+  ): DriverRegistrationProof {
+    const activationToken =
+      typeof command.activationToken === "string"
+        ? command.activationToken.trim()
+        : "";
+    const code =
+      typeof command.registrationCode === "string"
+        ? command.registrationCode.trim()
+        : "";
+    if (command.activationToken !== undefined) {
+      if (
+        !ACTIVATION_TOKEN_PATTERN.test(activationToken) ||
+        code ||
+        command.registrationContact !== undefined
+      ) {
+        throw invalidDriverRegistration();
+      }
+      return { kind: "activation_link", hash: this.hashToken(activationToken) };
+    }
+    if (!code) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "registrationCode is required.",
+        { field: "registrationCode" },
+      );
+    }
+    if (command.registrationContact !== undefined) {
+      const mobile = normalizeDriverOnboardingMobile(
+        command.registrationContact,
+      );
+      if (!SHORT_CODE_PATTERN.test(code) || !mobile)
+        throw invalidDriverRegistration();
+      return {
+        kind: "short_code",
+        code,
+        hash: onboardingProofHash("contact", mobile),
+      };
+    }
+    return { kind: "legacy", code, hash: this.hashToken(code) };
+  }
+
+  private async findRegistrationInvitation(proof: DriverRegistrationProof) {
+    if (proof.kind === "activation_link") {
+      return this.repository?.findOnboardingInvitation({
+        activationTokenHash: proof.hash,
+      });
+    }
+    if (proof.kind === "short_code") {
+      return this.repository?.findOnboardingInvitation({
+        contactHash: proof.hash,
+      });
+    }
+    const stored =
+      (await this.repository?.findInvitationByCodeHash?.(proof.hash)) ??
+      this.invitationsByHash.get(proof.hash);
+    if (stored) return stored.activationTokenHash ? null : stored;
+    const driverId = this.driverProfileService.resolveProvisionableDriverId(
+      proof.code,
+    );
+    if (!driverId) return null;
+    const issued = await this.issueRegistrationInvitation({
+      driverId,
+      registrationCode: proof.code,
+    });
+    return issued.invitation;
+  }
+
+  private async verifyShortCode(
+    invitation: DriverDeviceInvitationRecord,
+    code: string,
+    nowIso: string,
+  ): Promise<boolean> {
+    const attempts = invitation.failedCodeAttempts ?? 0;
+    if (attempts >= MAX_DRIVER_ONBOARDING_CODE_ATTEMPTS) return false;
+    const candidate = Buffer.from(
+      onboardingProofHash("code", invitation.invitationId, code),
+      "hex",
+    );
+    const stored = Buffer.from(invitation.registrationCodeHash, "hex");
+    if (
+      candidate.length === stored.length &&
+      timingSafeEqual(candidate, stored)
+    )
+      return true;
+    await this.repository?.saveInvitation({
+      ...invitation,
+      failedCodeAttempts: attempts + 1,
+      updatedAt: nowIso,
+    });
+    return false;
+  }
+
   async revokeInvitation(
     command: { registrationCode: string },
     allowedDriverId?: string,
@@ -208,16 +426,9 @@ export class DriverDeviceSessionService implements OnModuleInit {
     command: RegisterDriverDeviceCommand,
     requestId?: string,
   ): Promise<DriverDeviceProvisioningSession> {
-    const registrationCode = command.registrationCode?.trim();
-    const deviceId = command.deviceId?.trim();
-    if (!registrationCode) {
-      throw new ApiRequestError(
-        400,
-        "FIELD_REQUIRED",
-        "registrationCode is required.",
-        { field: "registrationCode" },
-      );
-    }
+    const proof = this.resolveRegistrationProof(command);
+    const deviceId =
+      typeof command.deviceId === "string" ? command.deviceId.trim() : "";
     if (!deviceId) {
       throw new ApiRequestError(
         400,
@@ -227,40 +438,21 @@ export class DriverDeviceSessionService implements OnModuleInit {
       );
     }
 
-    const regCodeHash = this.hashToken(registrationCode);
-    return this.runWithRegistrationLock({ regCodeHash, deviceId }, async () => {
-      let invitation =
-        (await this.repository?.findInvitationByCodeHash?.(regCodeHash)) ??
-        this.invitationsByHash.get(regCodeHash) ??
-        null;
-
-      if (!invitation) {
-        const resolvedDriverId =
-          this.driverProfileService.resolveProvisionableDriverId(
-            registrationCode,
-          );
-        if (resolvedDriverId) {
-          const issued = await this.issueRegistrationInvitation({
-            driverId: resolvedDriverId,
-            registrationCode,
-          });
-          invitation = issued.invitation;
-        }
-      }
-
-      const nowIso = new Date().toISOString();
-
+    const scope = { regCodeHash: proof.hash, deviceId };
+    const result = await this.runWithRegistrationLock(scope, async () => {
+      const invitation = await this.findRegistrationInvitation(proof);
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
       if (
         !invitation ||
-        invitation.status !== "pending" ||
-        invitation.acceptedAt !== null ||
-        invitation.revokedAt !== null ||
-        new Date(invitation.expiresAt).getTime() <= new Date(nowIso).getTime()
+        !isPendingInvitation(invitation, now) ||
+        (proof.kind === "short_code" &&
+          !(await this.verifyShortCode(invitation, proof.code, nowIso)))
       ) {
         this.securityEventsService?.recordEvent?.({
-          actorId: invitation?.driverId ?? registrationCode,
+          actorId: invitation?.driverId ?? "unknown",
           actorType: "driver_user",
-          subjectId: invitation?.driverId ?? registrationCode,
+          subjectId: invitation?.driverId ?? null,
           realm: "driver",
           tenantId: null,
           partnerId: null,
@@ -283,16 +475,12 @@ export class DriverDeviceSessionService implements OnModuleInit {
           afterSummary: null,
           maskedContext: {
             deviceId,
-            registrationCodeHash: regCodeHash,
+            proofKind: proof.kind,
           },
         });
 
-        throw new ApiRequestError(
-          403,
-          "DRIVER_REGISTRATION_INVALID",
-          "The device registration code is invalid, expired, or already used.",
-          { registrationCode },
-        );
+        // Commit the short-code attempt counter before reporting a refusal.
+        return null;
       }
 
       const driverId = invitation.driverId;
@@ -418,6 +606,8 @@ export class DriverDeviceSessionService implements OnModuleInit {
 
       return session;
     });
+    if (!result) throw invalidDriverRegistration();
+    return result;
   }
 
   async refresh(
