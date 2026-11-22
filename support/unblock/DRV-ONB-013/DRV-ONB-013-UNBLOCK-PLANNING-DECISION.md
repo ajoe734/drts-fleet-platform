@@ -12,14 +12,14 @@
 
 正式依據：
 
-| 依據 | 本次採用的界線 |
-| --- | --- |
-| `AI_COLLABORATION_GUIDE.md` §0.5、§0.7、§2、§5 | backlog／交接以 machine truth 為準；額外檔案由 Supervisor 核對平行衝突並更新原 task scope；不能以規劃文件或舊 SHA 綠燈取代新候選驗收。 |
-| `phase1_prd_detailed_v1.md` §2 P4；`phase1_system_analysis_v1.md` §6.3 | Driver App 已有裝置權限、onboarding／auth 範圍。本 helper 不改此產品邊界。 |
-| `phase1_migration_plan_v1.md` §3.1；dev pack `05_engineering_conventions_and_ai_dev_playbook.md` §5.2.5、§5.6 | schema 以正式 SQL migrations 為依據；保留既有資料，登記具體編號與檔名。不得為過測試刪除、改名或改寫已發布 migrations。 |
-| `docs/04-uat/system-remediation-20260906/schema-allocation.json` 的 `boundary_invariants`、歷次 `amendments` | 沿用 append-only 分配模式，保留既有 allocation、owner、amendment 與無碰撞規則。 |
-| parent `task_spec_ref`：`docs/04-uat/driver-onboarding-dual-channel-acceptance.md`「Migration allocation 缺漏定位」及「舊版司機草稿還原修復」 | allocation 是未修 finding；舊草稿修復已有 checkpoint 證據。原母文件的全部 finding／限制繼續有效，本 helper 不覆蓋或宣稱它們通過新候選。 |
-| `tools/development-orchestrator/skills/candidate-lifecycle.md` 的 unblock parent disposition | helper 仍留下 scope／實作工作時，必須在 merge 前記錄 `resolved_parent_status: blocked` 及具體 next；否則預設 resolution 可能錯誤恢復母任務。 |
+| 依據                                                                                                                                          | 本次採用的界線                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AI_COLLABORATION_GUIDE.md` §0.5、§0.7、§2、§5                                                                                                | backlog／交接以 machine truth 為準；額外檔案由 Supervisor 核對平行衝突並更新原 task scope；不能以規劃文件或舊 SHA 綠燈取代新候選驗收。       |
+| `phase1_prd_detailed_v1.md` §2 P4；`phase1_system_analysis_v1.md` §6.3                                                                        | Driver App 已有裝置權限、onboarding／auth 範圍。本 helper 不改此產品邊界。                                                                   |
+| `phase1_migration_plan_v1.md` §3.1；dev pack `05_engineering_conventions_and_ai_dev_playbook.md` §5.2.5、§5.6                                 | schema 以正式 SQL migrations 為依據；保留既有資料，登記具體編號與檔名。不得為過測試刪除、改名或改寫已發布 migrations。                       |
+| `docs/04-uat/system-remediation-20260906/schema-allocation.json` 的 `boundary_invariants`、歷次 `amendments`                                  | 沿用 append-only 分配模式，保留既有 allocation、owner、amendment 與無碰撞規則。                                                              |
+| parent `task_spec_ref`：`docs/04-uat/driver-onboarding-dual-channel-acceptance.md`「Migration allocation 缺漏定位」及「舊版司機草稿還原修復」 | allocation 是未修 finding；舊草稿修復已有 checkpoint 證據。原母文件的全部 finding／限制繼續有效，本 helper 不覆蓋或宣稱它們通過新候選。      |
+| `tools/development-orchestrator/skills/candidate-lifecycle.md` 的 unblock parent disposition                                                  | helper 仍留下 scope／實作工作時，必須在 merge 前記錄 `resolved_parent_status: blocked` 及具體 next；否則預設 resolution 可能錯誤恢復母任務。 |
 
 因此不新增另一個人類產品決策，也不調降雙通道通知、同一邀請僅成功一次、交易一致性、strict ingress、遮罩或實機驗收要求。`PHASE1_OPEN_QUESTIONS.md` 將本項列為「規劃已定位、scope 協調待辦」；無需以新 decision-ledger 項目覆寫既有產品契約。
 
@@ -34,13 +34,13 @@ Parent machine truth 仍為 `blocked`。最後已交審的候選為 `982e0357b93
 
 原始 hosted 失敗：[CI run 45036968286 / job 137263014560](https://github.com/ajoe734/drts-fleet-platform/actions/runs/45036968286/job/137263014560)。本次只讀取既有測試紀錄與正式來源，不重跑相同未修測試；`git apply --check` exit 0 僅證明 proposal 可套用，不代表修正版測試通過。
 
-| 既有 migration | 正式資料歸屬與 invariants | 原 owner 後續應登記 |
-| --- | --- | --- |
-| `V0140__driver_supply_email.sql` | `fleet.driver_supply_drafts` 加入 nullable `email text`，保留既有草稿。 | `DRV-ONB-013`、`V0140`、確切檔名、fleet／既有表修改及 nullable invariant。 |
-| `V0141__driver_onboarding_invitation_proofs.sql` | `iam.driver_device_invitations` 新增 nullable contact/token hashes；非空 token hash 唯一 partial index、contact lookup index；沿用同一邀請 authority。 | `DRV-ONB-013`、`V0141`、確切檔名、iam／既有表及兩個 indexes。 |
-| `V0142__driver_onboarding_delivery.sql` | `fleet.driver_onboarding_deliveries` 參照正式 submission／invitation；`UNIQUE(submission_id, channel)`；通道／狀態與 encrypted payload、invitation、expiry、sending lease checks；due／lease indexes。 | `DRV-ONB-013`、`V0142`、確切檔名、fleet／新表、FK 與上述 invariants。 |
+| 既有 migration                                   | 正式資料歸屬與 invariants                                                                                                                                                                              | 原 owner 後續應登記                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `V0140__driver_supply_email.sql`                 | `fleet.driver_supply_drafts` 加入 nullable `email text`，保留既有草稿。                                                                                                                                | `DRV-ONB-013`、`V0140`、確切檔名、fleet／既有表修改及 nullable invariant。 |
+| `V0141__driver_onboarding_invitation_proofs.sql` | `iam.driver_device_invitations` 新增 nullable contact/token hashes；非空 token hash 唯一 partial index、contact lookup index；沿用同一邀請 authority。                                                 | `DRV-ONB-013`、`V0141`、確切檔名、iam／既有表及兩個 indexes。              |
+| `V0142__driver_onboarding_delivery.sql`          | `fleet.driver_onboarding_deliveries` 參照正式 submission／invitation；`UNIQUE(submission_id, channel)`；通道／狀態與 encrypted payload、invitation、expiry、sending lease checks；due／lease indexes。 | `DRV-ONB-013`、`V0142`、確切檔名、fleet／新表、FK 與上述 invariants。      |
 
-本次静態核對時 parent remote checkpoint 與 `origin/dev` 的三個待擴檔案 git blobs 完全相同；ledger 上限為 `V0139`、三個新版本未被該 ledger 分配、母分支每個新編號只有一個正式檔名。這不是 Supervisor 對其他 active task／未發布分配的衝突核准。Supervisor 仍須在寫入前重新讀取最新任務範圍、分支與 reservation，若出現競爭分配，先協調原 owners，再由原 owner 調整 patch，不盲套舊 proposal。
+本次靜態核對時 parent remote checkpoint 與 `origin/dev` 的三個待擴檔案 git blobs 完全相同；ledger 上限為 `V0139`、三個新版本未被該 ledger 分配、母分支每個新編號只有一個正式檔名。這不是 Supervisor 對其他 active task／未發布分配的衝突核准。Supervisor 仍須在寫入前重新讀取最新任務範圍、分支與 reservation，若出現競爭分配，先協調原 owners，再由原 owner 調整 patch，不盲套舊 proposal。
 
 ## 具體 follow-up 與修正邊界
 
@@ -63,9 +63,9 @@ timeout 120s pnpm exec vitest run \
 
 本輪以原 `AI_NAME=Codex2` 及原 dispatch fence，透過指定 release CLI 實際嘗試兩項必要寫入，均 **exit 1**：
 
-| 寫入 | release 拒絕訊息 | 結果 |
-| --- | --- | --- |
-| `note DRV-ONB-013 <concrete-next>` | `Dispatched worker cannot mutate a different task` | 母任務 next 未更新。 |
+| 寫入                                                                 | release 拒絕訊息                                                     | 結果                          |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------- |
+| `note DRV-ONB-013 <concrete-next>`                                   | `Dispatched worker cannot mutate a different task`                   | 母任務 next 未更新。          |
 | `assign <helper> Codex2 Gemini`，附 `TASK_METADATA_JSON` disposition | `Dispatched workers must use their assigned task lifecycle commands` | helper disposition 尚未寫入。 |
 
 拒絕前後的兩份 task slice 一致；未移除 fence、冒用 Supervisor、直接編輯 status／activity log 或改 scope。這是 repository 的角色限制，由真實 Supervisor 處理，無須使用者重新許可。
@@ -105,22 +105,24 @@ AI_NAME=Supervisor "$CLI" note DRV-ONB-013 "$(jq -r '.parent_next' "$REQUEST")"
 
 ## §0.7 驗收與證據表
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 本次結果 | 命令、退出碼、版本與證據 | 未驗項與具體限制 |
-| --- | --- | --- | --- | --- |
-| Resolve or route missing product／contract decision；Record the decision | 原 parent status／UAT、正式 migrations、ledger、兩份 guards；本文件與 Open Questions 對應條目 | 規劃標籤過於籠統 → 定位為 allocation／scope 協調，逐檔路由至 Supervisor＋原 owner。純文件變更，行為重現不適用。 | release `show`；`capture.py` exit 0；來源版本、git blobs 與 hash 清單在 `planning-evidence.json`。 | 不宣稱已修 allocation，也沒有新產品批准。 |
-| scope cut or explicit follow-up needed by parent | 本文「具體 follow-up」與 `supervisor-request.json` | 無 scope cut；選擇 explicit follow-up，保留既有 acceptance／findings。 | 靜態核對三份 DDL、六個 collectors、原測試結果；`git apply --check` exit 0。 | 舊正式測試仍是 56 pass／2 fail；未套 patch，修正版 tests 未執行。 |
-| Update parent with concrete unblocked next step；safe helper disposition | release CLI `TaskBoardCommandExecutor._guard_worker_command`／`unblock_parent_resolution_fields` | 兩項寫入均被拒（exit 1）→ 精確 Supervisor 請求及拒絕證據已保存。 | `guarded-writes.json` 記錄命令、錯誤、時間及 parent／helper 不變；1004 字 next 在 request。 | **尚未滿足**：須 genuine Supervisor 寫入 parent next、三檔 scope 與 helper blocked disposition，並讀回。 |
-| Produce task-scoped commit／push／PR evidence | 只修改兩份規劃文件；指定 helper branch | 建立 anchor，完成內容／格式／trailers 核對後普通 push、draft PR。 | 最終 publication receipt 於下述 evidence root 及本 helper machine truth，列完整 SHA、remote／PR equality、檢查退出碼。 | reviewer／hosted CI／merge 尚待；在 guarded writes 完成前不 handoff，不稱 helper／parent done。 |
+| Finding／驗收項                                                          | 原始碼依據與修改位置                                                                             | 舊版重現 → 本次結果                                                                                             | 命令、退出碼、版本與證據                                                                                               | 未驗項與具體限制                                                                                         |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Resolve or route missing product／contract decision；Record the decision | 原 parent status／UAT、正式 migrations、ledger、兩份 guards；本文件與 Open Questions 對應條目    | 規劃標籤過於籠統 → 定位為 allocation／scope 協調，逐檔路由至 Supervisor＋原 owner。純文件變更，行為重現不適用。 | release `show`；`capture.py` exit 0；來源版本、git blobs 與 hash 清單在 `planning-evidence.json`。                     | 不宣稱已修 allocation，也沒有新產品批准。                                                                |
+| scope cut or explicit follow-up needed by parent                         | 本文「具體 follow-up」與 `supervisor-request.json`                                               | 無 scope cut；選擇 explicit follow-up，保留既有 acceptance／findings。                                          | 靜態核對三份 DDL、六個 collectors、原測試結果；`git apply --check` exit 0。                                            | 舊正式測試仍是 56 pass／2 fail；未套 patch，修正版 tests 未執行。                                        |
+| Update parent with concrete unblocked next step；safe helper disposition | release CLI `TaskBoardCommandExecutor._guard_worker_command`／`unblock_parent_resolution_fields` | 兩項寫入均被拒（exit 1）→ 精確 Supervisor 請求及拒絕證據已保存。                                                | `guarded-writes.json` 記錄命令、錯誤、時間及 parent／helper 不變；1004 字 next 在 request。                            | **尚未滿足**：須 genuine Supervisor 寫入 parent next、三檔 scope 與 helper blocked disposition，並讀回。 |
+| Produce task-scoped commit／push／PR evidence                            | 只修改兩份規劃文件；指定 helper branch                                                           | 建立 anchor，完成內容／格式／trailers 核對後普通 push、draft PR。                                               | 最終 publication receipt 於下述 evidence root 及本 helper machine truth，列完整 SHA、remote／PR equality、檢查退出碼。 | reviewer／hosted CI／merge 尚待；在 guarded writes 完成前不 handoff，不稱 helper／parent done。          |
 
 本機 evidence root：`/home/lupin/workspace/drts-fleet-platform/.local/drv-onb-013-unblock-planning-decision-20261122/`。`capture.py` 是可重跑的正式 CLI／git 靜態核對及 guard 拒絕紀錄，不是新產品測試。格式、引用、diff／trailers 結果與出版紀錄寫入本目錄的本輪 delta；不複製前輪 logs 或 repo，不使用 `/tmp` 工作副本。
 
 沿用證據所在目錄：`/home/lupin/workspace/drts-fleet-platform/.local/driver-onboarding-20261122/drv-onb-013-codex2-import-repair/unit-shard-repair/`。以下只記來源、hash、size；`planning-evidence.json` 亦保存 inventory：
 
-| 來源檔名 | SHA256 | bytes |
-| --- | --- | ---: |
-| `allocation-before.json` | `41fa3c9559467b27b2bf913e5650e18d702665fd44b15d6dae431d51097ce29a` | 641 |
-| `allocation-before.log` | `364ea1c1ec5e9ef6a7cdb2434c19e4fd1014a70a1cd47e137ebd1e72e8a75c3b` | 2833 |
-| `scope-request.json` | `e25f1e66ccc95f9bc6fb2787d8cefd3ea6eca360d006010ba541c07c88f42814` | 3286 |
-| `allocation-scope-proposal.patch` | `babd77a64654c0a1725cbe856f59a789a971fed86bfdd8da909de0f4f885437d` | 6453 |
+| 來源檔名                          | SHA256                                                             | bytes |
+| --------------------------------- | ------------------------------------------------------------------ | ----: |
+| `allocation-before.json`          | `41fa3c9559467b27b2bf913e5650e18d702665fd44b15d6dae431d51097ce29a` |   641 |
+| `allocation-before.log`           | `364ea1c1ec5e9ef6a7cdb2434c19e4fd1014a70a1cd47e137ebd1e72e8a75c3b` |  2833 |
+| `scope-request.json`              | `e25f1e66ccc95f9bc6fb2787d8cefd3ea6eca360d006010ba541c07c88f42814` |  3286 |
+| `allocation-scope-proposal.patch` | `babd77a64654c0a1725cbe856f59a789a971fed86bfdd8da909de0f4f885437d` |  6453 |
 
 磁碟檢查 `/` 可用 119 GiB。此 helper 沒有啟動產品 server、PG、browser／E2E、Docker 或部署；沒有啟動尚待結束的產品檢查。parent 新 checkpoint 的 hosted CI 與 helper PR 自動 CI 各自追蹤，不列為本次 PASS。
+
+本輪文件核對已完成：兩檔 Prettier check、相對 baseline 的 `git diff --check`、task commits 的正式 trailers checker、兩段文件 shell commands 的 `bash -n` 均 exit 0。另核對新增 Open Questions 只有一項且連結存在、request 的 parent next 與 helper disposition 相同、只變更兩份規劃文件。`document-checks.json` 保存每個命令、退出碼、執行 SHA、文件 hash 及是否尚有未提交差異；出版後的最終 receipt 另記已提交／遠端／PR head 一致性。guarded writes 仍分列為拒絕，不納入上述 PASS。
