@@ -431,6 +431,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         second.acceptFleetStaffOidcInvitation(f.tokenHash, f.proof, link),
       ]);
 
+      expect(
+        results.filter((result) => result.status === "rejected"),
+      ).toEqual([]);
       const fulfilled = results.filter(
         (result): result is PromiseFulfilledResult<unknown> =>
           result.status === "fulfilled" && result.value !== null,

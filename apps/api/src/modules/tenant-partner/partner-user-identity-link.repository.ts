@@ -241,15 +241,25 @@ export class PartnerUserIdentityLinkRepository {
             entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,
             linked_at, last_seen_at, created_at, updated_at, record
           )
-          SELECT $1, $2, $3, 'active', 'fleet_staff_invitation', $4, $4, $4, $4, $5::jsonb
+          SELECT
+            $1::text,
+            $2::text,
+            $3::text,
+            'active',
+            'fleet_staff_invitation',
+            $4::timestamptz,
+            $4::timestamptz,
+            $4::timestamptz,
+            $4::timestamptz,
+            $5::jsonb
           WHERE NOT EXISTS (
             SELECT 1
             FROM admin.phase1_partner_user_identity_links existing_any
-            WHERE existing_any.entry_slug = $1
-              AND existing_any.drts_passenger_id = $3
+            WHERE existing_any.entry_slug = $1::text
+              AND existing_any.drts_passenger_id = $3::text
               AND existing_any.consent_scope = 'fleet_staff_invitation'
               AND COALESCE(existing_any.record->>'consentScope', existing_any.consent_scope) = 'fleet_staff_invitation'
-              AND existing_any.partner_user_ref <> $2
+              AND existing_any.partner_user_ref <> $2::text
           )
           ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
           RETURNING record
@@ -259,24 +269,24 @@ export class PartnerUserIdentityLinkRepository {
         UNION ALL
         SELECT existing.record
         FROM admin.phase1_partner_user_identity_links existing
-        WHERE existing.entry_slug = $1
-          AND existing.partner_user_ref = $2
-          AND existing.drts_passenger_id = $3
+        WHERE existing.entry_slug = $1::text
+          AND existing.partner_user_ref = $2::text
+          AND existing.drts_passenger_id = $3::text
           AND existing.status = 'active'
           AND existing.consent_scope = 'fleet_staff_invitation'
-          AND COALESCE(existing.record->>'entrySlug', existing.entry_slug) = $1
-          AND COALESCE(existing.record->>'partnerUserRef', existing.partner_user_ref) = $2
-          AND COALESCE(existing.record->>'drtsPassengerId', existing.drts_passenger_id) = $3
+          AND COALESCE(existing.record->>'entrySlug', existing.entry_slug) = $1::text
+          AND COALESCE(existing.record->>'partnerUserRef', existing.partner_user_ref) = $2::text
+          AND COALESCE(existing.record->>'drtsPassengerId', existing.drts_passenger_id) = $3::text
           AND COALESCE(existing.record->>'status', existing.status) = 'active'
           AND COALESCE(existing.record->>'consentScope', existing.consent_scope) = 'fleet_staff_invitation'
           AND NOT EXISTS (
             SELECT 1
             FROM admin.phase1_partner_user_identity_links other_link
-            WHERE other_link.entry_slug = $1
-              AND other_link.drts_passenger_id = $3
+            WHERE other_link.entry_slug = $1::text
+              AND other_link.drts_passenger_id = $3::text
               AND other_link.consent_scope = 'fleet_staff_invitation'
               AND COALESCE(other_link.record->>'consentScope', other_link.consent_scope) = 'fleet_staff_invitation'
-              AND other_link.partner_user_ref <> $2
+              AND other_link.partner_user_ref <> $2::text
           )
         LIMIT 1
       `,

@@ -313,6 +313,13 @@ describe("partner user identity link repository", () => {
           "principal_fleet_fixture_001",
         ]),
       );
+      const issuedSql = query.mock.calls[0]?.[0] as string;
+      expect(issuedSql.match(/\$\d+(?!::)/g)).toBeNull();
+      expect(issuedSql).toContain("$1::text");
+      expect(issuedSql).toContain("$2::text");
+      expect(issuedSql).toContain("$3::text");
+      expect(issuedSql).toContain("$4::timestamptz");
+      expect(issuedSql).toContain("$5::jsonb");
     });
 
     it("surfaces the conflict signal against the database-backed path when the insert hits no row", async () => {
