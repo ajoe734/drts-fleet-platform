@@ -234,6 +234,40 @@ describe("FLEET-ONB-004 Fleet staff invitation Google-bind: strict negative cont
       ) {
         return { rows: [] };
       }
+      if (
+        text.includes("FROM iam.identity_principals p") &&
+        text.includes(
+          "JOIN iam.identity_memberships m ON m.principal_id = p.principal_id",
+        )
+      ) {
+        const [scopeRef, partnerId, emailNormalized, entrySlug] = params as [
+          string,
+          string,
+          string,
+          string,
+        ];
+        const rows: Array<{ principal_id: string }> = [];
+        for (const m of memberships.values()) {
+          if (
+            m.realm !== "partner" ||
+            m.scopeRef !== scopeRef ||
+            m.partnerId !== partnerId
+          ) {
+            continue;
+          }
+          const p = principals.get(m.principalId);
+          if (
+            p &&
+            p.email?.toLowerCase() === emailNormalized &&
+            p.principalType === "human" &&
+            p.sourceRef === `jwt_principal:partner:${p.principalId}` &&
+            m.sourceRef === `fleet_member:${entrySlug}:${p.principalId}`
+          ) {
+            rows.push({ principal_id: p.principalId });
+          }
+        }
+        return { rows };
+      }
       if (text.startsWith("SELECT principal_id FROM iam.identity_principals")) {
         const rec = principals.get(params[0] as string);
         return { rows: rec ? [{ principal_id: rec.principalId }] : [] };
@@ -291,6 +325,10 @@ describe("FLEET-ONB-004 Fleet staff invitation Google-bind: strict negative cont
       }
       if (text.includes("INSERT INTO iam.identity_principals")) {
         const record = JSON.parse(params[11] as string);
+        const prior = principals.get(record.principalId);
+        if (prior) {
+          principalsByIssuerSubject.delete(`${prior.issuer}::${prior.subject}`);
+        }
         principals.set(record.principalId, record);
         principalsByIssuerSubject.set(`${record.issuer}::${record.subject}`, record);
         return { rows: [{ record }] };

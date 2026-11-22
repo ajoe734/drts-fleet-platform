@@ -6,8 +6,11 @@ import type {
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
   CanonicalIdentityRoleBindingRecord,
+  CanonicalIdentitySessionRecord,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
+import { FleetPartnerService } from "../../src/modules/fleet-partner/fleet-partner.service";
 import {
   FLEET_INVITATION_ISSUER,
   IdentityRepository,
@@ -45,10 +48,15 @@ function createFleetInvitationClientMock() {
     string,
     CanonicalIdentityRoleBindingRecord
   >();
+  const invitationsById = new Map<
+    string,
+    CanonicalIdentityInvitationRecord
+  >();
   const invitationsByTokenHash = new Map<
     string,
     CanonicalIdentityInvitationRecord
   >();
+  const sessions = new Map<string, CanonicalIdentitySessionRecord>();
   const fleetPartnersActive = new Map<string, boolean>();
   const links = new Map<string, { drtsPassengerId: string }>();
   const passwordCredentials = new Map<
@@ -57,22 +65,62 @@ function createFleetInvitationClientMock() {
   >();
 
   function upsertPrincipalRow(record: CanonicalIdentityPrincipalRecord) {
-    principals.set(record.principalId, record);
-    principalsByIssuerSubject.set(`${record.issuer}::${record.subject}`, record);
+    const prior = principals.get(record.principalId);
+    if (prior) {
+      principalsByIssuerSubject.delete(`${prior.issuer}::${prior.subject}`);
+    }
+    const persisted = prior
+      ? {
+          ...record,
+          principalId: prior.principalId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    principals.set(persisted.principalId, persisted);
+    principalsByIssuerSubject.set(
+      `${persisted.issuer}::${persisted.subject}`,
+      persisted,
+    );
+    return persisted;
   }
   function upsertMembershipRow(record: CanonicalIdentityMembershipRecord) {
-    memberships.set(record.membershipId, record);
-    if (record.sourceRef) membershipsBySourceRef.set(record.sourceRef, record);
+    const prior = record.sourceRef
+      ? membershipsBySourceRef.get(record.sourceRef)
+      : memberships.get(record.membershipId);
+    const persisted = prior
+      ? {
+          ...record,
+          membershipId: prior.membershipId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    memberships.set(persisted.membershipId, persisted);
+    if (persisted.sourceRef)
+      membershipsBySourceRef.set(persisted.sourceRef, persisted);
+    return persisted;
   }
   function upsertRoleBindingRow(record: CanonicalIdentityRoleBindingRecord) {
-    if (record.sourceRef) roleBindingsBySourceRef.set(record.sourceRef, record);
-    const list = roleBindingsByMembership.get(record.membershipId) ?? [];
-    const idx = list.findIndex((b) => b.sourceRef === record.sourceRef);
-    if (idx >= 0) list[idx] = record;
-    else list.push(record);
-    roleBindingsByMembership.set(record.membershipId, list);
+    const prior = record.sourceRef
+      ? roleBindingsBySourceRef.get(record.sourceRef)
+      : undefined;
+    const persisted = prior
+      ? {
+          ...record,
+          roleBindingId: prior.roleBindingId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    if (persisted.sourceRef)
+      roleBindingsBySourceRef.set(persisted.sourceRef, persisted);
+    const list = roleBindingsByMembership.get(persisted.membershipId) ?? [];
+    const idx = list.findIndex((b) => b.sourceRef === persisted.sourceRef);
+    if (idx >= 0) list[idx] = persisted;
+    else list.push(persisted);
+    roleBindingsByMembership.set(persisted.membershipId, list);
+    return persisted;
   }
   function upsertInvitationRow(record: CanonicalIdentityInvitationRecord) {
+    invitationsById.set(record.invitationId, record);
     invitationsByTokenHash.set(record.tokenHash, record);
   }
 
@@ -89,33 +137,91 @@ function createFleetInvitationClientMock() {
       return { rows: [] };
     }
 
+    if (
+      text.includes("FROM iam.identity_principals p") &&
+      text.includes(
+        "JOIN iam.identity_memberships m ON m.principal_id = p.principal_id",
+      )
+    ) {
+      const [scopeRef, partnerId, emailNormalized, entrySlug] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const rows: Array<{ principal_id: string }> = [];
+      for (const m of memberships.values()) {
+        if (
+          m.realm !== "partner" ||
+          m.scopeRef !== scopeRef ||
+          m.partnerId !== partnerId
+        ) {
+          continue;
+        }
+        const p = principals.get(m.principalId);
+        if (
+          p &&
+          p.email?.toLowerCase() === emailNormalized &&
+          p.principalType === "human" &&
+          p.sourceRef === `jwt_principal:partner:${p.principalId}` &&
+          m.sourceRef === `fleet_member:${entrySlug}:${p.principalId}`
+        ) {
+          rows.push({ principal_id: p.principalId });
+        }
+      }
+      return { rows };
+    }
     if (text.startsWith("SELECT principal_id FROM iam.identity_principals")) {
       const rec = principals.get(params[0] as string);
       return { rows: rec ? [{ principal_id: rec.principalId }] : [] };
     }
-    if (text.includes("FROM iam.identity_principals WHERE issuer = $1 AND subject = $2")) {
+    if (
+      text.includes("FROM iam.identity_principals") &&
+      text.includes("WHERE issuer = $1 AND subject = $2")
+    ) {
       const rec = principalsByIssuerSubject.get(`${params[0]}::${params[1]}`);
       return { rows: rec ? [{ record: rec }] : [] };
     }
-    if (text.includes("FROM iam.identity_principals WHERE principal_id = $1")) {
+    if (
+      text.includes("FROM iam.identity_principals") &&
+      text.includes("WHERE principal_id = $1")
+    ) {
       const rec = principals.get(params[0] as string);
       return { rows: rec ? [{ record: rec }] : [] };
     }
-    if (text.includes("FROM iam.identity_memberships WHERE source_ref = $1")) {
+    if (
+      text.includes("FROM iam.identity_memberships") &&
+      text.includes("WHERE source_ref = $1")
+    ) {
       const rec = membershipsBySourceRef.get(params[0] as string);
       return { rows: rec ? [{ record: rec }] : [] };
     }
-    if (text.includes("FROM iam.identity_memberships WHERE membership_id = $1")) {
+    if (text.includes("FROM iam.identity_memberships") && text.includes("WHERE membership_id = $1")) {
       const rec = memberships.get(params[0] as string);
-      return { rows: rec ? [{ record: rec }] : [] };
+      if (!rec) return { rows: [] };
+      if (
+        text.includes("realm = 'partner' AND scope_ref = $2 AND partner_id = $3") &&
+        (rec.realm !== "partner" ||
+          rec.scopeRef !== params[1] ||
+          rec.partnerId !== params[2])
+      ) {
+        return { rows: [] };
+      }
+      return { rows: [{ record: rec }] };
     }
-    if (text.includes("FROM iam.identity_role_bindings WHERE source_ref = $1")) {
+    if (
+      text.includes("FROM iam.identity_role_bindings") &&
+      text.includes("WHERE source_ref = $1")
+    ) {
       const rec = roleBindingsBySourceRef.get(params[0] as string);
       return { rows: rec ? [{ record: rec }] : [] };
     }
-    if (text.includes("FROM iam.identity_role_bindings WHERE membership_id = $1")) {
+    if (text.includes("FROM iam.identity_role_bindings") && text.includes("WHERE membership_id = $1")) {
       const list = roleBindingsByMembership.get(params[0] as string) ?? [];
       return { rows: list.map((record) => ({ record })) };
+    }
+    if (text.includes("FROM iam.privileged_role_grants")) {
+      return { rows: [] };
     }
     if (text.includes("FROM iam.identity_invitations") && text.includes("token_hash = $1")) {
       const rec = invitationsByTokenHash.get(params[0] as string);
@@ -126,6 +232,40 @@ function createFleetInvitationClientMock() {
         !rec.revokedAt &&
         Date.parse(rec.expiresAt) > nowMs;
       return { rows: valid ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("UPDATE iam.identity_invitations") &&
+      text.includes("SET delivery_status = $2::text")
+    ) {
+      const rec = invitationsById.get(params[0] as string);
+      if (!rec || rec.realm !== "partner") return { rows: [] };
+      const updated: CanonicalIdentityInvitationRecord = {
+        ...rec,
+        deliveryStatus: params[1] as CanonicalIdentityInvitationRecord["deliveryStatus"],
+        updatedAt: params[2] as string,
+      };
+      upsertInvitationRow(updated);
+      return { rows: [{ record: updated }] };
+    }
+    if (
+      text.includes("UPDATE iam.identity_invitations") &&
+      text.includes("SET revoked_at = $2::timestamptz") &&
+      text.includes("WHERE membership_id = $1")
+    ) {
+      for (const inv of invitationsById.values()) {
+        if (
+          inv.membershipId === params[0] &&
+          !inv.acceptedAt &&
+          !inv.revokedAt
+        ) {
+          upsertInvitationRow({
+            ...inv,
+            revokedAt: params[1] as string,
+            updatedAt: params[1] as string,
+          });
+        }
+      }
+      return { rows: [] };
     }
     if (text.includes("SELECT active FROM admin.phase1_fleet_partners")) {
       const active = fleetPartnersActive.get(params[0] as string);
@@ -155,22 +295,22 @@ function createFleetInvitationClientMock() {
           { code: "23505" },
         );
       }
-      upsertPrincipalRow(record);
-      return { rows: [{ record }] };
+      const persisted = upsertPrincipalRow(record);
+      return { rows: [{ record: persisted }] };
     }
     if (text.includes("INSERT INTO iam.identity_memberships")) {
       const record = JSON.parse(
         params[12] as string,
       ) as CanonicalIdentityMembershipRecord;
-      upsertMembershipRow(record);
-      return { rows: [{ record }] };
+      const persisted = upsertMembershipRow(record);
+      return { rows: [{ record: persisted }] };
     }
     if (text.includes("INSERT INTO iam.identity_role_bindings")) {
       const record = JSON.parse(
         params[10] as string,
       ) as CanonicalIdentityRoleBindingRecord;
-      upsertRoleBindingRow(record);
-      return { rows: [{ record }] };
+      const persisted = upsertRoleBindingRow(record);
+      return { rows: [{ record: persisted }] };
     }
     if (text.includes("INSERT INTO iam.identity_invitations")) {
       const record = JSON.parse(
@@ -185,6 +325,26 @@ function createFleetInvitationClientMock() {
         passwordAlgo: params[2] as string,
         pepperVersion: params[3] as string,
       });
+      return { rows: [] };
+    }
+    if (text.includes("UPDATE iam.identity_sessions")) {
+      const revokedIds: Array<{ session_id: string }> = [];
+      for (const session of sessions.values()) {
+        if (session.principalId === params[0] && session.status === "active") {
+          sessions.set(session.sessionId, {
+            ...session,
+            status: "revoked",
+            revokedAt: params[1] as string,
+            revokedByPrincipalId: (params[2] as string | null) ?? null,
+            revokeReason: params[3] as string,
+            updatedAt: params[1] as string,
+          });
+          revokedIds.push({ session_id: session.sessionId });
+        }
+      }
+      return { rows: revokedIds };
+    }
+    if (text.includes("UPDATE iam.identity_refresh_families")) {
       return { rows: [] };
     }
 
@@ -208,8 +368,35 @@ function createFleetInvitationClientMock() {
     getPrincipal(principalId: string) {
       return principals.get(principalId) ?? null;
     },
+    getPrincipalCount() {
+      return [...principals.values()].filter((p) =>
+        p.sourceRef?.startsWith("jwt_principal:partner:"),
+      ).length;
+    },
+    getMembership(membershipId: string) {
+      return memberships.get(membershipId) ?? null;
+    },
+    getMembershipCount() {
+      return [...memberships.values()].filter((m) => m.realm === "partner")
+        .length;
+    },
+    getRoleBindings(membershipId: string) {
+      return roleBindingsByMembership.get(membershipId) ?? [];
+    },
     getInvitation(tokenHash: string) {
       return invitationsByTokenHash.get(tokenHash) ?? null;
+    },
+    getInvitationById(invitationId: string) {
+      return invitationsById.get(invitationId) ?? null;
+    },
+    getInvitationCount() {
+      return invitationsById.size;
+    },
+    seedSession(session: CanonicalIdentitySessionRecord) {
+      sessions.set(session.sessionId, session);
+    },
+    getSession(sessionId: string) {
+      return sessions.get(sessionId) ?? null;
     },
   };
 }
@@ -221,6 +408,7 @@ async function fixture(
   const databaseService = {
     isEnabled: () => true,
     connect: async () => mock.client,
+    query: mock.client.query,
   };
   const repository = new IdentityRepository(databaseService as never);
   const fleetPartnerId = `fleet-partner-${randomUUID()}`;
@@ -485,5 +673,395 @@ describe("IdentityRepository.acceptFleetStaffInvitationWithPassword (FLEET-ONB-0
       }),
     ).toBeNull();
     expect(mock.getInvitation(f.tokenHash)?.acceptedAt).toBeNull();
+  });
+});
+
+function createFleetServiceOverMock(
+  mock: ReturnType<typeof createFleetInvitationClientMock>,
+  repository: IdentityRepository,
+  fleets: Array<{ fleetPartnerId: string; entrySlug: string }>,
+) {
+  const deliveredTokens: Array<{
+    invitationId: string;
+    fleetPartnerId: string;
+    entrySlug: string;
+    recipientEmail: string;
+    rawToken: string;
+  }> = [];
+  const fleetSet = new Set(fleets.map((f) => f.fleetPartnerId));
+  for (const f of fleets) {
+    mock.setFleetPartnerActive(f.fleetPartnerId, true);
+  }
+  const invitationDelivery = {
+    send: vi.fn(
+      async (req: {
+        invitationId: string;
+        fleetPartnerId: string;
+        entrySlug: string;
+        recipientEmail: string;
+        expiresAt: string;
+        rawToken: string;
+      }) => {
+        deliveredTokens.push(req);
+        return {
+          status: "sent" as const,
+          attemptedAt: new Date().toISOString(),
+        };
+      },
+    ),
+  };
+  const audit = {
+    isEnabled: () => true,
+    recordEventRequired: vi.fn(async () => undefined),
+  };
+  const service = new FleetPartnerService(
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    {
+      isEnabled: () => true,
+      findActiveFleetPartnerById: async (id: string) =>
+        fleetSet.has(id) ? { fleetPartnerId: id, active: true } : null,
+    } as never,
+    undefined,
+    repository,
+    {
+      resolvePartnerEntries: async (slug: string) =>
+        fleets
+          .filter((f) => f.entrySlug === slug)
+          .map((f) => ({
+            entrySlug: f.entrySlug,
+            partnerType: "fleet_partner",
+            partnerId: f.fleetPartnerId,
+          })),
+    } as never,
+    { isEnabled: () => true, find: async () => null } as never,
+    audit as never,
+    invitationDelivery as never,
+  );
+  const manager = {
+    realm: "platform",
+    actorType: "platform_admin",
+    actorId: "manager-reinvite-test",
+    principalId: "principal-manager-reinvite-test",
+    scopes: ["foundation:write"],
+    amr: [],
+  } as never;
+  return { service, manager, deliveredTokens, invitationDelivery, audit };
+}
+
+describe("FLEET-REINVITE-CANONICAL-MEMBER-20261122: same-email re-invitation after Google OIDC binding", () => {
+  it("rejects a duplicate invitation for an already-active Google-bound member with 409 FLEET_STAFF_ALREADY_ACTIVE (no second member, invitation, or email), while isolating another Fleet with the same email", async () => {
+    const mock = createFleetInvitationClientMock();
+    const databaseService = {
+      isEnabled: () => true,
+      connect: async () => mock.client,
+      query: mock.client.query,
+    };
+    const repository = new IdentityRepository(databaseService as never);
+    const linkRepo = new PartnerUserIdentityLinkRepository();
+
+    const fleetA = {
+      fleetPartnerId: `fleet-partner-a-${randomUUID()}`,
+      entrySlug: `fleet-entry-a-${randomUUID()}`,
+    };
+    const fleetB = {
+      fleetPartnerId: `fleet-partner-b-${randomUUID()}`,
+      entrySlug: `fleet-entry-b-${randomUUID()}`,
+    };
+    const { service, manager, deliveredTokens, invitationDelivery } =
+      createFleetServiceOverMock(mock, repository, [fleetA, fleetB]);
+
+    const email = `google-bound-${randomUUID()}@fleet.example.org`;
+    const firstIssued = await service.inviteFleetStaff(
+      fleetA.fleetPartnerId,
+      {
+        entrySlug: fleetA.entrySlug,
+        email,
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+    );
+    expect(deliveredTokens).toHaveLength(1);
+    const firstTokenHash = createHash("sha256")
+      .update(deliveredTokens[0]!.rawToken)
+      .digest("hex");
+    const googleSub = `google-sub-${randomUUID()}`;
+
+    const accepted = await repository.acceptFleetStaffOidcInvitation(
+      firstTokenHash,
+      {
+        issuer: "https://accounts.google.com",
+        subject: googleSub,
+        email,
+        entrySlug: fleetA.entrySlug,
+      },
+      linkRepo,
+    );
+    expect(accepted).not.toBeNull();
+    expect(mock.getPrincipal(firstIssued.member.principalId)).toMatchObject({
+      principalId: firstIssued.member.principalId,
+      issuer: "https://accounts.google.com",
+      subject: googleSub,
+      status: "active",
+      emailVerified: true,
+    });
+
+    // Re-inviting the active Google-bound member in the same Fleet entry must
+    // fail with 409 FLEET_STAFF_ALREADY_ACTIVE without creating a duplicate
+    // principal/membership/invitation or sending a second email.
+    let conflictError: unknown;
+    try {
+      await service.inviteFleetStaff(
+        fleetA.fleetPartnerId,
+        {
+          entrySlug: fleetA.entrySlug,
+          email: `  ${email.toUpperCase()}  `,
+          roleCode: "fleet_partner_admin",
+        },
+        manager,
+      );
+    } catch (err) {
+      conflictError = err;
+    }
+    expect(conflictError).toBeInstanceOf(ApiRequestError);
+    expect((conflictError as ApiRequestError).getStatus()).toBe(409);
+    expect((conflictError as ApiRequestError).code).toBe(
+      "FLEET_STAFF_ALREADY_ACTIVE",
+    );
+    expect(invitationDelivery.send).toHaveBeenCalledTimes(1);
+    expect(mock.getPrincipalCount()).toBe(1);
+    expect(mock.getMembershipCount()).toBe(1);
+    expect(mock.getInvitationCount()).toBe(1);
+    expect(mock.getPrincipal(firstIssued.member.principalId)).toMatchObject({
+      issuer: "https://accounts.google.com",
+      subject: googleSub,
+      status: "active",
+    });
+    expect(mock.getMembership(firstIssued.member.membershipId)?.status).toBe(
+      "active",
+    );
+    expect(mock.getLink(fleetA.entrySlug, googleSub)).toMatchObject({
+      drtsPassengerId: firstIssued.member.principalId,
+    });
+
+    // Cross-Fleet isolation: inviting the same email in Fleet B creates a
+    // distinct principal, membership, role binding, and invitation for Fleet B
+    // without touching Fleet A's active Google-bound member.
+    const fleetBIssued = await service.inviteFleetStaff(
+      fleetB.fleetPartnerId,
+      {
+        entrySlug: fleetB.entrySlug,
+        email,
+        roleCode: "fleet_partner_finance",
+      },
+      manager,
+    );
+    expect(fleetBIssued.member.principalId).not.toBe(
+      firstIssued.member.principalId,
+    );
+    expect(fleetBIssued.member.membershipId).not.toBe(
+      firstIssued.member.membershipId,
+    );
+    expect(mock.getPrincipalCount()).toBe(2);
+    expect(mock.getMembershipCount()).toBe(2);
+    expect(mock.getInvitationCount()).toBe(2);
+    expect(mock.getMembership(firstIssued.member.membershipId)?.status).toBe(
+      "active",
+    );
+  });
+
+  it("reuses principal, membership, and role binding IDs and createdAt when re-inviting a deactivated Google-bound member, preserves old accepted invitation and revoked session, keeps old Google sub collision rule, and accepts via password", async () => {
+    const mock = createFleetInvitationClientMock();
+    const databaseService = {
+      isEnabled: () => true,
+      connect: async () => mock.client,
+      query: mock.client.query,
+    };
+    const repository = new IdentityRepository(databaseService as never);
+    const linkRepo = new PartnerUserIdentityLinkRepository();
+
+    const fleet = {
+      fleetPartnerId: `fleet-partner-${randomUUID()}`,
+      entrySlug: `fleet-entry-${randomUUID()}`,
+    };
+    const { service, manager, deliveredTokens } = createFleetServiceOverMock(
+      mock,
+      repository,
+      [fleet],
+    );
+
+    const email = `deactivated-google-${randomUUID()}@fleet.example.org`;
+    const firstIssued = await service.inviteFleetStaff(
+      fleet.fleetPartnerId,
+      {
+        entrySlug: fleet.entrySlug,
+        email,
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+    );
+    const firstTokenHash = createHash("sha256")
+      .update(deliveredTokens[0]!.rawToken)
+      .digest("hex");
+    const googleSub = `google-sub-${randomUUID()}`;
+
+    const accepted = await repository.acceptFleetStaffOidcInvitation(
+      firstTokenHash,
+      {
+        issuer: "https://accounts.google.com",
+        subject: googleSub,
+        email,
+        entrySlug: fleet.entrySlug,
+      },
+      linkRepo,
+    );
+    expect(accepted).not.toBeNull();
+    const originalPrincipal = { ...accepted!.principal };
+    const originalMembership = { ...accepted!.membership };
+    const originalBinding = { ...accepted!.roleBindings[0]! };
+    const firstAcceptedInvitation = {
+      ...mock.getInvitationById(firstIssued.invitation.invitationId)!,
+    };
+    expect(firstAcceptedInvitation.acceptedAt).not.toBeNull();
+
+    // Seed an active session for the Google-bound principal before deactivation.
+    const sessionNow = new Date().toISOString();
+    const sessionId = `session_${randomUUID()}`;
+    mock.seedSession({
+      sessionId,
+      sourceRef: sessionId,
+      principalId: originalPrincipal.principalId,
+      membershipId: originalMembership.membershipId,
+      realm: "partner",
+      status: "active",
+      authTime: sessionNow,
+      authMethods: ["oidc"],
+      tokenVersion: 1,
+      idleExpiresAt: null,
+      absoluteExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      revokedAt: null,
+      revokedByPrincipalId: null,
+      revokeReason: null,
+      deviceSummary: {},
+      riskSummary: {},
+      createdAt: sessionNow,
+      updatedAt: sessionNow,
+    });
+
+    const deactivated = await service.deactivateFleetStaffMember(
+      fleet.fleetPartnerId,
+      fleet.entrySlug,
+      originalMembership.membershipId,
+      manager,
+    );
+    expect(deactivated).toMatchObject({
+      principalId: originalPrincipal.principalId,
+      membershipId: originalMembership.membershipId,
+      status: "disabled",
+    });
+    expect(mock.getSession(sessionId)).toMatchObject({
+      status: "revoked",
+      revokedByPrincipalId: "principal-manager-reinvite-test",
+      revokeReason: "fleet_staff_membership_deactivated",
+    });
+
+    // Re-invite the same email in the same Fleet entry after deactivation.
+    const reissued = await service.inviteFleetStaff(
+      fleet.fleetPartnerId,
+      {
+        entrySlug: fleet.entrySlug,
+        email,
+        roleCode: "fleet_partner_finance",
+      },
+      manager,
+    );
+    expect(deliveredTokens).toHaveLength(2);
+    const secondTokenHash = createHash("sha256")
+      .update(deliveredTokens[1]!.rawToken)
+      .digest("hex");
+    expect(secondTokenHash).not.toBe(firstTokenHash);
+    expect(reissued.invitation.invitationId).not.toBe(
+      firstIssued.invitation.invitationId,
+    );
+
+    // Must reuse canonical principal, membership, and role binding IDs and createdAt.
+    expect(reissued.member).toMatchObject({
+      principalId: originalPrincipal.principalId,
+      membershipId: originalMembership.membershipId,
+      roleCode: "fleet_partner_finance",
+      status: "invited",
+    });
+    expect(mock.getPrincipalCount()).toBe(1);
+    expect(mock.getMembershipCount()).toBe(1);
+    expect(mock.getPrincipal(originalPrincipal.principalId)).toMatchObject({
+      principalId: originalPrincipal.principalId,
+      createdAt: originalPrincipal.createdAt,
+      issuer: FLEET_INVITATION_ISSUER,
+      subject: `fleet:${fleet.entrySlug}:email:${email}`,
+      status: "invited",
+      emailVerified: false,
+    });
+    expect(mock.getMembership(originalMembership.membershipId)).toMatchObject({
+      membershipId: originalMembership.membershipId,
+      createdAt: originalMembership.createdAt,
+      status: "invited",
+      invitationId: reissued.invitation.invitationId,
+    });
+    expect(mock.getRoleBindings(originalMembership.membershipId)[0]).toMatchObject({
+      roleBindingId: originalBinding.roleBindingId,
+      createdAt: originalBinding.createdAt,
+      roleCode: "fleet_partner_finance",
+    });
+
+    // Prior accepted invitation and revoked session remain traceable.
+    expect(
+      mock.getInvitationById(firstIssued.invitation.invitationId),
+    ).toEqual(firstAcceptedInvitation);
+    expect(mock.getSession(sessionId)).toMatchObject({
+      status: "revoked",
+      revokeReason: "fleet_staff_membership_deactivated",
+    });
+
+    // SA/SD §2, §3, §9: existing (entrySlug, googleSub) link is retained and
+    // rejects re-binding the same Google sub without consuming the new token.
+    expect(
+      await repository.acceptFleetStaffOidcInvitation(
+        secondTokenHash,
+        {
+          issuer: "https://accounts.google.com",
+          subject: googleSub,
+          email,
+          entrySlug: fleet.entrySlug,
+        },
+        linkRepo,
+      ),
+    ).toBeNull();
+    expect(mock.getInvitation(secondTokenHash)?.acceptedAt).toBeNull();
+
+    // Password-branch acceptance succeeds on the reused canonical member.
+    const passwordAccepted =
+      await repository.acceptFleetStaffInvitationWithPassword(secondTokenHash, {
+        passwordHash: "reinvited-hashed-password",
+        passwordAlgo: "argon2id",
+        pepperVersion: "v1",
+      });
+    expect(passwordAccepted).toMatchObject({
+      entrySlug: fleet.entrySlug,
+      fleetPartnerId: fleet.fleetPartnerId,
+      principal: {
+        principalId: originalPrincipal.principalId,
+        createdAt: originalPrincipal.createdAt,
+        issuer: FLEET_INVITATION_ISSUER,
+        status: "active",
+        emailVerified: true,
+      },
+      membership: {
+        membershipId: originalMembership.membershipId,
+        createdAt: originalMembership.createdAt,
+        status: "active",
+      },
+    });
+    expect(mock.getInvitation(secondTokenHash)?.acceptedAt).not.toBeNull();
   });
 });

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { DatabaseService } from "../../src/common/db";
-import { IdentityRepository } from "../../src/modules/identity/identity.repository";
+import {
+  FLEET_INVITATION_ISSUER,
+  IdentityRepository,
+} from "../../src/modules/identity/identity.repository";
 import { PasswordHashingService } from "../../src/common/auth/password-hashing.service";
 import { PartnerUserIdentityLinkRepository } from "../../src/modules/tenant-partner/partner-user-identity-link.repository";
 
@@ -455,6 +458,232 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(principal?.subject).toBe(f.proof.subject);
         expect(linkRow.rows[0]?.drts_passenger_id).toBe(
           f.issued.principal.principalId,
+        );
+      }
+    });
+
+    it("FLEET-REINVITE-CANONICAL-MEMBER-20261122: rejects a same-email re-invitation after real Google OIDC acceptance while isolating another Fleet with the same email", async () => {
+      const f = await fixture();
+      const link = new PartnerUserIdentityLinkRepository(f.database);
+      const accepted = await f.repository.acceptFleetStaffOidcInvitation(
+        f.tokenHash,
+        f.proof,
+        link,
+      );
+      expect(accepted).not.toBeNull();
+
+      const second = new IdentityRepository(f.database);
+      await expect(
+        second.issueFleetStaffInvitation({
+          entrySlug: f.entrySlug,
+          fleetPartnerId: f.fleetPartnerId,
+          email: `  ${f.email.toUpperCase()}  `,
+          roleCode: "fleet_partner_admin",
+          validTo: null,
+          tokenHash: createHash("sha256")
+            .update(`fi_${randomUUID()}`)
+            .digest("hex"),
+          expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          issuerPrincipalId: null,
+        }),
+      ).resolves.toBeNull();
+
+      // Verify no second membership or invitation was created for this Fleet entry.
+      const invitationsForEntry = await second.listFleetStaffInvitations(
+        f.entrySlug,
+        f.fleetPartnerId,
+      );
+      expect(invitationsForEntry).toHaveLength(1);
+      expect(invitationsForEntry[0]?.invitationId).toBe(
+        f.issued.invitation.invitationId,
+      );
+      expect(invitationsForEntry[0]?.acceptedAt).not.toBeNull();
+
+      // Another Fleet entry with the exact same email is isolated and creates its own canonical member.
+      const otherEntrySlug = `fleet-pg-other-${randomUUID()}`;
+      const otherFleetPartnerId = `fleet-pg-partner-other-${randomUUID()}`;
+      const now = new Date().toISOString();
+      await f.database.query(
+        `INSERT INTO admin.phase1_fleet_partners (fleet_partner_id, active, partnership_type, updated_at, record)
+         VALUES ($1, true, 'standard', $2, $3::jsonb)`,
+        [
+          otherFleetPartnerId,
+          now,
+          JSON.stringify({ fleetPartnerId: otherFleetPartnerId, active: true }),
+        ],
+      );
+      fleetPartnerIds.push(otherFleetPartnerId);
+      entrySlugs.push(otherEntrySlug);
+
+      const otherIssued = await second.issueFleetStaffInvitation({
+        entrySlug: otherEntrySlug,
+        fleetPartnerId: otherFleetPartnerId,
+        email: f.email,
+        roleCode: "fleet_partner_finance",
+        validTo: null,
+        tokenHash: createHash("sha256")
+          .update(`fi_${randomUUID()}`)
+          .digest("hex"),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        issuerPrincipalId: null,
+      });
+      expect(otherIssued).not.toBeNull();
+      principals.push(otherIssued!.principal.principalId);
+      memberships.push(otherIssued!.membership.membershipId);
+      expect(otherIssued!.principal.principalId).not.toBe(
+        f.issued.principal.principalId,
+      );
+      expect(otherIssued!.membership.membershipId).not.toBe(
+        f.issued.membership.membershipId,
+      );
+    });
+
+    it("FLEET-REINVITE-CANONICAL-MEMBER-20261122: reuses canonical principal, membership, and role binding IDs and createdAt after Google OIDC acceptance and deactivation, preserves history, rejects old Google sub collision, and accepts via password", async () => {
+      const f = await fixture();
+      const link = new PartnerUserIdentityLinkRepository(f.database);
+      const accepted = await f.repository.acceptFleetStaffOidcInvitation(
+        f.tokenHash,
+        f.proof,
+        link,
+      );
+      expect(accepted).not.toBeNull();
+
+      const now = new Date().toISOString();
+      const session = await f.database.query<{ session_id: string }>(
+        `INSERT INTO iam.identity_sessions (
+            session_id, source_ref, principal_id, realm, status, auth_time,
+            auth_methods, token_version, absolute_expires_at, created_at,
+            updated_at, record
+          ) VALUES ($1, $1, $2, 'partner', 'active', $3, '{}', 1, $4, $3, $3, '{}'::jsonb)
+          RETURNING session_id`,
+        [
+          `session_pg_reinvite_${randomUUID()}`,
+          f.issued.principal.principalId,
+          now,
+          new Date(Date.now() + 3_600_000).toISOString(),
+        ],
+      );
+      const sessionId = session.rows[0]!.session_id;
+
+      try {
+        const disabled = await f.repository.deactivateFleetStaffMembership(
+          f.entrySlug,
+          f.fleetPartnerId,
+          f.issued.membership.membershipId,
+          null,
+        );
+        expect(disabled).toMatchObject({
+          membershipId: f.issued.membership.membershipId,
+          status: "disabled",
+        });
+
+        const second = new IdentityRepository(f.database);
+        const newTokenHash = createHash("sha256")
+          .update(`fi_${randomUUID()}`)
+          .digest("hex");
+        const reissued = await second.issueFleetStaffInvitation({
+          entrySlug: f.entrySlug,
+          fleetPartnerId: f.fleetPartnerId,
+          email: f.email,
+          roleCode: "fleet_partner_finance",
+          validTo: null,
+          tokenHash: newTokenHash,
+          expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          issuerPrincipalId: null,
+        });
+        expect(reissued).not.toBeNull();
+        expect(reissued!.principal).toMatchObject({
+          principalId: f.issued.principal.principalId,
+          createdAt: accepted!.principal.createdAt,
+          issuer: FLEET_INVITATION_ISSUER,
+          subject: `fleet:${f.entrySlug}:email:${f.email}`,
+          status: "invited",
+          emailVerified: false,
+        });
+        expect(new Date(reissued!.principal.createdAt).toISOString()).toBe(
+          new Date(f.issued.principal.createdAt).toISOString(),
+        );
+        expect(reissued!.membership).toMatchObject({
+          membershipId: f.issued.membership.membershipId,
+          createdAt: f.issued.membership.createdAt,
+          status: "invited",
+          invitationId: reissued!.invitation.invitationId,
+        });
+        expect(new Date(reissued!.membership.createdAt).toISOString()).toBe(
+          new Date(f.issued.membership.createdAt).toISOString(),
+        );
+        expect(reissued!.roleBinding).toMatchObject({
+          roleBindingId: f.issued.roleBinding.roleBindingId,
+          roleCode: "fleet_partner_finance",
+        });
+        expect(new Date(reissued!.roleBinding.createdAt).toISOString()).toBe(
+          new Date(f.issued.roleBinding.createdAt).toISOString(),
+        );
+
+        // Old accepted invitation and revoked session remain traceable.
+        const firstInvitationRow = await f.database.query<{
+          accepted_at: string | null;
+          revoked_at: string | null;
+        }>(
+          `SELECT accepted_at, revoked_at FROM iam.identity_invitations WHERE invitation_id = $1`,
+          [f.issued.invitation.invitationId],
+        );
+        expect(firstInvitationRow.rows[0]?.accepted_at).not.toBeNull();
+        expect(firstInvitationRow.rows[0]?.revoked_at).toBeNull();
+
+        const sessionRow = await f.database.query<{
+          status: string;
+          revoke_reason: string | null;
+        }>(
+          `SELECT status, revoke_reason FROM iam.identity_sessions WHERE session_id = $1`,
+          [sessionId],
+        );
+        expect(sessionRow.rows[0]).toEqual({
+          status: "revoked",
+          revoke_reason: "fleet_staff_membership_deactivated",
+        });
+
+        // Re-using the same old Google sub hits the preserved (entrySlug, sub)
+        // identity link conflict and rolls back without consuming the new token.
+        expect(
+          await second.acceptFleetStaffOidcInvitation(
+            newTokenHash,
+            f.proof,
+            link,
+          ),
+        ).toBeNull();
+
+        const { hash, algo, pepperVersion } =
+          await new PasswordHashingService().hash("fleet-reinvited-password-value");
+        const passwordAccepted =
+          await second.acceptFleetStaffInvitationWithPassword(newTokenHash, {
+            passwordHash: hash,
+            passwordAlgo: algo,
+            pepperVersion,
+          });
+        expect(passwordAccepted).toMatchObject({
+          principal: {
+            principalId: f.issued.principal.principalId,
+            createdAt: reissued!.principal.createdAt,
+            issuer: FLEET_INVITATION_ISSUER,
+            status: "active",
+          },
+          membership: {
+            membershipId: f.issued.membership.membershipId,
+            createdAt: reissued!.membership.createdAt,
+            status: "active",
+          },
+        });
+        expect(
+          new Date(passwordAccepted!.principal.createdAt).toISOString(),
+        ).toBe(new Date(f.issued.principal.createdAt).toISOString());
+        expect(
+          new Date(passwordAccepted!.membership.createdAt).toISOString(),
+        ).toBe(new Date(f.issued.membership.createdAt).toISOString());
+      } finally {
+        await f.database.query(
+          `DELETE FROM iam.identity_sessions WHERE session_id = $1`,
+          [sessionId],
         );
       }
     });
