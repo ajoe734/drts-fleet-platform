@@ -65,3 +65,21 @@ timeout 180s pnpm --filter @drts/contracts --filter @drts/api \
   --filter @drts/platform-admin-web --filter @drts/api-client \
   -r --workspace-concurrency=2 typecheck
 ```
+
+### Root typecheck 修復（後續候選）
+
+Gemini 已於 `2026-11-22T14:19:51Z` 核准候選 `f30312960704c39b35ed865cd5b6f923bc79241a`（[PR #3358](https://github.com/ajoe734/drts-fleet-platform/pull/3358)）。隨後同 SHA 的 [CI typecheck job 137243182459](https://github.com/ajoe734/drts-fleet-platform/actions/runs/45031966586/job/137243182459) 在 root `tsconfig.json` 發現新 finding；前輪六個套件的 typecheck 不涵蓋此 root gate。這不是前輪循環匯入 finding 的再次退修。
+
+本輪 delta 證據位於上述 `EVIDENCE_DIR/root-typecheck-repair/`，沿用既有 artifact，未複製前輪 log 或大型檔案。最終 SHA 由 candidate lifecycle 與本輪 `manifest.json` 記錄。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| 核可交易測試 fixture 遺漏必填契約欄位，使 root typecheck 失敗 | `DriverSupplyDraft.preferredVehicleSubmissionId: string \| null`；`SupplySubmissionRepository.persistDriverDrafts` 將此欄位寫入正式資料表。僅在 `delivery.test.ts` 的 `approvalFixture` 補 `null`，表示本情境未指定車輛。 | 舊 SHA 以正式 `pnpm typecheck:root` 重現唯一 TS2741，exit 2；修正版檢查待完成。 | `ci-original-typecheck.log`、`root-typecheck-before-clean-cache.{log,json,exit}`；Node `22.23.2`、pnpm `10.33.0`、TypeScript `5.9.3`。修正後將執行完整 `pnpm run typecheck` 及既有後端／repository 回歸。 | 本輪只修測試資料契約，未改產品或 UI。SQL／供應商 doubles 的限制、共享 dev 及簽署實機驗收仍依上表與 DRV-ONB-012。 |
+
+最初本機檢查受到 Node 預設 2 GB heap、worker 漏接部分依賴及舊增量型別解析快取影響；相關嘗試分別保留於 `root-typecheck-before*`，不算產品回歸通過。僅調整此 worktree 的 ignored 依賴連結，使 workspace 套件指向本分支原始碼、第三方套件沿用既有安裝，並移除本 worktree 產生的舊 `tsconfig.tsbuildinfo`。沒有修改共用 checkout、套件契約或 lockfile。完成環境修復後，`root-typecheck-before-clean-cache.log` 僅剩上述 TS2741。
+
+```bash
+# 僅此檢查提高 Node heap；不修改專案設定、不啟動服務。
+timeout 600s env NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck
+# 既有後端 4 檔及 repository 1 檔的命令沿用上一節。
+```

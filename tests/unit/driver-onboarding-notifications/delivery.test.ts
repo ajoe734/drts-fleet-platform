@@ -268,6 +268,7 @@ async function approvalFixture() {
     taxiDriverRegistrationArea: "TPE",
     taxiDriverRegistrationExpiry: "2097-01-01",
     supportedServiceProductCodes: ["taxi_realtime"],
+    preferredVehicleSubmissionId: null,
   };
   await submissions.persistChanges({
     submissions: [pending],
