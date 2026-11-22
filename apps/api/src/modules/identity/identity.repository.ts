@@ -1854,16 +1854,52 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principalRows = await client.query<JsonRecordRow>(
-        `SELECT record FROM iam.identity_principals WHERE issuer = $1 AND subject = $2 FOR UPDATE`,
-        [FLEET_INVITATION_ISSUER, subject],
+      // A Google-bound (or manager-created) Fleet principal is no longer
+      // identified by the invitation placeholder issuer. Discover the same
+      // canonical member by bounded email first, then retain the original
+      // principal -> membership -> binding lock order and active-member guard.
+      const matches = await client.query<{ principal_id: string }>(
+        `SELECT p.principal_id
+           FROM iam.identity_principals p
+           JOIN iam.identity_memberships m ON m.principal_id = p.principal_id
+          WHERE m.realm = 'partner' AND m.scope_ref = $1 AND m.partner_id = $2
+            AND p.email_normalized = $3 AND p.principal_type = 'human'
+            AND p.source_ref = 'jwt_principal:partner:' || p.principal_id
+            AND m.source_ref = 'fleet_member:' || $4::text || ':' || p.principal_id`,
+        [scopeRef, input.fleetPartnerId, email, input.entrySlug],
       );
+      if (matches.rows.length > 1) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const discoveredPrincipalId = matches.rows[0]?.principal_id;
+      const principalRows = discoveredPrincipalId
+        ? await client.query<JsonRecordRow>(
+            `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+            [discoveredPrincipalId],
+          )
+        : await client.query<JsonRecordRow>(
+            `SELECT record FROM iam.identity_principals WHERE issuer = $1 AND subject = $2 FOR UPDATE`,
+            [FLEET_INVITATION_ISSUER, subject],
+          );
       const existingPrincipal = principalRows.rows[0]?.record
         ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
             principalRows.rows[0].record,
             "iam.identity_principals",
           )
         : null;
+      if (
+        discoveredPrincipalId &&
+        (!existingPrincipal ||
+          existingPrincipal.principalId !== discoveredPrincipalId ||
+          existingPrincipal.principalType !== "human" ||
+          existingPrincipal.email?.toLowerCase() !== email ||
+          existingPrincipal.sourceRef !==
+            buildFleetPartnerPrincipalSourceRef(discoveredPrincipalId))
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
       const principalId =
         existingPrincipal?.principalId ??
         `principal_${randomUUID().replace(/-/g, "")}`;
