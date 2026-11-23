@@ -66,6 +66,8 @@ on:
     branches:
       - gemini2/doc-live-runner-upgrade-20261005
       - gemini2/doc-live-runner-upgrade-20261005-*
+      - gemini2/gcs-actual-proof-and-placard-acceptance-20261123
+      - gemini2/gcs-actual-proof-and-placard-acceptance-20261123-*
     paths:
       - .github/workflows/live-document-acceptance.yml
       - tests/e2e/system-remediation/sr-live-doc-001/**
@@ -100,10 +102,19 @@ jobs:
       # "which commit is being accepted".
       WORKFLOW_SHA: ${{ github.sha }}
       SR_LIVE_DOC_RUNNER_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/evidence-runner-record.json
+      SR_LIVE_DOC_SHARED_DEV_ROUNDTRIP_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json
       SR_LIVE_DOC_LIVE_TARGET_ORIGIN: ${{ github.event.inputs.live_target_origin }}
       SR_LIVE_DOC_LIVE_API_ORIGIN: ${{ github.event.inputs.live_api_origin }}
       SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN: ${{ github.event.inputs.live_tenant_console_origin }}
       SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN: ${{ github.event.inputs.live_platform_admin_origin }}
+      SHARED_DEV_API_ORIGIN: ${{ github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN }}
+      SHARED_DEV_PLATFORM_ADMIN_ORIGIN: ${{ github.event.inputs.live_platform_admin_origin || vars.DEV_PLATFORM_ADMIN_ORIGIN }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      DEV_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+      DEV_REMITTANCE_PROOF_GCS_BUCKET: ${{ vars.DEV_REMITTANCE_PROOF_GCS_BUCKET }}
+      DEV_DOCUMENT_ARTIFACT_GCS_BUCKET: ${{ vars.DEV_DOCUMENT_ARTIFACT_GCS_BUCKET }}
+      DEV_REMITTANCE_PROOF_SCANNER_URL: ${{ vars.DEV_REMITTANCE_PROOF_SCANNER_URL }}
       SR_LIVE_DOC_LIVE_INVOICE_PATH: ${{ github.event.inputs.live_invoice_path }}
       SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH: ${{ github.event.inputs.live_expired_invoice_path }}
       SR_LIVE_DOC_LIVE_CROSS_TENANT_INVOICE_PATH: ${{ github.event.inputs.live_cross_tenant_invoice_path }}
@@ -133,12 +144,16 @@ jobs:
 
       - name: Authenticate to Google Cloud for live testing
         id: auth
-        if: ${{ github.event.inputs.live_target_origin != '' }}
+        if: ${{ github.event.inputs.live_target_origin != '' || github.event.inputs.live_api_origin != '' || vars.DEV_CONTROL_PLANE_API_ORIGIN != '' }}
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        if: ${{ github.event.inputs.live_target_origin != '' || github.event.inputs.live_api_origin != '' || vars.DEV_CONTROL_PLANE_API_ORIGIN != '' }}
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Mint identity token — live target origin
         id: id_token_target
@@ -151,18 +166,22 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ github.event.inputs.live_target_origin }}
           id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Mint identity token — api origin
         id: id_token_api
-        if: ${{ github.event.inputs.live_api_origin != '' }}
+        if: ${{ (github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN) != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
           token_format: id_token
-          id_token_audience: ${{ github.event.inputs.live_api_origin }}
+          id_token_audience: ${{ github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN }}
           id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Mint identity token — tenant console origin
         id: id_token_tenant
@@ -175,18 +194,22 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ github.event.inputs.live_tenant_console_origin }}
           id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Mint identity token — platform admin origin
         id: id_token_platform
-        if: ${{ github.event.inputs.live_platform_admin_origin != '' }}
+        if: ${{ (github.event.inputs.live_platform_admin_origin || vars.DEV_PLATFORM_ADMIN_ORIGIN) != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
           token_format: id_token
-          id_token_audience: ${{ github.event.inputs.live_platform_admin_origin }}
+          id_token_audience: ${{ github.event.inputs.live_platform_admin_origin || vars.DEV_PLATFORM_ADMIN_ORIGIN }}
           id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
 
       - name: Verify checkout resolved the exact immutable candidate
         # actions/checkout resolves `ref` at fetch time; a moving branch name
@@ -206,7 +229,7 @@ jobs:
           fi
 
       - name: Inject ID tokens into environment
-        if: ${{ github.event.inputs.live_target_origin != '' }}
+        if: ${{ github.event.inputs.live_target_origin != '' || github.event.inputs.live_api_origin != '' || vars.DEV_CONTROL_PLANE_API_ORIGIN != '' }}
         run: |
           echo "SR_LIVE_DOC_ID_TOKEN_TARGET=${{ steps.id_token_target.outputs.id_token }}" >> "$GITHUB_ENV"
           echo "SR_LIVE_DOC_ID_TOKEN_API=${{ steps.id_token_api.outputs.id_token }}" >> "$GITHUB_ENV"
@@ -291,12 +314,22 @@ jobs:
           print(f"Live document acceptance: {passed}/{total} passed, pending={pending} (allowed={allowed_pending}).")
           PY_GATE
 
+      - name: Run shared-dev artifact roundtrip acceptance (SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4)
+        id: shared_dev_roundtrip
+        if: ${{ (github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN) != '' }}
+        run: |
+          set -o pipefail
+          node tests/e2e/system-remediation/sr-live-doc-001/shared-dev-artifact-roundtrip.mjs \
+            2>&1 | tee -a .artifacts/live-document-acceptance/execution-log.txt
+
       - name: Record run status
         if: always()
         env:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           HARNESS_OUTCOME: ${{ steps.harness.outcome }}
           GATE_OUTCOME: ${{ steps.gate.outcome }}
+          SHARED_DEV_ROUNDTRIP_OUTCOME: ${{ steps.shared_dev_roundtrip.outcome }}
+          SHARED_DEV_ROUNDTRIP_ENABLED: ${{ (github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN) != '' && 'true' || 'false' }}
           LIVE_TARGET_SUPPLIED: ${{ github.event.inputs.live_target_origin != '' && 'true' || 'false' }}
         run: |
           python3 - <<'PY_STATUS'
@@ -305,18 +338,32 @@ jobs:
           from pathlib import Path
 
           report_path = Path(".artifacts/live-document-acceptance/test-report.json")
+          roundtrip_path = Path(".artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json")
           status_path = Path(".artifacts/live-document-acceptance/run-status.json")
           status_path.parent.mkdir(parents=True, exist_ok=True)
 
           install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
           harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
           gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
-          mode = "live_acceptance" if os.environ.get("LIVE_TARGET_SUPPLIED") == "true" else "runner_validation"
+          roundtrip_outcome = os.environ.get("SHARED_DEV_ROUNDTRIP_OUTCOME", "unknown")
+          roundtrip_enabled = os.environ.get("SHARED_DEV_ROUNDTRIP_ENABLED") == "true"
+          if os.environ.get("LIVE_TARGET_SUPPLIED") == "true":
+              mode = "live_acceptance"
+          elif roundtrip_enabled:
+              mode = "shared_dev_artifact_roundtrip"
+          else:
+              mode = "runner_validation"
+
+          roundtrip_ok = (
+              (not roundtrip_enabled)
+              or (roundtrip_outcome == "success" and roundtrip_path.exists())
+          )
 
           if (
               install_outcome == "success"
               and harness_outcome == "success"
               and gate_outcome == "success"
+              and roundtrip_ok
               and report_path.exists()
           ):
               status = "passed"
@@ -333,6 +380,9 @@ jobs:
               "install_outcome": install_outcome,
               "harness_outcome": harness_outcome,
               "gate_outcome": gate_outcome,
+              "shared_dev_roundtrip_enabled": roundtrip_enabled,
+              "shared_dev_roundtrip_outcome": roundtrip_outcome,
+              "shared_dev_roundtrip_evidence_present": roundtrip_path.exists(),
               "report_present": report_path.exists(),
           }, indent=2) + "\n")
           print(f"Run status recorded: {status} (mode={mode})")
@@ -347,5 +397,6 @@ jobs:
             .artifacts/live-document-acceptance/execution-log.txt
             .artifacts/live-document-acceptance/test-report.json
             .artifacts/live-document-acceptance/evidence-runner-record.json
+            .artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json
             .artifacts/live-document-acceptance/run-status.json
           if-no-files-found: warn
