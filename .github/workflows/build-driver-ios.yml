@@ -25,9 +25,9 @@ on:
           - preview
           - production
       api_url:
-        description: Direct API URL to bake into this build
-        required: true
-        default: https://drts-dev-api-4t7rg6fmeq-uc.a.run.app
+        description: Optional API origin override. An empty value uses the release environment for the selected profile.
+        required: false
+        default: ""
         type: string
       submit:
         description: Auto-submit the completed production build to TestFlight
@@ -66,6 +66,8 @@ jobs:
       WORKFLOW_MODE: ${{ inputs.mode || 'build' }}
       BUILD_API_URL: ${{ inputs.api_url }}
       BUILD_PROFILE: ${{ inputs.profile }}
+      PROD_RUNTIME_API_ORIGIN: ${{ vars.PROD_RUNTIME_API_ORIGIN }}
+      DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
       DRIVER_APP_EAS_PROJECT_ID: ${{ vars.DRIVER_APP_EAS_PROJECT_ID }}
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
@@ -109,10 +111,20 @@ jobs:
                   ;;
               esac
 
+              if [[ -z "${BUILD_API_URL:-}" ]]; then
+                if [[ "$BUILD_PROFILE" == "production" ]]; then
+                  BUILD_API_URL="${PROD_RUNTIME_API_ORIGIN:-https://api.smarttransport.tw}"
+                else
+                  BUILD_API_URL="${DEV_CONTROL_PLANE_API_ORIGIN:-https://drts-dev-api-r6ykdme3wa-uc.a.run.app}"
+                fi
+              fi
+              BUILD_API_URL="${BUILD_API_URL%/}"
               if [[ ! "$BUILD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
                 echo "::error::api_url must be a direct HTTPS API origin."
                 exit 1
               fi
+
+              echo "BUILD_API_URL=$BUILD_API_URL" >> "$GITHUB_ENV"
 
               if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" && "$BUILD_PROFILE" != "production" ]]; then
                 echo "::error::TestFlight auto-submit is allowed only with the production profile."
@@ -183,7 +195,8 @@ jobs:
           set -euo pipefail
 
           jq --arg project_id "$DRIVER_APP_EAS_PROJECT_ID" \
-            '.expo.extra.eas.projectId = $project_id' \
+            --arg api_url "$BUILD_API_URL" \
+            '.expo.extra.eas.projectId = $project_id | .expo.extra.apiBaseUrl = $api_url' \
             app.json > app.json.tmp
           mv app.json.tmp app.json
 
