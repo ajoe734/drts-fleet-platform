@@ -602,6 +602,18 @@ function buildPlan(vars, sha, tag, deployer) {
   const migrationJob = need("PROD_GCP_MIGRATION_JOB");
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(migrationJob))
     reject("PROD_GCP_MIGRATION_JOB");
+  if (
+    apiEnv.PSP_PROVIDER?.trim() === "ecpay" &&
+    apiEnv.PSP_SANDBOX?.trim() === "false"
+  ) {
+    const passengerOrigin = services.find(
+      (service) => service.id === "passenger-app-web",
+    ).origin;
+    if (!apiEnv.PSP_RETURN_URL?.trim())
+      apiEnv.PSP_RETURN_URL = `${passengerOrigin}/api/passenger-app/payment-methods/ecpay/callback`;
+    if (!apiEnv.PSP_ORDER_RESULT_URL?.trim())
+      apiEnv.PSP_ORDER_RESULT_URL = `${passengerOrigin}/api/passenger-app/payment-methods/ecpay/order-result`;
+  }
   return {
     schema: 1,
     sha,

@@ -112,7 +112,7 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "c704d63f646ee2e22a94c73e82dc76a0750404cadd1757a20fbf7419e2832679",
+      "d64de0a15f5f3a9cd31eb300e6aa8e8f98f3df9c517dbf0ee9e4745157bb3990",
     ],
     [
       "run.cjs",
