@@ -29,6 +29,223 @@ function service(f: any) {
 function record(report: any, id = "api") {
   return report.records.find((r: any) => r.id === id);
 }
+function listResponse(f: any, kind: string) {
+  const op = f.plan.operations.find((o: any) => o.kind === kind);
+  return f.responses.get(new URL(op.url).pathname);
+}
+describe("backend audience from observed control-plane identities", () => {
+  it("audience regression: selects the numeric backend ID with no additional resource request", () => {
+    const f = ownedNumeric();
+    const op = f.plan.operations.find((o: any) => o.kind === "backends");
+    const descriptor = c.requestDescriptor(f.plan, op);
+    expect(descriptor.method).toBe("GET");
+    expect(new URL(descriptor.url).searchParams.get("fields")).toBe(
+      "items(name,id,iap(enabled,oauth2ClientId),backends(group)),nextPageToken",
+    );
+    expect(f.plan.operations.some((o: any) => /urlMaps/.test(o.url))).toBe(
+      false,
+    );
+  });
+  it("audience regression: collects and serializes the exact uint64 backend/NEG/Run link for API and bank", async () => {
+    // Synthetic HTTP responses exercise real collection; these IDs are not a
+    // production inventory receipt. Real historical evidence is replayed separately.
+    const f = ownedNumeric();
+    const report = await c.collect(f.env, SHA, async (request: any) => {
+      const response = await f.transport(request);
+      const url = new URL(request.url);
+      // Google omits unselected fields. This also lets the original collector
+      // complete normally during the old-source regression replay.
+      if (
+        url.pathname.endsWith("/backendServices") &&
+        !url.searchParams.get("fields")?.includes("name,id,")
+      )
+        for (const backend of response.body.items) delete backend.id;
+      return response;
+    });
+    const saved = JSON.parse(c.serialize(report));
+    expect(report.collection).toBe("complete");
+    expect(report.requests).toBe(67);
+    for (const id of ["api", "bank-console-web"]) {
+      const backend = listResponse(f, "backends").body.items.find(
+        (b: any) => b.name === `prod-${id}-lb`,
+      );
+      expect(record(saved, `${id}-iap`)).toMatchObject({
+        status: "observed",
+        data: {
+          backend: backend.name,
+          backendId: backend.id,
+          projectNumber: NUMBER,
+          audience: `/projects/${NUMBER}/global/backendServices/${backend.id}`,
+          backendGroup: backend.backends[0].group,
+          neg: `prod-${id}-neg`,
+          negCount: 1,
+          service: `projects/${c.TARGET.project}/locations/us-central1/services/prod-${id}`,
+        },
+      });
+      expect(typeof record(saved, `${id}-iap`).data.backendId).toBe("string");
+    }
+    expect(record(saved, "api-iap").data.backendId).toBe(
+      "18446744073709551615",
+    );
+    expect(saved.runtimeProvenance).toBe("unverified");
+    expect(saved.effectiveIamPermissions).toBe("unverified");
+  });
+  it.each([
+    "missing-id",
+    "missing-name",
+    "missing-group",
+    "missing-iap",
+    "missing-neg-name",
+    "two-negs",
+    "two-backends",
+    "mixed-backend",
+    "duplicate-id",
+    "duplicate-name",
+    "duplicate-neg-name",
+    "foreign-group",
+    "service-403",
+    "project-403",
+    "project-name-missing",
+    "backend-403",
+    "backend-404",
+    "neg-403",
+    "neg-404",
+    "truncated-list",
+    "public-entry-ambiguous",
+  ])("keeps %s unverified without deriving an audience", async (mode) => {
+    const f = ownedNumeric();
+    const backends = listResponse(f, "backends");
+    const negs = listResponse(f, "negs");
+    const backend = backends.body.items[0];
+    const neg = negs.body.items[0];
+    let affected = "api";
+    if (mode === "missing-id") delete backend.id;
+    if (mode === "missing-name") delete backend.name;
+    if (mode === "missing-group") delete backend.backends[0].group;
+    if (mode === "missing-iap") delete backend.iap;
+    if (mode === "missing-neg-name") delete neg.name;
+    if (mode === "two-negs")
+      negs.body.items.push({ ...neg, name: "second-neg" });
+    if (mode === "two-backends")
+      backends.body.items.push({ ...backend, id: "1", name: "second-backend" });
+    if (mode === "mixed-backend")
+      backend.backends.push(backends.body.items[1].backends[0]);
+    if (mode === "duplicate-id") backends.body.items[1].id = backend.id;
+    if (mode === "duplicate-name") backends.body.items[1].name = backend.name;
+    if (mode === "duplicate-neg-name") negs.body.items[1].name = neg.name;
+    if (mode === "foreign-group")
+      backend.backends[0].group = backend.backends[0].group.replace(
+        c.TARGET.project,
+        "foreign-project",
+      );
+    if (mode === "service-403") {
+      const op = f.plan.operations.find((o: any) => o.id === "api");
+      f.responses.get(new URL(op.url).pathname).status = 403;
+    }
+    if (mode === "project-403" || mode === "project-name-missing") {
+      const project = f.responses.get(`/v3/projects/${c.TARGET.project}`);
+      if (mode === "project-403") project.status = 403;
+      else delete project.body.name;
+    }
+    if (mode.startsWith("backend-"))
+      backends.status = Number(mode.split("-")[1]);
+    if (mode.startsWith("neg-")) negs.status = Number(mode.split("-")[1]);
+    if (mode === "truncated-list")
+      backends.body.nextPageToken = "REPEATED_PAGE_TOKEN";
+    if (mode === "public-entry-ambiguous") {
+      affected = "referral-embed-web";
+      const original = backends.body.items.find(
+        (b: any) => b.name === "drts-prod-referral-lb",
+      );
+      backends.body.items.push({
+        ...original,
+        id: "1",
+        name: "second-referral-backend",
+      });
+    }
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(report.collection).toBe("incomplete");
+    expect(record(report, `${affected}-iap`)).toEqual({
+      id: `${affected}-iap`,
+      kind: "iap",
+      status: "unverified",
+      code: "INSUFFICIENT_OBSERVATION",
+    });
+    const saved = c.serialize(report);
+    expect(saved).not.toContain("REPEATED_PAGE_TOKEN");
+    expect(saved).not.toContain(SENTINEL);
+  });
+  it.each([0, 123, null, "0", "01", "-1", "1e18", "18446744073709551616"])(
+    "rejects malformed/rounded/out-of-range backend ID %s at both boundaries",
+    async (id) => {
+      const f = ownedNumeric();
+      const report = await c.collect(f.env, SHA, f.transport);
+      record(report, "api-iap").data.backendId = id;
+      expect(() => c.serialize(report)).toThrow();
+      listResponse(f, "backends").body.items[0].id = id;
+      const failed = await c.collect(f.env, SHA, f.transport);
+      expect(record(failed, "load-balancer").status).toBe("blocked");
+      expect(record(failed, "api-iap").status).toBe("unverified");
+      expect(() => c.serialize(failed)).not.toThrow();
+    },
+  );
+  it.each([
+    "backendId",
+    "projectNumber",
+    "audience",
+    "neg",
+    "backendGroup",
+    "service",
+    "negCount",
+  ])(
+    "independently rejects missing or inconsistent %s at serialization",
+    async (key) => {
+      const f = ownedNumeric();
+      const report = await c.collect(f.env, SHA, f.transport);
+      const missing = structuredClone(report);
+      delete record(missing, "api-iap").data[key];
+      expect(() => c.serialize(missing)).toThrow();
+      const changed = structuredClone(report);
+      record(changed, "api-iap").data[key] = record(
+        changed,
+        "bank-console-web-iap",
+      ).data[key];
+      if (key === "projectNumber")
+        record(changed, "api-iap").data[key] = "999999999";
+      if (key === "negCount") record(changed, "api-iap").data[key] = 2;
+      expect(() => c.serialize(changed)).toThrow();
+    },
+  );
+  it("rejects duplicate mappings and unanchored project/service observations in independently saved reports", async () => {
+    const f = ownedNumeric();
+    const report = await c.collect(f.env, SHA, f.transport);
+    for (const mutation of ["duplicate", "project", "service"]) {
+      const changed = structuredClone(report);
+      if (mutation === "duplicate")
+        changed.records.push(record(changed, "api-iap"));
+      else
+        changed.records = changed.records.filter(
+          (r: any) => r.id !== (mutation === "project" ? "project" : "api"),
+        );
+      expect(() => c.serialize(changed)).toThrow();
+    }
+  });
+  it("retains the independent IAP link during an image failure and filters unrelated LB metadata", async () => {
+    const f = ownedNumeric();
+    service(f).template.containers[0].image = SENTINEL;
+    listResponse(f, "backends").body.items.push({
+      id: "1",
+      name: "unrelated-backend",
+    });
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(record(report).status).toBe("blocked");
+    expect(record(report, "api-iap").status).toBe("observed");
+    expect(report.collection).toBe("incomplete");
+    const saved = c.serialize(report);
+    expect(saved).not.toContain(SENTINEL);
+    expect(saved).not.toContain("unrelated-backend");
+  });
+});
 describe("independently anchored observed Cloud Run names", () => {
   it("accepts anchored numeric service/job/revision names through actual collect and serializer", async () => {
     const f = ownedNumeric();

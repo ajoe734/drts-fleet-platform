@@ -39,9 +39,11 @@ describe("resetDriverAppToOnboarding", () => {
 });
 
 describe("allowUnprovisionedDriverRoute", () => {
-  it("only allows the onboarding route before provisioning", () => {
+  it("allows onboarding and one-tap activation before provisioning", () => {
     expect(allowUnprovisionedDriverRoute(["onboarding"])).toBe(true);
     expect(allowUnprovisionedDriverRoute(["/onboarding"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["driver-activate"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["/driver-activate"])).toBe(true);
   });
 
   it("strictly rejects all protected routes and empty segments until provisioning is complete", () => {

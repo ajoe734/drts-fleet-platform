@@ -11,7 +11,36 @@ const workflow = yaml.parse(
 );
 
 describe("protected production inventory actual exported boundaries", () => {
+  it.each(["rail.cjs", "run.cjs", "preflight.cjs", "driver-onboarding.cjs"])(
+    "rejects unreviewed %s changes before any external read",
+    async (file) => {
+      const f = fixture();
+      const fs = require("node:fs");
+      const read = fs.readFileSync;
+      const altered = vi
+        .spyOn(fs, "readFileSync")
+        .mockImplementation((...args: any[]) => {
+          const bytes = read(...args);
+          return String(args[0]).endsWith(`/production-release-rail/${file}`)
+            ? Buffer.concat([
+                Buffer.from(bytes),
+                Buffer.from("\n// unreviewed change\n"),
+              ])
+            : bytes;
+        });
+      try {
+        expect(() => c.checkRail()).toThrow("RAIL_LINEAGE_CHANGED");
+        await expect(c.collect(f.env, SHA, f.transport)).rejects.toThrow(
+          "RAIL_LINEAGE_CHANGED",
+        );
+        expect(f.calls).toHaveLength(0);
+      } finally {
+        altered.mockRestore();
+      }
+    },
+  );
   it("collects the complete original-rail inventory, revisions and actual LB join with no readiness inference", async () => {
+    expect(() => c.checkRail()).not.toThrow();
     const f = fixture();
     const report = await c.collect(f.env, SHA, f.transport);
     const saved = c.serialize(report);
@@ -400,6 +429,9 @@ describe("actual parsed workflow protection", () => {
     expect(Object.keys(workflow.jobs)).toEqual(["inventory"]);
     const job = workflow.jobs.inventory;
     expect(job.environment).toBe("production");
+    expect(job.env.PROD_GCP_AGENCY_PORTAL_SERVICE).toBe(
+      "${{ vars.PROD_GCP_AGENCY_PORTAL_SERVICE }}",
+    );
     expect(job.permissions).toEqual({ contents: "read", "id-token": "write" });
     expect(job["timeout-minutes"]).toBe(15);
     const steps = job.steps,

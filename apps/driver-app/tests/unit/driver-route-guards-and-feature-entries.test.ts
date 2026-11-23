@@ -52,8 +52,7 @@ vi.mock("@expo/vector-icons", () => ({
 vi.mock("react-native-maps", () => ({
   default: (props: any) =>
     React.createElement("MapView", props, props.children),
-  Marker: (props: any) =>
-    React.createElement("Marker", props, props.children),
+  Marker: (props: any) => React.createElement("Marker", props, props.children),
   Polyline: (props: any) =>
     React.createElement("Polyline", props, props.children),
   PROVIDER_GOOGLE: "google",
@@ -98,8 +97,7 @@ vi.mock("react-native", () => ({
 }));
 
 vi.mock("expo-router", () => ({
-  Redirect: (props: { href: string }) =>
-    React.createElement("Redirect", props),
+  Redirect: (props: { href: string }) => React.createElement("Redirect", props),
   useRouter: () => ({
     push: mocks.push,
     replace: mocks.replace,
@@ -219,33 +217,33 @@ vi.mock("@/lib/driver-location-heartbeat", () => ({
 
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
-      isFeatureEnabled: mocks.isFeatureEnabled,
-      listDriverTasks: mocks.listDriverTasks,
-      listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
-      getPlatformPresence: mocks.getPlatformPresence,
-      listShifts: mocks.listShifts,
-      getDriverSettings: mocks.getDriverSettings,
-      getDriverProfile: mocks.getDriverProfile,
-      getPlatformEarningsSummary: mocks.getPlatformEarningsSummary,
-      getPlatformEarningsByPlatform: mocks.getPlatformEarningsByPlatform,
-      listDriverStatements: mocks.listDriverStatements,
-      getOrder: vi.fn().mockResolvedValue(null),
-    }),
-    getDriverId: () => "drv-001",
-    getDriverIdentityIssue: mocks.getDriverIdentityIssue,
-    getPendingDriverTaskCompletion: vi.fn().mockResolvedValue(null),
-    replayPendingDriverTaskCompletion: vi.fn().mockResolvedValue(null),
-    initializeDriverIdentity: vi.fn().mockResolvedValue(undefined),
-    isDriverIdentityHydrated: () => true,
-    isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
-    recoverDriverSessionFromApiError: vi.fn().mockResolvedValue(false),
-    registerProtectedCacheClearHandler: (fn: () => Promise<void> | void) => {
-      mocks.cacheClearHandlers.add(fn);
-      return () => {
-        mocks.cacheClearHandlers.delete(fn);
-      };
-    },
-    formatDriverError: (_err: unknown, fallback: string) => fallback,
+    isFeatureEnabled: mocks.isFeatureEnabled,
+    listDriverTasks: mocks.listDriverTasks,
+    listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
+    getPlatformPresence: mocks.getPlatformPresence,
+    listShifts: mocks.listShifts,
+    getDriverSettings: mocks.getDriverSettings,
+    getDriverProfile: mocks.getDriverProfile,
+    getPlatformEarningsSummary: mocks.getPlatformEarningsSummary,
+    getPlatformEarningsByPlatform: mocks.getPlatformEarningsByPlatform,
+    listDriverStatements: mocks.listDriverStatements,
+    getOrder: vi.fn().mockResolvedValue(null),
+  }),
+  getDriverId: () => "drv-001",
+  getDriverIdentityIssue: mocks.getDriverIdentityIssue,
+  getPendingDriverTaskCompletion: vi.fn().mockResolvedValue(null),
+  replayPendingDriverTaskCompletion: vi.fn().mockResolvedValue(null),
+  initializeDriverIdentity: vi.fn().mockResolvedValue(undefined),
+  isDriverIdentityHydrated: () => true,
+  isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
+  recoverDriverSessionFromApiError: vi.fn().mockResolvedValue(false),
+  registerProtectedCacheClearHandler: (fn: () => Promise<void> | void) => {
+    mocks.cacheClearHandlers.add(fn);
+    return () => {
+      mocks.cacheClearHandlers.delete(fn);
+    };
+  },
+  formatDriverError: (_err: unknown, fallback: string) => fallback,
 }));
 
 import JobsScreen from "../../app/jobs";
@@ -318,8 +316,8 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
   });
 
   describe("Acceptance 1 & 2: Single session authority and route protection per route", () => {
-    it("strictly allows only onboarding and protects all 12 driver screens", () => {
-      expect(PUBLIC_DRIVER_ROUTES).toEqual(["onboarding"]);
+    it("strictly allows onboarding and activation and protects every driver workspace screen", () => {
+      expect(PUBLIC_DRIVER_ROUTES).toEqual(["onboarding", "driver-activate"]);
       expect(PROTECTED_DRIVER_ROUTES).toHaveLength(12);
       expect(PROTECTED_DRIVER_ROUTES).toEqual([
         "index",
@@ -340,6 +338,8 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(allowUnprovisionedDriverRoute(["onboarding"])).toBe(true);
       expect(allowUnprovisionedDriverRoute(["/onboarding"])).toBe(true);
       expect(isProtectedDriverRoute("onboarding")).toBe(false);
+      expect(allowUnprovisionedDriverRoute(["driver-activate"])).toBe(true);
+      expect(isProtectedDriverRoute("driver-activate")).toBe(false);
 
       // Protected routes
       for (const route of PROTECTED_DRIVER_ROUTES) {
@@ -498,7 +498,9 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
   describe("Acceptance 3: Authenticated driver entitlement and feature entries", () => {
     it("allows authenticated driver to reach entitled routes and load data", async () => {
       mocks.isDriverIdentityProvisioned.mockReturnValue(true);
-      mocks.listUnifiedDriverTasks.mockResolvedValue([buildMockTask("task-100")]);
+      mocks.listUnifiedDriverTasks.mockResolvedValue([
+        buildMockTask("task-100"),
+      ]);
 
       let renderer: any;
       await act(async () => {
@@ -540,7 +542,9 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
   describe("Acceptance 5: Sign-out and identity loss single-path cache clearing", () => {
     it("purges rendered protected state across screens upon cache clear trigger", async () => {
       mocks.isDriverIdentityProvisioned.mockReturnValue(true);
-      mocks.listUnifiedDriverTasks.mockResolvedValue([buildMockTask("task-200")]);
+      mocks.listUnifiedDriverTasks.mockResolvedValue([
+        buildMockTask("task-200"),
+      ]);
 
       let renderer: any;
       await act(async () => {

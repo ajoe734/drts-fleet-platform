@@ -13,6 +13,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { DriverOnboardingDeliveryService } from "../driver-onboarding/driver-onboarding-delivery.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   type SubmissionApprovalArtifacts,
@@ -446,6 +447,8 @@ export class SupplyReviewService implements OnModuleInit {
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
     private readonly supplySubmissionRepository?: SupplySubmissionRepository,
+    @Optional()
+    private readonly driverOnboardingDelivery?: DriverOnboardingDeliveryService,
   ) {}
 
   async onModuleInit() {
@@ -632,10 +635,9 @@ export class SupplyReviewService implements OnModuleInit {
     } else if (
       submission.submissionType === "profile_correction" &&
       !artifacts.documents.some((d) =>
-        [
-          "professional_driver_license",
-          "taxi_driver_registration",
-        ].includes(d.documentType),
+        ["professional_driver_license", "taxi_driver_registration"].includes(
+          d.documentType,
+        ),
       )
     ) {
       missingDocuments.push(
@@ -645,12 +647,18 @@ export class SupplyReviewService implements OnModuleInit {
 
     const isComplete =
       missingDocuments.length === 0 && expiredDocuments.length === 0;
+    const onboardingNotifications =
+      submission.submissionType === "driver_onboarding" &&
+      submission.status === "approved"
+        ? await this.driverOnboardingDelivery?.getSummary(submissionId)
+        : undefined;
 
     return {
       submission: { ...submission },
       ...submission,
       fleetPartnerName: this.getFleetPartnerName(submission.fleetPartnerId),
       driverDraft: artifacts.driverDraft,
+      ...(onboardingNotifications ? { onboardingNotifications } : {}),
       vehicleDraft: artifacts.vehicleDraft,
       documents: artifacts.documents,
       canonicalDriver: canonicalDriver
@@ -797,6 +805,15 @@ export class SupplyReviewService implements OnModuleInit {
                   current.submissionId,
                 )
               : null;
+          const isFirstDriverApproval =
+            config.nextStatus === "approved" &&
+            current.submissionType === "driver_onboarding" &&
+            !current.canonicalDriverId &&
+            this.driverOnboardingDelivery?.isEnabled();
+          const driverDraft = approvalArtifacts?.driverDraft;
+          if (isFirstDriverApproval) {
+            this.validateDriverOnboardingCredentials(driverDraft);
+          }
           const approvedDocuments =
             config.nextStatus === "approved"
               ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
@@ -844,6 +861,22 @@ export class SupplyReviewService implements OnModuleInit {
               executor,
               transitionParams,
             );
+
+          if (isFirstDriverApproval) {
+            if (!updated.canonicalDriverId) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "DRIVER_ONBOARDING_APPROVAL_INCOMPLETE",
+                "A driver record is required to send onboarding notifications.",
+              );
+            }
+            await this.driverOnboardingDelivery?.enqueue(executor, {
+              submissionId: updated.submissionId,
+              driverId: updated.canonicalDriverId,
+              mobile: driverDraft?.mobile,
+              email: driverDraft?.email,
+            });
+          }
 
           await this.supplySubmissionRepository!.persistSubmissionWorkflow(
             executor,
@@ -914,6 +947,7 @@ export class SupplyReviewService implements OnModuleInit {
         normalizedCommand.expectedRevisionNo,
       );
       this.assertAllowedStatus(current, config);
+      this.requireDriverOnboardingStorage(current, config);
       if (config.nextStatus === "approved") {
         this.assertReviewerNotSubmitter(current, reviewerId);
       }
@@ -1000,6 +1034,7 @@ export class SupplyReviewService implements OnModuleInit {
     const current = await this.findSubmission(submissionId);
     this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
     this.assertAllowedStatus(current, config);
+    this.requireDriverOnboardingStorage(current, config);
     if (config.nextStatus === "approved") {
       this.assertReviewerNotSubmitter(current, reviewerId);
     }
@@ -1182,6 +1217,37 @@ export class SupplyReviewService implements OnModuleInit {
       reviewerId,
       deferVolatileCommit: !executor,
     });
+  }
+
+  private requireDriverOnboardingStorage(
+    submission: SupplySubmissionRecord,
+    transition: SubmissionTransitionConfig,
+  ): void {
+    if (
+      transition.nextStatus === "approved" &&
+      submission.submissionType === "driver_onboarding" &&
+      !submission.canonicalDriverId &&
+      this.driverOnboardingDelivery?.isEnabled()
+    ) {
+      this.driverOnboardingDelivery.requireDatabase();
+    }
+  }
+
+  private validateDriverOnboardingCredentials(
+    draft: DriverSupplyDraft | null | undefined,
+  ): void {
+    const now = Date.now();
+    const expiresAt = [
+      Date.parse(draft?.professionalDriverLicenseExpiry ?? ""),
+      Date.parse(draft?.taxiDriverRegistrationExpiry ?? ""),
+    ];
+    if (expiresAt.some((value) => !Number.isFinite(value) || value <= now)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DRIVER_ONBOARDING_CREDENTIAL_INVALID",
+        "Current professional driver and taxi registration credentials are required.",
+      );
+    }
   }
 
   private assertDbSubmissionIdFormat(submissionId: string) {

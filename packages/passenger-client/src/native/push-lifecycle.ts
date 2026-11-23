@@ -143,6 +143,7 @@ export interface NativePassengerPushResult {
 export class NativePassengerPushLifecycle {
   private running = false;
   private epoch = 0;
+  private latestNotificationOpen = 0;
   private tail: Promise<unknown> = Promise.resolve();
   private subscriptions: Array<() => void> = [];
   private token: string | undefined;
@@ -426,26 +427,34 @@ export class NativePassengerPushLifecycle {
     const reference = record(data)?.ride_ref;
     if (typeof reference !== "string" || !reference.trim())
       return this.result({ status: "click_unresolved" });
-    const authority = await this.identity();
-    if (!authority) return this.result({ status: "session_required" });
-    const id = this.options.resolveRideRef
-      ? await this.options.resolveRideRef(reference)
-      : reference;
-    if (!id)
-      return this.result({
-        status: "click_unresolved",
-        reason: "ride_reference_unavailable",
-      });
-    const response = await this.options.accountClient.getRide(id);
-    const current = await this.options.session.snapshot();
-    if (
-      !this.running ||
-      epoch !== this.epoch ||
-      !current ||
-      current.generation !== authority.snapshot.generation
-    )
-      return this.result({ status: "stopped" });
-    this.options.onOwnedRide(response.ride);
-    return this.result({ status: "opened" });
+    const selection = ++this.latestNotificationOpen;
+    const isCurrent = () =>
+      this.running &&
+      this.epoch === epoch &&
+      this.latestNotificationOpen === selection;
+    try {
+      const authority = await this.identity();
+      if (!isCurrent()) return { status: "stopped" };
+      if (!authority) return this.result({ status: "session_required" });
+      const id = this.options.resolveRideRef
+        ? await this.options.resolveRideRef(reference)
+        : reference;
+      if (!isCurrent()) return { status: "stopped" };
+      if (!id)
+        return this.result({
+          status: "click_unresolved",
+          reason: "ride_reference_unavailable",
+        });
+      const response = await this.options.accountClient.getRide(id);
+      const current = await this.options.session.snapshot();
+      if (!isCurrent()) return { status: "stopped" };
+      if (!current || current.generation !== authority.snapshot.generation)
+        return this.result({ status: "stopped" });
+      this.options.onOwnedRide(response.ride);
+      return this.result({ status: "opened" });
+    } catch (error) {
+      if (!isCurrent()) return { status: "stopped" };
+      throw error;
+    }
   }
 }

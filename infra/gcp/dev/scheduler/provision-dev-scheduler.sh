@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Provision Cloud Scheduler for the scale-to-zero-safe internal trigger
-# routes added by SR-MAIL-RETRY-SCHEDULE-20261001 and
-# BUREAU-R14-EXPIRY-REMINDERS-SCHEDULER-20261024:
+# routes added by SR-MAIL-RETRY-SCHEDULE-20261001,
+# BUREAU-R14-EXPIRY-REMINDERS-SCHEDULER-20261024, and DRV-ONB-006 (opt-in):
 #   POST /api/internal/scheduled-tasks/mail-outbox/drain
 #   POST /api/internal/scheduled-tasks/approval-timeout-reminders/run
 #   POST /api/internal/scheduled-tasks/regulatory-expiry/run
+#   POST /api/internal/scheduled-tasks/driver-onboarding-notifications/drain (opt-in when DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true)
 #
 # This is step 3 of the operator sequence in
 # docs/03-runbooks/dev-scheduled-tasks-20261001.md: deploy the two
@@ -57,6 +58,24 @@ APPROVAL_REMINDER_URI="${API_ORIGIN}/api/internal/scheduled-tasks/approval-timeo
 REGULATORY_EXPIRY_JOB="${REGULATORY_EXPIRY_JOB:-drts-dev-regulatory-expiry-run}"
 REGULATORY_EXPIRY_SCHEDULE="${REGULATORY_EXPIRY_SCHEDULE:-*/15 * * * *}"
 REGULATORY_EXPIRY_URI="${API_ORIGIN}/api/internal/scheduled-tasks/regulatory-expiry/run"
+
+DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED="${DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED:-false}"
+DRIVER_ONBOARDING_JOB="${DRIVER_ONBOARDING_JOB:-drts-dev-driver-onboarding-notifications-drain}"
+DRIVER_ONBOARDING_SCHEDULE="${DRIVER_ONBOARDING_SCHEDULE:-* * * * *}"
+DRIVER_ONBOARDING_URI="${API_ORIGIN}/api/internal/scheduled-tasks/driver-onboarding-notifications/drain"
+
+case "${DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED}" in
+  true|false) ;;
+  *)
+    echo "Invalid DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=${DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED}; expected true or false." >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$PROJECT_ID" == "nodal-alloy-503700-s3" ]]; then
+  echo "Refusing suspended historical project nodal-alloy-503700-s3; verify live DEV_GCP_PROJECT_ID first." >&2
+  exit 1
+fi
 
 say() { printf '\n=== %s\n' "$*"; }
 gc() { gcloud --project "$PROJECT_ID" "$@"; }
@@ -145,6 +164,14 @@ create_or_update_job() { # create_or_update_job <name> <schedule> <uri>
 #     evaluates T-30/T-7 pre-expiry reminders (driver credentials, vehicle
 #     contracts, insurance policies) and post-expiry dispatch blocks via the
 #     same WIF Entry C OIDC pattern.
+#   - driver-onboarding-notifications/drain every 1 minute (DRV-ONB-006,
+#     opt-in via DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true): wakes Cloud Run
+#     from scale-to-zero to drain due encrypted dual-channel (email + SMS)
+#     driver onboarding notification deliveries and bounded retries (15s/60s/300s)
+#     after first driver onboarding approval, using the same scheduler OIDC SA
+#     (${SCHEDULER_SA}), exact route scope
+#     "POST internal/scheduled-tasks/driver-onboarding-notifications/drain",
+#     system scope "driver:onboarding:notify", and audience "${API_ORIGIN}".
 say "Cloud Scheduler job: ${MAIL_OUTBOX_JOB} (${MAIL_OUTBOX_SCHEDULE})"
 create_or_update_job "$MAIL_OUTBOX_JOB" "$MAIL_OUTBOX_SCHEDULE" "$MAIL_OUTBOX_URI"
 
@@ -154,6 +181,13 @@ create_or_update_job "$APPROVAL_REMINDER_JOB" "$APPROVAL_REMINDER_SCHEDULE" "$AP
 say "Cloud Scheduler job: ${REGULATORY_EXPIRY_JOB} (${REGULATORY_EXPIRY_SCHEDULE})"
 create_or_update_job "$REGULATORY_EXPIRY_JOB" "$REGULATORY_EXPIRY_SCHEDULE" "$REGULATORY_EXPIRY_URI"
 
+if [[ "${DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED}" == "true" ]]; then
+  say "Cloud Scheduler job: ${DRIVER_ONBOARDING_JOB} (${DRIVER_ONBOARDING_SCHEDULE})"
+  create_or_update_job "$DRIVER_ONBOARDING_JOB" "$DRIVER_ONBOARDING_SCHEDULE" "$DRIVER_ONBOARDING_URI"
+else
+  say "Cloud Scheduler job: ${DRIVER_ONBOARDING_JOB} (opt-in disabled by default; set DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true during authorized shared-dev rollout)"
+fi
+
 # ---------------------------------------------------------------- handoff
 cat <<EOF
 
@@ -161,8 +195,11 @@ cat <<EOF
 1. If not already done, update the WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
    secret with the three-entry JSON in
    docs/02-architecture/internal-key-exceptions.md §8.2 (includes entry C for
-   ${SCHEDULER_SA}), then redeploy or otherwise refresh the API's secret
-   mount so it picks up the new version.
+   ${SCHEDULER_SA}; when opting in to DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true,
+   add exact routeScope "POST internal/scheduled-tasks/driver-onboarding-notifications/drain"
+   and system scope "driver:onboarding:notify" with audience "${API_ORIGIN}" per
+   docs/03-runbooks/dev-scheduled-tasks-20261001.md §5), then redeploy or otherwise
+   refresh the API's secret mount so it picks up the new version.
 2. Verify each job actually reaches the API once the registry above is live.
    \`gcloud scheduler jobs run\` only dispatches the job -- it returns before
    the target responds -- and lastAttemptTime/state alone cannot tell a
@@ -174,6 +211,8 @@ cat <<EOF
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${MAIL_OUTBOX_JOB} internal/scheduled-tasks/mail-outbox/drain
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${APPROVAL_REMINDER_JOB} internal/scheduled-tasks/approval-timeout-reminders/run
      infra/gcp/dev/scheduler/confirm-job-attempt.sh ${REGULATORY_EXPIRY_JOB} internal/scheduled-tasks/regulatory-expiry/run
+     # When DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true:
+     infra/gcp/dev/scheduler/confirm-job-attempt.sh ${DRIVER_ONBOARDING_JOB} internal/scheduled-tasks/driver-onboarding-notifications/drain
    Exit 0 = confirmed completed successfully; exit 1 = confirmed completed
    but failed (script prints the status code); exit 2 = no completion
    evidence within the timeout, which means unconfirmed, not success. Then

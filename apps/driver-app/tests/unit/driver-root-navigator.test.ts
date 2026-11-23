@@ -120,6 +120,7 @@ describe("RootLayout navigator structure", () => {
       "platform-presence",
       "settings",
       "onboarding",
+      "driver-activate",
       "earnings",
       "shift",
       "leave",
@@ -146,6 +147,7 @@ describe("RootLayout navigator structure", () => {
     // Check sub-screens are declared with href: null so they render in tab shell without duplicate tab buttons
     const subScreenNames = [
       "onboarding",
+      "driver-activate",
       "earnings",
       "shift",
       "leave",
@@ -159,6 +161,14 @@ describe("RootLayout navigator structure", () => {
       expect(reg).toBeDefined();
       expect(reg?.options.href).toBe(null);
     }
+  });
+
+  it("hides workspace tabs while the activation link is being handled", () => {
+    expect(
+      passedTabBar({
+        state: { index: 0, routes: [{ name: "driver-activate" }] },
+      }),
+    ).toBeNull();
   });
 
   it("renders the bottom tab bar when provided sub-screen navigation state", () => {

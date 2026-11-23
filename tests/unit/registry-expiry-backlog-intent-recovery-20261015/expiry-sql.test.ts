@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
@@ -214,7 +214,14 @@ describe("Registry actual enabled Repository SQL/executor boundary (controlled t
     const db = seeded(1, 0);
     const outbox = new MemoryMailOutbox();
     const notification = new NotificationDeliveryService(outbox);
-    db.rejectIntentWrites = 2; // Link and attempted error bookkeeping both fail at SQL storage.
+    const enqueue = notification.enqueue.bind(notification);
+    vi.spyOn(notification, "enqueue").mockImplementationOnce(async (input) => {
+      const receipt = await enqueue(input);
+      // Fail the receipt link and its error bookkeeping after real outbox
+      // acceptance. The source precheck before enqueue must remain available.
+      db.rejectIntentWrites = 2;
+      return receipt;
+    });
     await expect(
       setup(db, notification).controller.reconcileExpiry({ asOf, limit: 2 }),
     ).rejects.toThrow("controlled Registry link storage failure");

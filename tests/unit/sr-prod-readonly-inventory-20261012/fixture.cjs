@@ -131,7 +131,8 @@ function fixture(overrides = {}, collector = { TARGET, inventory }) {
     if (op.kind === "backends")
       body = {
         items: TOPOLOGY.filter(([id]) => id !== "agency-portal-web").map(
-          ([id]) => ({
+          ([id], index) => ({
+            id: (18446744073709551615n - BigInt(index)).toString(),
             name:
               id === "referral-embed-web"
                 ? "drts-prod-referral-lb"

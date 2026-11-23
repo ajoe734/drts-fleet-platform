@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { PasswordHashingService } from "../../apps/api/src/common/auth/password-hashing.service";
 import { StepUpProofService } from "../../apps/api/src/common/auth/step-up-proof.service";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { PartnerUserIdentityLinkRepository } from "../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
@@ -30,6 +31,11 @@ beforeEach(() => {
   vi.stubEnv("AUTH_MODE", "local");
   vi.stubEnv("OIDC_MOCK_MODE", "true");
   vi.stubEnv("JWT_SECRET", "test_jwt_secret_key_32_characters_long_min!");
+  vi.stubEnv(
+    "PASSWORD_PEPPER_SECRETS_JSON",
+    JSON.stringify({ v1: "fleet-human-authority-test-pepper-32chars!" }),
+  );
+  vi.stubEnv("PASSWORD_PEPPER_CURRENT_VERSION", "v1");
 });
 
 describe("managed Fleet human source -> issuer -> durable verifier (in-memory port, no PG/IdP)", () => {
@@ -967,5 +973,196 @@ describe("FLEET-ONB-005 step-up gate on manageFleetHumanRole's route", () => {
         "x-drts-step-up-reference": proof.stepUpReference!,
       }),
     ).resolves.toBe(true);
+  });
+});
+
+describe("FLEET-PASSWORD-MEMBER-SESSION-20261123: password-onboarded Fleet member durable session authority without Google link", () => {
+  it("admits a password-authenticated Fleet member through JwtAuthService and BootstrapAuthGuard with PartnerUserIdentityLinkRepository wired, enforces role/fleet boundaries, and revokes immediately on role change or disablement", async () => {
+    const repository = new IdentityRepository();
+    const link = new PartnerUserIdentityLinkRepository();
+    const tenant = new TenantPartnerService(new AuditNotificationService());
+    const entries = (
+      tenant as unknown as {
+        partnerEntries: Array<{
+          entrySlug: string;
+          partnerType: string;
+          partnerId: string;
+        }>;
+      }
+    ).partnerEntries;
+    const entry = entries.find((row) => row.entrySlug === ENTRY)!;
+    entry.partnerType = "fleet_partner";
+    entry.partnerId = "fleet-test-001";
+
+    const jwt = new JwtAuthService(
+      repository,
+      tenant,
+      undefined,
+      undefined,
+      link,
+    );
+    const authController = new AuthController(
+      jwt,
+      tenant,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+
+    const principalId = "principal_fleet_password_member_001";
+    const email = "fleet-password-ops@fleet.example.org";
+    const password = "correct horse battery staple";
+    const now = "2026-11-20T00:00:00.000Z";
+
+    await repository.ensurePrincipalRecord({
+      principalId,
+      sourceRef: `jwt_principal:partner:${principalId}`,
+      issuer: "https://fleet-invitation.drts.internal",
+      subject: `fleet:${ENTRY}:email:${email}`,
+      principalType: "human",
+      email,
+      emailVerified: true,
+      displayName: "Fleet Password Ops",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const membership = await repository.ensureMembershipRecord({
+      membershipId: "fleet-password-membership-001",
+      sourceRef: `fleet_member:${ENTRY}:${principalId}`,
+      principalId,
+      realm: "partner",
+      scopeRef: `fleet:${ENTRY}`,
+      tenantId: null,
+      partnerId: "fleet-test-001",
+      status: "active",
+      invitedByPrincipalId: "manager",
+      invitationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const binding = await repository.ensureRoleBindingRecord({
+      roleBindingId: "fleet-password-binding-001",
+      sourceRef: `fleet_role:${ENTRY}:${principalId}`,
+      membershipId: membership.membershipId,
+      roleCode: "fleet_partner_ops",
+      grantedByPrincipalId: "manager",
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const hashed = await new PasswordHashingService().hash(password);
+    await repository.setPasswordCredentialForPrincipal(principalId, {
+      passwordHash: hashed.hash,
+      passwordAlgo: hashed.algo,
+      pepperVersion: hashed.pepperVersion,
+    });
+
+    // No Google identity link exists for this password-invited Fleet member.
+    expect(await link.findByDrtsPassengerId(ENTRY, principalId)).toBeNull();
+
+    const loginResult = (await authController.passwordLogin("partner", {
+      email,
+      password,
+      partnerId: ENTRY,
+    })) as {
+      data: {
+        accessToken: string;
+        identity: {
+          principalId?: string | null;
+          membershipId?: string | null;
+          partnerId?: string | null;
+          partnerEntrySlug?: string | null;
+          roles: string[];
+          scopes: string[];
+          amr?: string[];
+        };
+      };
+    };
+
+    expect(loginResult.data.identity).toMatchObject({
+      principalId,
+      membershipId: membership.membershipId,
+      partnerId: "fleet-test-001",
+      partnerEntrySlug: ENTRY,
+      roles: ["fleet_partner_ops"],
+      scopes: ["fleet:read", "fleet:training:read", "fleet:supply:write"],
+      amr: ["pwd"],
+    });
+    expect(
+      await jwt.verifyAccessToken(loginResult.data.accessToken),
+    ).not.toBeNull();
+
+    const operationalReq = {
+      method: "GET",
+      url: "/api/fleet-partner/drivers",
+      headers: { authorization: `Bearer ${loginResult.data.accessToken}` },
+      identity: null as unknown,
+    };
+    expect(
+      await guard.canActivate({
+        switchToHttp: () => ({ getRequest: () => operationalReq }),
+        getHandler: () => FleetPartnerController.prototype.listPortalDrivers,
+        getClass: () => FleetPartnerController,
+      } as never),
+    ).toBe(true);
+    expect(operationalReq.identity).toMatchObject({
+      principalId,
+      membershipId: membership.membershipId,
+      partnerId: "fleet-test-001",
+      partnerEntrySlug: ENTRY,
+      amr: ["pwd"],
+    });
+
+    // Cross-fleet access is denied.
+    await expect(
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            ...operationalReq,
+            headers: {
+              ...operationalReq.headers,
+              "x-fleet-partner-id": "fleet-other",
+            },
+          }),
+        }),
+        getHandler: () => FleetPartnerController.prototype.listPortalDrivers,
+        getClass: () => FleetPartnerController,
+      } as never),
+    ).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+
+    // Role change immediately invalidates the old password session token.
+    await repository.ensureRoleBindingRecord({
+      ...binding,
+      roleCode: "fleet_partner_admin",
+      updatedAt: new Date(Date.now() + 1000).toISOString(),
+    });
+    expect(
+      await jwt.verifyAccessToken(loginResult.data.accessToken),
+    ).toBeNull();
+
+    // Re-logging in with password picks up the new role and passes durable verification.
+    const adminLogin = (await authController.passwordLogin("partner", {
+      email,
+      password,
+      partnerId: ENTRY,
+    })) as { data: { accessToken: string; identity: { roles: string[] } } };
+    expect(adminLogin.data.identity.roles).toEqual(["fleet_partner_admin"]);
+    expect(
+      await jwt.verifyAccessToken(adminLogin.data.accessToken),
+    ).not.toBeNull();
+
+    // Disabling the membership immediately invalidates the session.
+    await repository.ensureMembershipRecord({
+      ...membership,
+      status: "disabled",
+      updatedAt: new Date(Date.now() + 2000).toISOString(),
+    });
+    expect(await jwt.verifyAccessToken(adminLogin.data.accessToken)).toBeNull();
   });
 });

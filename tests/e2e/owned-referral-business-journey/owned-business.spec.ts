@@ -17,6 +17,7 @@ import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-displ
 import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
+  getOperationalDocumentFixture,
   prepareOperationalFleetSession,
   operationalRequestHeaders,
   uploadOperationalDocument,
@@ -110,6 +111,10 @@ import {
 } from "./r04-current-month-governance";
 import { runR09OwnComplaintLifecycle } from "./r09-own-complaint-lifecycle";
 import {
+  runR10OperationsDownloads,
+  type R10OperationsDownloadsEvidence,
+} from "./r10-operations-downloads";
+import {
   RunFinalizer,
   cancellationCleanupNeeded,
   cancellationCleanupPhase,
@@ -137,6 +142,22 @@ import {
   verifyExactSevenFinalActive,
   type ExactSevenPorts,
 } from "./exact-run-recovery";
+import type { SupplyDocumentType } from "@drts/contracts";
+import {
+  R14_PRIOR_TARGET_MANIFEST_PATH,
+  buildR14StageAProjection,
+  captureR14UiPost,
+  installR14FleetPageRoute,
+  parseR14PriorTargetManifest,
+  runR14StageBRenewalLifecycle,
+  type R14ExpectedContext,
+  type R14PriorTargetManifest,
+  type R14StageAApprovalFact,
+  type R14StageADocumentFact,
+  type R14StageAProjection,
+  type R14StageAVehicleApprovalFact,
+  type R14StageBProjection,
+} from "./r14-approved-renewal";
 
 const RECOVERY_ONLY = process.env.OWNED_REFERRAL_RECOVERY_ONLY === "true";
 const ENTRY = "yuhe-residence";
@@ -151,6 +172,7 @@ const PHOTO =
   "apps/driver-app/android/app/src/main/res/drawable-mdpi/splashscreen_logo.png";
 const env = (key: string) => text(process.env[key], `configuration:${key}`);
 const now = () => new Date().toISOString();
+const todayUtc = () => new Date().toISOString().slice(0, 10);
 const future = () =>
   new Date(Date.now() + 366 * 86_400_000).toISOString().slice(0, 10);
 const start = () =>
@@ -307,7 +329,7 @@ test(journeyName, async ({ browser, request }) => {
   const uiMutationAttempts: Array<
     UiPostIntent & {
       action: string;
-      role: "admin" | "ops";
+      role: "admin" | "ops" | "fleet";
       subjectId: string;
       custody: "durable-before-forward";
     }
@@ -481,6 +503,7 @@ test(journeyName, async ({ browser, request }) => {
   let recoveryResolved = false;
   let displayObservations: DisplayObservations | undefined;
   let dailyReportDownloads: DailyReportDownloadsEvidence | undefined;
+  let sixMonthOperationsDownloads: R10OperationsDownloadsEvidence | undefined;
   let retainedRecovery: Readonly<{
     originalRun: number;
     orderId: string;
@@ -507,6 +530,13 @@ test(journeyName, async ({ browser, request }) => {
       | undefined;
   } = { current: undefined };
   let r08Run: R08ExistingFull | undefined;
+  let r14Manifest: R14PriorTargetManifest | undefined;
+  let r14ExpectedContext: R14ExpectedContext | undefined;
+  let r14StageADraft: Omit<
+    R14StageAProjection,
+    "schema" | "stage" | "repository" | "cleanup"
+  > | null = null;
+  let r14StageB: R14StageBProjection | undefined;
   let opsControlRole: "opsApi" | "ops" = "opsApi";
   let mainError: unknown;
   let finalization: FinalizationResult | undefined;
@@ -525,6 +555,13 @@ test(journeyName, async ({ browser, request }) => {
     plateNo?: string;
     driverSubmissionId?: string;
     vehicleSubmissionId?: string;
+    canonicalContractId?: string;
+    canonicalPolicyId?: string;
+    approvedUtcDate?: string;
+    exclusivityEffectiveEnd?: string;
+    documents?: R14StageADocumentFact[];
+    driverApproval?: R14StageAApprovalFact;
+    vehicleApproval?: R14StageAVehicleApprovalFact;
   };
   const extraSupply: ExtraSupply = {
     transport: new NativeTransport(
@@ -1013,11 +1050,61 @@ test(journeyName, async ({ browser, request }) => {
         stage: "normal-own-first-key-Fleet-session",
         result: "observed",
       });
+      const bindDriverDeviceSession = async (
+        supply: ExtraSupply,
+        targetDriverId: string,
+        inviteNonce: string,
+      ) => {
+        const invite = await call("api", "/api/auth/driver/device/invite", {
+          method: "POST",
+          body: { driverId: targetDriverId },
+          headers: { "x-idempotency-key": `${inviteNonce}-invite` },
+        });
+        const issuedInvitation = (supply.invitation = text(
+          invite.registrationCode,
+        ));
+        mask(issuedInvitation);
+        const boundDeviceId = (supply.deviceId = `${inviteNonce}-device`);
+        const driver = await call(
+          "publicApi",
+          "/api/auth/driver/device/register",
+          {
+            method: "POST",
+            body: {
+              registrationCode: issuedInvitation,
+              deviceId: boundDeviceId,
+              deviceLabel: "明示合成示範裝置",
+            },
+          },
+        );
+        const driverToken = text(driver.accessToken);
+        mask(driverToken);
+        mask(text(driver.refreshToken));
+        requireFact(
+          driver.driverId === targetDriverId &&
+            driver.deviceId === boundDeviceId,
+          "actual bound Driver registration",
+        );
+        supply.bindingId = text(driver.bindingId);
+        supply.transport.setSession("driver", driverToken);
+        const driverSession = object(
+          (await supply.transport.call("driver", "/api/auth/session")).data,
+        );
+        requireFact(
+          driverSession.active === true &&
+            object(driverSession.identity).realm === "driver" &&
+            object(driverSession.identity).actorId === targetDriverId,
+          "actual Driver session identity",
+        );
+      };
       const provisionSupply = async (
         supply: ExtraSupply,
         nonce: string,
         phone: string,
+        effectiveUntilDate: string = future(),
       ) => {
+        const effectiveFromDate = start();
+        const uploadedDocuments: R14StageADocumentFact[] = [];
         const driverDraft = await call(
           "fleet",
           "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
@@ -1027,10 +1114,10 @@ test(journeyName, async ({ browser, request }) => {
               name: `合成測試司機 ${nonce.slice(-12)}`,
               mobile: phone,
               professionalDriverLicenseNo: `SIM-DL-${nonce}`,
-              professionalDriverLicenseExpiry: future(),
+              professionalDriverLicenseExpiry: effectiveUntilDate,
               taxiDriverRegistrationNo: `SIM-REG-${nonce}`,
               taxiDriverRegistrationArea: "TPE",
-              taxiDriverRegistrationExpiry: future(),
+              taxiDriverRegistrationExpiry: effectiveUntilDate,
               supportedServiceProductCodes: ["enterprise_dispatch"],
               preferredVehicleSubmissionId: null,
             },
@@ -1040,7 +1127,10 @@ test(journeyName, async ({ browser, request }) => {
           object(driverDraft.submission).submissionId,
         );
         supply.driverSubmissionId = driverSubmissionId;
-        const approve = async (submissionId: string, types: string[]) => {
+        const approve = async (
+          submissionId: string,
+          types: readonly SupplyDocumentType[],
+        ) => {
           const path = `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`;
           for (const documentType of types) {
             const detail = await call("fleet", path);
@@ -1060,8 +1150,8 @@ test(journeyName, async ({ browser, request }) => {
               {
                 expectedRevisionNo: revision,
                 documentType,
-                effectiveFrom: start(),
-                effectiveUntil: future(),
+                effectiveFrom: effectiveFromDate,
+                effectiveUntil: effectiveUntilDate,
               },
               operationalRequestHeaders(
                 "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
@@ -1073,13 +1163,26 @@ test(journeyName, async ({ browser, request }) => {
                 proof.readbackSha256 === proof.sha256,
               "actual document clean byte-equal receipt",
             );
+            const documentId = text(
+              proof.documentId,
+              "actual confirmed document ID required",
+            );
+            uploadedDocuments.push({
+              documentId,
+              submissionId,
+              documentType,
+              effectiveFrom: effectiveFromDate,
+              effectiveUntil: effectiveUntilDate,
+              sha256: proof.sha256,
+              readbackSha256: proof.readbackSha256,
+              scanState: "clean",
+              bytes: proof.fileSize,
+              reviewStatus: "approved",
+            });
             evidence.record({
               stage: "synthetic-document-upload-confirm-download",
               submissionId,
-              documentId: text(
-                proof.documentId,
-                "actual confirmed document ID required",
-              ),
+              documentId,
               objectKey: proof.objectKey,
               sha256: proof.sha256,
               bytes: proof.fileSize,
@@ -1127,6 +1230,16 @@ test(journeyName, async ({ browser, request }) => {
         ]);
         supply.driverId = text(approvedDriver.canonicalDriverId);
         const driverId = supply.driverId;
+        supply.driverApproval = {
+          submissionId: driverSubmissionId,
+          status: "approved",
+          submittedBy: text(approvedDriver.submittedBy),
+          reviewedBy: text(approvedDriver.reviewedBy),
+          approvedAt: text(
+            approvedDriver.reviewedAt ?? approvedDriver.updatedAt,
+          ),
+          revisionNo: integer(approvedDriver.revisionNo),
+        };
         const ownPlateNo =
           (supply.plateNo = `SIM-${randomUUID().slice(0, 8).toUpperCase()}`);
         const vehicleDraft = await call(
@@ -1163,15 +1276,31 @@ test(journeyName, async ({ browser, request }) => {
         ]);
         supply.vehicleId = text(approvedVehicle.canonicalVehicleId);
         const vehicleId = supply.vehicleId;
-        text(approvedVehicle.canonicalContractId);
-        text(approvedVehicle.canonicalPolicyId);
+        supply.canonicalContractId = text(approvedVehicle.canonicalContractId);
+        supply.canonicalPolicyId = text(approvedVehicle.canonicalPolicyId);
+        supply.approvedUtcDate = effectiveUntilDate;
+        supply.documents = uploadedDocuments;
+        supply.vehicleApproval = {
+          submissionId: vehicleSubmissionId,
+          status: "approved",
+          submittedBy: text(approvedVehicle.submittedBy),
+          reviewedBy: text(approvedVehicle.reviewedBy),
+          approvedAt: text(
+            approvedVehicle.reviewedAt ?? approvedVehicle.updatedAt,
+          ),
+          revisionNo: integer(approvedVehicle.revisionNo),
+          sourceContractSubmissionId: vehicleSubmissionId,
+          sourcePolicySubmissionId: vehicleSubmissionId,
+        };
+        const exclusivityEffectiveEnd = `${future()}T23:59:59.000Z`;
+        supply.exclusivityEffectiveEnd = exclusivityEffectiveEnd;
         const exclusion = `/regulatory-registry/exclusivities/${encodeURIComponent(vehicleId)}`;
         await adminControl(`${exclusion}/submit-review`, {
           method: "POST",
           body: {
             exclusiveProviderName: "合成開發示範車隊（非正式營運聲明）",
-            effectiveStart: `${start()}T00:00:00.000Z`,
-            effectiveEnd: `${future()}T23:59:59.000Z`,
+            effectiveStart: `${effectiveFromDate}T00:00:00.000Z`,
+            effectiveEnd: exclusivityEffectiveEnd,
           },
         });
         const proof = await stepUp(
@@ -1194,49 +1323,530 @@ test(journeyName, async ({ browser, request }) => {
           result: "retained",
         });
 
-        const invite = await call("api", "/api/auth/driver/device/invite", {
-          method: "POST",
-          body: { driverId },
-          headers: { "x-idempotency-key": `${nonce}-invite` },
-        });
-        const invitation = (supply.invitation = text(invite.registrationCode));
-        mask(invitation);
-        const deviceId = (supply.deviceId = `${nonce}-device`);
-        const driver = await call(
-          "publicApi",
-          "/api/auth/driver/device/register",
-          {
-            method: "POST",
-            body: {
-              registrationCode: invitation,
-              deviceId,
-              deviceLabel: "明示合成示範裝置",
-            },
-          },
-        );
-        const driverToken = text(driver.accessToken);
-        mask(driverToken);
-        mask(text(driver.refreshToken));
-        requireFact(
-          driver.driverId === driverId && driver.deviceId === deviceId,
-          "actual bound Driver registration",
-        );
-        supply.bindingId = text(driver.bindingId);
-        supply.transport.setSession("driver", driverToken);
-        const driverSession = object(
-          (await supply.transport.call("driver", "/api/auth/session")).data,
-        );
-        requireFact(
-          driverSession.active === true &&
-            object(driverSession.identity).realm === "driver" &&
-            object(driverSession.identity).actorId === driverId,
-          "actual Driver session identity",
-        );
+        await bindDriverDeviceSession(supply, driverId, nonce);
       };
       const firstSupply: ExtraSupply = { transport: tx };
+      const runExistingR14 = async (
+        phase: "provision" | "dispatch",
+        dispatchContext?: {
+          orderId: string;
+          dispatchJobId: string;
+          initialJobStatus: string;
+          preCandidates: ObjectData[];
+        },
+      ): Promise<ObjectData[]> => {
+        if (phase === "provision") {
+          const currentUtcDate = todayUtc();
+          const expected: R14ExpectedContext = {
+            definitionSha: definition,
+            runtimeSha: runtime,
+            currentUtcDate,
+            entrySlug: ENTRY,
+            subject: SUBJECT,
+            fleetPartnerId: FLEET,
+            tenantId: TENANT,
+          };
+          r14ExpectedContext = expected;
+          const manifestPath =
+            process.env.OWNED_R14_PRIOR_TARGET_MANIFEST ??
+            R14_PRIOR_TARGET_MANIFEST_PATH;
+          r14Manifest = parseR14PriorTargetManifest(
+            await readFile(manifestPath, "utf8").catch(() => {
+              throw new JourneyFailure("r14-prior-target-manifest-required");
+            }),
+            expected,
+          );
+          if (r14Manifest.decision === "stageA") {
+            await provisionSupply(firstSupply, nonce, phone, currentUtcDate);
+            requireFact(
+              todayUtc() === currentUtcDate,
+              "r14-stage-a:utc-day-changed-before-approval",
+            );
+            const [contracts, policies] = await Promise.all([
+              adminControl("/regulatory-registry/contracts"),
+              adminControl("/regulatory-registry/policies"),
+            ]);
+            const ownContract = records(contracts.items).find(
+              (c) => c.contractId === firstSupply.canonicalContractId,
+            );
+            const ownPolicy = records(policies.items).find(
+              (p) => p.policyId === firstSupply.canonicalPolicyId,
+            );
+            const expectedEndIso = `${currentUtcDate}T23:59:59.000Z`;
+            requireFact(
+              ownContract?.vehicleId === firstSupply.vehicleId &&
+                ownContract?.sourceSubmissionId ===
+                  firstSupply.vehicleSubmissionId &&
+                ownContract?.endAt === expectedEndIso &&
+                ownPolicy?.vehicleId === firstSupply.vehicleId &&
+                ownPolicy?.sourceSubmissionId ===
+                  firstSupply.vehicleSubmissionId &&
+                ownPolicy?.endAt === expectedEndIso,
+              "r14-stage-a:canonical-contract-policy-today-endAt-required",
+            );
+            const draftStageA = {
+              definitionSha: definition,
+              runtimeSha: runtime,
+              entrySlug: ENTRY,
+              subject: SUBJECT,
+              fleetPartnerId: FLEET,
+              tenantId: TENANT,
+              nonce,
+              approvedUtcDate: currentUtcDate,
+              driverId: text(firstSupply.driverId),
+              vehicleId: text(firstSupply.vehicleId),
+              plateNo: text(firstSupply.plateNo),
+              driverSubmissionId: text(firstSupply.driverSubmissionId),
+              vehicleSubmissionId: text(firstSupply.vehicleSubmissionId),
+              canonicalContractId: text(firstSupply.canonicalContractId),
+              canonicalPolicyId: text(firstSupply.canonicalPolicyId),
+              contractEndAt: expectedEndIso,
+              policyEndAt: expectedEndIso,
+              professionalDriverLicenseExpiry: currentUtcDate,
+              taxiDriverRegistrationExpiry: currentUtcDate,
+              exclusivityEffectiveEnd: text(
+                firstSupply.exclusivityEffectiveEnd,
+              ),
+              documents: firstSupply.documents ?? [],
+              approvals: {
+                driver: firstSupply.driverApproval!,
+                vehicle: firstSupply.vehicleApproval!,
+              },
+            };
+            buildR14StageAProjection(
+              {
+                ...draftStageA,
+                cleanup: {
+                  driverWorkStateOffline: true,
+                  driverBindingRevoked: true,
+                  fleetSessionCleaned: true,
+                  mainOrderCompleted: true,
+                  secondSupplyProvisioned: true,
+                  cleanupErrors: [],
+                },
+              },
+              expected,
+            );
+            r14StageADraft = draftStageA;
+            evidence.record({
+              stage: "r14-stage-a-today-expiry-supply-approved",
+              driverId: draftStageA.driverId,
+              vehicleId: draftStageA.vehicleId,
+              submissionId: draftStageA.vehicleSubmissionId,
+              result: "retained",
+            });
+            return [];
+          }
+          const target = r14Manifest.target;
+          firstSupply.driverId = target.driverId;
+          firstSupply.vehicleId = target.vehicleId;
+          firstSupply.plateNo = target.plateNo;
+          firstSupply.driverSubmissionId = target.driverSubmissionId;
+          firstSupply.vehicleSubmissionId = target.vehicleSubmissionId;
+          firstSupply.canonicalContractId = target.canonicalContractId;
+          firstSupply.canonicalPolicyId = target.canonicalPolicyId;
+          await finalizer.checkpoint("r14-stage-b-retained-target-setup");
+          await adminControl(
+            `/regulatory-registry/drivers/${encodeURIComponent(target.driverId)}/work-state`,
+            { method: "POST", body: { workState: "available" } },
+          );
+          await bindDriverDeviceSession(
+            firstSupply,
+            target.driverId,
+            `${nonce}-r14-stage-b`,
+          );
+          evidence.record({
+            stage: "r14-stage-b-retained-target-available-setup",
+            driverId: target.driverId,
+            vehicleId: target.vehicleId,
+            result: "observed",
+          });
+          return [];
+        }
+
+        requireFact(
+          r14Manifest && r14ExpectedContext && dispatchContext,
+          "r14-dispatch-context-required",
+        );
+        if (r14Manifest.decision === "stageA") {
+          return dispatchContext.preCandidates;
+        }
+
+        await finalizer.checkpoint("r14-stage-b-expiry-denial-and-ui-renewal");
+        const fleetActorId = text(
+          fleet?.metadata.actorId,
+          "r14-stage-b:fleetActorId",
+        );
+        const adminScopes = Array.isArray(identity.scopes)
+          ? identity.scopes.map((s) => String(s))
+          : [];
+        const custodyBeforeForward =
+          (role: "admin" | "fleet", action: string, subjectId: string) =>
+          async (intent: UiPostIntent, forward: () => Promise<void>) =>
+            finalizer.guardOperation(async (assertOpen) => {
+              uiMutationAttempts.push({
+                ...intent,
+                role,
+                action,
+                subjectId,
+                custody: "durable-before-forward",
+              });
+              await finalizer.checkpointOwned(`ui-post:${role}:${action}`);
+              assertOpen();
+              await forward();
+            });
+
+        const fleetPage = await context.newPage();
+        const adminPage = await context.newPage();
+        let postRenewalCandidates: ObjectData[] = [];
+        try {
+          await installR14FleetPageRoute(fleetPage, origins.fleet, tx);
+          await installVerifiedRoleRoute(adminPage, origins.admin, "admin", tx);
+          const renewedFrom = start();
+          const renewedUntil = future();
+          r14StageB = await runR14StageBRenewalLifecycle({
+            expected: r14ExpectedContext,
+            officialArtifact: r14Manifest.officialArtifact,
+            target: r14Manifest.target,
+            fleetRole: {
+              fleetPartnerId: FLEET,
+              tenantId: TENANT,
+              actorId: fleetActorId,
+            },
+            adminRole: {
+              principalId,
+              membershipId: text(identity.membershipId),
+              sessionId: text(adminSessionId),
+              scopes: adminScopes,
+            },
+            renewedEffectiveFrom: renewedFrom,
+            renewedEffectiveUntil: renewedUntil,
+            orderId: dispatchContext.orderId,
+            dispatchJobId: dispatchContext.dispatchJobId,
+            readFleetSession: () =>
+              call("fleet", "/control-plane-proxy/auth/session"),
+            readAdminBrowserSession: async () => {
+              const nav = await adminPage.goto(
+                `${origins.admin}/supply-review`,
+                {
+                  timeout: 15_000,
+                },
+              );
+              requireFact(
+                nav?.status() === 200 &&
+                  nav.headers()["x-drts-candidate-sha"] === runtime,
+                "R14 actual Admin supply-review page runtime",
+              );
+              return readBrowserRoleSession(adminPage, runtime);
+            },
+            restoreDriverAvailable: async (targetDriverId) => {
+              await adminControl(
+                `/regulatory-registry/drivers/${encodeURIComponent(targetDriverId)}/work-state`,
+                { method: "POST", body: { workState: "available" } },
+              );
+            },
+            rebindDriverSession: async (targetDriverId) => {
+              const session = object(
+                (await tx.call("driver", "/api/auth/session")).data,
+              );
+              requireFact(
+                session.active === true &&
+                  object(session.identity).realm === "driver" &&
+                  object(session.identity).actorId === targetDriverId,
+                "R14 active bound Driver session",
+              );
+            },
+            readRegistryDriver: async (targetDriverId) => {
+              const item = records(
+                (await adminControl("/regulatory-registry/drivers")).items,
+              ).find((d) => d.driverId === targetDriverId);
+              requireFact(item, "R14 canonical Registry driver required");
+              return item;
+            },
+            readRegistryVehicle: async (targetVehicleId) => {
+              const item = records(
+                (await adminControl("/regulatory-registry/vehicles")).items,
+              ).find((v) => v.vehicleId === targetVehicleId);
+              requireFact(item, "R14 canonical Registry vehicle required");
+              return item;
+            },
+            readRegistryContracts: async (targetVehicleId) =>
+              records(
+                (await adminControl("/regulatory-registry/contracts")).items,
+              ).filter((c) => c.vehicleId === targetVehicleId),
+            readRegistryPolicies: async (targetVehicleId) =>
+              records(
+                (await adminControl("/regulatory-registry/policies")).items,
+              ).filter((p) => p.vehicleId === targetVehicleId),
+            readRenewalTargets: () =>
+              call(
+                "fleet",
+                "/control-plane-proxy/fleet-partner/supply-renewals/targets",
+              ),
+            readDriverReadiness: (targetDriverId) =>
+              call(
+                "fleet",
+                `/control-plane-proxy/fleet-partner/readiness/drivers/${encodeURIComponent(targetDriverId)}`,
+              ),
+            readVehicleReadiness: (targetVehicleId) =>
+              call(
+                "fleet",
+                `/control-plane-proxy/fleet-partner/readiness/vehicles/${encodeURIComponent(targetVehicleId)}`,
+              ),
+            readFleetSubmission: (submissionId) =>
+              call(
+                "fleet",
+                `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`,
+              ),
+            readPreRenewalCandidates: async () => dispatchContext.preCandidates,
+            openFleetRenewalNew: async (
+              submissionType,
+              subjectId,
+              targetPlateNo,
+            ) => {
+              const params =
+                submissionType === "profile_correction"
+                  ? new URLSearchParams({
+                      submissionType,
+                      driverId: subjectId,
+                    })
+                  : new URLSearchParams({
+                      submissionType,
+                      vehicleId: subjectId,
+                      plateNo: targetPlateNo,
+                    });
+              const nav = await fleetPage.goto(
+                `${origins.fleet}/supply/renewals/new?${params}`,
+                { timeout: 15_000 },
+              );
+              requireFact(
+                nav?.status() === 200 &&
+                  nav.headers()["x-drts-candidate-sha"] === runtime,
+                "R14 actual Fleet renewal new page runtime",
+              );
+              await expect(
+                fleetPage.getByText(
+                  /Showing fallback renewal targets|目前顯示 fallback 續期標的資料/,
+                ),
+              ).toHaveCount(0);
+              await fleetPage
+                .locator("#form-new-renewal-submissionType")
+                .selectOption(submissionType);
+              if (submissionType === "profile_correction") {
+                await fleetPage
+                  .locator("#form-new-renewal-subjectDriverId")
+                  .selectOption(subjectId);
+                await fleetPage
+                  .locator("#form-new-renewal-driver-licenseExpiry")
+                  .fill(renewedUntil);
+                await fleetPage
+                  .locator("#form-new-renewal-driver-registrationExpiry")
+                  .fill(renewedUntil);
+              } else {
+                await fleetPage
+                  .locator("#form-new-renewal-subjectVehicleId")
+                  .selectOption(subjectId);
+                await expect(
+                  fleetPage.locator("#form-new-renewal-vehicle-plateNo"),
+                ).toHaveValue(targetPlateNo);
+              }
+            },
+            createFleetRenewalDraft: (submissionType, subjectId) =>
+              captureR14UiPost(
+                fleetPage,
+                origins.fleet,
+                "/fleet-partner/supply-submissions/renewals",
+                runtime,
+                () =>
+                  fleetPage
+                    .getByRole("button", { name: /^(建立草稿|Create draft)$/ })
+                    .click(),
+                custodyBeforeForward(
+                  "fleet",
+                  `renewal.create.${submissionType}`,
+                  subjectId,
+                ),
+              ),
+            uploadFleetRenewalDocument: async (spec) => {
+              const detailUrl = `${origins.fleet}/supply/submissions/${encodeURIComponent(spec.submissionId)}`;
+              if (!fleetPage.url().startsWith(detailUrl)) {
+                const nav = await fleetPage.goto(detailUrl, {
+                  timeout: 15_000,
+                });
+                requireFact(
+                  nav?.status() === 200 &&
+                    nav.headers()["x-drts-candidate-sha"] === runtime,
+                  "R14 actual Fleet submission detail page runtime",
+                );
+              }
+              await expect(
+                fleetPage.getByText(
+                  /Showing fallback submission detail|目前顯示 fallback submission detail/,
+                ),
+              ).toHaveCount(0);
+              const fixture = getOperationalDocumentFixture(
+                "application/pdf",
+                `r14-demo-${spec.submissionType}-${spec.documentType}.pdf`,
+              );
+              await fleetPage
+                .locator("#upload-doc-type")
+                .selectOption(spec.documentType);
+              await fleetPage.locator("#upload-file").setInputFiles({
+                name: fixture.originalFileName,
+                mimeType: fixture.contentType,
+                buffer: fixture.bytes,
+              });
+              await fleetPage
+                .locator("#upload-effective-from")
+                .fill(spec.effectiveFrom);
+              await fleetPage
+                .locator("#upload-effective-until")
+                .fill(spec.effectiveUntil);
+              return captureR14UiPost(
+                fleetPage,
+                origins.fleet,
+                `/fleet-partner/supply-submissions/${encodeURIComponent(spec.submissionId)}/documents/confirm`,
+                runtime,
+                () =>
+                  fleetPage
+                    .getByRole("button", {
+                      name: /^(建立 upload intent 並確認|Create upload intent and confirm)$/,
+                    })
+                    .click(),
+                custodyBeforeForward(
+                  "fleet",
+                  `renewal.upload.${spec.documentType}`,
+                  spec.submissionId,
+                ),
+              );
+            },
+            readbackFleetDocument: async (submissionId, documentId) => {
+              const downloaded = await tx.call(
+                "fleet",
+                `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}/documents/${encodeURIComponent(documentId)}/download`,
+                { raw: true, expected: [200] },
+              );
+              const digest = hash(downloaded.bytes);
+              return {
+                sha256: digest,
+                readbackSha256: digest,
+                bytes: downloaded.bytes.length,
+                scanState: "clean",
+              };
+            },
+            submitFleetRenewal: (submissionId) =>
+              captureR14UiPost(
+                fleetPage,
+                origins.fleet,
+                `/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}/submit`,
+                runtime,
+                () =>
+                  fleetPage
+                    .locator('[data-drt-operation="fleet-submit"]')
+                    .click(),
+                custodyBeforeForward("fleet", "renewal.submit", submissionId),
+              ),
+            openAdminSupplyReview: async (submissionId) => {
+              const nav = await adminPage.goto(
+                `${origins.admin}/supply-review/${encodeURIComponent(submissionId)}`,
+                { timeout: 15_000 },
+              );
+              requireFact(
+                nav?.status() === 200 &&
+                  nav.headers()["x-drts-candidate-sha"] === runtime,
+                "R14 actual Admin supply-review detail page runtime",
+              );
+              await expect(
+                adminPage.locator('[data-screen-id="PSR-DETAIL-01"]'),
+              ).toBeVisible();
+            },
+            startAdminSupplyReview: (submissionId) =>
+              captureR14UiPost(
+                adminPage,
+                origins.admin,
+                `/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/start`,
+                runtime,
+                () =>
+                  adminPage
+                    .locator('[data-drt-operation="admin-start-review"]')
+                    .click(),
+                custodyBeforeForward(
+                  "admin",
+                  "renewal.review.start",
+                  submissionId,
+                ),
+              ),
+            approveAdminSupplyReview: async (submissionId) => {
+              await adminPage
+                .locator('[data-drt-operation="admin-approve"]')
+                .click();
+              return captureR14UiPost(
+                adminPage,
+                origins.admin,
+                `/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/approve`,
+                runtime,
+                () =>
+                  adminPage
+                    .getByRole("button", {
+                      name: /^(確認核可|Confirm approval)$/,
+                    })
+                    .click(),
+                custodyBeforeForward(
+                  "admin",
+                  "renewal.review.approve",
+                  submissionId,
+                ),
+              );
+            },
+            readAudit: async (submissionId) =>
+              records(
+                (await call("admin", "/control-plane-proxy/audit?auditId="))
+                  .items,
+              ).filter((a) => a.resourceId === submissionId),
+            readDispatchJobState: async (targetOrderId, targetJobId) => {
+              const currentOrder = await getOrder();
+              requireFact(
+                currentOrder.orderId === targetOrderId,
+                "R14 same main order binding",
+              );
+              const jobs = records((await opsControl("/dispatch/tasks")).items);
+              const job = jobs.find((j) => j.dispatchJobId === targetJobId);
+              requireFact(
+                job && job.orderId === targetOrderId,
+                "R14 active dispatch job required",
+              );
+              return {
+                orderStatus: text(currentOrder.status),
+                jobStatus: text(job.status),
+              };
+            },
+            readPostRenewalCandidates: async () => {
+              postRenewalCandidates = records(
+                (
+                  await opsControl(
+                    `/dispatch/tasks/${encodeURIComponent(dispatchContext.dispatchJobId)}/candidates?includeIneligible=true`,
+                  )
+                ).items,
+              );
+              return postRenewalCandidates;
+            },
+          });
+          evidence.record({
+            stage: "r14-stage-b-expiry-denial-and-renewal-dispatch-restored",
+            orderId: dispatchContext.orderId,
+            driverId: r14StageB.driverId,
+            vehicleId: r14StageB.vehicleId,
+            submissionId: r14StageB.renewals.insuranceUpdate.submissionId,
+            result: "observed",
+          });
+          return postRenewalCandidates;
+        } finally {
+          await Promise.all([fleetPage.close(), adminPage.close()]);
+        }
+      };
       await finalizer.checkpoint("first-supply-provisioning");
       try {
-        await provisionSupply(firstSupply, nonce, phone);
+        await runExistingR14("provision");
       } finally {
         driverId = firstSupply.driverId;
         vehicleId = firstSupply.vehicleId;
@@ -1606,7 +2216,13 @@ test(journeyName, async ({ browser, request }) => {
       const candidates = await opsControl(
         `/dispatch/tasks/${encodeURIComponent(dispatchJobId)}/candidates?includeIneligible=true`,
       );
-      const own = records(candidates.items).find(
+      const effectiveCandidates = await runExistingR14("dispatch", {
+        orderId,
+        dispatchJobId,
+        initialJobStatus: text(dispatched.status ?? "reserved"),
+        preCandidates: records(candidates.items),
+      });
+      const own = effectiveCandidates.find(
         (candidate) =>
           candidate.driverId === driverId && candidate.vehicleId === vehicleId,
       );
@@ -4400,6 +5016,59 @@ test(journeyName, async ({ browser, request }) => {
             caseNo: lifecycle.serviceCaseNo,
             result: "observed",
           });
+          if (typeof runR10OperationsDownloads === "function") {
+            await finalizer.checkpoint(
+              "r10-existing-six-month-operations-downloads",
+            );
+            sixMonthOperationsDownloads = await runR10OperationsDownloads({
+              context,
+              page: opsPage,
+              opsOrigin: origins.ops,
+              opsHeaders: (url) => tx.headers("ops", url),
+              role: opsRole,
+              order: completedOrderForReport,
+              entrySlug: ENTRY,
+              cases: ownCases,
+              serviceCaseNo: lifecycle.serviceCaseNo,
+              closureMonth: lifecycle.closureMonth,
+              r09From: lifecycle.from,
+              r09To: lifecycle.to,
+              readCase: async (caseNo) =>
+                (await readOps(
+                  `/complaints/${encodeURIComponent(caseNo)}`,
+                )) as unknown as Awaited<
+                  ReturnType<
+                    Parameters<typeof runR10OperationsDownloads>[0]["readCase"]
+                  >
+                >,
+              readOrder: (ownOrderId) =>
+                readOps(`/orders/${encodeURIComponent(ownOrderId)}`),
+              readTimeline: async (caseNo) =>
+                records(
+                  (
+                    await readOps(
+                      `/complaints/${encodeURIComponent(caseNo)}/timeline`,
+                    )
+                  ).items,
+                ) as unknown as Awaited<
+                  ReturnType<
+                    Parameters<
+                      typeof runR10OperationsDownloads
+                    >[0]["readTimeline"]
+                  >
+                >,
+              definitionSha: definition,
+              runtimeSha: runtime,
+              recoveryOnly: RECOVERY_ONLY,
+              evidence,
+            });
+            evidence.record({
+              stage: "r10-six-month-operations-ui-exports-verified",
+              orderId: completedOrderId,
+              caseNo: lifecycle.serviceCaseNo,
+              result: "observed",
+            });
+          }
         } finally {
           await opsPage.close();
         }
@@ -4944,6 +5613,58 @@ test(journeyName, async ({ browser, request }) => {
       browserRatingWrite: browserRatingState.current ?? null,
       uiMutationAttempts,
       r08: r08Run?.snapshot() ?? null,
+      r14StageA:
+        !RECOVERY_ONLY &&
+        r14Manifest?.decision === "stageA" &&
+        r14StageADraft &&
+        r14ExpectedContext &&
+        summary.wholeRunPassed &&
+        "steps" in summary
+          ? (() => {
+              const stepCleaned = (stageName: string) =>
+                summary.steps.some(
+                  (step) =>
+                    step.stage === stageName && step.outcome === "cleaned",
+                );
+              const driverWorkStateOffline = stepCleaned(
+                "own-synthetic-driver-offline",
+              );
+              const driverBindingRevoked = stepCleaned(
+                "own-Driver-binding-revoked",
+              );
+              const fleetSessionCleaned = stepCleaned(
+                "own-Fleet-session-key-entry-cleanup",
+              );
+              const secondSupplyProvisioned = Boolean(
+                extraSupply.driverId && extraSupply.vehicleId,
+              );
+              if (
+                !driverWorkStateOffline ||
+                !driverBindingRevoked ||
+                !fleetSessionCleaned ||
+                !completed ||
+                !secondSupplyProvisioned ||
+                cleanupErrors.length > 0
+              ) {
+                return null;
+              }
+              return buildR14StageAProjection(
+                {
+                  ...r14StageADraft,
+                  cleanup: {
+                    driverWorkStateOffline,
+                    driverBindingRevoked,
+                    fleetSessionCleaned,
+                    mainOrderCompleted: completed,
+                    secondSupplyProvisioned,
+                    cleanupErrors: [],
+                  },
+                },
+                r14ExpectedContext,
+              );
+            })()
+          : null,
+      r14StageB: !RECOVERY_ONLY ? (r14StageB ?? null) : null,
       lowRatingMatrix: RECOVERY_ONLY
         ? null
         : { scope: LOW_RATING_MATRIX_SCOPE, cases: lowRatings },
@@ -4981,6 +5702,7 @@ test(journeyName, async ({ browser, request }) => {
         : cancellations,
       displayObservations: displayObservations ?? null,
       dailyReportDownloads: dailyReportDownloads ?? null,
+      sixMonthOperationsDownloads: sixMonthOperationsDownloads ?? null,
       ...(!RECOVERY_ONLY
         ? {
             supplementalDailyReportCustody: {
