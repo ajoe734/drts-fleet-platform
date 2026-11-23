@@ -50,7 +50,18 @@ describe("backend audience from observed control-plane identities", () => {
     // Synthetic HTTP responses exercise real collection; these IDs are not a
     // production inventory receipt. Real historical evidence is replayed separately.
     const f = ownedNumeric();
-    const report = await c.collect(f.env, SHA, f.transport);
+    const report = await c.collect(f.env, SHA, async (request: any) => {
+      const response = await f.transport(request);
+      const url = new URL(request.url);
+      // Google omits unselected fields. This also lets the original collector
+      // complete normally during the old-source regression replay.
+      if (
+        url.pathname.endsWith("/backendServices") &&
+        !url.searchParams.get("fields")?.includes("name,id,")
+      )
+        for (const backend of response.body.items) delete backend.id;
+      return response;
+    });
     const saved = JSON.parse(c.serialize(report));
     expect(report.collection).toBe("complete");
     expect(report.requests).toBe(67);
