@@ -1764,6 +1764,8 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
+      - name: Verify four-portal password hosted journey fixture authenticator, redaction and boundary checks
+        run: pnpm exec vitest run tests/unit/agency-portal-business
       - name: Migrate and seed the disposable hosted database
         run: |
           PGPASSWORD=postgres psql \
