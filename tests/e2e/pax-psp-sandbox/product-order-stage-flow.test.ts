@@ -301,6 +301,8 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
             buildSignedEcpayEnvelope({
               RtnCode: 1,
               RtnMsg: "OK",
+              // CreditDetail/QueryTrade's nested lifecycle contract; this is
+              // simulated coverage, not a response from the live Stage run.
               RtnValue: {
                 status: "Authorized",
                 amount: 85,
@@ -742,6 +744,8 @@ describe.skipIf(!hostedPaymentEnabled)(
                   buildSignedEcpayEnvelope({
                     RtnCode: 1,
                     RtnMsg: "OK",
+                    // Keep the hosted fixture on the same CreditDetail
+                    // lifecycle contract as the offline refund regression.
                     RtnValue: {
                       status: "Authorized",
                       amount: 85,
