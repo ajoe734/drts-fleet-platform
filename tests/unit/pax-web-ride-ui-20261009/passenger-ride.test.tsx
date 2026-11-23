@@ -9,6 +9,9 @@ import {
   act,
 } from "@testing-library/react";
 import React from "react";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import type { PassengerRideAuthorityView } from "@drts/contracts";
 import {
   PassengerRidePage,
   RatingCard,
@@ -16,6 +19,12 @@ import {
 import { ComplaintForm } from "../../../apps/passenger-app-web/components/ride/complaint-form";
 
 const originalFetch = global.fetch;
+const appRequire = createRequire(
+  resolve("apps/passenger-app-web/package.json"),
+);
+const { AppRouterContext } = appRequire(
+  "next/dist/shared/lib/app-router-context.shared-runtime",
+) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -81,6 +90,133 @@ describe("Passenger Ride UI Acceptance", () => {
     global.fetch = originalFetch;
     cleanup();
   });
+
+  const cancelledRide: PassengerRideAuthorityView = {
+    order: {
+      orderId: "cancelled-owned-ride",
+      orderNo: "ORD-CANCELLED",
+      status: "cancelled",
+      timingMode: "scheduled",
+      requestedPickupAt: "2026-11-23T12:00:00Z",
+      pickup: { address: "Original pickup" },
+      dropoff: { address: "Original dropoff" },
+      cancelableUntil: null,
+      cancelledAt: "2026-11-23T11:00:00Z",
+      completedAt: null,
+    },
+    assignment: null,
+    rating: null,
+    payment: null,
+    receipt: null,
+    actions: {
+      canCancel: false,
+      canContact: false,
+      canRate: false,
+      canReadReceipt: false,
+    },
+  };
+
+  it("opens history or normal booking from an owned cancelled ride without creating or changing an order", async () => {
+    fetchResponse = { ride: cancelledRide };
+    const router = {
+      bfcacheId: "cancelled-ride-test-route",
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      refresh: vi.fn(),
+      prefetch: vi.fn(),
+    };
+    render(
+      <AppRouterContext.Provider value={router}>
+        <PassengerRidePage token={cancelledRide.order.orderId} kind="ride" />
+      </AppRouterContext.Provider>,
+    );
+
+    await screen.findByText("行程已取消");
+    expect(fetchCalls).toEqual([
+      {
+        url: "/api/passenger-app/rides/cancelled-owned-ride",
+        method: "GET",
+        body: null,
+      },
+    ]);
+    const history = screen.getByRole("link", { name: "行程紀錄" });
+    const booking = screen.getByRole("link", { name: "預約叫車" });
+    expect(history.getAttribute("href")).toBe("/rides");
+    expect(booking.getAttribute("href")).toBe("/");
+
+    await act(async () => {
+      fireEvent.click(history);
+      fireEvent.click(booking);
+    });
+    expect(router.push.mock.calls.map(([href]) => href)).toEqual([
+      "/rides",
+      "/",
+    ]);
+    expect(fetchCalls).toHaveLength(1);
+    expect(screen.getByText("行程已取消")).toBeTruthy();
+    expect(
+      screen.getAllByText(cancelledRide.order.orderNo).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "取消行程" })).toBeNull();
+  });
+
+  it("keeps the cancelled token page on its existing support entry without account booking or history actions", async () => {
+    fetchResponse = { ride: cancelledRide };
+    render(
+      <PassengerRidePage
+        token="shared-cancelled-token"
+        authMode="token"
+        kind="ride"
+      />,
+    );
+
+    await screen.findByText("行程已取消");
+    expect(fetchCalls).toEqual([
+      {
+        url: "/api/passenger-rides/shared-cancelled-token",
+        method: "GET",
+        body: null,
+      },
+    ]);
+    expect(
+      screen
+        .getAllByRole("link", { name: "客服 02-2944-0985" })
+        .every((link) => link.getAttribute("href") === "tel:02-2944-0985"),
+    ).toBe(true);
+    expect(screen.queryByRole("link", { name: "行程紀錄" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "預約叫車" })).toBeNull();
+    expect(screen.queryByText("客訴與遺失物表單")).toBeNull();
+  });
+
+  it.each(["id", "token"] as const)(
+    "does not expose cancelled ride actions when the %s authority read is forbidden",
+    async (authMode) => {
+      const deniedFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          error: { code: "FORBIDDEN", message: "Forbidden" },
+        }),
+      });
+      vi.stubGlobal("fetch", deniedFetch);
+      render(
+        <PassengerRidePage
+          token="another-passengers-ride"
+          authMode={authMode}
+          kind="ride"
+        />,
+      );
+
+      await screen.findByText("無法取得行程資料");
+      expect(screen.queryByText("行程已取消")).toBeNull();
+      expect(screen.queryByRole("link", { name: "行程紀錄" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "預約叫車" })).toBeNull();
+      expect(deniedFetch).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances).toHaveLength(0);
+    },
+  );
 
   it("pax-web-ride_p5_live_page - reconnect and expiry handling", async () => {
     const view = {
