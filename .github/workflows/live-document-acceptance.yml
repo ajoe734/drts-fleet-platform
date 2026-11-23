@@ -105,6 +105,8 @@ jobs:
       WORKFLOW_SHA: ${{ github.sha }}
       SR_LIVE_DOC_RUNNER_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/evidence-runner-record.json
       SR_LIVE_DOC_SHARED_DEV_ROUNDTRIP_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json
+      SR_LIVE_DOC_EXECUTION_LOG_PATH: ${{ github.workspace }}/.artifacts/live-document-acceptance/execution-log.txt
+      SR_LIVE_DOC_REMEDIATE_TRANSIENT_UAT_FEE_PLAN: "true"
       SR_LIVE_DOC_LIVE_TARGET_ORIGIN: ${{ github.event.inputs.live_target_origin }}
       SR_LIVE_DOC_LIVE_API_ORIGIN: ${{ github.event.inputs.live_api_origin }}
       SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN: ${{ github.event.inputs.live_tenant_console_origin }}
@@ -341,8 +343,63 @@ jobs:
 
           report_path = Path(".artifacts/live-document-acceptance/test-report.json")
           roundtrip_path = Path(".artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json")
+          exec_log_path = Path(".artifacts/live-document-acceptance/execution-log.txt")
           status_path = Path(".artifacts/live-document-acceptance/run-status.json")
           status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          import re
+          secret_env_keys = [
+              "SR_LIVE_DOC_ID_TOKEN_TARGET",
+              "SR_LIVE_DOC_ID_TOKEN_API",
+              "SR_LIVE_DOC_ID_TOKEN_TENANT",
+              "SR_LIVE_DOC_ID_TOKEN_PLATFORM",
+              "SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER",
+              "SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT",
+              "SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT",
+              "SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN",
+              "SR_LIVE_DOC_LIVE_SESSION_COOKIE",
+          ]
+          secret_values = sorted(
+              {
+                  os.environ.get(k, "").strip()
+                  for k in secret_env_keys
+                  if os.environ.get(k, "").strip()
+              },
+              key=len,
+              reverse=True,
+          )
+
+          def redact_artifact_text(content: str) -> str:
+              for sec in secret_values:
+                  content = content.replace(sec, "[REDACTED]")
+              content = re.sub(r"::add-mask::[^\r\n]*", "::add-mask::[REDACTED]", content)
+              content = re.sub(
+                  r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+                  "[REDACTED_JWT]",
+                  content,
+              )
+              content = re.sub(
+                  r"(Bearer\s+)(?!\[REDACTED)[A-Za-z0-9._~+/=-]+",
+                  r"\1[REDACTED]",
+                  content,
+                  flags=re.IGNORECASE,
+              )
+              content = re.sub(
+                  r"\b(?:regcode|drvreg|drvinv|drvrefresh)_[A-Za-z0-9_-]+\b",
+                  "[REDACTED_REGISTRATION_CODE]",
+                  content,
+              )
+              content = re.sub(
+                  r"\breg-code-[A-Za-z0-9_-]+\b",
+                  "[REDACTED_REGISTRATION_CODE]",
+                  content,
+              )
+              return content
+
+          for artifact_file in [exec_log_path, roundtrip_path]:
+              if artifact_file.exists():
+                  sanitized = redact_artifact_text(artifact_file.read_text(encoding="utf-8", errors="replace"))
+                  artifact_file.write_text(sanitized, encoding="utf-8")
 
           install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
           harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")

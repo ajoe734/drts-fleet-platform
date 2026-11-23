@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CANONICAL_EICAR_BYTES,
   CANONICAL_EICAR_SHA256,
@@ -9,6 +9,7 @@ import {
   SYNTHETIC_CLEAN_PDF_SHA256,
   inspectGcsObjectGenerationAndBytes,
   inspectSharedDevProviderActivation,
+  redactExecutionLogText,
   runSharedDevArtifactRoundtrip,
   sha256Hex,
   // @ts-expect-error -- TS7016: no declaration file for shared-dev-artifact-roundtrip.mjs
@@ -33,6 +34,24 @@ const PLACARD_PDF_BYTES = Buffer.from(
 );
 const PLACARD_MANIFEST_HASH = sha256Hex(PLACARD_PDF_BYTES);
 
+interface MockFeePlanItem {
+  fee_plan_id?: string;
+  plan_name?: string;
+  version?: string;
+  status?: string;
+  service_fee_bps?: number;
+  reimbursement_mode?: string;
+}
+
+const APPROVED_FIXTURE_FEE_PLAN: MockFeePlanItem = {
+  fee_plan_id: 'fee-plan-fixture-001',
+  plan_name: 'fixture-platform-funded-reimbursement',
+  version: 'v1',
+  status: 'published',
+  service_fee_bps: 0,
+  reimbursement_mode: 'platform_funded',
+};
+
 interface MockHarnessOptions {
   providerEnvOverrides?: Record<string, string>;
   cleanInitialScanState?: 'clean' | 'pending_scan';
@@ -49,6 +68,13 @@ interface MockHarnessOptions {
   gcsPlacardBytes?: Buffer;
   publicInfoItems?: Array<{ publicInfoVersionId: string; status: string }>;
   responseCandidateShaHeader?: string;
+  feePlanItems?: MockFeePlanItem[];
+  feePlanReadbackSequence?: MockFeePlanItem[][];
+  placardCreateStatus?: number;
+  placardCreatePayload?: unknown;
+  opsJwtToken?: string;
+  driverJwtToken?: string;
+  registrationCode?: string;
 }
 
 function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
@@ -67,9 +93,14 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
 
   let cleanScans = 0;
   let eicarScans = 0;
+  let feePlanGetCount = 0;
   const currentCleanStagedRef = 'staged-clean-001';
   const currentEicarStagedRef = 'staged-eicar-001';
   const currentPlacardVersionId = 'placard-version-uat-001';
+  const opsJwtToken = options.opsJwtToken ?? 'ops-jwt-token-001';
+  const driverJwtToken = options.driverJwtToken ?? 'driver-jwt-token-001';
+  const registrationCode =
+    options.registrationCode ?? 'reg-code-drv-demo-001';
 
   const envList = [
     { name: 'DRTS_CANDIDATE_SHA', value: OBSERVED_RUNTIME_SHA },
@@ -283,7 +314,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     ) {
       return jsonResponse(201, {
         data: {
-          token: 'ops-jwt-token-001',
+          token: opsJwtToken,
           sessionId: 'ops-session-001',
         },
       });
@@ -294,7 +325,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       parsedUrl.pathname === '/api/auth/session' &&
       method === 'GET'
     ) {
-      if (headers.Authorization === 'Bearer ops-jwt-token-001') {
+      if (headers.Authorization === `Bearer ${opsJwtToken}`) {
         return jsonResponse(200, {
           data: {
             active: true,
@@ -315,7 +346,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
           },
         });
       }
-      if (headers.Authorization === 'Bearer driver-jwt-token-001') {
+      if (headers.Authorization === `Bearer ${driverJwtToken}`) {
         return jsonResponse(200, {
           data: {
             active: true,
@@ -339,7 +370,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       method === 'POST'
     ) {
       return jsonResponse(201, {
-        registration_code: 'reg-code-drv-demo-001',
+        registration_code: registrationCode,
         driver_id: 'drv-demo-001',
       });
     }
@@ -350,7 +381,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       method === 'POST'
     ) {
       return jsonResponse(201, {
-        access_token: 'driver-jwt-token-001',
+        access_token: driverJwtToken,
         driver_id: 'drv-demo-001',
       });
     }
@@ -360,15 +391,22 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       parsedUrl.pathname === '/api/driver-fee-plans' &&
       method === 'GET'
     ) {
+      const sequenceItems =
+        options.feePlanReadbackSequence?.[feePlanGetCount];
+      feePlanGetCount += 1;
       return jsonResponse(200, {
-        items: [
-          {
-            planCode: 'fixture-platform-funded-reimbursement',
-            versionCode: 'v1',
-            status: 'published',
-          },
+        items: sequenceItems ?? options.feePlanItems ?? [
+          APPROVED_FIXTURE_FEE_PLAN,
         ],
       });
+    }
+
+    if (
+      parsedUrl.origin === API_ORIGIN &&
+      parsedUrl.pathname === '/api/driver-fee-plans/publish' &&
+      method === 'POST'
+    ) {
+      return jsonResponse(201, {});
     }
 
     if (
@@ -570,6 +608,17 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       parsedUrl.pathname === '/api/platform-admin/placards' &&
       method === 'POST'
     ) {
+      if (options.placardCreateStatus && options.placardCreateStatus !== 201) {
+        return jsonResponse(
+          options.placardCreateStatus,
+          options.placardCreatePayload ?? {
+            error: {
+              code: 'PLACARD_GENERATION_FAILED',
+              message: 'Failed to create placard',
+            },
+          }
+        );
+      }
       return jsonResponse(201, {
         placard_version_id: currentPlacardVersionId,
         artifact_download_url: `/downloads/placard/${currentPlacardVersionId}?expires=1893456000&signature=sig-placard`,
@@ -836,5 +885,366 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
         scanPollIntervalMs: 1,
       })
     ).rejects.toThrow(/GCS placard artifact object .* byte\/hash mismatch/);
+  });
+
+  it('R1: never emits raw secrets or ::add-mask:: values into console stdout/stderr, execution-log.txt, or evidence JSON on success and failure', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sr-live-doc-r1-redaction-'));
+    tempDirs.push(dir);
+    const successEvidencePath = join(dir, 'success-evidence.json');
+    const successLogPath = join(dir, 'success-execution-log.txt');
+    const failureEvidencePath = join(dir, 'failure-evidence.json');
+    const failureLogPath = join(dir, 'failure-execution-log.txt');
+
+    const apiWifJwt = 'eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJhcGkifQ.wifApiSigSecret1';
+    const platformWifJwt =
+      'eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJwbGF0Zm9ybSJ9.wifPlatformSigSecret2';
+    const opsJwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcHMifQ.opsSessionSigSecret3';
+    const driverJwt =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJdrvIn0.driverSessionSigSecret4';
+    const regCode = 'regcode_e3b0c44298fc1c149afbf4c8996fb924';
+    const allSecrets = [
+      apiWifJwt,
+      platformWifJwt,
+      opsJwt,
+      driverJwt,
+      regCode,
+    ];
+
+    // Pre-seed execution-log.txt as if tee captured stdout prior to finalization
+    writeFileSync(
+      successLogPath,
+      `Runner start\n::add-mask::${apiWifJwt}\nBearer ${opsJwt}\nreg=${regCode}\n`,
+      'utf8'
+    );
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const successHarness = createMockSharedDevHarness({
+        opsJwtToken: opsJwt,
+        driverJwtToken: driverJwt,
+        registrationCode: regCode,
+      });
+
+      // Omit options.mask to exercise the real default mask behavior
+      const successResult = await runSharedDevArtifactRoundtrip({
+        evidencePath: successEvidencePath,
+        executionLogPath: successLogPath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: apiWifJwt,
+        platformIdToken: platformWifJwt,
+        fetchImpl: successHarness.fetchImpl,
+        execFileImpl: successHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      });
+
+      expect(successResult.status).toBe('passed');
+
+      const consoleOutput = [
+        ...logSpy.mock.calls.map((args) => args.join(' ')),
+        ...errorSpy.mock.calls.map((args) => args.join(' ')),
+      ].join('\n');
+      const persistedSuccessLog = readFileSync(successLogPath, 'utf8');
+      const persistedSuccessEvidence = readFileSync(
+        successEvidencePath,
+        'utf8'
+      );
+
+      for (const secret of allSecrets) {
+        expect(consoleOutput).not.toContain(secret);
+        expect(persistedSuccessLog).not.toContain(secret);
+        expect(persistedSuccessEvidence).not.toContain(secret);
+      }
+      expect(consoleOutput).not.toContain('::add-mask::');
+      expect(persistedSuccessLog).toContain('::add-mask::[REDACTED]');
+      expect(persistedSuccessLog).not.toMatch(
+        /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/
+      );
+
+      // Failure path where upstream error body echoes all 5 credentials and tee log captured them
+      writeFileSync(
+        failureLogPath,
+        `Failure run\n::add-mask::${platformWifJwt}\n::add-mask::${driverJwt}\n::add-mask::${regCode}\n`,
+        'utf8'
+      );
+
+      const failureHarness = createMockSharedDevHarness({
+        opsJwtToken: opsJwt,
+        driverJwtToken: driverJwt,
+        registrationCode: regCode,
+        placardCreateStatus: 500,
+        placardCreatePayload: {
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: `Debug dump: api=${apiWifJwt} platform=${platformWifJwt} ops=${opsJwt} driver=${driverJwt} code=${regCode}`,
+          },
+        },
+      });
+
+      await expect(
+        runSharedDevArtifactRoundtrip({
+          evidencePath: failureEvidencePath,
+          executionLogPath: failureLogPath,
+          candidateSha: CANDIDATE_SHA,
+          apiOrigin: API_ORIGIN,
+          platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+          projectId: PROJECT_ID,
+          region: REGION,
+          apiIdToken: apiWifJwt,
+          platformIdToken: platformWifJwt,
+          fetchImpl: failureHarness.fetchImpl,
+          execFileImpl: failureHarness.execFileImpl,
+          scanPollIntervalMs: 1,
+        })
+      ).rejects.toThrow(/Failed to create controlled placard version/);
+
+      const persistedFailureLog = readFileSync(failureLogPath, 'utf8');
+      const persistedFailureEvidence = readFileSync(
+        failureEvidencePath,
+        'utf8'
+      );
+
+      for (const secret of allSecrets) {
+        expect(persistedFailureLog).not.toContain(secret);
+        expect(persistedFailureEvidence).not.toContain(secret);
+      }
+      expect(persistedFailureLog).not.toMatch(
+        /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/
+      );
+      expect(persistedFailureEvidence).not.toMatch(
+        /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/
+      );
+      expect(redactExecutionLogText(`::add-mask::${regCode}`, [regCode])).toBe(
+        '::add-mask::[REDACTED]'
+      );
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('R2: reuses valid active fixture-platform-funded-reimbursement/v1 (0 bps, platform_funded) without publishing and uses deterministic statement idempotency key', async () => {
+    const evidencePath = makeTempEvidencePath();
+    const harness = createMockSharedDevHarness({
+      feePlanItems: [APPROVED_FIXTURE_FEE_PLAN],
+    });
+
+    const result = await runSharedDevArtifactRoundtrip({
+      evidencePath,
+      apiOrigin: API_ORIGIN,
+      platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+      projectId: PROJECT_ID,
+      region: REGION,
+      apiIdToken: 'wif-id-token-api',
+      platformIdToken: 'wif-id-token-platform',
+      fetchImpl: harness.fetchImpl,
+      execFileImpl: harness.execFileImpl,
+      scanPollIntervalMs: 1,
+    });
+
+    expect(result.status).toBe('passed');
+    const publishCalls = harness.calls.fetch.filter((call) =>
+      call.url.endsWith('/api/driver-fee-plans/publish')
+    );
+    expect(publishCalls).toHaveLength(0);
+
+    const generateCalls = harness.calls.fetch.filter((call) =>
+      call.url.endsWith('/api/driver-statements/generate')
+    );
+    expect(generateCalls).toHaveLength(1);
+    expect(generateCalls[0]?.headers['Idempotency-Key']).toBe(
+      'fixture-driver-statements-drv-demo-001-2026-03'
+    );
+    expect(JSON.parse(generateCalls[0]?.body ?? '{}')).toEqual({
+      driverId: 'drv-demo-001',
+      periodMonth: '2026-03',
+    });
+  });
+
+  it('R2: publishes approved fixture-platform-funded-reimbursement/v1 (0 bps, platform_funded) when no fee plan exists and confirms activation via readback', async () => {
+    const evidencePath = makeTempEvidencePath();
+    const harness = createMockSharedDevHarness({
+      feePlanReadbackSequence: [[], [APPROVED_FIXTURE_FEE_PLAN]],
+    });
+
+    const result = await runSharedDevArtifactRoundtrip({
+      evidencePath,
+      apiOrigin: API_ORIGIN,
+      platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+      projectId: PROJECT_ID,
+      region: REGION,
+      apiIdToken: 'wif-id-token-api',
+      platformIdToken: 'wif-id-token-platform',
+      fetchImpl: harness.fetchImpl,
+      execFileImpl: harness.execFileImpl,
+      scanPollIntervalMs: 1,
+    });
+
+    expect(result.status).toBe('passed');
+    const publishCalls = harness.calls.fetch.filter((call) =>
+      call.url.endsWith('/api/driver-fee-plans/publish')
+    );
+    expect(publishCalls).toHaveLength(1);
+    expect(JSON.parse(publishCalls[0]?.body ?? '{}')).toEqual({
+      planName: 'fixture-platform-funded-reimbursement',
+      version: 'v1',
+      serviceFeeBps: 0,
+      reimbursementMode: 'platform_funded',
+    });
+  });
+
+  it('R2: fails closed when a different active fee plan shadows fixture-platform-funded-reimbursement/v1 instead of publishing a new plan', async () => {
+    const evidencePath = makeTempEvidencePath();
+    const harness = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          fee_plan_id: 'fee-plan-other-009',
+          plan_name: 'someone-elses-plan',
+          version: 'v9',
+          status: 'published',
+          service_fee_bps: 1500,
+          reimbursement_mode: 'mixed',
+        },
+        APPROVED_FIXTURE_FEE_PLAN,
+      ],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: harness.fetchImpl,
+        execFileImpl: harness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /already exists but a different, more recently published fee plan \(someone-elses-plan\/v9\) is now active/
+    );
+
+    const publishCalls = harness.calls.fetch.filter((call) =>
+      call.url.endsWith('/api/driver-fee-plans/publish')
+    );
+    const generateCalls = harness.calls.fetch.filter((call) =>
+      call.url.endsWith('/api/driver-statements/generate')
+    );
+    expect(publishCalls).toHaveLength(0);
+    expect(generateCalls).toHaveLength(0);
+
+    const persisted = JSON.parse(readFileSync(evidencePath, 'utf8'));
+    expect(persisted.status).toBe('failed');
+    expect(persisted.missing).toContain(
+      'driver_fee_plan:fixture-platform-funded-reimbursement/v1:shadowed'
+    );
+    expect(persisted.teardown).toEqual({
+      driver_invitation_revoked: true,
+      ops_session_revoked: true,
+    });
+  });
+
+  it('R2: fails closed when active fixture-platform-funded-reimbursement/v1 has mismatched economics or when a conflicting active plan is present', async () => {
+    const evidencePathBps = makeTempEvidencePath();
+    const harnessMismatchedBps = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          ...APPROVED_FIXTURE_FEE_PLAN,
+          service_fee_bps: 1200,
+          reimbursement_mode: 'platform_funded',
+        },
+      ],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: evidencePathBps,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: harnessMismatchedBps.fetchImpl,
+        execFileImpl: harnessMismatchedBps.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(/does not carry the fixture's expected content/);
+
+    expect(
+      harnessMismatchedBps.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-fee-plans/publish')
+      )
+    ).toHaveLength(0);
+
+    const evidencePathMode = makeTempEvidencePath();
+    const harnessMismatchedMode = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          ...APPROVED_FIXTURE_FEE_PLAN,
+          service_fee_bps: 0,
+          reimbursement_mode: 'mixed',
+        },
+      ],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: evidencePathMode,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: harnessMismatchedMode.fetchImpl,
+        execFileImpl: harnessMismatchedMode.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(/does not carry the fixture's expected content/);
+
+    const evidencePathConflicting = makeTempEvidencePath();
+    const harnessConflicting = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          fee_plan_id: 'fee-plan-other-009',
+          plan_name: 'someone-elses-plan',
+          version: 'v9',
+          status: 'published',
+          service_fee_bps: 1500,
+          reimbursement_mode: 'mixed',
+        },
+      ],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: evidencePathConflicting,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: harnessConflicting.fetchImpl,
+        execFileImpl: harnessConflicting.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Conflicting active fee plan someone-elses-plan\/v9 is currently active/
+    );
+
+    expect(
+      harnessConflicting.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-fee-plans/publish')
+      )
+    ).toHaveLength(0);
   });
 });

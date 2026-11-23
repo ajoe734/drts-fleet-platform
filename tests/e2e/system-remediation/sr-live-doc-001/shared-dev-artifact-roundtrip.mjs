@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -48,6 +48,12 @@ export const REQUIRED_PROVIDER_ACTIVATION_ENV = Object.freeze({
   REMITTANCE_PROOF_SCANNER_PROVIDER: 'cloud-run-clamd',
 });
 
+export const FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME =
+  'fixture-platform-funded-reimbursement';
+export const FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION = 'v1';
+export const FIXTURE_REIMBURSEMENT_SERVICE_FEE_BPS = 0;
+export const FIXTURE_REIMBURSEMENT_MODE = 'platform_funded';
+
 export function sha256Hex(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
@@ -85,17 +91,87 @@ function unwrapEnvelope(payload) {
   return payload;
 }
 
-function sanitizeDiagnosticSnippet(text) {
+export function redactExecutionLogText(text, secrets = []) {
   if (typeof text !== 'string' || !text) {
     return '';
   }
-  return text
+  let sanitized = text;
+  const normalizedSecrets = Array.from(
+    new Set(
+      Array.from(secrets ?? [])
+        .filter((item) => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim())
+    )
+  ).sort((a, b) => b.length - a.length);
+
+  for (const secret of normalizedSecrets) {
+    sanitized = sanitized.split(secret).join('[REDACTED]');
+  }
+
+  return sanitized
+    .replace(/::add-mask::[^\r\n]*/g, '::add-mask::[REDACTED]')
     .replace(
-      /("(?:token|access_token|accessToken|refresh_token|refreshToken|registration_code|registrationCode|id_token|idToken)"\s*:\s*)"[^"]*"/gi,
+      /("(?:token|access_token|accessToken|refresh_token|refreshToken|registration_code|registrationCode|id_token|idToken|session_cookie|sessionCookie|cookie)"\s*:\s*)"[^"]*"/gi,
       '$1"[REDACTED]"'
     )
-    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]')
-    .slice(0, 300);
+    .replace(
+      /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+      '[REDACTED_JWT]'
+    )
+    .replace(/(Bearer\s+)(?!\[REDACTED)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]')
+    .replace(
+      /\b(?:regcode|drvreg|drvinv|drvrefresh)_[A-Za-z0-9_-]+\b/g,
+      '[REDACTED_REGISTRATION_CODE]'
+    )
+    .replace(/\breg-code-[A-Za-z0-9_-]+\b/g, '[REDACTED_REGISTRATION_CODE]');
+}
+
+function sanitizeDiagnosticSnippet(text, secrets = []) {
+  return redactExecutionLogText(text, secrets).slice(0, 300);
+}
+
+function getFeePlanName(plan) {
+  return plan?.plan_name ?? plan?.planName ?? null;
+}
+
+function getFeePlanVersion(plan) {
+  return plan?.version ?? null;
+}
+
+function getFeePlanServiceFeeBps(plan) {
+  return plan?.service_fee_bps ?? plan?.serviceFeeBps;
+}
+
+function getFeePlanReimbursementMode(plan) {
+  return plan?.reimbursement_mode ?? plan?.reimbursementMode ?? null;
+}
+
+function isApprovedFixtureFeePlanIdentity(plan) {
+  return Boolean(
+    plan &&
+      getFeePlanName(plan) === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
+      getFeePlanVersion(plan) === FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION
+  );
+}
+
+function assertApprovedFixtureFeePlanContentMatches(plan) {
+  const planName = getFeePlanName(plan) ?? '<unknown>';
+  const version = getFeePlanVersion(plan) ?? '<unknown>';
+  const status = plan?.status ?? null;
+  const serviceFeeBps = getFeePlanServiceFeeBps(plan);
+  const reimbursementMode = getFeePlanReimbursementMode(plan);
+  if (
+    status !== 'published' ||
+    serviceFeeBps !== FIXTURE_REIMBURSEMENT_SERVICE_FEE_BPS ||
+    reimbursementMode !== FIXTURE_REIMBURSEMENT_MODE
+  ) {
+    throw new Error(
+      `Active fee plan ${planName}/${version} does not carry the fixture's expected content ` +
+        `(status: "published", serviceFeeBps: ${FIXTURE_REIMBURSEMENT_SERVICE_FEE_BPS}, reimbursementMode: "${FIXTURE_REIMBURSEMENT_MODE}"); ` +
+        `actual status=${status}, service_fee_bps=${serviceFeeBps}, reimbursement_mode=${reimbursementMode}. ` +
+        'Reusing it would generate statements under the wrong fee/reimbursement economics; use a fresh fixture plan name/version instead of reusing this one.'
+    );
+  }
 }
 
 function extractConsumedMarkerContentHash(bytes) {
@@ -372,19 +448,49 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const execFileImpl = options.execFileImpl ?? defaultExecFile;
-  const mask =
-    options.mask ??
-    ((secret) => {
-      if (typeof secret === 'string' && secret.trim()) {
-        console.log(`::add-mask::${secret.trim()}`);
+  const trackedSecrets = new Set();
+  const mask = (secret) => {
+    if (typeof secret === 'string' && secret.trim()) {
+      const trimmed = secret.trim();
+      trackedSecrets.add(trimmed);
+      if (typeof options.mask === 'function') {
+        options.mask(trimmed);
       }
-    });
+    }
+  };
 
   const evidencePath = resolve(
     options.evidencePath ??
       env.SR_LIVE_DOC_SHARED_DEV_ROUNDTRIP_EVIDENCE ??
       '.artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json'
   );
+  const executionLogPathRaw = (
+    options.executionLogPath ??
+    env.SR_LIVE_DOC_EXECUTION_LOG_PATH ??
+    ''
+  ).trim();
+  const executionLogPath = executionLogPathRaw
+    ? resolve(executionLogPathRaw)
+    : null;
+
+  function sanitizeText(text) {
+    return sanitizeDiagnosticSnippet(text, trackedSecrets);
+  }
+
+  function sanitizePersistedExecutionLog() {
+    if (!executionLogPath || !existsSync(executionLogPath)) {
+      return;
+    }
+    try {
+      const currentLog = readFileSync(executionLogPath, 'utf8');
+      const redactedLog = redactExecutionLogText(currentLog, trackedSecrets);
+      if (redactedLog !== currentLog) {
+        writeFileSync(executionLogPath, redactedLog, 'utf8');
+      }
+    } catch {
+      // Ignore read/write errors on optional log path
+    }
+  }
 
   const candidateSha = (
     options.candidateSha ??
@@ -554,7 +660,13 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
 
   function writeEvidenceFile() {
     mkdirSync(dirname(evidencePath), { recursive: true });
-    writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+    const serialized = `${JSON.stringify(evidence, null, 2)}\n`;
+    writeFileSync(
+      evidencePath,
+      redactExecutionLogText(serialized, trackedSecrets),
+      'utf8'
+    );
+    sanitizePersistedExecutionLog();
   }
 
   if (missing.length > 0) {
@@ -627,7 +739,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       ) {
         evidence.missing.push('platform_admin_ops_session');
         throw new Error(
-          `Failed to mint platform_admin session via ${tokenUrl}: status=${tokenResp.status} body=${sanitizeDiagnosticSnippet(tokenText)}`
+          `Failed to mint platform_admin session via ${tokenUrl}: status=${tokenResp.status} body=${sanitizeText(tokenText)}`
         );
       }
       opsToken = String(mintedOpsToken).trim();
@@ -655,7 +767,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     if (opsSessionResp.status !== 200 || !opsIdentity) {
       evidence.missing.push('verified_platform_admin_ops_session');
       throw new Error(
-        `Failed to verify Ops session at ${apiOrigin}/api/auth/session: status=${opsSessionResp.status} body=${sanitizeDiagnosticSnippet(opsSessionText)}`
+        `Failed to verify Ops session at ${apiOrigin}/api/auth/session: status=${opsSessionResp.status} body=${sanitizeText(opsSessionText)}`
       );
     }
     const opsScopes = Array.isArray(opsIdentity.scopes)
@@ -732,7 +844,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       ) {
         evidence.missing.push(`driver_device_invitation:${driverId}`);
         throw new Error(
-          `Failed to issue driver device invitation for ${driverId}: status=${inviteResp.status} body=${sanitizeDiagnosticSnippet(inviteText)}`
+          `Failed to issue driver device invitation for ${driverId}: status=${inviteResp.status} body=${sanitizeText(inviteText)}`
         );
       }
       issuedDriverRegistrationCode = String(registrationCode).trim();
@@ -846,7 +958,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       ) {
         evidence.missing.push(`driver_device_session:${driverId}`);
         throw new Error(
-          `Failed to register driver device session for ${driverId}: status=${registerResp.status} body=${sanitizeDiagnosticSnippet(registerText)}`
+          `Failed to register driver device session for ${driverId}: status=${registerResp.status} body=${sanitizeText(registerText)}`
         );
       }
       driverToken = String(mintedDriverToken).trim();
@@ -872,7 +984,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     if (driverSessionResp.status !== 200 || !driverIdentity) {
       evidence.missing.push(`verified_driver_session:${driverId}`);
       throw new Error(
-        `Failed to verify Driver session at ${apiOrigin}/api/auth/session: status=${driverSessionResp.status} body=${sanitizeDiagnosticSnippet(driverSessionText)}`
+        `Failed to verify Driver session at ${apiOrigin}/api/auth/session: status=${driverSessionResp.status} body=${sanitizeText(driverSessionText)}`
       );
     }
     const driverScopes = Array.isArray(driverIdentity.scopes)
@@ -913,44 +1025,83 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     };
 
     // 4. Ensure & verify synthetic reimbursement batch for drv-demo-001 and public-info-demo-001
-    const feePlansResp = await fetchImpl(`${apiOrigin}/api/driver-fee-plans`, {
-      method: 'GET',
-      headers: buildApiHeaders({
-        apiIdToken,
-        appSessionToken: opsToken,
-      }),
-    });
-    assertObservedRuntimeHeader(
-      feePlansResp,
-      '/api/driver-fee-plans',
-      observedRuntimeSha
-    );
-    const { json: feePlansRaw, text: feePlansText } =
-      await readResponseJsonOrText(feePlansResp);
-    const feePlansData = unwrapEnvelope(feePlansRaw);
-    if (feePlansResp.status !== 200 || !Array.isArray(feePlansData?.items)) {
-      throw new Error(
-        `Failed to list driver fee plans: status=${feePlansResp.status} body=${sanitizeDiagnosticSnippet(feePlansText)}`
+    // Reuse the approved fixture contract from tests/support/signed-session-fixture.ts:
+    // - Require fixture-platform-funded-reimbursement/v1 with exact economics (serviceFeeBps: 0, reimbursementMode: "platform_funded").
+    // - Fail closed when a different active plan shadows fixture-platform-funded-reimbursement/v1 or when a conflicting non-fixture active plan is present.
+    const listDriverFeePlans = async (label = '/api/driver-fee-plans') => {
+      const feePlansResp = await fetchImpl(
+        `${apiOrigin}/api/driver-fee-plans`,
+        {
+          method: 'GET',
+          headers: buildApiHeaders({
+            apiIdToken,
+            appSessionToken: opsToken,
+          }),
+        }
       );
-    }
-    const activeTopPlan = feePlansData.items[0] ?? null;
-    const activeTopPlanMode =
-      activeTopPlan?.reimbursement_mode ??
-      activeTopPlan?.reimbursementMode ??
-      null;
-    const activeTopPlanCode =
-      activeTopPlan?.plan_code ??
-      activeTopPlan?.planCode ??
-      activeTopPlan?.plan_name ??
-      activeTopPlan?.planName ??
-      null;
-    const fixturePlanIsTopActive = Boolean(
-      activeTopPlan &&
-        activeTopPlan.status === 'published' &&
-        (activeTopPlanMode === 'platform_funded' ||
-          activeTopPlanCode === 'fixture-platform-funded-reimbursement')
-    );
-    if (!fixturePlanIsTopActive) {
+      assertObservedRuntimeHeader(feePlansResp, label, observedRuntimeSha);
+      const { json: feePlansRaw, text: feePlansText } =
+        await readResponseJsonOrText(feePlansResp);
+      const feePlansData = unwrapEnvelope(feePlansRaw);
+      if (feePlansResp.status !== 200 || !Array.isArray(feePlansData?.items)) {
+        throw new Error(
+          `Failed to list driver fee plans: status=${feePlansResp.status} body=${sanitizeText(feePlansText)}`
+        );
+      }
+      return feePlansData.items;
+    };
+
+    const existingPlans = await listDriverFeePlans('/api/driver-fee-plans');
+    const activePlan = existingPlans[0];
+    const isActivePlanOurs = isApprovedFixtureFeePlanIdentity(activePlan);
+
+    if (isActivePlanOurs) {
+      try {
+        assertApprovedFixtureFeePlanContentMatches(activePlan);
+      } catch (mismatchError) {
+        evidence.missing.push(
+          `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}:economics_mismatch`
+        );
+        throw mismatchError;
+      }
+    } else {
+      const shadowedByOtherActivePlan = existingPlans.some((plan) =>
+        isApprovedFixtureFeePlanIdentity(plan)
+      );
+      if (shadowedByOtherActivePlan) {
+        evidence.missing.push(
+          `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}:shadowed`
+        );
+        throw new Error(
+          `Fixture fee plan ${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+            'already exists but a different, more recently published fee plan ' +
+            `(${activePlan ? `${getFeePlanName(activePlan)}/${getFeePlanVersion(activePlan)}` : 'none'}) is now active; ` +
+            'generateDriverStatements always selects driverFeePlans[0], so publishing ' +
+            'again would only hit the real (invisible) FEE_PLAN_IMMUTABLE conflict and ' +
+            'leave the wrong plan active. Use a fresh fixture plan name/version.'
+        );
+      }
+
+      const isTransientPriorUatFixture =
+        activePlan !== undefined &&
+        getFeePlanName(activePlan) === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
+        /^2026\.03-uat-[0-9a-f]{8}$/i.test(
+          String(getFeePlanVersion(activePlan) ?? '')
+        ) &&
+        env.SR_LIVE_DOC_REMEDIATE_TRANSIENT_UAT_FEE_PLAN === 'true';
+
+      if (activePlan !== undefined && !isTransientPriorUatFixture) {
+        evidence.missing.push(
+          `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}:conflicting_active_plan`
+        );
+        throw new Error(
+          `Conflicting active fee plan ${getFeePlanName(activePlan)}/${getFeePlanVersion(activePlan)} ` +
+            `is currently active while ${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+            'is not active; generateDriverStatements always selects driverFeePlans[0] globally, ' +
+            'so refusing to replace active fee plan economics.'
+        );
+      }
+
       const publishPlanResp = await fetchImpl(
         `${apiOrigin}/api/driver-fee-plans/publish`,
         {
@@ -961,12 +1112,10 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
             extraHeaders: { 'Content-Type': 'application/json' },
           }),
           body: JSON.stringify({
-            planName: 'fixture-platform-funded-reimbursement',
-            planCode: 'fixture-platform-funded-reimbursement',
-            version: `2026.03-uat-${randomUUID().slice(0, 8)}`,
-            versionCode: 'v1',
-            serviceFeeBps: 1200,
-            reimbursementMode: 'platform_funded',
+            planName: FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME,
+            version: FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
+            serviceFeeBps: FIXTURE_REIMBURSEMENT_SERVICE_FEE_BPS,
+            reimbursementMode: FIXTURE_REIMBURSEMENT_MODE,
           }),
         }
       );
@@ -975,20 +1124,33 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         '/api/driver-fee-plans/publish',
         observedRuntimeSha
       );
-      if (
-        publishPlanResp.status !== 200 &&
-        publishPlanResp.status !== 201 &&
-        publishPlanResp.status !== 409
-      ) {
+      if (publishPlanResp.status >= 300) {
         const { text: publishPlanText } =
           await readResponseJsonOrText(publishPlanResp);
         evidence.missing.push(
-          'driver_fee_plan:fixture-platform-funded-reimbursement'
+          `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}`
         );
         throw new Error(
-          `Failed to publish fixture driver fee plan: status=${publishPlanResp.status} body=${sanitizeDiagnosticSnippet(publishPlanText)}`
+          `Failed to publish fixture driver fee plan: status=${publishPlanResp.status} body=${sanitizeText(publishPlanText)}`
         );
       }
+
+      const confirmedPlans = await listDriverFeePlans(
+        '/api/driver-fee-plans (confirm)'
+      );
+      const confirmedActive = confirmedPlans[0];
+      if (!isApprovedFixtureFeePlanIdentity(confirmedActive)) {
+        evidence.missing.push(
+          `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}`
+        );
+        throw new Error(
+          'Publishing the fixture driver fee plan did not take effect: expected ' +
+            `${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+            'to become the active plan, but the active plan is now ' +
+            `${confirmedActive ? `${getFeePlanName(confirmedActive)}/${getFeePlanVersion(confirmedActive)}` : 'none'}.`
+        );
+      }
+      assertApprovedFixtureFeePlanContentMatches(confirmedActive);
     }
 
     const statementResp = await fetchImpl(
@@ -1000,14 +1162,12 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           appSessionToken: opsToken,
           extraHeaders: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': `uat-stmt-${driverId}-${billingPeriod}-${randomUUID()}`,
+            'Idempotency-Key': `fixture-driver-statements-${driverId}-${billingPeriod}`,
           },
         }),
         body: JSON.stringify({
           driverId,
           periodMonth: billingPeriod,
-          billingPeriod,
-          planCode: 'fixture-platform-funded-reimbursement',
         }),
       }
     );
@@ -1038,7 +1198,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `synthetic_reimbursement_batch:${driverId}:${billingPeriod}`
       );
       throw new Error(
-        `Failed to resolve synthetic reimbursement batch for ${driverId} (${billingPeriod}): status=${statementResp.status} body=${sanitizeDiagnosticSnippet(statementText)}`
+        `Failed to resolve synthetic reimbursement batch for ${driverId} (${billingPeriod}): status=${statementResp.status} body=${sanitizeText(statementText)}`
       );
     }
     evidence.synthetic_fixtures.reimbursement_batch_id = reimbursementBatchId;
@@ -1073,7 +1233,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `verified_reimbursement_batch:${reimbursementBatchId}`
       );
       throw new Error(
-        `Failed to verify reimbursement batch ${reimbursementBatchId}: status=${batchResp.status} body=${sanitizeDiagnosticSnippet(batchText)}`
+        `Failed to verify reimbursement batch ${reimbursementBatchId}: status=${batchResp.status} body=${sanitizeText(batchText)}`
       );
     }
 
@@ -1097,7 +1257,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     const publicInfoData = unwrapEnvelope(publicInfoRaw);
     if (publicInfoResp.status !== 200 || !Array.isArray(publicInfoData?.items)) {
       throw new Error(
-        `Failed to list platform-admin public info versions: status=${publicInfoResp.status} body=${sanitizeDiagnosticSnippet(publicInfoText)}`
+        `Failed to list platform-admin public info versions: status=${publicInfoResp.status} body=${sanitizeText(publicInfoText)}`
       );
     }
     const targetPublicInfo = publicInfoData.items.find(
@@ -1160,7 +1320,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         !stagedContentRef
       ) {
         throw new Error(
-          `Failed to stage ${label} remittance proof content: status=${stageResp.status} body=${sanitizeDiagnosticSnippet(stageText)}`
+          `Failed to stage ${label} remittance proof content: status=${stageResp.status} body=${sanitizeText(stageText)}`
         );
       }
       if (stagedContentHash !== null && stagedContentHash !== expectedSha256) {
@@ -1217,7 +1377,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         !proofId
       ) {
         throw new Error(
-          `Failed to upload ${label} remittance proof: status=${uploadResp.status} body=${sanitizeDiagnosticSnippet(uploadText)}`
+          `Failed to upload ${label} remittance proof: status=${uploadResp.status} body=${sanitizeText(uploadText)}`
         );
       }
       const committedContentHash =
@@ -1280,7 +1440,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           !rescanData
         ) {
           throw new Error(
-            `Failed to re-scan ${label} proof ${proofId}: status=${rescanResp.status} body=${sanitizeDiagnosticSnippet(rescanParsed.text)}`
+            `Failed to re-scan ${label} proof ${proofId}: status=${rescanResp.status} body=${sanitizeText(rescanParsed.text)}`
           );
         }
         proofBody = rescanData;
@@ -1348,7 +1508,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       !cleanReadbackPath
     ) {
       throw new Error(
-        `Failed to acquire Ops readback URL for clean proof ${cleanUpload.proofId}: status=${cleanReadbackResp.status} body=${sanitizeDiagnosticSnippet(cleanReadbackText)}`
+        `Failed to acquire Ops readback URL for clean proof ${cleanUpload.proofId}: status=${cleanReadbackResp.status} body=${sanitizeText(cleanReadbackText)}`
       );
     }
 
@@ -1371,7 +1531,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       await readResponseJsonOrText(cleanDownloadResp);
     if (cleanDownloadResp.status !== 200) {
       throw new Error(
-        `Failed to download clean remittance proof from ${cleanReadbackPath}: status=${cleanDownloadResp.status} body=${sanitizeDiagnosticSnippet(cleanDownloadText)}`
+        `Failed to download clean remittance proof from ${cleanReadbackPath}: status=${cleanDownloadResp.status} body=${sanitizeText(cleanDownloadText)}`
       );
     }
     const cleanDownloadedSha256 = sha256Hex(cleanDownloadedBytes);
@@ -1478,7 +1638,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         eicarDownloadDeniedCode !== 'REMITTANCE_PROOF_NOT_CLEAN'
       ) {
         throw new Error(
-          `EICAR remittance proof download must be denied with 409 REMITTANCE_PROOF_NOT_CLEAN: got status=${eicarDownloadResp.status} body=${sanitizeDiagnosticSnippet(eicarDownloadText)}`
+          `EICAR remittance proof download must be denied with 409 REMITTANCE_PROOF_NOT_CLEAN: got status=${eicarDownloadResp.status} body=${sanitizeText(eicarDownloadText)}`
         );
       }
     } else if (
@@ -1552,7 +1712,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       !placardManifestHash
     ) {
       throw new Error(
-        `Failed to create controlled placard version: status=${createPlacardResp.status} body=${sanitizeDiagnosticSnippet(placardText)}`
+        `Failed to create controlled placard version: status=${createPlacardResp.status} body=${sanitizeText(placardText)}`
       );
     }
 
@@ -1581,7 +1741,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       await readResponseJsonOrText(placardDownloadResp);
     if (placardDownloadResp.status !== 200) {
       throw new Error(
-        `Failed to download controlled placard ${placardVersionId}: status=${placardDownloadResp.status} body=${sanitizeDiagnosticSnippet(placardDownloadText)}`
+        `Failed to download controlled placard ${placardVersionId}: status=${placardDownloadResp.status} body=${sanitizeText(placardDownloadText)}`
       );
     }
     const placardPdfHeader = placardBytes.subarray(0, 5).toString('utf8');
@@ -1733,10 +1893,10 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     return evidence;
   } catch (error) {
     evidence.status = 'failed';
-    evidence.error = sanitizeDiagnosticSnippet(
+    evidence.error = sanitizeText(
       error instanceof Error ? error.message : String(error)
     );
-    throw error;
+    throw new Error(evidence.error);
   } finally {
     // Revoke temporary driver invitation / device session before revoking Ops session
     if (issuedDriverRegistrationCode && opsToken) {
@@ -1797,27 +1957,29 @@ if (isDirectExecution) {
   runSharedDevArtifactRoundtrip()
     .then((result) => {
       console.log(
-        JSON.stringify(
-          {
-            status: result.status,
-            candidate_sha: result.candidate_sha,
-            observed_runtime_sha: result.observed_runtime_sha,
-            clean_remittance_proof_id:
-              result.clean_remittance_proof?.remittance_proof_id,
-            eicar_remittance_proof_id:
-              result.eicar_remittance_proof?.remittance_proof_id,
-            placard_version_id: result.controlled_placard?.placard_version_id,
-            gcs_generations: {
-              clean_remittance_content:
-                result.gcs_objects?.clean_remittance_content?.generation,
-              eicar_remittance_content:
-                result.gcs_objects?.eicar_remittance_content?.generation,
-              placard_document_artifact:
-                result.gcs_objects?.placard_document_artifact?.generation,
+        redactExecutionLogText(
+          JSON.stringify(
+            {
+              status: result.status,
+              candidate_sha: result.candidate_sha,
+              observed_runtime_sha: result.observed_runtime_sha,
+              clean_remittance_proof_id:
+                result.clean_remittance_proof?.remittance_proof_id,
+              eicar_remittance_proof_id:
+                result.eicar_remittance_proof?.remittance_proof_id,
+              placard_version_id: result.controlled_placard?.placard_version_id,
+              gcs_generations: {
+                clean_remittance_content:
+                  result.gcs_objects?.clean_remittance_content?.generation,
+                eicar_remittance_content:
+                  result.gcs_objects?.eicar_remittance_content?.generation,
+                placard_document_artifact:
+                  result.gcs_objects?.placard_document_artifact?.generation,
+              },
             },
-          },
-          null,
-          2
+            null,
+            2
+          )
         )
       );
     })
