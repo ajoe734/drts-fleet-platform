@@ -31,12 +31,23 @@ const nextConfig: NextConfig = {
   async rewrites() {
     // Signed links are console-relative. The existing proxy selects the API
     // origin at runtime and adds its /api prefix without changing the query.
-    return [
-      {
-        source: "/downloads/:kind/:subjectId",
-        destination: "/control-plane-proxy/downloads/:kind/:subjectId",
-      },
-    ];
+    // Built-in mock map tiles fall back to the root schematic SVG when a zoom
+    // or pan coordinate is not among the pre-generated static files.
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        {
+          source: "/downloads/:kind/:subjectId",
+          destination: "/control-plane-proxy/downloads/:kind/:subjectId",
+        },
+      ],
+      fallback: [
+        {
+          source: "/mock-map-tiles/:z(\\d+)/:x(\\d+)/:y(\\d+).svg",
+          destination: "/mock-map-tiles/0/0/0.svg",
+        },
+      ],
+    };
   },
   async headers() {
     const candidateSha =

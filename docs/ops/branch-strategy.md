@@ -71,7 +71,7 @@ You get a stable dev VM, a small list of meaningful tags, and a clear "which ver
                                                        ▼
                                   Operator picks tag, dispatches deploy:
                                     gh workflow run deploy-staging.yml -f source_ref=<any>
-                                    gh workflow run deploy-prod.yml    -f tag=prod/v<date>
+                                    production deployment (select workflow branch and product tag in Gate 4)
 
   hotfix/<id> ──► PR direct to main (3 gates + admin bypass if needed) ──► merges + tagged
               └─► cherry-pick into dev
@@ -137,7 +137,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 ### Gate 4: prod deploy (manual)
 
-- operator runs `gh workflow run deploy-prod.yml -f tag=prod/v<date>`
+- the operator selects the reviewed `release/*` workflow branch and immutable `prod/v*` tag using the [production runbook](../03-runbooks/prod-deploy-rollback-runbook-20260519.md#select-the-production-workflow-branch), then dispatches with the command in §8
 - tag shape validation: `^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`
 - tag-existence validation against origin
 - production environment can be configured with required-reviewer for double gate
@@ -146,7 +146,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 - branch off main, PR to main, 3 gates (or admin bypass)
 - **after merge, cherry-pick the commit into `dev` in the same change** (see the reconciliation rule below — this is mandatory, not optional)
-- if the hotfix needs to ship immediately to prod: cut a manual publish (`gh workflow run nightly-publish.yml`), trigger hourly-promote manually, then `gh workflow run deploy-prod.yml -f tag=<new prod tag>`
+- if the hotfix needs to ship immediately to prod: cut a manual publish (`gh workflow run nightly-publish.yml`), trigger hourly-promote manually, then dispatch the new product tag using Gate 4
 
 ### Reconciliation rule — `main` must never out-diverge `dev`
 
@@ -268,8 +268,8 @@ gh workflow run nightly-publish.yml
 # Manually trigger hourly-promote (after publish is cut + soak)
 gh workflow run hourly-promote.yml
 
-# Deploy a specific prod tag to prod
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0
+# Deploy the approved product tag with the workflow branch selected in Gate 4
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${PROD_TAG:?}"
 
 # Deploy current main HEAD to staging (no tag needed)
 gh workflow run deploy-staging.yml -f source_ref=main
@@ -277,8 +277,8 @@ gh workflow run deploy-staging.yml -f source_ref=main
 # Block promotion of a bad publish (humans / testers do this from the dev VM)
 gh issue create --title "regression in v2026.05.18.0: bookings page blank" --label "regression:v2026.05.18.0"
 
-# Redeploy yesterday's prod tag (rollback)
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0 -f skip_migration=true
+# Roll back to the previous known-good tag with its reviewed workflow branch
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${ROLLBACK_TAG:?}" -f skip_migration=true
 ```
 
 ---

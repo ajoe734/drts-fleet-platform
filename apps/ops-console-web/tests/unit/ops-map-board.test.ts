@@ -6,6 +6,9 @@ import type {
 } from "@drts/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  OPS_MAP_MAX_ZOOM,
+  OPS_MAP_MIN_ZOOM,
+  OPS_MAP_MOCK_TILE_URL_TEMPLATE,
   buildOpsMapBoardModel,
   buildOpsMapOverlaySummary,
   buildOpsMapTileViewport,
@@ -14,6 +17,7 @@ import {
   normalizeOpsMapBounds,
   projectOpsMapPointToViewport,
   resolveOpsMapTileUrlTemplate,
+  shiftOpsMapCenter,
   unprojectOpsMapViewportPoint,
 } from "../../app/dispatch/ops-map-board";
 
@@ -297,6 +301,13 @@ describe("ops map board model", () => {
     );
     expect(
       resolveOpsMapTileUrlTemplate({
+        MAP_PROVIDER_MODE: "mock",
+        NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE:
+          "https://ops.smarttransport.tw/mock-map-tiles/{z}/{x}/{y}.svg",
+      }),
+    ).toBe("https://ops.smarttransport.tw/mock-map-tiles/{z}/{x}/{y}.svg");
+    expect(
+      resolveOpsMapTileUrlTemplate({
         MAP_PROVIDER_MODE: "external",
         MAP_PROVIDER_TILE_URL_TEMPLATE:
           "https://tiles.example.test/{z}/{x}/{y}.png",
@@ -309,5 +320,114 @@ describe("ops map board model", () => {
         NODE_ENV: "production",
       }),
     ).toBe("");
+  });
+
+  it("projects the Bureau Banqiao Station to New Taipei City Hall case across supported zoom and pan levels for dispatch and callcenter viewports", () => {
+    const banqiaoOrder = order({
+      orderId: "order-bureau-banqiao",
+      orderNo: "ORD-BANQIAO-001",
+      pickup: {
+        address: "新北市板橋區合成板橋車站",
+        addressName: "合成板橋車站",
+        lat: 25.0142,
+        lng: 121.4636,
+      },
+      dropoff: {
+        address: "新北市板橋區合成市政府",
+        addressName: "合成新北市政府",
+        lat: 25.012,
+        lng: 121.4654,
+      },
+    });
+    const banqiaoDriver = candidate({
+      vehicleId: "VH-BANQIAO-01",
+      driverId: "driver-banqiao-1",
+      currentLocation: {
+        driverId: "driver-banqiao-1",
+        lat: 25.0131,
+        lng: 121.4645,
+        accuracyM: 6,
+        recordedAt: "2026-06-30T10:01:00.000Z",
+        updatedAt: "2026-06-30T10:01:10.000Z",
+      },
+    });
+    const model = buildOpsMapBoardModel({
+      orders: [banqiaoOrder],
+      orderJobMap: {
+        "order-bureau-banqiao": job({ orderId: "order-bureau-banqiao" }),
+      },
+      candidatesByJobId: { "job-1": [banqiaoDriver] },
+    });
+
+    expect(model.providerStatus).toBe("ready");
+    expect(model.points.map((point) => point.kind)).toEqual([
+      "pickup",
+      "dropoff",
+      "candidate",
+    ]);
+    expect(model.routeSegments).toHaveLength(1);
+
+    const bounds = normalizeOpsMapBounds(model.points);
+    expect(bounds).not.toBeNull();
+    expect(getDefaultOpsMapZoom(bounds!)).toBe(8);
+
+    const tilePattern = /^\/mock-map-tiles\/\d+\/\d+\/\d+\.svg$/;
+    for (let zoom = OPS_MAP_MIN_ZOOM; zoom <= OPS_MAP_MAX_ZOOM; zoom += 1) {
+      const dispatchViewport = buildOpsMapTileViewport({
+        bounds: bounds!,
+        zoom,
+        tileUrlTemplate: OPS_MAP_MOCK_TILE_URL_TEMPLATE,
+      });
+      expect(dispatchViewport.zoom).toBe(zoom);
+      expect(dispatchViewport.tiles.length).toBeGreaterThan(0);
+      for (const tile of dispatchViewport.tiles) {
+        expect(tile.src).toMatch(tilePattern);
+      }
+
+      for (const point of model.points) {
+        const projected = projectOpsMapPointToViewport(point, dispatchViewport);
+        expect(projected.visible).toBe(true);
+      }
+
+      for (const direction of ["north", "south", "west", "east"] as const) {
+        const shifted = shiftOpsMapCenter(dispatchViewport, direction);
+        const pannedViewport = buildOpsMapTileViewport({
+          bounds: bounds!,
+          centerLat: shifted.lat,
+          centerLng: shifted.lng,
+          zoom,
+          tileUrlTemplate: OPS_MAP_MOCK_TILE_URL_TEMPLATE,
+        });
+        expect(pannedViewport.tiles.length).toBeGreaterThan(0);
+        for (const tile of pannedViewport.tiles) {
+          expect(tile.src).toMatch(tilePattern);
+        }
+      }
+
+      for (const stop of [banqiaoOrder.pickup, banqiaoOrder.dropoff]) {
+        const stopLat = stop.lat!;
+        const stopLng = stop.lng!;
+        const callcenterViewport = buildOpsMapTileViewport({
+          bounds: {
+            minLat: stopLat - 0.01,
+            maxLat: stopLat + 0.01,
+            minLng: stopLng - 0.01,
+            maxLng: stopLng + 0.01,
+            latSpan: 0.02,
+            lngSpan: 0.02,
+          },
+          centerLat: stopLat,
+          centerLng: stopLng,
+          zoom,
+          width: 640,
+          height: 280,
+          tileUrlTemplate: OPS_MAP_MOCK_TILE_URL_TEMPLATE,
+        });
+        expect(callcenterViewport.tiles.length).toBeGreaterThan(0);
+        for (const tile of callcenterViewport.tiles) {
+          expect(tile.src).toMatch(tilePattern);
+        }
+      }
+    }
   });
 });
