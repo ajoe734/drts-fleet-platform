@@ -256,7 +256,7 @@ async function createFixture() {
   async function activateGuard(
     method: string,
     url: string,
-    token: string,
+    token: string | undefined,
     controllerClass: object,
     handler: (...args: never[]) => unknown,
     extraHeaders: Record<string, string> = {},
@@ -266,7 +266,7 @@ async function createFixture() {
       originalUrl: url,
       url,
       headers: {
-        authorization: `Bearer ${token}`,
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
         "x-request-id": "req-agency-own-account",
         ...extraHeaders,
       },
@@ -309,12 +309,14 @@ describe("AGENCY-OWN-ACCOUNT-PASSWORD-JOURNEY-20261123 agency own-account TOTP a
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
   it("allows an agency member to accept a password invitation, log in, enroll and confirm TOTP, re-login with TOTP, and regenerate recovery codes through real BootstrapAuthGuard, AuthController, and TotpController", async () => {
     const f = await createFixture();
+    vi.useFakeTimers({ toFake: ["Date"] });
     const rawInviteToken = "agency-pwd-invite-token-001";
     const email = "pwd-inspector@agency-a.example";
     const password = "correct horse battery staple";
@@ -406,28 +408,18 @@ describe("AGENCY-OWN-ACCOUNT-PASSWORD-JOURNEY-20261123 agency own-account TOTP a
       f.authController.passwordLogin("agency", { email, password }),
     ).rejects.toBeInstanceOf(ApiRequestError);
 
-    const mfaSession = await f.issueAgencySession(
-      {
-        principal: (await f.repo.findPrincipalById(
-          firstLogin.data.identity.principalId,
-        ))!,
-        membership: (await f.repo.findAgencyMembershipForPrincipal(
-          firstLogin.data.identity.principalId,
-        ))!.membership,
-        roleBindings: (await f.repo.findAgencyMembershipForPrincipal(
-          firstLogin.data.identity.principalId,
-        ))!.roleBindings,
-        invitation: {} as never,
-      },
-      {
-        amr: ["pwd", "otp"],
-        authTime: new Date().toISOString(),
-      },
-    );
+    // Move the login verification window past the code consumed during enrollment.
+    vi.setSystemTime(Date.now() + 60_000);
+    const mfaLogin = await f.authController.passwordLogin("agency", {
+      email,
+      password,
+      totpCode: await generate({ secret: enrollEnvelope.data.secret }),
+    });
+    expect(mfaLogin.data.identity.amr).toEqual(["pwd", "otp"]);
     const regenIdentity = await f.activateGuard(
       "POST",
       "/api/auth/agency/mfa/totp/recovery-codes/regenerate",
-      mfaSession.token,
+      mfaLogin.data.accessToken,
       TotpController,
       TotpController.prototype.regenerateRecoveryCodes,
     );
