@@ -733,6 +733,8 @@ export async function dailyDispatch(page, cfg, row) {
   const incompleteCandidates = [];
   let totalPages = 1;
   let totalRows = 0;
+  let expectedTotal;
+  let expectedPageSize;
   for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
     const query = new URLSearchParams({
       serviceDateFrom: cfg.fixture.serviceDate,
@@ -752,46 +754,48 @@ export async function dailyDispatch(page, cfg, row) {
         ),
       "dated-daily-dispatch-data-required",
     );
-    const pageSize = Number(
-      result.page_size ?? result.pageSize ?? result.items.length,
-    );
-    const total = Number(result.total ?? result.items.length);
+    const pageSize = result.page_size;
+    const total = result.total;
     check(
-      Number.isInteger(pageSize) &&
+      Number.isSafeInteger(pageSize) &&
         pageSize > 0 &&
-        Number.isInteger(total) &&
+        Number.isSafeInteger(total) &&
         total >= result.items.length &&
-        (result.page == null || Number(result.page) === pageNo),
+        result.page === pageNo,
       "daily-dispatch-pagination-contract",
     );
     const computedPages = Math.max(1, Math.ceil(total / pageSize));
-    if (pageNo === 1) totalPages = computedPages;
-    else
-      check(computedPages === totalPages, "daily-dispatch-pagination-contract");
-    check(totalPages <= 100, "daily-dispatch-pagination-bound");
-    totalRows += result.items.length;
-    if (pageNo === 1 || typeof page.url === "function") {
-      await expect(page.getByRole("alert")).toHaveCount(0);
-      await expect(page.locator("main tbody tr")).toHaveCount(
-        result.items.length,
+    if (pageNo === 1) {
+      totalPages = computedPages;
+      expectedTotal = total;
+      expectedPageSize = pageSize;
+    } else
+      check(
+        total === expectedTotal && pageSize === expectedPageSize,
+        "daily-dispatch-pagination-contract",
       );
-      for (let i = 0; i < result.items.length; i++) {
-        const item = result.items[i];
-        const cells = page.locator("main tbody tr").nth(i).locator("td");
-        await expect(cells.nth(0)).toHaveText(cfg.fixture.serviceDate);
-        await expect(cells.nth(1)).toHaveText(item.order_no_masked);
-        await expect(cells.nth(3)).toHaveText(item.service_product_code);
-        const completedCell = cells.nth(11);
-        if (
-          completedCell &&
-          (!("value" in completedCell) || completedCell.value !== undefined) &&
-          validTime(item.trip_completed_at)
-        ) {
-          await expect(completedCell).toHaveText(
-            formatTaipei(item.trip_completed_at),
-          );
-        }
-      }
+    check(totalPages <= 100, "daily-dispatch-pagination-bound");
+    check(
+      result.items.length ===
+        Math.min(pageSize, total - (pageNo - 1) * pageSize),
+      "daily-dispatch-pagination-contract",
+    );
+    totalRows += result.items.length;
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator("main tbody tr")).toHaveCount(
+      result.items.length,
+    );
+    for (let i = 0; i < result.items.length; i++) {
+      const item = result.items[i];
+      const cells = page.locator("main tbody tr").nth(i).locator("td");
+      await expect(cells.nth(0)).toHaveText(cfg.fixture.serviceDate);
+      await expect(cells.nth(1)).toHaveText(item.order_no_masked);
+      await expect(cells.nth(3)).toHaveText(item.service_product_code);
+      await expect(cells.nth(11)).toHaveText(
+        validTime(item.trip_completed_at)
+          ? formatTaipei(item.trip_completed_at)
+          : "Not provided",
+      );
     }
     for (let i = 0; i < result.items.length; i++) {
       const item = result.items[i];
@@ -804,7 +808,6 @@ export async function dailyDispatch(page, cfg, row) {
         validTime(item.trip_started_at) && validTime(item.trip_completed_at);
       const plateMissing =
         Boolean(row.plate_no_masked) &&
-        item.final_plate_no_masked !== undefined &&
         (typeof item.final_plate_no_masked !== "string" ||
           item.final_plate_no_masked.trim().length === 0);
       if (!hasTimes || plateMissing) {
@@ -816,7 +819,6 @@ export async function dailyDispatch(page, cfg, row) {
         Date.parse(item.trip_completed_at) === Date.parse(row.dropoff_at);
       const samePlate =
         !row.plate_no_masked ||
-        item.final_plate_no_masked === undefined ||
         item.final_plate_no_masked === row.plate_no_masked;
       const sameService =
         !row.service_product_code ||
@@ -829,6 +831,7 @@ export async function dailyDispatch(page, cfg, row) {
       }
     }
   }
+  check(totalRows === expectedTotal, "daily-dispatch-pagination-contract");
   check(
     incompleteCandidates.length === 0,
     "daily-dispatch-correlation-fields-missing",

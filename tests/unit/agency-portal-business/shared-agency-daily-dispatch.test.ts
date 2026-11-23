@@ -252,13 +252,13 @@ async function exerciseDailyDispatch({
   pageSize = 1,
   detailRow,
   uiPageItems,
-  trackUrl = true,
+  apiPageOverrides,
 }: {
   allItems: WireDailyRow[];
   pageSize?: number;
   detailRow: Record<string, unknown>;
   uiPageItems?: Record<number, WireDailyRow[]>;
-  trackUrl?: boolean;
+  apiPageOverrides?: Record<number, Record<string, unknown>>;
 }) {
   const reads: number[] = [];
   let currentUrl = new URL("https://fixture.invalid/reports/daily-dispatch");
@@ -294,10 +294,11 @@ async function exerciseDailyDispatch({
       page_size: paged.pageSize,
       total: paged.total,
       items: paged.items,
+      ...apiPageOverrides?.[pageNo],
     };
   };
   const pageStub: Record<string, unknown> = {
-    ...(trackUrl ? { url: () => currentUrl.toString() } : {}),
+    url: () => currentUrl.toString(),
     waitForURL: async (condition: (url: URL) => boolean) => {
       for (const field of ["serviceDateFrom", "serviceDateTo"]) {
         currentUrl.searchParams.set(field, SERVICE_DATE);
@@ -311,9 +312,7 @@ async function exerciseDailyDispatch({
       if (selector !== "main tbody tr") {
         return { fill: async () => {}, click: async () => {} };
       }
-      const pageNo = trackUrl
-        ? Number(currentUrl.searchParams.get("page") || 1)
-        : 1;
+      const pageNo = Number(currentUrl.searchParams.get("page") || 1);
       const defaultItems = paginate(allItems, pageNo, pageSize).items;
       const rendered = uiPageItems?.[pageNo] ?? defaultItems;
       return {
@@ -605,16 +604,6 @@ describe("AGENCY-DAILY-DISPATCH-EXACT-TRIP-PAGING-20261123", () => {
       uiMatchesApi: true,
     });
 
-    // 4. Legacy single-page DOM stub (trackUrl=false, like agency-daily-fixture-readback.cjs)
-    const legacyHarnessPageTwo = await exerciseDailyDispatch({
-      allItems: [otherDaily, matchingDaily],
-      pageSize: 1,
-      detailRow: tripDetail,
-      trackUrl: false,
-    });
-    expect(legacyHarnessPageTwo.pagesRead).toEqual([1, 2]);
-    expect(legacyHarnessPageTwo.result.matchedPage).toBe(2);
-
     // 5. Duplicate identical trip matches across pages -> rejected
     await expect(
       exerciseDailyDispatch({
@@ -662,6 +651,53 @@ describe("AGENCY-DAILY-DISPATCH-EXACT-TRIP-PAGING-20261123", () => {
         },
       }),
     ).rejects.toThrow(/ui-cell-text/);
+  });
+
+  it.each([
+    ["missing pagination metadata", "daily-dispatch-pagination-contract"],
+    [
+      "changed total with same page count",
+      "daily-dispatch-pagination-contract",
+    ],
+    [
+      "changed page size with same page count",
+      "daily-dispatch-pagination-contract",
+    ],
+    ["missing completion cell on page two", "ui-cell-text"],
+    [
+      "missing known plate on dispatch row",
+      "daily-dispatch-correlation-fields-missing",
+    ],
+  ])("rejects %s", async (scenario, reason) => {
+    const tripDetail = toWireTripDetail(buildTripAdminRecord());
+    const matchingDaily = toWireDailyDispatch(buildDispatchDailyRecord());
+    const otherDaily = toWireDailyDispatch(
+      buildDispatchDailyRecord({ orderNo: "ORD-20261120-C00435" }),
+    );
+    const options: Parameters<typeof exerciseDailyDispatch>[0] = {
+      allItems: [otherDaily, otherDaily, otherDaily, matchingDaily],
+      pageSize: 3,
+      detailRow: tripDetail,
+    };
+    if (scenario === "missing pagination metadata") {
+      options.allItems = [matchingDaily];
+      options.apiPageOverrides = {
+        1: { page: undefined, page_size: undefined, total: undefined },
+      };
+    } else if (scenario === "changed total with same page count") {
+      options.apiPageOverrides = { 2: { total: 5 } };
+    } else if (scenario === "changed page size with same page count") {
+      options.apiPageOverrides = { 2: { page_size: 2 } };
+    } else if (scenario === "missing completion cell on page two") {
+      options.uiPageItems = {
+        2: [{ ...matchingDaily, trip_completed_at: null }],
+      };
+    } else {
+      const missingPlate = { ...matchingDaily };
+      Reflect.deleteProperty(missingPlate, "final_plate_no_masked");
+      options.allItems = [missingPlate];
+    }
+    await expect(exerciseDailyDispatch(options)).rejects.toThrow(reason);
   });
 
   it("validates 5-field primary and optional second fixture inputs from the existing workflow parameter", () => {
