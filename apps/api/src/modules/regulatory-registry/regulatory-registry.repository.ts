@@ -2951,13 +2951,25 @@ export class RegulatoryRegistryRepository {
                 | "professional_driver_license"
                 | "taxi_driver_registration"
             ];
-          if (field)
+          if (field) {
             changed =
               !source ||
               Date.parse(source[field] ?? "") !== sourceExpiryMs ||
               (reminder !== null &&
                 (source.lifecycleStatus !== "active" ||
                   driverCredentialExpiryMs(source[field]) <= asOfMs));
+            // Defer an old prematurely-created expiry intent, retaining its
+            // fingerprint and payload for the real cutoff. Accepted receipts
+            // must still be recorded, even if the source is currently valid.
+            if (
+              source &&
+              !changed &&
+              reminder === null &&
+              update.deliveryStatus === "pending" &&
+              driverCredentialExpiryMs(source[field]) > asOfMs
+            )
+              return null;
+          }
         } else if (
           snapshot.credential_type === "vehicle_contract" ||
           preexpiry?.credential === "vehicle_contract"

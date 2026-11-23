@@ -60,10 +60,16 @@ describe.each(fields)("R14 UTC inclusive service day: %s", (field) => {
           (d) => d.driverId === driverId,
         )?.[field],
       ).toBe("2026-11-23");
+      await service.prepareDriverAuthority(driverId);
       const row = service.listDrivers().find((d) => d.driverId === driverId)!;
       expect(row[field]).toBe("2026-11-23");
       expect(row.licensesValid).toBe(valid);
       expect(row.dispatchEligible).toBe(valid);
+      expect(
+        service
+          .listExpiringDriverLicenses(30)
+          .some((d) => d.driverId === driverId),
+      ).toBe(valid);
       expect(
         service
           .getEligibleCandidates("standard_taxi")

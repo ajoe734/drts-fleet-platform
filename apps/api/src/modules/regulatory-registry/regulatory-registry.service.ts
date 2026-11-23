@@ -7801,8 +7801,13 @@ export class RegulatoryRegistryService
         continue;
       }
 
-      // The reminder's original source may have renewed since its intent commit.
-      if (parsePreexpiryRecordFamily(eventWithIntent.credential_type)) {
+      // Recheck the original source before enqueueing. Legacy driver expiry
+      // intents may predate the inclusive UTC-day rule; keep them pending until
+      // the actual cutoff so their frozen identity/payload can still recover.
+      if (
+        eventWithIntent.entity_type === "driver" ||
+        parsePreexpiryRecordFamily(eventWithIntent.credential_type)
+      ) {
         const current = await repository.recordExpiryDeliveryOutcome(
           intent,
           {

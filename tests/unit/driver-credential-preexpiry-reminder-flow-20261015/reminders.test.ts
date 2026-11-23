@@ -168,8 +168,9 @@ describe("complete original reminder immutable handoff and recovery", () => {
       new Date(Date.parse(future(30)) - 1).toISOString(),
     ]);
     expect(scan.sql).toContain("ORDER BY d.driver_id ASC LIMIT $2");
-    expect(scan.sql).toContain("::timestamptz > $1");
-    expect(scan.sql).toContain("::timestamptz <= $5");
+    expect(scan.sql).toContain("::timestamptz END) > $1");
+    expect(scan.sql).toContain("::timestamptz END) <= $5");
+    expect(scan.sql).toContain("::date + 1)::timestamp AT TIME ZONE 'UTC'");
   });
   it.each([undefined, "invalid address"])(
     "keeps missing/invalid approved recipient %s pending without a placeholder and recovers its same source",

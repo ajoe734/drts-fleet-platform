@@ -1,4 +1,4 @@
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_ONLY = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 
 /** First invalid instant: date-only credentials include their whole UTC day.
  * Keep the stored value and event identity unchanged; timestamps stay exact. */
