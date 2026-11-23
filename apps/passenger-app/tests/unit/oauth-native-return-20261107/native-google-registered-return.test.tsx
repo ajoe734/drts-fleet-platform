@@ -95,6 +95,7 @@ const APP = path.resolve(
 const BASE = "https://api.smarttransport.tw";
 const WEB_CALLBACK = "https://ride.smarttransport.tw/auth/callback/google";
 const NATIVE_CALLBACK = "drtspassenger://auth/callback";
+const ALT_NATIVE_CALLBACK = "drtspassenger://oauth/callback";
 const GOOGLE_CLIENT_ID = "pax-google-web-client";
 const GOOGLE_CLIENT_SECRET = "pax-google-web-secret";
 
@@ -703,5 +704,234 @@ describe("Native PassengerAppEntry with real PassengerOAuthService Google HTTPS 
       refreshToken: expect.any(String),
     });
     expect(actions).toEqual([]);
+  });
+
+  it("completes Google Web-client HTTPS callback -> drtspassenger://oauth/callback return into the same mobile session when configured with alternate allowlisted callback URI", async () => {
+    vi.stubEnv(
+      "OAUTH_REDIRECT_ALLOWLIST",
+      [ALT_NATIVE_CALLBACK, WEB_CALLBACK].join(","),
+    );
+    vi.stubEnv("EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI", ALT_NATIVE_CALLBACK);
+    const sdk = actualSdk();
+    const {
+      googleEndpoints,
+      PassengerOAuthService,
+      buildNativePassengerOAuthReturnUrl,
+    } = loadActualOAuthModules();
+    const oauthStore = new MemoryOAuthTransactionStore();
+    const accounts = {
+      async findOrCreateByIdentity() {
+        return { drtsPassengerId: "google-alt-native-passenger-id" };
+      },
+      async issueSession() {
+        return {
+          accessToken: "sim-google-alt-native-access-token",
+          refreshToken: "sim-google-alt-native-refresh-token",
+        };
+      },
+    };
+    const oauthService = new PassengerOAuthService(oauthStore, accounts);
+    const tokenExchanges: Array<Record<string, string>> = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const urlStr = String(input);
+        if (urlStr === googleEndpoints.token) {
+          const params = new URLSearchParams(String(init?.body ?? ""));
+          const record = Object.fromEntries(params.entries());
+          tokenExchanges.push(record);
+          const txn = [...oauthStore.rows.values()].find(
+            (r) => r.codeVerifier === record.code_verifier,
+          );
+          if (!txn || record.redirect_uri !== WEB_CALLBACK) {
+            return new Response(JSON.stringify({ error: "invalid_grant" }), {
+              status: 400,
+            });
+          }
+          const idToken = Buffer.from(
+            JSON.stringify({
+              sub: "google-alt-native-pax-1",
+              name: "Google 替代回呼乘客",
+              email: "google.alt.native@example.test",
+              nonce: txn.nonce,
+            }),
+          ).toString("base64url");
+          return new Response(JSON.stringify({ id_token: idToken }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        const url = new URL(urlStr);
+        const reply = (data: unknown) =>
+          new Response(JSON.stringify({ data }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (url.pathname === "/api/passenger-app/auth/providers")
+          return reply({ providers: ["google"] });
+        if (url.pathname === "/api/passenger-app/auth/oauth/google/start") {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          return reply(await oauthService.start("google", body, null));
+        }
+        if (url.pathname === "/api/passenger-app/auth/oauth/google/callback") {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          return reply(await oauthService.callback("google", body, null));
+        }
+        if (url.pathname === "/api/passenger-app/me") {
+          const bearer = new Headers(init?.headers).get("Authorization");
+          if (bearer !== "Bearer sim-google-alt-native-access-token") {
+            return new Response(JSON.stringify({ error: "unauthorized" }), {
+              status: 401,
+            });
+          }
+          return reply({
+            account: {
+              drts_passenger_id: "google-alt-native-passenger-id",
+              display_name: "Google 替代回呼乘客",
+              contact_phone_verified: true,
+              status: "active",
+              created_at: "2026-11-23T00:00:00Z",
+            },
+          });
+        }
+        if (url.pathname === "/api/passenger-app/settings")
+          return reply({
+            minLeadTimeMinutes: 30,
+            requireSmsVerification: false,
+          });
+        if (url.pathname === "/api/passenger-app/fares")
+          return reply({
+            currentVersion: {
+              version: "sim-oauth-fare",
+              effectiveAt: "2023-04-01T00:00:00Z",
+              baseFare: 85,
+              baseDistanceMeters: 1250,
+              distanceRate: 5,
+              distanceIncrementMeters: 200,
+              delayRate: 5,
+              delayIncrementSeconds: 60,
+              nightSurcharge: 20,
+              nightSurchargeWindowStart: "23:00",
+              nightSurchargeWindowEnd: "06:00",
+              additionalFees: {},
+            },
+          });
+        if (url.pathname === "/api/passenger-app/payment-methods")
+          return reply({ methods: [] });
+        if (url.pathname === "/api/passenger-app/rides")
+          return reply({ rides: [], next_cursor: null });
+        throw new Error(`unexpected_http:${url.pathname}`);
+      }),
+    );
+
+    const actions: unknown[] = [];
+    function RouterObserver() {
+      const navigation = React.useRef<Navigation>({
+        getRootState: () => ({
+          routeNames: Object.keys(sdk.linking.config.screens),
+        }),
+        dispatch: (action) => actions.push(action),
+        resetRoot: (state) => actions.push({ type: "RESET", payload: state }),
+      });
+      sdk.useLinking(navigation, sdk.linking, () => {});
+      return null;
+    }
+
+    let tree!: Renderer;
+    await act(async () => {
+      tree = create(
+        <>
+          <RouterObserver />
+          <PassengerAppEntry />
+        </>,
+      ) as unknown as Renderer;
+      await flush();
+    });
+    mounted.push(tree);
+    expect(present(tree, "app-login")).toBe(true);
+
+    let pending!: void | Promise<void>;
+    await act(async () => {
+      pending = onPress(tree, "auth-oauth-google")();
+      await flush();
+    });
+    const authUrl = new URL(external.browserCalls.at(-1)!);
+    const issuedState = authUrl.searchParams.get("state")!;
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(WEB_CALLBACK);
+
+    const bridgedUrl = buildNativePassengerOAuthReturnUrl(
+      "google",
+      new URLSearchParams({
+        code: "google-alt-verified-code-20261123",
+        state: issuedState,
+      }),
+    )!;
+    expect(bridgedUrl).toBe(
+      `${ALT_NATIVE_CALLBACK}?code=google-alt-verified-code-20261123&state=${encodeURIComponent(issuedState)}`,
+    );
+
+    await act(async () => {
+      await emitURL(bridgedUrl);
+      await flush();
+      resume();
+      await pending;
+      await flush();
+    });
+
+    expect(external.browserResults.at(-1)).toEqual({
+      type: "success",
+      url: bridgedUrl,
+    });
+    expect(tokenExchanges).toHaveLength(1);
+    expect(tokenExchanges[0]?.redirect_uri).toBe(WEB_CALLBACK);
+    expect(present(tree, "native-passenger-application")).toBe(true);
+    expect(JSON.parse(external.stored)).toEqual({
+      accessToken: "sim-google-alt-native-access-token",
+      refreshToken: "sim-google-alt-native-refresh-token",
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it("rejects unsupported native callback URIs before launching the system browser or calling /oauth/google/start", async () => {
+    vi.stubEnv(
+      "EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI",
+      "drtspassenger://account/payment-methods",
+    );
+    actualSdk();
+    const startCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/passenger-app/auth/providers") {
+          return new Response(
+            JSON.stringify({ data: { providers: ["google"] } }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        startCalls.push(url.pathname);
+        throw new Error(`unexpected_http:${url.pathname}`);
+      }),
+    );
+
+    let tree!: Renderer;
+    await act(async () => {
+      tree = create(<PassengerAppEntry />) as unknown as Renderer;
+      await flush();
+    });
+    mounted.push(tree);
+    expect(present(tree, "app-login")).toBe(true);
+
+    await act(async () => {
+      await onPress(tree, "auth-oauth-google")();
+      await flush();
+    });
+    expect(present(tree, "auth-error")).toBe(true);
+    expect(startCalls).toEqual([]);
+    expect(external.browserCalls).toEqual([]);
   });
 });

@@ -44,6 +44,7 @@ const API_ORIGIN = "https://api.smarttransport.tw";
 const GOOGLE_WEB_CALLBACK = `${WEB_ORIGIN}/auth/callback/google`;
 const LINE_WEB_CALLBACK = `${WEB_ORIGIN}/auth/callback/line`;
 const NATIVE_CALLBACK = "drtspassenger://auth/callback";
+const ALT_NATIVE_CALLBACK = "drtspassenger://oauth/callback";
 const GOOGLE_CLIENT_ID = "pax-google-web-client-id";
 const GOOGLE_CLIENT_SECRET = "pax-google-web-client-secret";
 const LINE_CHANNEL_ID = "pax-line-channel-id";
@@ -122,10 +123,13 @@ function loadNativeLoginScreenModule() {
     callbackFields(
       url: string,
       expectedState?: string,
+      expectedCallbackUri?: string,
     ): { code: string; state: string } | null;
+    isSupportedNativePassengerOAuthCallbackUri(callbackUri: string): boolean;
   };
 }
-const { callbackFields } = loadNativeLoginScreenModule();
+const { callbackFields, isSupportedNativePassengerOAuthCallbackUri } =
+  loadNativeLoginScreenModule();
 
 class MemoryOAuthTransactionStore {
   rows = new Map<string, OAuthTransactionRecord>();
@@ -642,5 +646,119 @@ describe("PAX-NATIVE-GOOGLE-REGISTERED-LOGIN-RETURN-20261123: Google web-client 
         null,
       ),
     ).rejects.toMatchObject({ code: "validation_error" });
+  });
+
+  it("binds alternate allowlisted drtspassenger://oauth/callback transaction return target through /auth/callback/google and rejects unsupported native callback URIs", async () => {
+    const env = createEnvironment();
+    const unsupportedPaymentUri = "drtspassenger://account/payment-methods";
+    const unsupportedSchemeUri = "otherapp://auth/callback";
+    vi.stubEnv(
+      "OAUTH_REDIRECT_ALLOWLIST",
+      [
+        NATIVE_CALLBACK,
+        ALT_NATIVE_CALLBACK,
+        GOOGLE_WEB_CALLBACK,
+        unsupportedPaymentUri,
+        unsupportedSchemeUri,
+      ].join(","),
+    );
+    const redirectSpy = vi
+      .spyOn(nativeReturnModule, "redirectToNativePassengerApp")
+      .mockImplementation(() => {});
+
+    // 1. Alternate configured drtspassenger://oauth/callback succeeds and binds its exact return target into state
+    const start = await env.nativeSession.oauthStart({
+      provider: "google",
+      redirectUri: ALT_NATIVE_CALLBACK,
+      purpose: "login",
+    });
+    const authUrl = new URL(start.authUrl);
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(GOOGLE_WEB_CALLBACK);
+    expect(
+      nativeReturnModule.resolveNativePassengerOAuthCallbackUriFromState(
+        start.state,
+      ),
+    ).toBe(ALT_NATIVE_CALLBACK);
+
+    const googleCode = "google-auth-code-alt-native-callback-1";
+    env.expectedAuthorizations.set(googleCode, {
+      redirectUri: GOOGLE_WEB_CALLBACK,
+      codeChallenge: authUrl.searchParams.get("code_challenge")!,
+      nonce: authUrl.searchParams.get("nonce")!,
+      sub: "google-alt-mobile-passenger-1",
+    });
+
+    renderCallbackPage(
+      "google",
+      new URLSearchParams({
+        code: googleCode,
+        state: start.state,
+      }),
+    );
+
+    const expectedAltNativeUrl = `${ALT_NATIVE_CALLBACK}?code=${encodeURIComponent(googleCode)}&state=${encodeURIComponent(start.state)}`;
+    await waitFor(() =>
+      expect(redirectSpy).toHaveBeenCalledExactlyOnceWith(expectedAltNativeUrl),
+    );
+    expect(
+      (
+        screen.getByTestId("native-oauth-return-link") as HTMLAnchorElement
+      ).getAttribute("href"),
+    ).toBe(expectedAltNativeUrl);
+    expect(env.bffCalls).toEqual([]);
+
+    // callbackFields enforces exact base callbackUri match in addition to state match
+    expect(
+      callbackFields(expectedAltNativeUrl, start.state, NATIVE_CALLBACK),
+    ).toBeNull();
+    const fields = callbackFields(
+      expectedAltNativeUrl,
+      start.state,
+      ALT_NATIVE_CALLBACK,
+    );
+    expect(fields).toEqual({ code: googleCode, state: start.state });
+
+    const callbackResult = await env.nativeSession.oauthCallback({
+      provider: "google",
+      ...fields!,
+      transactionId: start.transactionId,
+    });
+    expect(callbackResult.result).toBe("logged_in");
+    expect(env.googleTokenRequests).toHaveLength(1);
+    expect(env.googleTokenRequests[0]?.redirect_uri).toBe(GOOGLE_WEB_CALLBACK);
+
+    const account = await env.nativePassenger.getAccount();
+    expect(account.status).toBe("active");
+    redirectSpy.mockRestore();
+
+    // 2. Unsupported custom-scheme or payment-return URIs are rejected even if present in OAUTH_REDIRECT_ALLOWLIST
+    for (const invalidUri of [unsupportedPaymentUri, unsupportedSchemeUri]) {
+      expect(isSupportedNativePassengerOAuthCallbackUri(invalidUri)).toBe(
+        false,
+      );
+      await expect(
+        env.oauth.start(
+          "google",
+          {
+            provider: "google",
+            redirectUri: invalidUri,
+            purpose: "login",
+          },
+          null,
+        ),
+      ).rejects.toMatchObject({ code: "validation_error" });
+      const forgedState = `drtspassenger.${Buffer.from(invalidUri, "utf8").toString("base64url")}.forged_random_token_123456`;
+      expect(
+        nativeReturnModule.buildNativePassengerOAuthReturnUrl(
+          "google",
+          new URLSearchParams({ code: "c", state: forgedState }),
+        ),
+      ).toBeNull();
+      expect(() =>
+        nativeReturnModule.redirectToNativePassengerApp(
+          `${invalidUri}?code=c&state=s`,
+        ),
+      ).toThrow("Invalid native passenger OAuth callback redirect");
+    }
   });
 });

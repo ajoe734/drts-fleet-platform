@@ -90,15 +90,17 @@ Firebase/APNs setup, Maps provisioning, backend/provider configuration and OAuth
 registrations for the functions being demonstrated. For Google sign-in with the
 shared Web-server OAuth client (`GOOGLE_OAUTH_CLIENT_ID` /
 `GOOGLE_OAUTH_CLIENT_SECRET`), `EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI`
-remains the registered app-scheme URI (`drtspassenger://auth/callback`), while
-the API `OAUTH_REDIRECT_ALLOWLIST` includes both `drtspassenger://auth/callback`
+remains the registered app-scheme URI (`drtspassenger://auth/callback`, or an
+allowlisted `drtspassenger://oauth/callback` native OAuth callback URI), while
+the API `OAUTH_REDIRECT_ALLOWLIST` includes both that native callback URI
 and the Google-registered HTTPS callback
 (`https://<passenger-web-origin>/auth/callback/google`): `PassengerOAuthService`
 uses that allowlisted HTTPS callback for both Google authorization and token
-code exchange and binds a `drtspassenger.`-prefixed `state` so the HTTPS
-`/auth/callback/google` page returns control to the active
-`drtspassenger://auth/callback` mobile session without consuming Web BFF cookies
-or mixing with payment return routes. This proposal adds no new
+code exchange and binds the accepted `drtspassenger://` OAuth callback target
+into the `drtspassenger.`-prefixed `state` (storing `state_hash` over the full
+bound `state`) so the HTTPS `/auth/callback/google` page returns control to the
+exact requesting `drtspassenger://` mobile session without consuming Web BFF
+cookies or mixing with payment return routes. This proposal adds no new
 backend activation flag or security gate.
 
 ## Manual hosted caller and evidence

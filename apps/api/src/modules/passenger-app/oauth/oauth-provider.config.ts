@@ -107,11 +107,38 @@ export function listConfiguredAuthProviders(): AuthProvider[] {
   return providers;
 }
 
+export const NATIVE_PASSENGER_OAUTH_CALLBACK_URI =
+  "drtspassenger://auth/callback";
 export const NATIVE_PASSENGER_OAUTH_STATE_PREFIX = "drtspassenger.";
+const SUPPORTED_NATIVE_PASSENGER_OAUTH_CALLBACK_PATTERN =
+  /^drtspassenger:\/\/(?:auth|oauth)(?:\/callback)?$/;
+
+export function isSupportedNativePassengerOAuthCallbackUri(
+  redirectUri: string,
+): boolean {
+  return SUPPORTED_NATIVE_PASSENGER_OAUTH_CALLBACK_PATTERN.test(redirectUri);
+}
+
+export function encodeNativePassengerOAuthState(
+  rawState: string,
+  nativeCallbackUri: string,
+): string {
+  if (!isSupportedNativePassengerOAuthCallbackUri(nativeCallbackUri)) {
+    throw new Error("Unsupported native passenger OAuth callback URI");
+  }
+  if (nativeCallbackUri === NATIVE_PASSENGER_OAUTH_CALLBACK_URI) {
+    return `${NATIVE_PASSENGER_OAUTH_STATE_PREFIX}${rawState}`;
+  }
+  const encodedCallbackUri = Buffer.from(nativeCallbackUri, "utf8").toString(
+    "base64url",
+  );
+  return `${NATIVE_PASSENGER_OAUTH_STATE_PREFIX}${encodedCallbackUri}.${rawState}`;
+}
 
 export interface ResolvedOAuthProviderRedirect {
   providerRedirectUri: string;
   nativeAppReturn: boolean;
+  nativeCallbackUri: string | null;
 }
 
 function readOAuthRedirectAllowlist(): string[] {
@@ -130,8 +157,9 @@ export function isAllowedOAuthRedirectUri(redirectUri: string): boolean {
 
 /** Google Web-server OAuth clients require a registered HTTPS redirect_uri at
  * both authorization and token exchange even when the caller is the native app
- * (`drtspassenger://auth/callback`). Other providers and direct HTTP(S) Web
- * callbacks retain their exact allowlisted redirectUri unchanged. */
+ * (`drtspassenger://auth/callback` or `drtspassenger://oauth/callback`). Other
+ * providers and direct HTTP(S) Web callbacks retain their exact allowlisted
+ * redirectUri unchanged. */
 export function resolveOAuthProviderRedirectUri(
   provider: OAuthProvider,
   requestedRedirectUri: string,
@@ -146,7 +174,11 @@ export function resolveOAuthProviderRedirectUri(
     return {
       providerRedirectUri: requestedRedirectUri,
       nativeAppReturn: false,
+      nativeCallbackUri: null,
     };
+  }
+  if (!isSupportedNativePassengerOAuthCallbackUri(requestedRedirectUri)) {
+    return null;
   }
   const httpsEntries = allowlist.filter((entry) => {
     try {
@@ -169,5 +201,6 @@ export function resolveOAuthProviderRedirectUri(
   return {
     providerRedirectUri: googleHttpsRedirect,
     nativeAppReturn: true,
+    nativeCallbackUri: requestedRedirectUri,
   };
 }

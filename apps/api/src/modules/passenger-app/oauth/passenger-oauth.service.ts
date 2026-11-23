@@ -9,7 +9,7 @@ import type { RequestIdentity } from "../../../common/auth/auth.types";
 import { OidcIdTokenVerifier } from "../../auth/oidc-id-token-verifier";
 import { PassengerAccountService } from "../account/passenger-account.service";
 import {
-  NATIVE_PASSENGER_OAUTH_STATE_PREFIX,
+  encodeNativePassengerOAuthState,
   isAllowedOAuthRedirectUri,
   resolveOAuthProviderConfig,
   resolveOAuthProviderRedirectUri,
@@ -178,9 +178,13 @@ export class PassengerOAuthService {
       command.purpose === "link" ? requirePassengerBearer(identity) : null;
 
     const rawState = base64url(randomBytes(24));
-    const state = resolvedRedirect.nativeAppReturn
-      ? `${NATIVE_PASSENGER_OAUTH_STATE_PREFIX}${rawState}`
-      : rawState;
+    const state =
+      resolvedRedirect.nativeAppReturn && resolvedRedirect.nativeCallbackUri
+        ? encodeNativePassengerOAuthState(
+            rawState,
+            resolvedRedirect.nativeCallbackUri,
+          )
+        : rawState;
     const nonce = base64url(randomBytes(24));
     const codeVerifier = base64url(randomBytes(32));
     const codeChallenge = base64url(
