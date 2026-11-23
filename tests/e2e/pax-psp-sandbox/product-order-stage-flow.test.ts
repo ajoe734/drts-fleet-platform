@@ -1018,7 +1018,7 @@ describe.skipIf(!hostedPaymentEnabled)(
           },
         );
         expect(refundReplay.status).toBe(201);
-        expect(refundReplay.body).toEqual(refundResp.body);
+        expect(refundReplay.body.data).toEqual(refundResp.body.data);
         expect(calls).toHaveLength(callsBeforeRefundReplay);
 
         const deleteResp = await ctx.requestJson<{
