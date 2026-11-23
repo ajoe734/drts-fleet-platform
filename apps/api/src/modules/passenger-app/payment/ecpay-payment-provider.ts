@@ -404,7 +404,11 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
     this.serverType = options.sandbox ? "Stage" : "Prod";
     this.approvedActionOrigins = Object.freeze(
       options.sandbox
-        ? [ECPAY_STAGE_BASE_URL, "https://payment-stage.ecpay.com.tw"]
+        ? [
+            ECPAY_STAGE_BASE_URL,
+            "https://payment-stage.ecpay.com.tw",
+            "https://cc-stage.ecpay.com.tw",
+          ]
         : [ECPAY_PROD_BASE_URL, "https://payment.ecpay.com.tw"],
     );
     this.returnUrl =

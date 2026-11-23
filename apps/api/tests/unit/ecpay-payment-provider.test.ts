@@ -264,7 +264,70 @@ describe("EcpayPaymentProvider adapter operations", () => {
     );
     expect(session.serverType).toBe("Stage");
     expect(session.provider).toBe("ecpay");
+    expect(session.approvedActionOrigins).toEqual([
+      "https://ecpg-stage.ecpay.com.tw",
+      "https://payment-stage.ecpay.com.tw",
+      "https://cc-stage.ecpay.com.tw",
+    ]);
     expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("includes verified Stage 3DS challenge origin https://cc-stage.ecpay.com.tw in Stage approvedActionOrigins while preserving Stage/Prod origin separation", async () => {
+    const stageFetch = vi.fn().mockResolvedValueOnce(
+      buildMockResponse(
+        {
+          RtnCode: 1,
+          RtnMsg: "ThreeDVerify",
+          ThreeDInfo: {
+            ThreeDURL: "https://cc-stage.ecpay.com.tw/ThreeD/Verify",
+          },
+        },
+        now,
+      ),
+    );
+    const stageProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      fetchFn: stageFetch as unknown as typeof fetch,
+      now: () => now,
+    });
+    const prodProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: false,
+      fetchFn: vi.fn() as unknown as typeof fetch,
+      now: () => now,
+    });
+
+    expect(Object.isFrozen(stageProvider.approvedActionOrigins)).toBe(true);
+    expect(stageProvider.approvedActionOrigins).toEqual([
+      "https://ecpg-stage.ecpay.com.tw",
+      "https://payment-stage.ecpay.com.tw",
+      "https://cc-stage.ecpay.com.tw",
+    ]);
+    expect(Object.isFrozen(prodProvider.approvedActionOrigins)).toBe(true);
+    expect(prodProvider.approvedActionOrigins).toEqual([
+      "https://ecpg.ecpay.com.tw",
+      "https://payment.ecpay.com.tw",
+    ]);
+    expect(prodProvider.approvedActionOrigins).not.toContain(
+      "https://cc-stage.ecpay.com.tw",
+    );
+
+    const threeD = await stageProvider.bind(
+      "synthetic_bind_card_pay_token_cc_stage_0001",
+      "pax:bind:cc-stage-3ds",
+      { passengerId: "pax_uuid_0001_safe" },
+    );
+    expect(threeD).toEqual({
+      status: "action_required",
+      nextActionUrl: "https://cc-stage.ecpay.com.tw/ThreeD/Verify",
+    });
+    if (threeD.status !== "action_required") {
+      throw new Error("Expected action_required result");
+    }
+    expect(stageProvider.approvedActionOrigins).toContain(
+      new URL(threeD.nextActionUrl).origin,
+    );
   });
 
   it("completes CreateBindCard with top-level BindCardID + split CardValidYY/CardValidMM, supports 3DS ThreeDURL, and never fabricates 12/2099 when expiry is missing", async () => {

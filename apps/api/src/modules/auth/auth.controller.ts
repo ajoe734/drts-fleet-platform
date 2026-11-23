@@ -1014,13 +1014,18 @@ export class AuthController {
     if (membership.status !== "active") return denyPartnerAccessNotActive();
     const entrySlug = /^fleet:(.+)$/.exec(membership.scopeRef)?.[1];
     if (!entrySlug) return denyPartnerAccessNotActive();
-    const matchedEntry = this.tenantPartnerService
-      .listPartnerEntries(entrySlug)
-      .find(
-        (entry) =>
-          entry.entrySlug === entrySlug &&
-          entry.partnerId === membership.partnerId,
-      );
+    const partnerEntries =
+      typeof this.tenantPartnerService.resolvePartnerEntries === "function"
+        ? await this.tenantPartnerService.resolvePartnerEntries(entrySlug)
+        : this.tenantPartnerService.listPartnerEntries(entrySlug);
+    const matchedEntry = partnerEntries.find(
+      (entry) =>
+        entry.entrySlug === entrySlug &&
+        entry.partnerId === membership.partnerId &&
+        entry.partnerType === "fleet_partner" &&
+        entry.status === "active" &&
+        entry.activeFlag,
+    );
     if (!matchedEntry) return denyPartnerAccessNotActive();
 
     const amr = await this.resolvePasswordLoginAmr(principal.principalId, mfa, {
@@ -1064,7 +1069,7 @@ export class AuthController {
       ...[
         principal.updatedAt,
         membership.updatedAt,
-        role.updatedAt,
+        ...roleBindings.map((binding) => binding.updatedAt),
         matchedEntry.updatedAt,
       ].map((timestamp) => Date.parse(timestamp)),
     );
@@ -1093,7 +1098,7 @@ export class AuthController {
         policyVersion: "v1",
         requestId: meta.requestId ?? null,
       },
-      { expiresIn: "8h", tokenVersion },
+      { expiresIn: "8h", ensurePrincipal: false, tokenVersion },
     );
 
     const identity: IdentityContext = {
@@ -2110,10 +2115,9 @@ export class AuthController {
     // Same policy evaluation as :realm/password-reset/confirm: there is no
     // confirmed-TOTP lookup available before an account even exists yet, so
     // the stricter single-factor minimum applies.
-    const policyResult = this.passwordPolicyService.evaluate(
-      command.password,
-      { totpEnabled: false },
-    );
+    const policyResult = this.passwordPolicyService.evaluate(command.password, {
+      totpEnabled: false,
+    });
     if (!policyResult.valid) {
       throw new ApiRequestError(
         400,
