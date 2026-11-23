@@ -16,7 +16,7 @@ import {
   visit,
 } from "./shared-dev-trip-record.mjs";
 
-const COPY = {
+export const COPY = {
   en: {
     lang: "en",
     login: "Regulatory Agency Read-Only Portal",
@@ -48,8 +48,22 @@ const COPY = {
   },
 };
 
-async function language(page, locale, heading) {
-  const { expect } = await import("@playwright/test");
+export function formatMinorLocale(amountMinor, currency, locale) {
+  if (
+    amountMinor === null ||
+    amountMinor === undefined ||
+    !Number.isFinite(amountMinor)
+  ) {
+    return COPY[locale].missing;
+  }
+  const formatted = new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    maximumFractionDigits: 2,
+  }).format(amountMinor / 100);
+  return `${formatted} ${currency ?? ""}`.trim();
+}
+
+export async function language(page, locale, heading, expectImpl) {
+  const expect = expectImpl ?? (await import("@playwright/test")).expect;
   const before = new URL(page.url());
   if ((await page.locator("html").getAttribute("lang")) !== COPY[locale].lang) {
     const label =
@@ -147,19 +161,32 @@ async function publicEntries(browser, cfg, record) {
   }
 }
 
-async function nullZeroAndTime(page, cfg, row, locale) {
-  const { expect } = await import("@playwright/test");
-  // Fail explicitly when the controlled fixture lacks the required source
-  // sample. Undefined, another null field or a mocked zero is not a substitute.
+export async function verifyLocaleDetail(page, cfg, row, locale, expectImpl) {
+  const expect = expectImpl ?? (await import("@playwright/test")).expect;
   check(
-    row.collected_fare_minor === null && row.toll_minor === 0,
-    "fixture-needs-null-collected-and-zero-toll",
+    Boolean(row) &&
+      (row.collected_fare_minor === null ||
+        (typeof row.collected_fare_minor === "number" &&
+          Number.isFinite(row.collected_fare_minor))),
+    "fixture-collected-fare-type",
   );
+  check(row.toll_minor === 0, "fixture-needs-zero-toll");
+  const expectedCollected = formatMinorLocale(
+    row.collected_fare_minor,
+    row.currency,
+    locale,
+  );
+  const expectedZeroToll = formatMinorLocale(0, row.currency, locale);
   await expect(detailCell(page, COPY[locale].collected)).toContainText(
-    COPY[locale].missing,
+    expectedCollected,
   );
+  if (row.collected_fare_minor !== null) {
+    await expect(detailCell(page, COPY[locale].collected)).not.toContainText(
+      COPY[locale].missing,
+    );
+  }
   await expect(detailCell(page, COPY[locale].toll)).toContainText(
-    `0 ${row.currency}`.trim(),
+    expectedZeroToll,
   );
   await expect(detailCell(page, COPY[locale].toll)).not.toContainText(
     COPY[locale].missing,
@@ -179,21 +206,143 @@ async function nullZeroAndTime(page, cfg, row, locale) {
     page.getByRole("heading", { name: COPY[locale].detail, exact: true }),
   ).toBeVisible();
   await expect(detailCell(page, COPY[locale].collected)).toContainText(
-    COPY[locale].missing,
+    expectedCollected,
   );
   await expect(detailCell(page, COPY[locale].toll)).toContainText(
-    `0 ${row.currency}`.trim(),
+    expectedZeroToll,
   );
   return {
     locale,
-    rawCollectedIsNull: true,
+    recordId: row.record_id,
+    orderId: row.order_id,
+    tripId: row.trip_id,
+    collectedFareMinor: row.collected_fare_minor,
+    paymentStatus: row.payment_status,
+    tollMinor: row.toll_minor,
+    rawCollectedIsNull: row.collected_fare_minor === null,
     rawTollIsZero: true,
-    nullText: COPY[locale].missing,
-    zeroText: `0 ${row.currency}`.trim(),
+    collectedText: expectedCollected,
+    ...(row.collected_fare_minor === null
+      ? { nullText: COPY[locale].missing }
+      : {}),
+    zeroText: expectedZeroToll,
     taipeiTime: formatted,
     browserTimeZone: "UTC",
     viewports,
     reloadPersisted: true,
+  };
+}
+
+export async function nullZeroAndTime(page, cfg, row, locale, expectImpl) {
+  // Fail explicitly when the controlled fixture lacks the required source
+  // sample. Undefined, another null field or a mocked zero is not a substitute.
+  check(
+    Boolean(row) && row.collected_fare_minor === null && row.toll_minor === 0,
+    "fixture-needs-null-collected-and-zero-toll",
+  );
+  const facts = await verifyLocaleDetail(page, cfg, row, locale, expectImpl);
+  return {
+    ...facts,
+    rawCollectedIsNull: true,
+    rawTollIsZero: true,
+    nullText: COPY[locale].missing,
+    subcaseStatus: "verified",
+  };
+}
+
+export async function resolveNullZeroSubcase(
+  page,
+  cfg,
+  primaryRow,
+  secondRow,
+  locale,
+  expectImpl,
+) {
+  check(Boolean(primaryRow), "detail-prerequisite");
+  if (primaryRow.collected_fare_minor === null && primaryRow.toll_minor === 0) {
+    await visit(
+      page,
+      `/trip-records/${encodeURIComponent(cfg.fixture.recordId)}`,
+      cfg,
+    );
+    await language(page, locale, COPY[locale].detail, expectImpl);
+    return {
+      ...(await nullZeroAndTime(page, cfg, primaryRow, locale, expectImpl)),
+      fixtureSlot: "primary",
+    };
+  }
+  if (secondRow) {
+    check(Boolean(cfg.secondFixture), "second-fixture-config-required");
+    if (secondRow.collected_fare_minor === null && secondRow.toll_minor === 0) {
+      const secondCfg = { ...cfg, fixture: cfg.secondFixture };
+      await visit(
+        page,
+        `/trip-records/${encodeURIComponent(cfg.secondFixture.recordId)}`,
+        secondCfg,
+      );
+      await language(page, locale, COPY[locale].detail, expectImpl);
+      return {
+        ...(await nullZeroAndTime(
+          page,
+          secondCfg,
+          secondRow,
+          locale,
+          expectImpl,
+        )),
+        fixtureSlot: "secondary",
+        primaryRecordId: primaryRow.record_id,
+        primaryCollectedFareMinor: primaryRow.collected_fare_minor,
+        primaryCollectedText: formatMinorLocale(
+          primaryRow.collected_fare_minor,
+          primaryRow.currency,
+          locale,
+        ),
+      };
+    }
+  }
+  check(
+    typeof primaryRow.collected_fare_minor === "number" &&
+      Number.isFinite(primaryRow.collected_fare_minor) &&
+      primaryRow.toll_minor === 0,
+    "primary-fixture-captured-zero-toll-required",
+  );
+  if (secondRow) {
+    check(
+      typeof secondRow.collected_fare_minor === "number" &&
+        Number.isFinite(secondRow.collected_fare_minor) &&
+        secondRow.toll_minor === 0,
+      "second-fixture-captured-zero-toll-required",
+    );
+  }
+  return {
+    status: "pending",
+    subcaseStatus: "pending",
+    reason: secondRow
+      ? "second-sample-also-captured-null-collected-sample-pending"
+      : "second-null-collected-sample-pending",
+    locale,
+    primaryRecordId: primaryRow.record_id,
+    primaryCollectedFareMinor: primaryRow.collected_fare_minor,
+    primaryCollectedText: formatMinorLocale(
+      primaryRow.collected_fare_minor,
+      primaryRow.currency,
+      locale,
+    ),
+    primaryTollMinor: primaryRow.toll_minor,
+    ...(secondRow
+      ? {
+          secondRecordId: secondRow.record_id,
+          secondCollectedFareMinor: secondRow.collected_fare_minor,
+          secondCollectedText: formatMinorLocale(
+            secondRow.collected_fare_minor,
+            secondRow.currency,
+            locale,
+          ),
+          secondTollMinor: secondRow.toll_minor,
+        }
+      : {}),
+    rawCollectedIsNull: false,
+    rawTollIsZero: true,
   };
 }
 
@@ -261,11 +410,38 @@ export async function main() {
       try {
         const { page } = opened;
         let row;
+        let secondRow = null;
         await record(`${role}:locale-detail-via-list`, async () => {
           row = await readDetail(page, cfg);
           assertRecord(row, cfg.fixture);
-          return { sameRecord: true };
+          return {
+            fixtureSlot: "primary",
+            recordId: row.record_id,
+            orderId: row.order_id,
+            tripId: row.trip_id,
+            collectedFareMinor: row.collected_fare_minor,
+            paymentStatus: row.payment_status,
+            tollMinor: row.toll_minor,
+            sameRecord: true,
+          };
         });
+        if (cfg.secondFixture) {
+          const secondCfg = { ...cfg, fixture: cfg.secondFixture };
+          await record(`${role}:second-fixture-detail-via-list`, async () => {
+            secondRow = await readDetail(page, secondCfg);
+            assertRecord(secondRow, cfg.secondFixture);
+            return {
+              fixtureSlot: "secondary",
+              recordId: secondRow.record_id,
+              orderId: secondRow.order_id,
+              tripId: secondRow.trip_id,
+              collectedFareMinor: secondRow.collected_fare_minor,
+              paymentStatus: secondRow.payment_status,
+              tollMinor: secondRow.toll_minor,
+              sameRecord: true,
+            };
+          });
+        }
         for (const locale of ["zh", "en"]) {
           await record(`${role}:detail:${locale}`, async () => {
             check(row, "detail-prerequisite");
@@ -275,8 +451,38 @@ export async function main() {
               cfg,
             );
             await language(page, locale, COPY[locale].detail);
-            return nullZeroAndTime(page, cfg, row, locale);
+            return {
+              ...(await verifyLocaleDetail(page, cfg, row, locale)),
+              fixtureSlot: "primary",
+            };
           });
+          if (cfg.secondFixture) {
+            const secondCfg = { ...cfg, fixture: cfg.secondFixture };
+            await record(
+              `${role}:second-fixture-detail:${locale}`,
+              async () => {
+                check(secondRow, "second-detail-prerequisite");
+                await visit(
+                  page,
+                  `/trip-records/${encodeURIComponent(cfg.secondFixture.recordId)}`,
+                  secondCfg,
+                );
+                await language(page, locale, COPY[locale].detail);
+                return {
+                  ...(await verifyLocaleDetail(
+                    page,
+                    secondCfg,
+                    secondRow,
+                    locale,
+                  )),
+                  fixtureSlot: "secondary",
+                };
+              },
+            );
+          }
+          await record(`${role}:null-collected-zero-toll:${locale}`, async () =>
+            resolveNullZeroSubcase(page, cfg, row, secondRow, locale),
+          );
           for (const kind of ["invalid", "window"])
             await record(`${role}:${kind}:${locale}`, () =>
               rejection(page, cfg, kind, locale),
