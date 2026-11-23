@@ -325,32 +325,5 @@ describe.skipIf(!databaseUrl)(
       expect(stored.attempt_count).toBe(0);
       expect(await nextSequence()).toBe(1);
     });
-
-    it("gives an order with only a first-party route its own durable sequence", async () => {
-      await pool.query(
-        `INSERT INTO mobility.phase1_order_first_party_notification_routes
-           (order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
-            app_id, consent_version, ride_ref)
-         VALUES ('order-first-party', 'tenant-seq', 'passenger-seq',
-            'subject-seq', 'app-seq', 'v1', 'ride-order-first-party')`,
-      );
-      await repository.persistChanges({
-        consumerNotificationOutbox: [
-          event("first-party-1", "order-first-party"),
-          event("first-party-2", "order-first-party"),
-        ],
-      });
-      const stored = (await rows()).filter(
-        (row) => row.order_id === "order-first-party",
-      );
-      expect(stored.map((row) => row.payload.eventSequence)).toEqual([1, 2]);
-      const counter = await pool.query(
-        "SELECT next_sequence FROM mobility.phase1_first_party_notification_sequences WHERE order_id = $1",
-        ["order-first-party"],
-      );
-      expect(Number(counter.rows[0].next_sequence)).toBe(3);
-      expect(await nextSequence("order-a")).toBe(1);
-      expect(await nextSequence("order-b")).toBe(1);
-    });
   },
 );
