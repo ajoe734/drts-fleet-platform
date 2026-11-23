@@ -694,6 +694,19 @@ describe("captured E04 downstream mapping and authorized downloads (SQL fixtures
       },
     };
     const before = f.queries.length;
+    const rideReceipt = (
+      await f.booking.controller.getRide(identity, f.orderId)
+    ).data.ride.receipt;
+    expect(rideReceipt).toEqual(
+      await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER),
+    );
+    expect(rideReceipt).toMatchObject({
+      receiptId: currentId,
+      record: {
+        certificateVersion: "v2",
+        pdfUrl: `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/pdf`,
+      },
+    });
     expect(
       (await f.account.downloads(identity, f.orderId, f.response)).data
         .certificateId,
