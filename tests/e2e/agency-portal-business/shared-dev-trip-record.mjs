@@ -28,11 +28,26 @@ export const save = (name, value) => {
   writeFileSync(`${OUT}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
 };
 
-export function validateFixture(raw) {
-  const fixture = JSON.parse(raw);
-  const keys = ["agencyId", "recordId", "orderId", "tripId", "serviceDate"];
+const FIXTURE_KEYS = [
+  "agencyId",
+  "recordId",
+  "orderId",
+  "tripId",
+  "serviceDate",
+];
+const SECOND_FIXTURE_KEYS = [
+  "secondFixture",
+  "secondaryFixture",
+  "nullCollectedFixture",
+];
+
+export function validateSingleFixture(fixture) {
   check(
-    Object.keys(fixture).sort().join() === keys.sort().join(),
+    Boolean(fixture) && typeof fixture === "object" && !Array.isArray(fixture),
+    "fixture-fields",
+  );
+  check(
+    Object.keys(fixture).sort().join() === [...FIXTURE_KEYS].sort().join(),
     "fixture-fields",
   );
   check(fixture.agencyId === AGENCY, "existing-fictional-agency-only");
@@ -43,17 +58,80 @@ export function validateFixture(raw) {
       "fixture-id",
     );
   check(
-    /^\d{4}-\d{2}-\d{2}$/.test(fixture.serviceDate) &&
+    typeof fixture.serviceDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(fixture.serviceDate) &&
       new Date(`${fixture.serviceDate}T00:00:00Z`)
         .toISOString()
         .slice(0, 10) === fixture.serviceDate,
     "fixture-date",
   );
-  return fixture;
+  return {
+    agencyId: fixture.agencyId,
+    recordId: fixture.recordId,
+    orderId: fixture.orderId,
+    tripId: fixture.tripId,
+    serviceDate: fixture.serviceDate,
+  };
 }
 
-export function config() {
-  const env = process.env;
+export function parseFixtureInput(raw) {
+  const parsed = JSON.parse(raw);
+  check(Boolean(parsed) && typeof parsed === "object", "fixture-fields");
+  let primary;
+  let secondFixture = null;
+  if (Array.isArray(parsed)) {
+    check(parsed.length === 1 || parsed.length === 2, "fixture-fields");
+    primary = validateSingleFixture(parsed[0]);
+    if (parsed.length === 2 && parsed[1] != null)
+      secondFixture = validateSingleFixture(parsed[1]);
+  } else if ("primary" in parsed || "fixture" in parsed) {
+    const keys = Object.keys(parsed);
+    const primaryKeys = keys.filter(
+      (key) => key === "primary" || key === "fixture",
+    );
+    const secondKeys = keys.filter((key) =>
+      ["secondary", ...SECOND_FIXTURE_KEYS].includes(key),
+    );
+    check(
+      primaryKeys.length === 1 &&
+        secondKeys.length <= 1 &&
+        primaryKeys.length + secondKeys.length === keys.length,
+      "fixture-fields",
+    );
+    primary = validateSingleFixture(parsed[primaryKeys[0]]);
+    if (secondKeys.length === 1 && parsed[secondKeys[0]] != null)
+      secondFixture = validateSingleFixture(parsed[secondKeys[0]]);
+  } else {
+    const secondKeys = Object.keys(parsed).filter((key) =>
+      SECOND_FIXTURE_KEYS.includes(key),
+    );
+    check(secondKeys.length <= 1, "fixture-fields");
+    const rest = { ...parsed };
+    for (const key of secondKeys) delete rest[key];
+    primary = validateSingleFixture(rest);
+    if (secondKeys.length === 1 && parsed[secondKeys[0]] != null)
+      secondFixture = validateSingleFixture(parsed[secondKeys[0]]);
+  }
+  if (secondFixture) {
+    check(
+      secondFixture.agencyId === primary.agencyId,
+      "existing-fictional-agency-only",
+    );
+    check(
+      secondFixture.recordId !== primary.recordId &&
+        secondFixture.orderId !== primary.orderId &&
+        secondFixture.tripId !== primary.tripId,
+      "distinct-second-fixture-required",
+    );
+  }
+  return { fixture: primary, secondFixture };
+}
+
+export function validateFixture(raw) {
+  return parseFixtureInput(raw).fixture;
+}
+
+export function config(env = process.env) {
   check(env.GITHUB_ACTIONS === "true", "hosted-runner-required");
   check(
     /^[a-f0-9]{40}$/.test(env.EXPECTED_DEFINITION_SHA ?? "") &&
@@ -71,10 +149,12 @@ export function config() {
     env.DEV_GCP_PROJECT_ID === PROJECT && env.DEV_GCP_REGION === REGION,
     "live-dev-target-mismatch",
   );
+  const parsed = parseFixtureInput(env.AGENCY_SHARED_FIXTURE ?? "");
   return {
     definitionSha: env.GITHUB_SHA,
     runtimeSha: env.EXPECTED_RUNTIME_SHA,
-    fixture: validateFixture(env.AGENCY_SHARED_FIXTURE ?? ""),
+    fixture: parsed.fixture,
+    ...(parsed.secondFixture ? { secondFixture: parsed.secondFixture } : {}),
   };
 }
 
@@ -607,8 +687,35 @@ async function exportRecord(page, role, cfg, row) {
   };
 }
 
-async function dailyDispatch(page, cfg, row) {
+export async function dailyDispatch(page, cfg, row) {
   const { expect } = await import("@playwright/test");
+  const validTime = (value) =>
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    Number.isFinite(Date.parse(value));
+  const formatTaipei = (value) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date(value));
+  check(
+    Boolean(row) &&
+      typeof row.order_no_masked === "string" &&
+      row.order_no_masked.trim().length > 0 &&
+      validTime(row.pickup_at) &&
+      validTime(row.dropoff_at) &&
+      Date.parse(row.pickup_at) <= Date.parse(row.dropoff_at) &&
+      (row.plate_no_masked == null ||
+        (typeof row.plate_no_masked === "string" &&
+          row.plate_no_masked.trim().length > 0)),
+    "daily-dispatch-trip-correlation-fields-required",
+  );
   await visit(page, "/reports/daily-dispatch", cfg);
   for (const field of ["serviceDateFrom", "serviceDateTo"])
     await page.locator(`input[name="${field}"]`).fill(cfg.fixture.serviceDate);
@@ -620,39 +727,132 @@ async function dailyDispatch(page, cfg, row) {
     ),
     page.locator('button[type="submit"]').click(),
   ]);
-  const query = new URLSearchParams({
-    serviceDateFrom: cfg.fixture.serviceDate,
-    serviceDateTo: cfg.fixture.serviceDate,
-  });
-  const result = await api(page, `reports/daily-dispatch-records?${query}`);
+  const pagesRead = [];
+  const matches = [];
+  const maskedCollisions = [];
+  const incompleteCandidates = [];
+  let totalPages = 1;
+  let totalRows = 0;
+  let expectedTotal;
+  let expectedPageSize;
+  for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
+    const query = new URLSearchParams({
+      serviceDateFrom: cfg.fixture.serviceDate,
+      serviceDateTo: cfg.fixture.serviceDate,
+      ...(pageNo > 1 ? { page: String(pageNo) } : {}),
+    });
+    if (pageNo > 1) {
+      await visit(page, `/reports/daily-dispatch?${query}`, cfg);
+    }
+    const result = await api(page, `reports/daily-dispatch-records?${query}`);
+    pagesRead.push(pageNo);
+    check(
+      Array.isArray(result?.items) &&
+        result.items.length > 0 &&
+        result.items.every(
+          (item) => item.service_date === cfg.fixture.serviceDate,
+        ),
+      "dated-daily-dispatch-data-required",
+    );
+    const pageSize = result.page_size;
+    const total = result.total;
+    check(
+      Number.isSafeInteger(pageSize) &&
+        pageSize > 0 &&
+        Number.isSafeInteger(total) &&
+        total >= result.items.length &&
+        result.page === pageNo,
+      "daily-dispatch-pagination-contract",
+    );
+    const computedPages = Math.max(1, Math.ceil(total / pageSize));
+    if (pageNo === 1) {
+      totalPages = computedPages;
+      expectedTotal = total;
+      expectedPageSize = pageSize;
+    } else
+      check(
+        total === expectedTotal && pageSize === expectedPageSize,
+        "daily-dispatch-pagination-contract",
+      );
+    check(totalPages <= 100, "daily-dispatch-pagination-bound");
+    check(
+      result.items.length ===
+        Math.min(pageSize, total - (pageNo - 1) * pageSize),
+      "daily-dispatch-pagination-contract",
+    );
+    totalRows += result.items.length;
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator("main tbody tr")).toHaveCount(
+      result.items.length,
+    );
+    for (let i = 0; i < result.items.length; i++) {
+      const item = result.items[i];
+      const cells = page.locator("main tbody tr").nth(i).locator("td");
+      await expect(cells.nth(0)).toHaveText(cfg.fixture.serviceDate);
+      await expect(cells.nth(1)).toHaveText(item.order_no_masked);
+      await expect(cells.nth(3)).toHaveText(item.service_product_code);
+      await expect(cells.nth(11)).toHaveText(
+        validTime(item.trip_completed_at)
+          ? formatTaipei(item.trip_completed_at)
+          : "Not provided",
+      );
+    }
+    for (let i = 0; i < result.items.length; i++) {
+      const item = result.items[i];
+      if (
+        item.order_no_masked !== row.order_no_masked ||
+        item.final_status !== "completed"
+      )
+        continue;
+      const hasTimes =
+        validTime(item.trip_started_at) && validTime(item.trip_completed_at);
+      const plateMissing =
+        Boolean(row.plate_no_masked) &&
+        (typeof item.final_plate_no_masked !== "string" ||
+          item.final_plate_no_masked.trim().length === 0);
+      if (!hasTimes || plateMissing) {
+        incompleteCandidates.push({ page: pageNo, rowIndex: i });
+        continue;
+      }
+      const sameTimes =
+        Date.parse(item.trip_started_at) === Date.parse(row.pickup_at) &&
+        Date.parse(item.trip_completed_at) === Date.parse(row.dropoff_at);
+      const samePlate =
+        !row.plate_no_masked ||
+        item.final_plate_no_masked === row.plate_no_masked;
+      const sameService =
+        !row.service_product_code ||
+        !item.service_product_code ||
+        item.service_product_code === row.service_product_code;
+      if (sameTimes && samePlate && sameService) {
+        matches.push({ page: pageNo, rowIndex: i, item });
+      } else {
+        maskedCollisions.push({ page: pageNo, rowIndex: i, item });
+      }
+    }
+  }
+  check(totalRows === expectedTotal, "daily-dispatch-pagination-contract");
   check(
-    result.items.length > 0 &&
-      result.items.every(
-        (item) => item.service_date === cfg.fixture.serviceDate,
-      ),
-    "dated-daily-dispatch-data-required",
+    incompleteCandidates.length === 0,
+    "daily-dispatch-correlation-fields-missing",
   );
-  check(
-    row &&
-      result.items.some(
-        (item) =>
-          item.order_no_masked === row.order_no_masked &&
-          item.final_status === "completed",
-      ),
-    "daily-dispatch-same-completed-order",
-  );
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.locator("main tbody tr")).toHaveCount(result.items.length);
-  for (let i = 0; i < result.items.length; i++) {
-    const cells = page.locator("main tbody tr").nth(i).locator("td");
-    await expect(cells.nth(0)).toHaveText(cfg.fixture.serviceDate);
-    await expect(cells.nth(1)).toHaveText(result.items[i].order_no_masked);
-    await expect(cells.nth(3)).toHaveText(result.items[i].service_product_code);
+  check(matches.length <= 1, "daily-dispatch-duplicate-trip-match");
+  if (matches.length === 0) {
+    check(
+      maskedCollisions.length === 0,
+      "daily-dispatch-masked-order-collision",
+    );
+    check(false, "daily-dispatch-same-completed-order");
   }
   return {
     serviceDate: cfg.fixture.serviceDate,
     apiStatus: 200,
-    rows: result.items.length,
+    rows: totalRows,
+    pagesRead,
+    matchedPage: matches[0].page,
+    matchedRowIndex: matches[0].rowIndex,
+    maskedCollisionsSkipped: maskedCollisions.length,
+    uniqueTripMatch: true,
     uiMatchesApi: true,
   };
 }
@@ -683,7 +883,8 @@ export async function probe(name, operation) {
   const record = async (label, action) => {
     try {
       const facts = await action();
-      result.checks.push({ check: label, status: "pass", ...facts });
+      const status = facts?.status === "pending" ? "pending" : "pass";
+      result.checks.push({ check: label, ...facts, status });
       return facts;
     } catch (error) {
       result.checks.push({
@@ -704,15 +905,22 @@ export async function probe(name, operation) {
     result.checks.push({ check: "probe-aborted", status: "fail" });
   } finally {
     await browser.close();
-    result.status =
-      result.checks.length > 0 &&
-      result.checks.every((item) => item.status === "pass")
-        ? "pass"
-        : "fail";
+    const hasFailed =
+      result.checks.length === 0 ||
+      result.checks.some((item) => item.status === "fail");
+    const pendingChecks = result.checks
+      .filter((item) => item.status === "pending")
+      .map((item) => item.check);
+    if (pendingChecks.length > 0) result.pendingChecks = pendingChecks;
+    result.status = hasFailed
+      ? "fail"
+      : pendingChecks.length > 0
+        ? "pending"
+        : "pass";
     result.finishedAt = new Date().toISOString();
     save(name, result);
   }
-  check(result.status === "pass", "probe-has-failed-checks");
+  check(result.status !== "fail", "probe-has-failed-checks");
 }
 
 async function main() {
@@ -729,11 +937,18 @@ async function main() {
         await record(`${role}:R11-detail-refresh`, async () => {
           row = await readDetail(opened.page, cfg);
           return {
+            fixtureSlot: "primary",
+            recordId: row.record_id,
+            orderId: row.order_id,
+            tripId: row.trip_id,
             sameRecord: true,
             refreshed: true,
             routeSource: row.route.source,
             paymentStatus: row.payment_status,
             collectedFareMinor: row.collected_fare_minor,
+            tollMinor: row.toll_minor,
+            pickupAt: row.pickup_at,
+            dropoffAt: row.dropoff_at,
             retainUntil: row.retain_until,
           };
         });
@@ -744,6 +959,34 @@ async function main() {
           check(row, "detail-prerequisite");
           return exportRecord(opened.page, role, cfg, row);
         });
+        if (cfg.secondFixture) {
+          const secondCfg = { ...cfg, fixture: cfg.secondFixture };
+          let secondRow;
+          await record(
+            `${role}:R11-second-fixture-detail-refresh`,
+            async () => {
+              secondRow = await readDetail(opened.page, secondCfg);
+              return {
+                fixtureSlot: "secondary",
+                recordId: secondRow.record_id,
+                orderId: secondRow.order_id,
+                tripId: secondRow.trip_id,
+                sameRecord: true,
+                refreshed: true,
+                routeSource: secondRow.route.source,
+                paymentStatus: secondRow.payment_status,
+                collectedFareMinor: secondRow.collected_fare_minor,
+                tollMinor: secondRow.toll_minor,
+                pickupAt: secondRow.pickup_at,
+                dropoffAt: secondRow.dropoff_at,
+                retainUntil: secondRow.retain_until,
+              };
+            },
+          );
+          await record(`${role}:R13-second-fixture-dated-daily-dispatch`, () =>
+            dailyDispatch(opened.page, secondCfg, secondRow),
+          );
+        }
       } finally {
         await opened.context.close();
       }
@@ -751,7 +994,7 @@ async function main() {
   });
 }
 
-export function selfTest() {
+export async function selfTest() {
   const fixture = {
     agencyId: AGENCY,
     recordId: "mtr_fixture",
@@ -759,7 +1002,33 @@ export function selfTest() {
     tripId: "trip_fixture",
     serviceDate: "2026-11-19",
   };
+  const secondFixture = {
+    agencyId: AGENCY,
+    recordId: "mtr_fixture_2",
+    orderId: "order_fixture_2",
+    tripId: "trip_fixture_2",
+    serviceDate: "2026-11-20",
+  };
   assert.deepEqual(validateFixture(JSON.stringify(fixture)), fixture);
+  assert.deepEqual(parseFixtureInput(JSON.stringify(fixture)), {
+    fixture,
+    secondFixture: null,
+  });
+  for (const dual of [
+    [fixture, secondFixture],
+    { ...fixture, secondFixture },
+    { primary: fixture, secondFixture },
+    { fixture, nullCollectedFixture: secondFixture },
+  ]) {
+    assert.deepEqual(parseFixtureInput(JSON.stringify(dual)), {
+      fixture,
+      secondFixture,
+    });
+  }
+  assert.throws(
+    () => parseFixtureInput(JSON.stringify([fixture, fixture])),
+    /distinct-second-fixture-required/,
+  );
   for (const delta of [
     { agencyId: "customer" },
     { recordId: "../../escape" },
@@ -839,8 +1108,159 @@ export function selfTest() {
       "a".repeat(40),
     ),
   );
+  const serviceDate = "2026-11-20";
+  const maskOrder = (orderNo) =>
+    `${orderNo.slice(0, 3)}...${orderNo.slice(-2)}`;
+  const bookedNo = "ORD-20261120-A00117";
+  const collidingNo = "ORD-20261120-B00217";
+  assert.equal(maskOrder(bookedNo), maskOrder(collidingNo));
+  const detail = {
+    order_no_masked: maskOrder(bookedNo),
+    pickup_at: "2026-11-20T03:30:00Z",
+    dropoff_at: "2026-11-20T03:55:00Z",
+  };
+  const makeRow = (orderNo, start, end, status = "completed") => ({
+    service_date: serviceDate,
+    order_no_masked: maskOrder(orderNo),
+    service_product_code: "multi_taxi_direct",
+    final_status: status,
+    trip_started_at: start,
+    trip_completed_at: end,
+  });
+  const sourceText = readFileSync(new URL(import.meta.url), "utf8");
+  const dailySource = sourceText
+    .slice(
+      sourceText.indexOf("async function dailyDispatch("),
+      sourceText.indexOf("export async function probe("),
+    )
+    .trim();
+  const importLine = 'const { expect } = await import("@playwright/test");';
+  assert.equal(dailySource.split(importLine).length, 2);
+  const bindDaily = new Function(
+    "expect",
+    "visit",
+    "api",
+    "check",
+    `return (${dailySource.replace(importLine, "")})`,
+  );
+  const runDailyPages = async (
+    pages,
+    detailRow = detail,
+    uiOverride = null,
+  ) => {
+    const reads = [];
+    let currentUrl = new URL("https://fixture.invalid/reports/daily-dispatch");
+    for (const field of ["serviceDateFrom", "serviceDateTo"])
+      currentUrl.searchParams.set(field, serviceDate);
+    const expectStub = (locator) => ({
+      toHaveCount: async (n) => assert.equal(locator.count, n),
+      toHaveText: async (text) => assert.equal(locator.value, text),
+    });
+    const visitStub = async (_page, path) => {
+      currentUrl = new URL(path, "https://fixture.invalid/");
+      for (const field of ["serviceDateFrom", "serviceDateTo"])
+        if (!currentUrl.searchParams.has(field))
+          currentUrl.searchParams.set(field, serviceDate);
+    };
+    const apiStub = async (_page, path) => {
+      const pageNo = Number(
+        new URL(path, "https://fixture.invalid/").searchParams.get("page") || 1,
+      );
+      reads.push(pageNo);
+      return {
+        page: pageNo,
+        page_size: pages[0]?.length || 1,
+        total: pages.flat().length,
+        items: pages[pageNo - 1] ?? [],
+      };
+    };
+    const pageStub = {
+      url: () => currentUrl.toString(),
+      waitForURL: async (condition) => assert.ok(condition(currentUrl)),
+      getByRole: () => ({ count: 0 }),
+      locator(selector) {
+        if (selector !== "main tbody tr")
+          return { fill: async () => {}, click: async () => {} };
+        const pageNo = Number(currentUrl.searchParams.get("page") || 1);
+        const uiRows = uiOverride?.[pageNo - 1] ?? pages[pageNo - 1] ?? [];
+        return {
+          count: uiRows.length,
+          nth(i) {
+            const item = uiRows[i];
+            const completedText =
+              item?.trip_completed_at &&
+              Number.isFinite(Date.parse(item.trip_completed_at))
+                ? taipeiTime(item.trip_completed_at, "en")
+                : undefined;
+            const values = [
+              item?.service_date ?? serviceDate,
+              item?.order_no_masked,
+              null,
+              item?.service_product_code,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              completedText,
+            ];
+            return {
+              locator: () => ({
+                nth: (column) => ({ value: values[column] }),
+              }),
+            };
+          },
+        };
+      },
+    };
+    const fn = bindDaily(expectStub, visitStub, apiStub, check);
+    return fn(pageStub, { fixture: { serviceDate } }, detailRow);
+  };
+  const correctRow = makeRow(bookedNo, detail.pickup_at, detail.dropoff_at);
+  const collidingRow = makeRow(
+    collidingNo,
+    "2026-11-20T07:12:00Z",
+    "2026-11-20T07:38:00Z",
+  );
+  const otherRow = makeRow(
+    "ORD-20261120-C00435",
+    collidingRow.trip_started_at,
+    collidingRow.trip_completed_at,
+  );
+  const singlePagePass = await runDailyPages([[correctRow]]);
+  assert.equal(singlePagePass.matchedPage, 1);
+  assert.deepEqual(singlePagePass.pagesRead, [1]);
+  await assert.rejects(
+    () => runDailyPages([[collidingRow]]),
+    /daily-dispatch-masked-order-collision/,
+  );
+  const pageTwoPass = await runDailyPages([
+    [otherRow, collidingRow],
+    [correctRow],
+  ]);
+  assert.equal(pageTwoPass.matchedPage, 2);
+  assert.equal(pageTwoPass.maskedCollisionsSkipped, 1);
+  assert.deepEqual(pageTwoPass.pagesRead, [1, 2]);
+  await assert.rejects(
+    () => runDailyPages([[correctRow], [correctRow]]),
+    /daily-dispatch-duplicate-trip-match/,
+  );
+  await assert.rejects(
+    () => runDailyPages([[makeRow(bookedNo, null, detail.dropoff_at)]]),
+    /daily-dispatch-correlation-fields-missing/,
+  );
+  await assert.rejects(
+    () =>
+      runDailyPages([[correctRow]], {
+        ...detail,
+        pickup_at: null,
+      }),
+    /daily-dispatch-trip-correlation-fields-required/,
+  );
   console.log(
-    "PASS: socket-free fixture, runtime, RFC4180, CSV bytes/hash/readback and null/zero controls",
+    "PASS: socket-free fixture, runtime, RFC4180, CSV bytes/hash/readback, masked collision, pagination and null/zero controls",
   );
 }
 
@@ -849,7 +1269,7 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   try {
-    if (process.argv[2] === "--self-test") selfTest();
+    if (process.argv[2] === "--self-test") await selfTest();
     else if (["--runtime-before", "--runtime-after"].includes(process.argv[2]))
       runtime(process.argv[2].slice(10));
     else await main();
