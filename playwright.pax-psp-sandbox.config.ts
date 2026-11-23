@@ -14,11 +14,8 @@ import path from "node:path";
  * iframe; the spec takes its own masked screenshots instead. No retries: a
  * retry would bind another Stage card for the same run.
  */
-export default defineConfig({
-  testDir: "./tests/e2e/pax-psp-sandbox",
-  testMatch: /ecpay-stage-sandbox\.spec\.ts/,
-  tsconfig: "./tsconfig.json",
-  build: {
+const playwrightLoaderOptions = {
+  "@playwright/test": {
     babelPlugins: [
       [
         path.resolve(
@@ -28,6 +25,13 @@ export default defineConfig({
       ],
     ],
   },
+};
+
+export default defineConfig({
+  testDir: "./tests/e2e/pax-psp-sandbox",
+  testMatch: /ecpay-stage-sandbox\.spec\.ts/,
+  tsconfig: "./tsconfig.json",
+  ...playwrightLoaderOptions,
   fullyParallel: false,
   workers: 1,
   retries: 0,
