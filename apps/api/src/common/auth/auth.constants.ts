@@ -61,15 +61,37 @@ export function getAgencyRoleScopes(
 
 /**
  * BUREAU-R13 §2.6: the only non-read requests an agency session may make.
- * Export-job creation produces an access record and an export artifact; it
- * never changes operational data. Every other write is denied to the realm.
+ * Export-job creation produces an access record and an export artifact; own-
+ * account session logout/revocation and TOTP enrollment/confirmation/recovery-
+ * code regeneration operate strictly on the caller's own principal/session and
+ * never change operational business data. Every other write is denied to the realm.
  */
 export const AGENCY_WRITE_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
   "POST agency/trip-records/export-jobs/preview",
   "POST agency/trip-records/export-jobs",
   "POST auth/logout",
   "POST auth/logout-all",
+  "POST auth/agency/mfa/totp/enroll",
+  "POST auth/agency/mfa/totp/confirm",
+  "POST auth/agency/mfa/totp/recovery-codes/regenerate",
 ]);
+
+export const AGENCY_SELF_SESSION_REVOKE_ROUTE_PATTERN =
+  /^auth\/sessions\/[^/]+\/revoke$/;
+
+export function isAgencyAllowedWriteRoute(
+  method: string,
+  routePath: string,
+): boolean {
+  const upperMethod = method.toUpperCase();
+  if (AGENCY_WRITE_ROUTE_ALLOWLIST.has(`${upperMethod} ${routePath}`)) {
+    return true;
+  }
+  return (
+    upperMethod === "POST" &&
+    AGENCY_SELF_SESSION_REVOKE_ROUTE_PATTERN.test(routePath)
+  );
+}
 
 export function getTenantRoleScopes(
   roleCode: string,
