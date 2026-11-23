@@ -342,8 +342,10 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
         hashKey: TEST_HASH_KEY,
         hashIv: TEST_HASH_IV,
         sandbox: true,
-        publicApiOrigin: "https://api-dev.smarttransport.tw",
-        publicWebOrigin: "https://ride-dev.smarttransport.tw",
+        returnUrl:
+          "https://ride-dev.smarttransport.tw/api/passenger-app/payment-methods/ecpay/callback",
+        orderResultUrl:
+          "https://ride-dev.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result",
         fetchFn: recordingFetch,
       });
       const cipher = new PaymentTokenCipher(TEST_KEY_RING);
@@ -525,7 +527,7 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
   });
 
   it("verifies Stage GetTokenbyBindingCard ConsumerInfo.Email format, CreatePassengerRideCommand camelCase body, and V0056/V0115 SQL schema alignment", async () => {
-    let capturedGetTokenData: Record<string, unknown> | null = null;
+    const capturedGetTokenData: Record<string, unknown>[] = [];
     const provider = new EcpayPaymentProvider({
       merchantId: TEST_MERCHANT_ID,
       hashKey: TEST_HASH_KEY,
@@ -533,10 +535,8 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
       sandbox: true,
       fetchFn: async (_url, init) => {
         const envelope = JSON.parse(String(init.body)) as { Data: string };
-        capturedGetTokenData = decryptEcpayData(
-          envelope.Data,
-          TEST_HASH_KEY,
-          TEST_HASH_IV,
+        capturedGetTokenData.push(
+          decryptEcpayData(envelope.Data, TEST_HASH_KEY, TEST_HASH_IV),
         );
         return new Response(
           JSON.stringify(
@@ -582,10 +582,8 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
     await provider.createBindingSession("drts_passenger_stage_email_check", {
       email: "pax-psp-sandbox@example.com",
     });
-    const consumerInfo = (capturedGetTokenData?.ConsumerInfo ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const consumerInfo = (capturedGetTokenData[0]?.ConsumerInfo ??
+      {}) as Record<string, unknown>;
     expect(consumerInfo.Email).toBe("pax-psp-sandbox@example.com");
     expect(consumerInfo.Phone).toBeUndefined();
 
@@ -672,8 +670,10 @@ describe.skipIf(!hostedPaymentEnabled)(
         hashKey: TEST_HASH_KEY,
         hashIv: TEST_HASH_IV,
         sandbox: true,
-        publicApiOrigin: "https://api-dev.smarttransport.tw",
-        publicWebOrigin: "https://ride-dev.smarttransport.tw",
+        returnUrl:
+          "https://ride-dev.smarttransport.tw/api/passenger-app/payment-methods/ecpay/callback",
+        orderResultUrl:
+          "https://ride-dev.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result",
         fetchFn: async (url, init) => {
           const pathname = new URL(url).pathname;
           const originalFetch = globalThis.fetch;

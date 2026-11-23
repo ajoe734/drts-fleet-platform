@@ -299,7 +299,7 @@ export async function startHarness(
           body:
             bodyBuffer && req.method !== "GET" && req.method !== "HEAD"
               ? new Uint8Array(bodyBuffer)
-              : undefined,
+              : null,
         });
         const upstreamBytes = Buffer.from(await upstream.arrayBuffer());
         res.writeHead(upstream.status, {
