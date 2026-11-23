@@ -203,6 +203,13 @@ const en: Dict = {
   "supply.field.supportedProducts": "Supported service products",
   "supply.driverField.name": "Name",
   "supply.driverField.mobile": "Mobile",
+  "supply.driverField.mobileInvalid":
+    "Enter a valid Taiwan mobile number and save the draft before submitting.",
+  "supply.driverField.email": "Driver email",
+  "supply.driverField.emailHint":
+    "Used to send the driver's app activation link after approval.",
+  "supply.driverField.emailInvalid":
+    "Enter a valid driver email address and save the draft before submitting.",
   "supply.driverField.licenseNo": "Professional driver license no.",
   "supply.driverField.licenseExpiry": "License expiry",
   "supply.driverField.registrationNo": "Taxi registration no.",
@@ -911,6 +918,12 @@ const zh: Dict = {
   "supply.field.supportedProducts": "支援服務產品",
   "supply.driverField.name": "姓名",
   "supply.driverField.mobile": "手機",
+  "supply.driverField.mobileInvalid":
+    "請填寫有效的台灣手機號碼，儲存草稿後再送審。",
+  "supply.driverField.email": "司機電子郵件",
+  "supply.driverField.emailHint": "用於核可後寄送司機 App 啟用連結。",
+  "supply.driverField.emailInvalid":
+    "請填寫有效的司機電子郵件，儲存草稿後再送審。",
   "supply.driverField.licenseNo": "職業駕照號",
   "supply.driverField.licenseExpiry": "駕照到期",
   "supply.driverField.registrationNo": "計程車登記證號",

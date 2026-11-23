@@ -17,14 +17,22 @@ import {
   PassengerPaymentClient,
   PassengerClient,
 } from "../../../packages/passenger-client/src/index";
+import {
+  ECPAY_ACTION_ORIGINS,
+  ECPAY_HOSTED_FIELDS_CSP,
+} from "../../../apps/passenger-app-web/components/payment/ecpay-csp";
+import type { EcpaySdkGlobal } from "../../../apps/passenger-app-web/components/payment/ecpay-hosted-fields";
 import { PaymentMethodsScreen } from "../../../apps/passenger-app-web/components/payment/payment-methods-screen";
 import {
   PaymentMethodChoice,
   PassengerPaymentStatus,
   UnpaidPaymentNotice,
 } from "../../../apps/passenger-app-web/components/payment/payment-summary";
+import { approvedPaymentActionUrl } from "../../../apps/passenger-app-web/lib/payment/action-url";
 import { createSyntheticPaymentFields } from "../../../apps/passenger-app-web/lib/payment/synthetic-fields";
 import { paymentFieldsForRuntime } from "../../../apps/passenger-app-web/lib/payment/runtime-fields";
+import { encryptEcpayData } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-cipher";
+import { EcpayPaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-payment-provider";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 import {
   apiWireResponse,
@@ -942,5 +950,321 @@ describe("A22/A23 actual reusable selector and truthful payment status", () => {
     vi.stubEnv("NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER", "synthetic");
     vi.stubEnv("NODE_ENV", "production");
     expect(paymentFieldsForRuntime).toThrow("forbidden");
+  });
+});
+describe("ECPay Stage verified 3DS challenge entry https://cc-stage.ecpay.com.tw from PaymentMethodsPage & EcpayPaymentProvider", () => {
+  const syntheticCredentials = {
+    merchantId: "SYNTHETIC_MID_01",
+    hashKey: "SYNTHETIC_KEY_16",
+    hashIv: "SYNTHETIC_IV__16",
+  };
+  const fixedNow = new Date("2026-11-23T00:00:00Z");
+  const verifiedStageThreeDUrl = "https://cc-stage.ecpay.com.tw/ThreeD/Verify";
+
+  function buildEncryptedEcpayResponse(payload: Record<string, unknown>) {
+    const timestamp = Math.floor(fixedNow.getTime() / 1000);
+    return new Response(
+      JSON.stringify({
+        PlatformID: "",
+        MerchantID: syntheticCredentials.merchantId,
+        RpHeader: { Timestamp: timestamp },
+        TransCode: 1,
+        TransMsg: "Success",
+        Data: encryptEcpayData(
+          payload,
+          syntheticCredentials.hashKey,
+          syntheticCredentials.hashIv,
+        ),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function installMockEcpaySdk(payToken: string): EcpaySdkGlobal {
+    const sdk: EcpaySdkGlobal = {
+      Language: { zhTW: "zh-TW", enUS: "en-US" },
+      initialize: vi.fn((_serverType, _isLoading, cb) => cb()),
+      addBindingCard: vi.fn((_token, _lang, cb) => cb()),
+      getBindCardPayToken: vi.fn((cb) =>
+        cb({
+          BindCardPayToken: payToken,
+          MerchantTradeNo: "DR202611230000000001",
+        }),
+      ),
+    };
+    window.ECPay = sdk;
+    return sdk;
+  }
+
+  afterEach(() => {
+    delete window.ECPay;
+  });
+
+  it("includes https://cc-stage.ecpay.com.tw in Stage EcpayPaymentProvider.approvedActionOrigins, ECPAY_ACTION_ORIGINS, and ECPAY_HOSTED_FIELDS_CSP while keeping Prod origins distinct", () => {
+    const stageProvider = new EcpayPaymentProvider({
+      ...syntheticCredentials,
+      sandbox: true,
+      now: () => fixedNow,
+    });
+    const prodProvider = new EcpayPaymentProvider({
+      ...syntheticCredentials,
+      sandbox: false,
+      now: () => fixedNow,
+    });
+
+    expect(stageProvider.approvedActionOrigins).toEqual([
+      "https://ecpg-stage.ecpay.com.tw",
+      "https://payment-stage.ecpay.com.tw",
+      "https://cc-stage.ecpay.com.tw",
+    ]);
+    expect(prodProvider.approvedActionOrigins).toEqual([
+      "https://ecpg.ecpay.com.tw",
+      "https://payment.ecpay.com.tw",
+    ]);
+    expect(ECPAY_ACTION_ORIGINS).toEqual([
+      "https://ecpg-stage.ecpay.com.tw",
+      "https://ecpg.ecpay.com.tw",
+      "https://payment-stage.ecpay.com.tw",
+      "https://payment.ecpay.com.tw",
+      "https://cc-stage.ecpay.com.tw",
+    ]);
+    expect(ECPAY_HOSTED_FIELDS_CSP).toContain(
+      "frame-src 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw https://cc-stage.ecpay.com.tw;",
+    );
+    expect(ECPAY_HOSTED_FIELDS_CSP).toContain(
+      "form-action 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw https://cc-stage.ecpay.com.tw;",
+    );
+
+    expect(
+      approvedPaymentActionUrl(
+        verifiedStageThreeDUrl,
+        stageProvider.approvedActionOrigins,
+      ),
+    ).toBe(verifiedStageThreeDUrl);
+    expect(
+      approvedPaymentActionUrl(verifiedStageThreeDUrl, ECPAY_ACTION_ORIGINS),
+    ).toBe(verifiedStageThreeDUrl);
+    expect(
+      approvedPaymentActionUrl(
+        verifiedStageThreeDUrl,
+        prodProvider.approvedActionOrigins,
+      ),
+    ).toBeNull();
+  });
+
+  it("renders the existing 前往付款商安全驗證 link to https://cc-stage.ecpay.com.tw/ThreeD/Verify when clicking 新增信用卡 -> 綁定卡片 on PaymentMethodsPage wired to Stage EcpayPaymentProvider", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER", "ecpay");
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_3DS_ORIGINS", "");
+    const sdk = installMockEcpaySdk("ecpay_stage_pay_token_cc_stage_001");
+
+    const ecpayUpstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildEncryptedEcpayResponse({
+          RtnCode: 1,
+          RtnMsg: "Success",
+          Token: "synthetic_stage_merchant_token_001",
+          TokenExpireDate: "2026/11/23 00:30:00",
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildEncryptedEcpayResponse({
+          RtnCode: 1,
+          RtnMsg: "ThreeDVerify",
+          ThreeDInfo: {
+            ThreeDURL: verifiedStageThreeDUrl,
+          },
+        }),
+      );
+
+    const stageProvider = new EcpayPaymentProvider({
+      ...syntheticCredentials,
+      sandbox: true,
+      fetchFn: ecpayUpstreamFetch as unknown as typeof fetch,
+      now: () => fixedNow,
+    });
+
+    reply = async (verb, path, body) => {
+      if (verb === "GET" && path.endsWith("/payment-methods")) {
+        return undefined;
+      }
+      if (verb === "POST" && path.endsWith("/payment-methods")) {
+        const token = (body as { providerToken: string }).providerToken;
+        const bindResult = await stageProvider.bind(
+          token,
+          "pax:bind:web-stage-3ds-001",
+          { passengerId: "pax_uuid_0001_safe" },
+        );
+        return apiWireResponse(bindResult);
+      }
+      return undefined;
+    };
+
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const urlStr = String(input);
+      if (
+        (init?.method ?? "GET") === "GET" &&
+        urlStr.includes("binding_session=1")
+      ) {
+        const session = await stageProvider.createBindingSession(
+          "pax_uuid_0001_safe",
+          {
+            email: "pax@example.com",
+            idempotencyKey: "pax:session:web-stage-3ds-001",
+          },
+        );
+        return Response.json({ data: session });
+      }
+      return baseFetch(input, init);
+    });
+
+    render(<PaymentMethodsPage />);
+    await add();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "綁定卡片" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+
+    await screen.findByText("此卡片需要付款商的安全驗證，尚未完成綁定。");
+    const verifyLink = screen.getByRole("link", {
+      name: "前往付款商安全驗證",
+    });
+    expect(verifyLink.getAttribute("href")).toBe(verifiedStageThreeDUrl);
+    expect(verifyLink.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(
+      screen.queryByText("尚未設定核准的安全驗證網址，請聯絡客服。"),
+    ).toBeNull();
+    expect(sdk.getBindCardPayToken).toHaveBeenCalledTimes(1);
+    expect(ecpayUpstreamFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("supports default ECPAY_ACTION_ORIGINS on managed PaymentMethodsScreen while preserving explicit NEXT_PUBLIC_PAYMENT_3DS_ORIGINS, Prod separation, and untrusted origin rejection", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER", "ecpay");
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_3DS_ORIGINS", "");
+    installMockEcpaySdk("ecpay_stage_pay_token_cc_stage_002");
+
+    const baseFetch = globalThis.fetch;
+    let sessionPayload: Record<string, unknown> = {
+      provider: "ecpay",
+      merchantToken: "synthetic_stage_merchant_token_default_origins",
+      tokenExpireDate: "2026/11/23 00:30:00",
+      sandbox: true,
+      serverType: "Stage",
+    };
+    let nextActionUrl = verifiedStageThreeDUrl;
+
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const urlStr = String(input);
+      if (
+        (init?.method ?? "GET") === "GET" &&
+        urlStr.includes("binding_session=1")
+      ) {
+        return Response.json({ data: sessionPayload });
+      }
+      return baseFetch(input, init);
+    });
+    reply = (verb) =>
+      verb === "POST"
+        ? apiWireResponse({
+            status: "action_required",
+            nextActionUrl,
+          })
+        : undefined;
+
+    // 1. Managed PaymentMethodsScreen (using default ECPAY_ACTION_ORIGINS without session approvedActionOrigins)
+    const firstRender = render(<PaymentMethodsScreen />);
+    await add();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "綁定卡片" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+    await screen.findByText("此卡片需要付款商的安全驗證，尚未完成綁定。");
+    expect(
+      screen
+        .getByRole("link", { name: "前往付款商安全驗證" })
+        .getAttribute("href"),
+    ).toBe(verifiedStageThreeDUrl);
+    firstRender.unmount();
+
+    // 2. Explicit NEXT_PUBLIC_PAYMENT_3DS_ORIGINS override takes precedence and blocks unlisted Stage host
+    vi.stubEnv(
+      "NEXT_PUBLIC_PAYMENT_3DS_ORIGINS",
+      "https://payment.ecpay.com.tw",
+    );
+    const explicitRender = render(<PaymentMethodsPage />);
+    await add();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "綁定卡片" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+    await screen.findByText("尚未設定核准的安全驗證網址，請聯絡客服。");
+    expect(
+      screen.queryByRole("link", { name: "前往付款商安全驗證" }),
+    ).toBeNull();
+    explicitRender.unmount();
+
+    // 3. Prod provider session origins reject Stage cc-stage.ecpay.com.tw host
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_3DS_ORIGINS", "");
+    const prodProvider = new EcpayPaymentProvider({
+      ...syntheticCredentials,
+      sandbox: false,
+      now: () => fixedNow,
+    });
+    sessionPayload = {
+      provider: "ecpay",
+      merchantToken: "synthetic_prod_merchant_token_001",
+      tokenExpireDate: "2026/11/23 00:30:00",
+      sandbox: false,
+      serverType: "Prod",
+      approvedActionOrigins: prodProvider.approvedActionOrigins,
+    };
+    const prodRender = render(<PaymentMethodsPage />);
+    await add();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "綁定卡片" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+    await screen.findByText("尚未設定核准的安全驗證網址，請聯絡客服。");
+    expect(
+      screen.queryByRole("link", { name: "前往付款商安全驗證" }),
+    ).toBeNull();
+    prodRender.unmount();
+
+    // 4. Non-HTTPS or arbitrary external host is rejected even with Stage origins
+    sessionPayload = {
+      provider: "ecpay",
+      merchantToken: "synthetic_stage_merchant_token_002",
+      tokenExpireDate: "2026/11/23 00:30:00",
+      sandbox: true,
+      serverType: "Stage",
+    };
+    nextActionUrl = "https://foreign-psp.example.invalid/ThreeD/Verify";
+    const untrustedRender = render(<PaymentMethodsPage />);
+    await add();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "綁定卡片" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+    await screen.findByText("尚未設定核准的安全驗證網址，請聯絡客服。");
+    expect(
+      screen.queryByRole("link", { name: "前往付款商安全驗證" }),
+    ).toBeNull();
+    untrustedRender.unmount();
   });
 });

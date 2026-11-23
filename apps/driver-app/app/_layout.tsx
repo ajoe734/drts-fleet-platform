@@ -97,7 +97,12 @@ export default function RootLayout() {
       <DriverHeartbeatBootstrap />
       <StatusBar style={driverTheme.mode === "dark" ? "light" : "dark"} />
       <Tabs
-        tabBar={(props) => <DriverBottomTabBar {...props} />}
+        tabBar={(props) =>
+          props.state.routes[props.state.index]?.name ===
+          "driver-activate" ? null : (
+            <DriverBottomTabBar {...props} />
+          )
+        }
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
@@ -145,6 +150,7 @@ export default function RootLayout() {
             href: null,
           }}
         />
+        <Tabs.Screen name="driver-activate" options={{ href: null }} />
         <Tabs.Screen
           name="earnings"
           options={{

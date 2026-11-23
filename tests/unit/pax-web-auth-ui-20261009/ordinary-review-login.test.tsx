@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import type { ReactElement } from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -13,6 +14,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import LoginPage from "../../../apps/passenger-app-web/app/login/page";
 import { ConsentGate } from "../../../apps/passenger-app-web/components/auth/consent-gate";
 import { ReviewDemoProvider } from "../../../apps/passenger-app-web/components/review-demo/review-context";
+import {
+  otpKey,
+  saveOtp,
+} from "../../../apps/passenger-app-web/lib/auth/otp-state";
 import { createFixture } from "./fixture";
 
 const requireApp = createRequire(
@@ -126,4 +131,114 @@ it("ordinary consent can show existing rehearsal terms without formal legal conf
   expect(
     screen.getByRole("link", { name: "服務條款" }).getAttribute("href"),
   ).toBe("/review/terms");
+});
+
+function holdReviewConfiguration() {
+  const fetchOriginal = globalThis.fetch;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/passenger-app/review-demo/config")
+        await ready;
+      return fetchOriginal(input, init);
+    },
+  );
+  return release;
+}
+
+it.each([
+  ["0900000016", true, false],
+  ["+886 900-000-016", true, false],
+  ["0900000016", false, false],
+  ["0900000016", true, true],
+] as const)(
+  "waits for the correct delivery route for %s (review enabled: %s, resending: %s)",
+  async (phone, review, resending) => {
+    const f = createFixture({ review });
+    const release = holdReviewConfiguration();
+    if (resending) {
+      saveOtp(otpKey("phone", "login", "anonymous"), {
+        subject: "anonymous",
+        purpose: "login",
+        provider: "phone",
+        target: phone,
+        challenge: "previous-challenge",
+        resendAt: Date.now() - 1,
+        expiresAt: Date.now() + 300000,
+        attempts: 0,
+      });
+    }
+    mount(<LoginPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "手機號碼登入" }),
+    );
+    if (!resending) {
+      fireEvent.change(screen.getByLabelText("請輸入您的手機號碼"), {
+        target: { value: phone },
+      });
+    }
+    const send = screen.getByRole<HTMLButtonElement>("button", {
+      name: resending ? "重新發送驗證碼" : "取得驗證碼",
+    });
+    await act(async () => {
+      fireEvent.click(send);
+    });
+    try {
+      expect(
+        f.calls
+          .filter(
+            (c) =>
+              c.path === "auth/otp/request" || c.path === "review-demo/otp",
+          )
+          .map((c) => c.path),
+      ).toEqual([]);
+      expect(send.disabled).toBe(true);
+    } finally {
+      await act(async () => {
+        release();
+      });
+    }
+    await waitFor(() => expect(send.disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(send);
+    });
+    const expected = review ? "review-demo/otp" : "auth/otp/request";
+    expect(
+      f.calls
+        .filter(
+          (c) => c.path === "auth/otp/request" || c.path === "review-demo/otp",
+        )
+        .map((c) => c.path),
+    ).toEqual([expected]);
+    if (review)
+      expect((await screen.findByLabelText("模擬簡訊驗證碼")).textContent).toBe(
+        f.codes[0],
+      );
+  },
+);
+
+it("allows an ordinary phone to request a code while rehearsal configuration loads", async () => {
+  const f = createFixture();
+  const release = holdReviewConfiguration();
+  mount(<LoginPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "手機號碼登入" }));
+  fireEvent.change(screen.getByLabelText("請輸入您的手機號碼"), {
+    target: { value: "0912345678" },
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "取得驗證碼" }));
+  });
+  try {
+    expect(f.calls.filter((c) => c.path === "auth/otp/request")).toHaveLength(
+      1,
+    );
+  } finally {
+    await act(async () => {
+      release();
+    });
+  }
 });

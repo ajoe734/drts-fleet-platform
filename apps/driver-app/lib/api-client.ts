@@ -25,11 +25,29 @@ type DriverExpoExtra = {
   driverActorId?: string;
 };
 
+const DEFAULT_PRODUCTION_API_URL = "https://api.smarttransport.tw";
+const LEGACY_DIRECT_API_URL = "https://drts-api-kdhu6wzufa-uc.a.run.app";
+
 const expoExtra = (Constants.expoConfig?.extra ?? {}) as DriverExpoExtra;
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ??
-  expoExtra.apiBaseUrl ??
-  "https://drts-api-kdhu6wzufa-uc.a.run.app";
+
+export function resolveDriverApiBaseUrl(options?: {
+  envApiUrl?: string;
+  manifestApiBaseUrl?: string;
+}): string {
+  const candidates = [
+    options ? options.envApiUrl : process.env.EXPO_PUBLIC_API_URL,
+    options ? options.manifestApiBaseUrl : expoExtra.apiBaseUrl,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim().replace(/\/+$/, "");
+    if (trimmed && trimmed !== LEGACY_DIRECT_API_URL) {
+      return trimmed;
+    }
+  }
+  return DEFAULT_PRODUCTION_API_URL;
+}
+
+const API_URL = resolveDriverApiBaseUrl();
 
 const DEV_DRIVER_ID: string | undefined =
   process.env.EXPO_PUBLIC_DRIVER_ID ??
@@ -605,13 +623,15 @@ export function isDriverIdentityProvisioned(): boolean {
   return Boolean(DEV_DRIVER_ID || provisionedSession?.accessToken);
 }
 
-export async function registerDriverDevice(
-  registrationCode: string,
+async function registerDriverDeviceWithProof(
+  proof:
+    | { registrationCode: string; registrationContact?: string }
+    | { activationToken: string },
   deviceLabel?: string,
 ): Promise<DriverDeviceProvisioningSession> {
   const deviceId = await getOrCreateDeviceId();
   const session = await publicClient.registerDriverDevice({
-    registrationCode,
+    ...proof,
     deviceId,
     deviceLabel: deviceLabel?.trim() || null,
   });
@@ -619,6 +639,43 @@ export async function registerDriverDevice(
   await persistSession(session);
   hydrated = true;
   return session;
+}
+
+export async function registerDriverDevice(
+  registrationCode: string,
+  deviceLabel?: string,
+  registrationContact?: string,
+): Promise<DriverDeviceProvisioningSession> {
+  return registerDriverDeviceWithProof(
+    {
+      registrationCode,
+      ...(registrationContact ? { registrationContact } : {}),
+    },
+    deviceLabel,
+  );
+}
+
+export async function activateDriverDevice(
+  activationToken: string,
+): Promise<"activated" | "already_signed_in"> {
+  await initializeDriverIdentity();
+  if (isDriverIdentityProvisioned()) return "already_signed_in";
+
+  await registerDriverDeviceWithProof({ activationToken });
+  return "activated";
+}
+
+export function formatDriverRegistrationError(error: unknown): string {
+  switch (parseApiError(error).code) {
+    case "DRIVER_REGISTRATION_INVALID":
+      return "註冊碼或啟用連結無效、過期或已使用。請確認資料，或聯絡車隊重新發送。";
+    case "DRIVER_AUTH_SUSPENDED":
+    case "DRIVER_AUTH_REVOKED":
+    case "DRIVER_CERT_INVALID":
+      return getDriverIdentityIssueMessage(error);
+    default:
+      return "裝置驗證失敗。請稍後再試，或聯絡車隊。";
+  }
 }
 
 export async function rebindDriverDevice(

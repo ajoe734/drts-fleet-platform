@@ -96,6 +96,40 @@ describe("FLEET-ONB-007 Fleet staff invitation Google-bind: email_verified and p
       ) {
         return { rows: [] };
       }
+      if (
+        text.includes("FROM iam.identity_principals p") &&
+        text.includes(
+          "JOIN iam.identity_memberships m ON m.principal_id = p.principal_id",
+        )
+      ) {
+        const [scopeRef, partnerId, emailNormalized, entrySlug] = params as [
+          string,
+          string,
+          string,
+          string,
+        ];
+        const rows: Array<{ principal_id: string }> = [];
+        for (const m of memberships.values()) {
+          if (
+            m.realm !== "partner" ||
+            m.scopeRef !== scopeRef ||
+            m.partnerId !== partnerId
+          ) {
+            continue;
+          }
+          const p = principals.get(m.principalId);
+          if (
+            p &&
+            p.email?.toLowerCase() === emailNormalized &&
+            p.principalType === "human" &&
+            p.sourceRef === `jwt_principal:partner:${p.principalId}` &&
+            m.sourceRef === `fleet_member:${entrySlug}:${p.principalId}`
+          ) {
+            rows.push({ principal_id: p.principalId });
+          }
+        }
+        return { rows };
+      }
       if (text.startsWith("SELECT principal_id FROM iam.identity_principals")) {
         const rec = principals.get(params[0] as string);
         return { rows: rec ? [{ principal_id: rec.principalId }] : [] };
@@ -145,14 +179,58 @@ describe("FLEET-ONB-007 Fleet staff invitation Google-bind: email_verified and p
         return { rows: active === undefined ? [] : [{ active }] };
       }
       if (text.includes("INSERT INTO admin.phase1_partner_user_identity_links")) {
-        const key = `${params[0]}::${params[1]}`;
-        if (links.has(key)) return { rows: [] };
+        const entrySlug = params[0] as string;
+        const partnerUserRef = params[1] as string;
+        const drtsPassengerId = params[2] as string;
+        const key = `${entrySlug}::${partnerUserRef}`;
+        for (const existing of links.values()) {
+          const rec = existing as {
+            entrySlug?: string;
+            partnerUserRef?: string;
+            drtsPassengerId: string;
+            status?: string;
+            consentScope?: string;
+          };
+          if (
+            rec.entrySlug === entrySlug &&
+            rec.drtsPassengerId === drtsPassengerId &&
+            rec.consentScope === "fleet_staff_invitation" &&
+            rec.partnerUserRef !== partnerUserRef
+          ) {
+            return { rows: [] };
+          }
+        }
+        const existingForKey = links.get(key) as
+          | {
+              entrySlug?: string;
+              partnerUserRef?: string;
+              drtsPassengerId: string;
+              status?: string;
+              consentScope?: string;
+            }
+          | undefined;
+        if (existingForKey) {
+          if (
+            existingForKey.entrySlug === entrySlug &&
+            existingForKey.partnerUserRef === partnerUserRef &&
+            existingForKey.drtsPassengerId === drtsPassengerId &&
+            existingForKey.status === "active" &&
+            existingForKey.consentScope === "fleet_staff_invitation"
+          ) {
+            return { rows: [{ record: existingForKey }] };
+          }
+          return { rows: [] };
+        }
         const record = JSON.parse(params[4] as string);
         links.set(key, record);
         return { rows: [{ record }] };
       }
       if (text.includes("INSERT INTO iam.identity_principals")) {
         const record = JSON.parse(params[11] as string);
+        const prior = principals.get(record.principalId);
+        if (prior) {
+          principalsByIssuerSubject.delete(`${prior.issuer}::${prior.subject}`);
+        }
         principals.set(record.principalId, record);
         principalsByIssuerSubject.set(`${record.issuer}::${record.subject}`, record);
         return { rows: [{ record }] };

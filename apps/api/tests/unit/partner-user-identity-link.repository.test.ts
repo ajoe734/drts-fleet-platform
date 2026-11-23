@@ -160,6 +160,93 @@ describe("partner user identity link repository", () => {
       expect(stillOriginal?.updatedAt).toBe("2026-11-14T10:00:00.000Z");
     });
 
+    it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: reuses the existing active fleet_staff_invitation link when the same (entrySlug, partnerUserRef, drtsPassengerId) is re-verified, without duplicating or overwriting original timestamps", async () => {
+      const repository = new PartnerUserIdentityLinkRepository();
+
+      const first = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-14T10:00:00.000Z",
+      );
+      const reverified = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-22T12:00:00.000Z",
+      );
+
+      expect(reverified).not.toBeNull();
+      expect(reverified).toEqual(first);
+      expect(
+        await repository.findByDrtsPassengerId(
+          "fleet-demo-001",
+          "principal_fleet_fixture_001",
+        ),
+      ).toEqual(first);
+    });
+
+    it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: rejects binding a different partnerUserRef for a drtsPassengerId that already holds an original Google link in the same entrySlug", async () => {
+      const repository = new PartnerUserIdentityLinkRepository();
+
+      await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-original",
+        "principal_fleet_fixture_001",
+        "2026-11-14T10:00:00.000Z",
+      );
+
+      const differentSubAttempt = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-different",
+        "principal_fleet_fixture_001",
+        "2026-11-22T12:00:00.000Z",
+      );
+
+      expect(differentSubAttempt).toBeNull();
+      expect(
+        await repository.find("fleet-demo-001", "google-sub-staff-different"),
+      ).toBeNull();
+      expect(
+        await repository.find("fleet-demo-001", "google-sub-staff-original"),
+      ).toMatchObject({
+        drtsPassengerId: "principal_fleet_fixture_001",
+        partnerUserRef: "google-sub-staff-original",
+      });
+    });
+
+    it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: allows an independent entrySlug to create its own distinct-principal link for the same partnerUserRef while preserving existing entry links, and ignores unrelated non-invitation consentScope rows when checking same-principal sub consistency", async () => {
+      const repository = new PartnerUserIdentityLinkRepository();
+
+      const fleetALink = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-14T10:00:00.000Z",
+      );
+      expect(fleetALink).not.toBeNull();
+
+      const fleetBLink = await repository.createForInvitedPrincipal(
+        "fleet-demo-002",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_002",
+        "2026-11-22T12:00:00.000Z",
+      );
+      expect(fleetBLink).toMatchObject({
+        entrySlug: "fleet-demo-002",
+        partnerUserRef: "google-sub-staff-001",
+        drtsPassengerId: "principal_fleet_fixture_002",
+        status: "active",
+        consentScope: "fleet_staff_invitation",
+      });
+      expect(
+        await repository.find("fleet-demo-001", "google-sub-staff-001"),
+      ).toEqual(fleetALink);
+      expect(
+        await repository.find("fleet-demo-002", "google-sub-staff-001"),
+      ).toEqual(fleetBLink);
+    });
+
     it("does not overwrite an existing link created by a prior referral handoff for the same key", async () => {
       const repository = new PartnerUserIdentityLinkRepository();
 
@@ -226,6 +313,13 @@ describe("partner user identity link repository", () => {
           "principal_fleet_fixture_001",
         ]),
       );
+      const issuedSql = query.mock.calls[0]?.[0] as string;
+      expect(issuedSql.match(/\$\d+(?!::)/g)).toBeNull();
+      expect(issuedSql).toContain("$1::text");
+      expect(issuedSql).toContain("$2::text");
+      expect(issuedSql).toContain("$3::text");
+      expect(issuedSql).toContain("$4::timestamptz");
+      expect(issuedSql).toContain("$5::jsonb");
     });
 
     it("surfaces the conflict signal against the database-backed path when the insert hits no row", async () => {
@@ -295,6 +389,37 @@ describe("partner user identity link repository", () => {
       );
 
       expect(transactionQuery).toHaveBeenCalledTimes(1);
+      expect(result).toBeNull();
+    });
+
+    it("FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122: rejects a database row whose parsed record drifts from the caller's (entrySlug, partnerUserRef, drtsPassengerId, active, fleet_staff_invitation) contract", async () => {
+      const transactionQuery = vi.fn().mockResolvedValue({
+        rows: [
+          {
+            record: {
+              entrySlug: "fleet-demo-001",
+              partnerUserRef: "google-sub-staff-001",
+              drtsPassengerId: "principal_fleet_fixture_001",
+              status: "active",
+              consentScope: "passenger_identity_link",
+              linkedAt: "2026-11-14T10:00:00.000Z",
+              lastSeenAt: "2026-11-14T10:00:00.000Z",
+              createdAt: "2026-11-14T10:00:00.000Z",
+              updatedAt: "2026-11-14T10:00:00.000Z",
+            },
+          },
+        ],
+      });
+      const repository = new PartnerUserIdentityLinkRepository();
+
+      const result = await repository.createForInvitedPrincipal(
+        "fleet-demo-001",
+        "google-sub-staff-001",
+        "principal_fleet_fixture_001",
+        "2026-11-22T12:00:00.000Z",
+        { query: transactionQuery } as never,
+      );
+
       expect(result).toBeNull();
     });
   });

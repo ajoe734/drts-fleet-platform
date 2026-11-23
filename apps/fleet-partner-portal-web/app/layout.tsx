@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { FleetPortalShell } from "@/components/fleet-portal-shell";
+import { isFleetPublicEntryPagePath } from "@/lib/fleet-portal-entry-paths";
 import { buildFleetPortalNav, isHostPortalPath } from "@/lib/fleet-portal-nav";
 import { loadNavBadges } from "@/lib/fleet-portal-data.server";
 import { LanguageProvider } from "@/lib/i18n";
@@ -27,9 +28,10 @@ export default async function RootLayout({
 }) {
   const locale = await getServerLocale();
   const requestHeaders = await headers();
-  // The sign-in page stands alone: no portal chrome or nav-badge API reads
+  // Public account-entry pages (/login, /invite, /forgot-password,
+  // /reset-password) stand alone: no portal chrome or nav-badge API reads
   // for a visitor who has no session yet.
-  if (requestHeaders.get("x-drts-fleet-pathname") === "/login") {
+  if (isFleetPublicEntryPagePath(requestHeaders.get("x-drts-fleet-pathname"))) {
     return (
       <html lang={locale}>
         <body style={{ margin: 0, minHeight: "100dvh" }}>

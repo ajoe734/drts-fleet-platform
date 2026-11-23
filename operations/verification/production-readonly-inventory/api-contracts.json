@@ -133,13 +133,13 @@
     {
       "kind": "backends",
       "discoveryUrl": "https://compute.googleapis.com/$discovery/rest?version=v1",
-      "revision": "20261007",
+      "revision": "20261106",
       "methodId": "compute.backendServices.list",
       "httpMethod": "GET",
       "baseUrl": "https://compute.googleapis.com/compute/v1/",
       "path": "projects/{project}/global/backendServices",
       "responseSchema": "BackendServiceList",
-      "verifiedSelector": "items(name,iap(enabled,oauth2ClientId),backends(group)),nextPageToken",
+      "verifiedSelector": "items(name,id,iap(enabled,oauth2ClientId),backends(group)),nextPageToken",
       "partialResponseParameter": {
         "location": "query",
         "type": "string",
@@ -195,6 +195,21 @@
       }
     }
   ],
+  "backendIdentityFieldsSource": {
+    "observedAt": "2026-11-23",
+    "source": "Unauthenticated official public discovery definitions; not production observations",
+    "computeDiscoveryUrl": "https://compute.googleapis.com/$discovery/rest?version=v1",
+    "computeRevision": "20261106",
+    "computeDiscoverySha256": "9a922f1474c6218f350ec97abffe41f6169f7b89b079ef85c426bbbffb5f702e",
+    "backendId": { "type": "string", "format": "uint64", "outputOnly": true },
+    "projectDiscoveryUrl": "https://cloudresourcemanager.googleapis.com/$discovery/rest?version=v3",
+    "projectRevision": "20261115",
+    "projectDiscoverySha256": "e53478b50df2f1b63ba7adedcb20160a74842a1857bd090bf3c9fe2e5b480f8c",
+    "projectNumberSource": "Project.name: projects/<int64 generated number>; no separate projectNumber field in v3",
+    "audienceSource": "https://cloud.google.com/iap/docs/signed-headers-howto",
+    "audienceFormat": "/projects/<projectNumber>/global/backendServices/<backendId>",
+    "scope": "Existing Project GET, global backendServices list and regional NEG list only. No URL map, IAM change or new resource authority. A unique one-backend/one-NEG/observed-Run-service link identifies this backend audience, not a host/path route or release readiness."
+  },
   "backgroundFieldsSource": {
     "observedAt": "2026-10-12T11:51:29.439782+00:00",
     "discoveryUrl": "https://run.googleapis.com/$discovery/rest?version=v2",

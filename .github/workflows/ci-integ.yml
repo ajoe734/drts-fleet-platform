@@ -25,7 +25,7 @@ on:
         default: false
         type: boolean
       expected_runtime_sha:
-        description: "For metadata/shared bureau: full expected currently deployed release SHA"
+        description: "For metadata/shared bureau/agency: full expected currently deployed release SHA"
         required: false
         default: ""
         type: string
@@ -76,6 +76,16 @@ on:
         type: boolean
       bureau_phones:
         description: "JSON: eight distinct allocated fresh synthetic identities, consent/wrong/resend/expiry/returning/trip/reliability/matching"
+        required: false
+        default: ""
+        type: string
+      shared_agency:
+        description: "Also verify existing shared Agency viewer/exporter R11/R13 and locale UI; one controlled synthetic export, no accounts or deployment"
+        required: false
+        default: false
+        type: boolean
+      agency_fixture:
+        description: "JSON: existing fictional agencyId, recordId, orderId, tripId, serviceDate (Taipei YYYY-MM-DD); must include null collected fare and zero toll"
         required: false
         default: ""
         type: string
@@ -245,6 +255,14 @@ jobs:
           OWNED_REFERRAL_HOSTED_OPT_IN: "true"
           OWNED_REFERRAL_RECOVERY_ONLY: "true"
         run: python3 tests/e2e/owned-referral-business-journey/retained-journal.py
+      - name: Discover and validate prior official owned R14 supply target
+        if: inputs.owned_referral_recovery_only != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_REFERRAL_RECOVERY_ONLY: "false"
+          OWNED_R14_PRIOR_TARGET_MANIFEST: .artifacts/owned-referral-business-journey/r14-prior-owned-target.json
+        run: python3 tests/e2e/owned-referral-business-journey/r14-prior-owned-target.py
       - name: Authenticate existing hosted verification identity
         uses: google-github-actions/auth@v2
         with:
@@ -318,6 +336,7 @@ jobs:
           OWNED_REFERRAL_HOSTED_OPT_IN: "true"
           OWNED_REFERRAL_RECOVERY_ONLY: ${{ inputs.owned_referral_recovery_only }}
           OWNED_REFERRAL_RECOVER_ORIGINAL_JOURNAL: ${{ inputs.owned_referral_recovery_only }}
+          OWNED_R14_PRIOR_TARGET_MANIFEST: .artifacts/owned-referral-business-journey/r14-prior-owned-target.json
           OWNED_TEST_CODE_SHA: ${{ github.sha }}
           DRTS_CANDIDATE_SHA: ${{ inputs.expected_runtime_sha }}
           OWNED_REFERRAL_ORIGIN: ${{ steps.runtime_before.outputs.referral_origin }}
@@ -372,6 +391,132 @@ jobs:
             .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.csv
             .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.xlsx
             .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.pdf
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Independent opt-in: do not reuse shared_bureau, which allocates new riders.
+  # Ordinary PR/dev integration jobs and their aggregate remain mandatory.
+  shared-agency-acceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.shared_agency == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: shared-dev-agency-role-trip-locale
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      AGENCY_SHARED_FIXTURE: ${{ inputs.agency_fixture }}
+    steps:
+      - name: Validate immutable definition and current dev target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify checkout, exact existing fixture and socket-free probe controls
+        run: |
+          node tests/e2e/agency-portal-business/shared-dev-trip-record.mjs --self-test
+          node --input-type=module -e 'import { config } from "./tests/e2e/agency-portal-business/shared-dev-trip-record.mjs"; config();'
+      - name: Verify the original temporary probe refs are actually absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          from pathlib import Path
+          refs = ["ops/dev-agency-browser-locale-20261119a", "ops/dev-agency-browser-locale-20261119b",
+                  "ops/dev-agency-r10-r11-20261119", "ops/dev-r10-compare-20261119"]
+          results = []
+          for ref in refs:
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/heads/{ref}",
+                  headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json"})
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      status = response.status
+              except urllib.error.HTTPError as error:
+                  status = error.code
+              results.append({"ref": ref, "status": status, "absent": status == 404})
+          output = Path(".artifacts/agency-shared")
+          output.mkdir(parents=True, exist_ok=True)
+          (output / "temporary-refs.json").write_text(json.dumps(results, indent=2) + "\n")
+          if not all(item["absent"] for item in results):
+              raise SystemExit("Original temporary probe ref is present or could not be checked")
+          PY
+      - name: Authenticate existing shared-dev verification identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Bind the existing Agency and API runtime before any login
+        id: runtime_before
+        run: node tests/e2e/agency-portal-business/shared-dev-trip-record.mjs --runtime-before
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium only in the hosted runner
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Mint the exact existing private Agency audience credential
+        id: agency_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.agency_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Read both roles and download the exact controlled trip through normal UI
+        env:
+          AGENCY_ID_TOKEN: ${{ steps.agency_token.outputs.id_token }}
+          OPS_DEV_TEST_INVITEE_EMAIL: ${{ secrets.OPS_DEV_TEST_INVITEE_EMAIL }}
+          OPS_DEV_AGENCY_VIEWER_PASSWORD: ${{ secrets.OPS_DEV_AGENCY_VIEWER_PASSWORD }}
+          OPS_DEV_AGENCY_EXPORTER_PASSWORD: ${{ secrets.OPS_DEV_AGENCY_EXPORTER_PASSWORD }}
+        run: node tests/e2e/agency-portal-business/shared-dev-trip-record.mjs
+      - name: Verify bilingual login, invite, same-trip detail and report refusals
+        if: ${{ !cancelled() && steps.agency_token.outcome == 'success' }}
+        env:
+          AGENCY_ID_TOKEN: ${{ steps.agency_token.outputs.id_token }}
+          OPS_DEV_TEST_INVITEE_EMAIL: ${{ secrets.OPS_DEV_TEST_INVITEE_EMAIL }}
+          OPS_DEV_AGENCY_VIEWER_PASSWORD: ${{ secrets.OPS_DEV_AGENCY_VIEWER_PASSWORD }}
+          OPS_DEV_AGENCY_EXPORTER_PASSWORD: ${{ secrets.OPS_DEV_AGENCY_EXPORTER_PASSWORD }}
+        run: node tests/e2e/agency-portal-business/shared-dev-locale.mjs
+      - name: Verify Agency and API stayed on the exact same runtime revisions
+        if: always() && steps.runtime_before.outcome == 'success'
+        run: node tests/e2e/agency-portal-business/shared-dev-trip-record.mjs --runtime-after
+      - name: Preserve allowlisted shared Agency results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-agency-${{ inputs.expected_runtime_sha }}-${{ github.run_id }}
+          path: |
+            .artifacts/agency-shared/runtime-before.json
+            .artifacts/agency-shared/runtime-after.json
+            .artifacts/agency-shared/temporary-refs.json
+            .artifacts/agency-shared/trip-record.json
+            .artifacts/agency-shared/locale.json
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

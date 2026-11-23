@@ -11,6 +11,7 @@ export const ECPAY_ACTION_ORIGINS = Object.freeze([
   "https://ecpg.ecpay.com.tw",
   "https://payment-stage.ecpay.com.tw",
   "https://payment.ecpay.com.tw",
+  "https://cc-stage.ecpay.com.tw",
 ]);
 
 export const ECPAY_SCRIPT_ORIGINS = Object.freeze([

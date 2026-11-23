@@ -29,6 +29,7 @@ import {
 import { assessPlatformHealth } from "@/components/platform-status-card";
 import {
   formatDriverError,
+  formatDriverRegistrationError,
   getDriverAuthState,
   getDriverClient,
   getDriverId,
@@ -44,7 +45,11 @@ import {
   isOwnedUnifiedTask,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { driverActivationSteps, driverAuthStrings, driverStrings } from "@/lib/strings";
+import {
+  driverActivationSteps,
+  driverAuthStrings,
+  driverStrings,
+} from "@/lib/strings";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -66,9 +71,8 @@ type ActivationStep = {
 
 const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 
-// Registration codes are one-time credentials. Do not prefill one from a
-// build-time environment value: Expo bundles public values into the client.
-const DEFAULT_TEST_REGISTRATION_CODE = "";
+const REVIEW_LEGACY_REGISTRATION =
+  process.env.EXPO_PUBLIC_REVIEW_BASE_PATH === "/review-driver";
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
 
@@ -482,8 +486,10 @@ export default function OnboardingScreen() {
   const [ready, setReady] = useState(false);
   const [flagsOk, setFlagsOk] = useState<boolean | null>(null);
   const [identityOk, setIdentityOk] = useState<boolean | null>(null);
-  const [registrationCode, setRegistrationCode] = useState(
-    DEFAULT_TEST_REGISTRATION_CODE,
+  const [registrationCode, setRegistrationCode] = useState("");
+  const [registrationContact, setRegistrationContact] = useState("");
+  const [legacyRegistration, setLegacyRegistration] = useState(
+    REVIEW_LEGACY_REGISTRATION,
   );
   const [deviceLabel, setDeviceLabel] = useState(DEFAULT_TEST_DEVICE_LABEL);
   const [provisioningError, setProvisioningError] = useState<string | null>(
@@ -994,18 +1000,34 @@ export default function OnboardingScreen() {
       return;
     }
 
+    const normalizedContact = registrationContact.replace(/[\s()-]/g, "");
+    if (!legacyRegistration) {
+      if (!/^[0-9]{6}$/.test(normalizedCode)) {
+        setProvisioningError("請輸入六位數註冊碼。");
+        return;
+      }
+      if (!/^(?:09|\+8869)[0-9]{8}$/.test(normalizedContact)) {
+        setProvisioningError("請輸入車隊建檔時登記的手機號碼。");
+        return;
+      }
+    }
+
     setSubmitting(true);
     setProvisioningError(null);
 
     try {
-      await registerDriverDevice(normalizedCode, deviceLabel);
+      await registerDriverDevice(
+        normalizedCode,
+        deviceLabel,
+        legacyRegistration ? undefined : normalizedContact,
+      );
+      setRegistrationCode("");
+      setRegistrationContact("");
       setFlagsOk(null);
       setIdentityOk(null);
       setWorkspaceIssue(null);
     } catch (error) {
-      setProvisioningError(
-        formatDriverError(error, "裝置配置失敗，請稍後再試。"),
-      );
+      setProvisioningError(formatDriverRegistrationError(error));
     } finally {
       setSubmitting(false);
     }
@@ -1200,8 +1222,11 @@ export default function OnboardingScreen() {
             ? driverAuthStrings.states.driver_suspended.badge
             : driverAuthStrings.states.not_provisioned.badge;
 
-    const badgeVariant =
-      isExpired ? "warning" : isRevoked || isSuspended ? "danger" : "info";
+    const badgeVariant = isExpired
+      ? "warning"
+      : isRevoked || isSuspended
+        ? "danger"
+        : "info";
 
     const displayTitle =
       currentAuthState === "session_expired"
@@ -1278,16 +1303,33 @@ export default function OnboardingScreen() {
           {provisioningError ? (
             <ErrorBanner message={provisioningError} />
           ) : null}
+          {legacyRegistration ? null : (
+            <FormField
+              accessibilityLabel="登記手機號碼"
+              autoComplete="tel"
+              editable={!submitting}
+              keyboardType="phone-pad"
+              label="登記手機號碼"
+              onChangeText={setRegistrationContact}
+              placeholder="0912 345 678"
+              value={registrationContact}
+            />
+          )}
           <FormField
-            accessibilityHint="請輸入車隊發放的 6 至 32 位元註冊代碼"
             accessibilityLabel="裝置註冊碼"
             autoComplete="one-time-code"
             autoCapitalize="none"
             autoCorrect={false}
             editable={!submitting}
-            label="註冊代碼"
-            onChangeText={setRegistrationCode}
-            placeholder="請輸入註冊代碼"
+            keyboardType={legacyRegistration ? "default" : "number-pad"}
+            label={legacyRegistration ? "舊版註冊碼" : "六位數註冊碼"}
+            maxLength={legacyRegistration ? undefined : 6}
+            onChangeText={(value) =>
+              setRegistrationCode(
+                legacyRegistration ? value : value.replace(/[^0-9]/g, ""),
+              )
+            }
+            placeholder={legacyRegistration ? "請輸入註冊碼" : "000000"}
             secureTextEntry
             style={styles.monoInput}
             value={registrationCode}
@@ -1305,9 +1347,7 @@ export default function OnboardingScreen() {
           <ActionButton
             accessibilityHint="送出代碼進行裝置綁定與連線"
             accessibilityLabel={
-              isExpired || isRevoked
-                ? "重新綁定此裝置"
-                : "註冊此裝置"
+              isExpired || isRevoked ? "重新綁定此裝置" : "註冊此裝置"
             }
             icon="shield-checkmark-outline"
             loading={submitting}
@@ -1322,13 +1362,28 @@ export default function OnboardingScreen() {
                   : "註冊此裝置"
             }
           />
+          {REVIEW_LEGACY_REGISTRATION ? null : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={submitting}
+              onPress={() => {
+                setLegacyRegistration((current) => !current);
+                setRegistrationCode("");
+                setProvisioningError(null);
+              }}
+            >
+              <Text style={styles.registrationModeLabel}>
+                {legacyRegistration ? "使用六位數註冊碼" : "使用舊版註冊碼"}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         <WarningCallout
           message={
             isRevoked || isExpired
               ? "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。"
-              : "未啟用裝置無法接收派單。請使用車隊發放的代碼，避免使用個人帳號註冊。"
+              : "點開核可簡訊或 Email 中的啟用連結，可直接完成裝置註冊。"
           }
           tone={isRevoked ? "danger" : isExpired ? "warning" : "info"}
         />
@@ -1865,6 +1920,11 @@ const styles = StyleSheet.create({
     padding: tokens.spacing[16],
     gap: tokens.spacing[12],
     ...tokens.shadows.sm,
+  },
+  registrationModeLabel: {
+    ...tokens.type.label,
+    color: tokens.colors.primary,
+    textAlign: "center",
   },
   monoInput: {
     fontVariant: ["tabular-nums"],

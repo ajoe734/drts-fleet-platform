@@ -1222,6 +1222,21 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath ===
+      "internal/scheduled-tasks/driver-onboarding-notifications/drain" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey:
+        "internal:scheduled-tasks:driver-onboarding-notifications:drain",
+      requiredScopes: ["driver:onboarding:notify"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler drain for driver onboarding notifications",
+    };
+  }
+
+  if (
     routePath === "internal/scheduled-tasks/approval-timeout-reminders/run" &&
     upperMethod === "POST"
   ) {

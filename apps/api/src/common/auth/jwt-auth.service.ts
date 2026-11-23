@@ -1237,14 +1237,57 @@ export class JwtAuthService {
     return true;
   }
 
+  private async resolveFleetPartnerEntry(entrySlug: string) {
+    if (!this.tenantPartnerService) {
+      return null;
+    }
+    if (typeof this.tenantPartnerService.resolvePartnerEntry === "function") {
+      try {
+        const entry =
+          await this.tenantPartnerService.resolvePartnerEntry(entrySlug);
+        if (entry) {
+          return entry;
+        }
+      } catch (error) {
+        if (
+          typeof this.tenantPartnerService.resolvePartnerEntries !== "function"
+        ) {
+          throw error;
+        }
+      }
+    }
+    if (typeof this.tenantPartnerService.resolvePartnerEntries === "function") {
+      const entries =
+        await this.tenantPartnerService.resolvePartnerEntries(entrySlug);
+      return (
+        entries.find((candidate) => candidate.entrySlug === entrySlug) ?? null
+      );
+    }
+    return null;
+  }
+
   /** Managed Fleet human authority is always verified against the same
-   * principal, live entry/link, membership and effective role binding used at
-   * issuance. Legacy scoped service credentials remain on their original path.
+   * principal, live entry, identity link (Google/OIDC branch) or persisted
+   * password credential (password-login branch), membership and effective role
+   * binding used at issuance. Legacy scoped service credentials remain on their
+   * original path.
    */
   private async validateFleetHumanDurableState(
     payload: JwtIdentityPayload,
     session: CanonicalIdentitySessionRecord,
   ): Promise<boolean> {
+    const isPasswordAuthenticatedSession =
+      session.acr === "aal1" &&
+      payload.acr === "aal1" &&
+      Array.isArray(session.authMethods) &&
+      session.authMethods.includes("pwd") &&
+      session.authMethods.every(
+        (method) => method === "pwd" || method === "otp",
+      ) &&
+      Array.isArray(payload.amr) &&
+      payload.amr.includes("pwd") &&
+      arraysEqual(payload.amr, session.authMethods);
+
     if (
       payload.actorType !== "partner_user" ||
       !payload.partnerEntrySlug ||
@@ -1252,7 +1295,8 @@ export class JwtAuthService {
       !payload.membershipId ||
       !this.identityRepository ||
       !this.tenantPartnerService ||
-      !this.partnerUserIdentityLinkRepository ||
+      (!isPasswordAuthenticatedSession &&
+        !this.partnerUserIdentityLinkRepository) ||
       !payload.partnerId ||
       session.principalId !== payload.principalId ||
       session.membershipId !== payload.membershipId ||
@@ -1266,23 +1310,35 @@ export class JwtAuthService {
       state = await Promise.all([
         this.identityRepository.findPrincipalById(payload.principalId),
         this.identityRepository.findMembershipById(payload.membershipId),
-        this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
-          entrySlug,
-          payload.principalId,
-        ),
-        this.tenantPartnerService.resolvePartnerEntry(entrySlug),
+        isPasswordAuthenticatedSession
+          ? typeof this.identityRepository
+              .findPasswordCredentialByPrincipalId === "function"
+            ? this.identityRepository.findPasswordCredentialByPrincipalId(
+                payload.principalId,
+              )
+            : Promise.resolve(null)
+          : Promise.resolve(null),
+        !isPasswordAuthenticatedSession
+          ? this.partnerUserIdentityLinkRepository!.findByDrtsPassengerId(
+              entrySlug,
+              payload.principalId,
+            )
+          : Promise.resolve(null),
+        this.resolveFleetPartnerEntry(entrySlug),
       ] as const);
     } catch {
       return false;
     }
-    const [principal, membership, link, entry] = state;
+    const [principal, membership, passwordCredential, link, entry] = state;
+    const hasVerifiedBindingOrCredential = isPasswordAuthenticatedSession
+      ? Boolean(passwordCredential?.passwordHash)
+      : Boolean(link && link.status === "active");
     if (
       !principal ||
       principal.status !== "active" ||
       principal.principalType !== "human" ||
       principal.sourceRef !== `jwt_principal:partner:${payload.principalId}` ||
-      !link ||
-      link.status !== "active" ||
+      !hasVerifiedBindingOrCredential ||
       !entry ||
       entry.partnerType !== "fleet_partner" ||
       entry.status !== "active" ||

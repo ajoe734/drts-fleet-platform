@@ -1,5 +1,5 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
@@ -783,5 +783,172 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
     expect(executedStatements.at(-1)).toBe("ROLLBACK");
     expect(jwtAuthService).toBeDefined();
     expect(identityRepository).toBeDefined();
+  });
+});
+
+describe("Driver onboarding six-digit and app-link proofs", () => {
+  const mobile = "+886900000001";
+
+  beforeEach(() =>
+    vi.stubEnv(
+      "DRIVER_ONBOARDING_CODE_PEPPER",
+      "synthetic-test-secret-at-least-32-characters",
+    ),
+  );
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it.each(["short_code", "activation_link"] as const)(
+    "binds with %s and consumes both proofs",
+    async (firstProof) => {
+      const { sessionService, sessionRepository } = setupServices();
+      const issued = await sessionService.issueOnboardingInvitation({
+        driverId: "drv-demo-001",
+        mobile,
+      });
+      expect(issued.registrationCode).toMatch(/^\d{6}$/);
+      expect(issued.activationToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(
+        Date.parse(issued.invitation.expiresAt) -
+          Date.parse(issued.invitation.createdAt),
+      ).toBe(86_400_000);
+      const stored = await sessionRepository.findOnboardingInvitation({
+        invitationId: issued.invitation.invitationId,
+      });
+      expect(stored).not.toHaveProperty("registrationCode");
+      expect(stored).not.toHaveProperty("activationToken");
+      expect(stored?.registrationCodeHash).toHaveLength(64);
+      expect(stored?.activationTokenHash).toHaveLength(64);
+      await expect(
+        sessionService.canDeliverOnboardingInvitation(
+          issued.invitation.invitationId,
+        ),
+      ).resolves.toBe(true);
+
+      const code = {
+        registrationCode: issued.registrationCode,
+        registrationContact: "0900 000 001",
+      };
+      const link = { activationToken: issued.activationToken };
+      await expect(
+        sessionService.register({
+          deviceId: "new-device",
+          ...(firstProof === "short_code" ? code : link),
+        }),
+      ).resolves.toMatchObject({ driverId: "drv-demo-001" });
+      await expect(
+        sessionService.register({
+          deviceId: "second-device",
+          ...(firstProof === "short_code" ? link : code),
+        }),
+      ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+      await expect(
+        sessionService.canDeliverOnboardingInvitation(
+          issued.invitation.invitationId,
+        ),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it("rejects unscoped codes and commits the attempt limit without disabling the activation link", async () => {
+    const { sessionService, sessionRepository } = setupServices();
+    const issued = await sessionService.issueOnboardingInvitation({
+      driverId: "drv-demo-001",
+      mobile,
+    });
+    const deviceId = "onboarding-guess-device";
+    await expect(
+      sessionService.register({
+        registrationCode: issued.registrationCode,
+        deviceId,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+    await expect(
+      sessionService.register({
+        registrationCode: issued.registrationCode,
+        registrationContact: "+886900000002",
+        deviceId,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+    const wrongCode =
+      issued.registrationCode === "000000" ? "000001" : "000000";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(
+        sessionService.register({
+          registrationCode: wrongCode,
+          registrationContact: mobile,
+          deviceId,
+        }),
+      ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+    }
+    await expect(
+      sessionRepository.findOnboardingInvitation({
+        invitationId: issued.invitation.invitationId,
+      }),
+    ).resolves.toMatchObject({ failedCodeAttempts: 5 });
+    await expect(
+      sessionService.register({
+        registrationCode: issued.registrationCode,
+        registrationContact: mobile,
+        deviceId,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+    await expect(
+      sessionService.register({
+        activationToken: issued.activationToken,
+        deviceId,
+      }),
+    ).resolves.toMatchObject({ driverId: "drv-demo-001" });
+  });
+
+  it("expires both proofs at the same boundary", async () => {
+    const { sessionService } = setupServices();
+    const issued = await sessionService.issueOnboardingInvitation({
+      driverId: "drv-demo-001",
+      mobile,
+    });
+    vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse(issued.invitation.expiresAt),
+    );
+    await expect(
+      sessionService.register({
+        activationToken: issued.activationToken,
+        deviceId: "late-link",
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+    await expect(
+      sessionService.register({
+        registrationCode: issued.registrationCode,
+        registrationContact: mobile,
+        deviceId: "late-code",
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_REGISTRATION_INVALID" });
+  });
+
+  it("allows at most one device to consume the two proofs concurrently", async () => {
+    const { sessionService } = setupServices();
+    const issued = await sessionService.issueOnboardingInvitation({
+      driverId: "drv-demo-001",
+      mobile,
+    });
+    const results = await Promise.allSettled([
+      sessionService.register({
+        activationToken: issued.activationToken,
+        deviceId: "race-link",
+      }),
+      sessionService.register({
+        registrationCode: issued.registrationCode,
+        registrationContact: mobile,
+        deviceId: "race-code",
+      }),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === "rejected"),
+    ).toMatchObject([{ reason: { code: "DRIVER_REGISTRATION_INVALID" } }]);
   });
 });

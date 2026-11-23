@@ -59,18 +59,11 @@ Owner: Claude · Reviewer: Claude2 · Decision: [SD-DP-20261114-001](../../01-de
 
 **`partner_user_identity_links` 在邀請階段保持不存在**：邀請時還不知道受邀者的 Google `sub`，所以不建立 link row（這與機關一致——機關也沒有在邀請階段建立任何「待綁定」的 Google 專用表，身分綁定全部在接受邀請時發生）。
 
-**接受邀請時**才在同一交易寫入 link row，而且**不經過** `resolveOrCreate`（它會生成新的隨機 `drtsPassengerId`，那是給 referral 乘客用的語意，見決策紀錄 §3）。改用新方法 `PartnerUserIdentityLinkRepository.createForInvitedPrincipal(entrySlug, partnerUserRef, drtsPassengerId, now)`：
+**接受邀請時**才在同一交易寫入或重驗 link row，而且**不經過** `resolveOrCreate`（它會生成新的隨機 `drtsPassengerId`，那是給 referral 乘客用的語意，見決策紀錄 §3）。改用方法 `PartnerUserIdentityLinkRepository.createForInvitedPrincipal(entrySlug, partnerUserRef, drtsPassengerId, now, executor)`：
 
-```sql
-INSERT INTO admin.phase1_partner_user_identity_links (
-  entry_slug, partner_user_ref, drts_passenger_id, status, consent_scope,
-  linked_at, last_seen_at, created_at, updated_at, record
-) VALUES ($1, $2, $3, 'active', 'fleet_staff_invitation', $4, $4, $4, $4, $5::jsonb)
-ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING
-RETURNING record
-```
-
-若 `ON CONFLICT DO NOTHING` 命中（代表這個 `(entrySlug, sub)` 已經有一筆 link，無論是哪種 `consent_scope`），邀請接受**必須失敗**（回滾整個交易，邀請不算被消費），不得靜默覆寫既有 link 的 `drtsPassengerId`——這擋掉「同一個 Google 帳號先用 referral handoff 建立了乘客 link，後來被邀請當車行人員」的身分覆寫風險（決策紀錄 §3 的「不得以 referral handoff 當人員開通機制」的反向保證：也不讓人員開通去覆寫 referral 的 link）。新增 `PartnerUserIdentityConsentScope` 值 `"fleet_staff_invitation"`（`PARTNER_USER_IDENTITY_CONSENT_SCOPES`，`packages/contracts/src/referral-channel.ts:46-52`，現有值為 `"referral_attribution"`／`"referral_settlement"`／`"passenger_identity_link"`，皆為 referral 乘客語意）用於區分，供稽核與未來查詢過濾使用。
+- **首次綁定**：當該 `(entrySlug, drtsPassengerId)` 在 `admin.phase1_partner_user_identity_links` 尚無任何 `fleet_staff_invitation` 連結時，以 `INSERT ... ON CONFLICT (entry_slug, partner_user_ref) DO NOTHING` 建立 `status = 'active'`、`consent_scope = 'fleet_staff_invitation'` 的新列。
+- **同車隊停用後重新邀請的原 Google 帳號重驗（2026-11-22 產品決定，`FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122`）**：當同一車隊既有成員（同一 `entrySlug` 與 canonical `drtsPassengerId`）於停用後重新獲發新邀請，並以原本已綁定的同一 Google `partnerUserRef` 重新驗證時，若既有 `(entrySlug, partnerUserRef)` 列的 `drts_passenger_id === drtsPassengerId`、`status === 'active'` 且 `consent_scope === 'fleet_staff_invitation'`（且該 `drtsPassengerId` 在同車隊無其他 `fleet_staff_invitation` 的 `partner_user_ref` 列），直接重用並回傳該既有 link record（保留原 `linkedAt`／`createdAt` 與單一列，不重複插入、不覆寫既有列）。
+- **衝突與跨人／跨途徑隔離**：若同車隊 `(entrySlug, partnerUserRef)` 已存在但屬於其他 `drtsPassengerId`、或屬於其他 `consent_scope`（例如先前的 referral handoff `passenger_identity_link`）、或 `status !== 'active'`、或該 `drtsPassengerId` 在同車隊已保有原 `fleet_staff_invitation` 的 Google `partnerUserRef` 卻收到同 email 但不同 Google `sub` 的 proof，則 `createForInvitedPrincipal` 一律回傳 `null`，邀請接受**必須失敗**（回滾整個交易，新邀請不算被消費，也不建立第二條跨人關聯），不得靜默覆寫既有 link 的 `drtsPassengerId`。跨 principal 的現役 Google `(issuer, sub)` 唯一性仍由 `iam.identity_principals` 的 `(issuer, subject)` 唯一約束（§3 第 6 點 `23505`）強制執行，不以其他車隊的歷史 link 封鎖另一車隊在 `(issuer, sub)` 已釋放後的合法獨立首次受邀。新增 `PartnerUserIdentityConsentScope` 值 `"fleet_staff_invitation"`（`PARTNER_USER_IDENTITY_CONSENT_SCOPES`，`packages/contracts/src/referral-channel.ts:46-52`，現有值為 `"referral_attribution"`／`"referral_settlement"`／`"passenger_identity_link"`，皆為 referral 乘客語意）用於區分，供稽核、重邀原帳號核對與查詢過濾使用。
 
 ## 3. 接受邀請時如何綁定 Google `(issuer, sub)`，與密碼分支的銜接
 
@@ -79,7 +72,7 @@ RETURNING record
 1. 鎖 `iam.identity_invitations`（`token_hash = $1 AND realm = 'partner' AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now`）。
 2. 鎖對應 `fleet_partners`（透過 `fleetPartnerRepository.findActiveFleetPartnerById`，仿機關核對 `core.regulatory_agencies.status === 'active'`，§4862-4865）與對應 `partner_entries`（`entrySlug` 必須 `status === 'active' && activeFlag === true`，仿 `oidc-pkce.service.ts:1181-1196` 的 HARD ACCEPTANCE RULE）——車行比機關多一層，因為車行有 `fleet_partners` 主檔**與** `partner_entries` 兩個需要都 active 的實體。
 3. 鎖 membership／principal／role bindings，核對 `principal.status === 'invited' && principal.issuer === FLEET_INVITATION_ISSUER && principal.email === proof.email`（仿 §4765-4773）。
-4. **新增車行特有的一步**：以 `INSERT ... ON CONFLICT DO NOTHING` 寫入 `partner_user_identity_links`（§2），若衝突（link 已存在）整個交易回滾，邀請不算被消費。
+4. **車行特有的 identity link 建立／原帳號重驗**：呼叫 `createForInvitedPrincipal(entrySlug, proof.subject, principal.principalId, now, client)`（§2）。首次邀請接受時建立新列；同車隊停用後重邀且本人以同一原 Google `sub` 接受時重用既有 active `fleet_staff_invitation` 列；若該 `(entrySlug, sub)` 為 referral link、同車隊其他員工 link、非 active link，或同車隊該成員已保有原 Google link 卻收到不同 Google `sub` 衝突，整個交易回滾，邀請不算被消費。
 5. `upsertPrincipal`：`issuer/subject` 覆寫為 `(proof.issuer, proof.subject)`，`status: 'active'`，`emailVerified: true`（仿 §4908-4919）；membership 轉 `active`；invitation 寫 `acceptedAt`。
 6. `(issuer, subject)` 唯一約束衝突（`error.code === '23505'`，已有其他 principal 綁同一個 Google 帳號）時整段回滾，回傳 `null`（仿 §4937-4941），不是部分成功。
 
@@ -163,7 +156,7 @@ const partnerId = requireNonBlankEnv("DRTS_FLEET_PARTNER_ID");
 
 **撤銷**：新端點 `POST /api/admin/fleet-partners/:fleetPartnerId/invitations/:invitationId/revoke`（仿 `revokeAgencyInvitation`／`platform-admin-agencies.controller.ts:176-193`），寫 `invitation.revokedAt`；若已接受（membership 已 active），改走**停用成員**：新端點 `POST /api/admin/fleet-partners/:fleetPartnerId/members/:membershipId/deactivate`，membership 轉 `disabled`，同交易呼叫既有 `revokePrincipalSessionsInTransaction`（`identity.repository.ts:1606-1612`，`manageFleetHumanRole` 已在用同一個函式撤銷角色變更時的既有 session，本端點沿用同一機制，不新增第二套撤銷邏輯）。
 
-**重寄**：沒有獨立的「resend」端點或函式——機關端也沒有（`identity.repository.ts` 只有 `issueAgencyInvitation`／`revokeAgencyInvitation`，無 `resendAgencyInvitation`）。重寄＝呼叫端先 `revoke` 舊邀請（若尚未撤銷），再呼叫一次 `POST .../invitations` 核發新邀請（`issueFleetStaffInvitation` 的 `buildRecords` 邏輯本身已處理「重新邀請一個先前邀請過的 principal」的情況，仿 `issueAgencyInvitation` §4494-4496 的註解：重新邀請會把 principal 重置回未綁定的邀請佔位狀態，新 proof 必須重新驗證，不延用舊的 Google 綁定）。UI 的「重寄」按鈕對應「撤銷＋重新發送同一個 email/roleCode」兩個 API 呼叫，不是一個新端點。
+**重寄與停用後重邀**：沒有獨立的「resend」端點或函式——機關端也沒有（`identity.repository.ts` 只有 `issueAgencyInvitation`／`revokeAgencyInvitation`，無 `resendAgencyInvitation`）。重寄＝呼叫端先 `revoke` 舊邀請（若尚未撤銷），再呼叫一次 `POST .../invitations` 核發新邀請（`issueFleetStaffInvitation` 先在同車隊 `scopeRef`／`partnerId`／正規化 email 查找既有 canonical 成員 [`FLEET-REINVITE-CANONICAL-MEMBER-20261122`]，沿用原 `principalId`、`membershipId`、`roleBindingId` 與 `createdAt`，並把 principal 重置回未綁定的 `FLEET_INVITATION_ISSUER` 邀請佔位狀態，使成員在完成新邀請驗證前無法直接登入；當成員持新邀請以同一原 Google `(issuer, sub)` proof 重新驗證時 [`FLEET-REINVITE-SAME-GOOGLE-ACCOUNT-20261122`]，重用該成員既有的 active `fleet_staff_invitation` link 並重新啟用 principal／membership 與新授予角色，原已接受邀請與已撤銷 session 歷史完整保留）。UI 的「重寄」按鈕對應「撤銷＋重新發送同一個 email/roleCode」兩個 API 呼叫，不是一個新端點。
 
 ## 9. 負向資安測試矩陣
 
@@ -174,7 +167,9 @@ const partnerId = requireNonBlankEnv("DRTS_FLEET_PARTNER_ID");
 | 邀請已撤銷後才接受 | 拒絕 | 同上 |
 | OIDC proof 的 email 與邀請 email 不符 | 拒絕 | 仿 `validPrincipal`（§4765-4773） |
 | OIDC `email_verified !== true` | 拒絕 | 仿既有 `exchangePartnerCallbackSession`（§1094-1114）同規則 |
-| 接受邀請時 `(entrySlug, sub)` 的 identity link 已存在（無論是先前的 referral link 還是另一筆員工 link） | 拒絕，整段回滾，不覆寫既有 link | §2 的 `ON CONFLICT DO NOTHING` 回滾規則 |
+| 接受邀請時同車隊 `(entrySlug, sub)` 的 identity link 已屬於先前的 referral link 或另一位員工 | 拒絕，整段回滾，不覆寫既有 link、不消耗邀請 | §2 的 `createForInvitedPrincipal` 隔離與回滾規則 |
+| 同車隊停用後重邀的成員已保有原 Google link，但新 Google proof 帶相同 email 與**不同** Google `sub` | 拒絕，整段回滾，不建立第二條跨人 link，保留新邀請給原帳號 | §2 的同成員原 Google `sub` 一致性檢查 |
+| 同車隊停用後重邀的成員於重驗前直接嘗試一般 Google 登入，或持已撤銷舊 session 存取 | 拒絕（`IAM_PRINCIPAL_NOT_ACTIVE`／`SESSION_REVOKED`）；須經新邀請重驗同一原 Google 帳號後才簽發新有效 session 並讀回此次授予角色 | §3、§8 與 2026-11-22 產品決定 |
 | 接受邀請時 `(issuer, sub)` 已綁定另一個 active principal | 拒絕（`23505` 唯一約束），不部分成功 | 仿 §4937-4941 |
 | `fleet_partners` 主檔或 `partner_entries` 任一方非 active 時接受邀請 | 拒絕 | §3 第 2 點 |
 | 密碼分支接受邀請後，直接用 Google 登入同一 email 的其他帳號 | 拒絕（`findPrincipalBySubject` 找不到或找到別的 principal；密碼分支不覆寫 issuer/subject） | §3 密碼分支 |

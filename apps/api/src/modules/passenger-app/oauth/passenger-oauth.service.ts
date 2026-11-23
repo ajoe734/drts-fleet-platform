@@ -9,8 +9,10 @@ import type { RequestIdentity } from "../../../common/auth/auth.types";
 import { OidcIdTokenVerifier } from "../../auth/oidc-id-token-verifier";
 import { PassengerAccountService } from "../account/passenger-account.service";
 import {
+  encodeNativePassengerOAuthState,
   isAllowedOAuthRedirectUri,
   resolveOAuthProviderConfig,
+  resolveOAuthProviderRedirectUri,
   type OAuthProviderConfig,
 } from "./oauth-provider.config";
 import type {
@@ -160,6 +162,14 @@ export class PassengerOAuthService {
       validation("Provider path and body must match.");
     if (!isAllowedOAuthRedirectUri(command.redirectUri))
       validation("Redirect URI is not in the configured allowlist.");
+    const resolvedRedirect = resolveOAuthProviderRedirectUri(
+      provider,
+      command.redirectUri,
+    );
+    if (!resolvedRedirect)
+      validation(
+        "Google web OAuth requires an allowlisted HTTPS callback URI.",
+      );
 
     // Session-bound transaction: a link transaction is permanently tied to the
     // account the caller was authenticated as at /start time, never to
@@ -167,7 +177,14 @@ export class PassengerOAuthService {
     const drtsPassengerId =
       command.purpose === "link" ? requirePassengerBearer(identity) : null;
 
-    const state = base64url(randomBytes(24));
+    const rawState = base64url(randomBytes(24));
+    const state =
+      resolvedRedirect.nativeAppReturn && resolvedRedirect.nativeCallbackUri
+        ? encodeNativePassengerOAuthState(
+            rawState,
+            resolvedRedirect.nativeCallbackUri,
+          )
+        : rawState;
     const nonce = base64url(randomBytes(24));
     const codeVerifier = base64url(randomBytes(32));
     const codeChallenge = base64url(
@@ -185,7 +202,7 @@ export class PassengerOAuthService {
       nonce,
       codeVerifier,
       codeChallenge,
-      redirectUri: command.redirectUri,
+      redirectUri: resolvedRedirect.providerRedirectUri,
       drtsPassengerId,
       createdAt: new Date(now).toISOString(),
       expiresAt,
@@ -199,7 +216,10 @@ export class PassengerOAuthService {
       "scope",
       provider === "facebook" ? "public_profile,email" : "openid profile email",
     );
-    authUrl.searchParams.set("redirect_uri", command.redirectUri);
+    authUrl.searchParams.set(
+      "redirect_uri",
+      resolvedRedirect.providerRedirectUri,
+    );
     authUrl.searchParams.set("state", state);
     if (provider !== "facebook") authUrl.searchParams.set("nonce", nonce);
     authUrl.searchParams.set("code_challenge", codeChallenge);
