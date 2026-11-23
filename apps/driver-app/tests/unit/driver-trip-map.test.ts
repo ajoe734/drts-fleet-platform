@@ -1,6 +1,12 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
+
+const native = vi.hoisted(() => ({
+  platform: { OS: "ios" },
+  modules: {} as { DRTSDriverMapConfig?: { googleMapsConfigured: boolean } },
+  managers: new Set<string>(),
+}));
 
 vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
@@ -8,7 +14,11 @@ vi.mock("react-native", () => ({
     canOpenURL: vi.fn(),
     openURL: vi.fn(),
   },
-  Platform: { OS: "ios" },
+  Platform: native.platform,
+  NativeModules: native.modules,
+  UIManager: {
+    hasViewManagerConfig: (name: string) => native.managers.has(name),
+  },
   Pressable: ({
     children,
     ...props
@@ -43,8 +53,9 @@ vi.mock("react-native-maps", () => ({
       [key: string]: unknown;
     }) => React.createElement("MapView", props, children),
   ),
-  Marker: (props: Record<string, unknown>) =>
+  Marker: vi.fn((props: Record<string, unknown>) =>
     React.createElement("Marker", props),
+  ),
   PROVIDER_GOOGLE: "google",
 }));
 
@@ -82,7 +93,7 @@ vi.mock("@/components/canvas-primitives", () => ({
 
 import DriverTripMap from "../../components/driver-trip-map";
 import DriverTripMapWeb from "../../components/driver-trip-map.web";
-import MapView from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
 
 function buildTask(
   overrides: Partial<DriverTaskRecord> = {},
@@ -207,6 +218,16 @@ function renderDriverTripMapText(
 }
 
 describe("DriverTripMap", () => {
+  const googleIos = ["AIRGoogleMap", "AIRGoogleMapMarker"];
+  const defaultMap = ["AIRMap", "AIRMapMarker"];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    native.platform.OS = "ios";
+    native.modules.DRTSDriverMapConfig = { googleMapsConfigured: true };
+    native.managers.clear();
+    for (const name of [...googleIos, ...defaultMap]) native.managers.add(name);
+  });
+
   it("shows the native Google map with real pickup/dropoff coordinates", () => {
     const text = renderDriverTripMapText({
       task: buildTask(),
@@ -223,16 +244,98 @@ describe("DriverTripMap", () => {
 
     expect(text).toContain("Trip Map & Navigation Handoff");
     expect(text).toContain("DRTS-owned route");
-    expect(text).toContain("Google native map active");
+    expect(text).toContain("Google 地圖");
     expect(text).toContain("台北車站");
     expect(text).toContain("25.047800, 121.517000");
     expect(text).toContain("松山機場");
     expect(text).toContain("25.069700, 121.552500");
     expect(text).toContain("GPS 即時回報");
     expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
+      provider: "google",
       showsUserLocation: true,
       showsMyLocationButton: true,
     });
+  });
+
+  it.each([
+    { os: "ios", configured: true, managers: defaultMap, label: "Apple 地圖" },
+    {
+      os: "ios",
+      configured: true,
+      managers: ["AIRGoogleMap", ...defaultMap],
+      label: "Apple 地圖",
+    },
+    {
+      os: "ios",
+      configured: false,
+      managers: [...googleIos, ...defaultMap],
+      label: "Apple 地圖",
+    },
+    {
+      os: "ios",
+      configured: false,
+      managers: ["AIRMap"],
+      label: "可用下方座標開啟外部導航",
+    },
+    {
+      os: "android",
+      configured: true,
+      managers: defaultMap,
+      label: "Google 地圖",
+    },
+    {
+      os: "android",
+      configured: false,
+      managers: defaultMap,
+      label: "可用下方座標開啟外部導航",
+    },
+    {
+      os: "android",
+      configured: true,
+      managers: ["AIRMap"],
+      label: "可用下方座標開啟外部導航",
+    },
+  ])(
+    "uses the packaged map and pins on $os ($configured, $managers)",
+    ({ os, configured, managers, label }) => {
+      native.platform.OS = os;
+      native.modules.DRTSDriverMapConfig = { googleMapsConfigured: configured };
+      native.managers.clear();
+      for (const name of managers) native.managers.add(name);
+      const text = renderDriverTripMapText({
+        task: buildTask(),
+        order: buildOrder(),
+        driverLocation: null,
+      });
+      expect(text).toContain(label);
+      expect(text).toContain("25.047800, 121.517000");
+      if (label === "可用下方座標開啟外部導航") {
+        expect(MapView).not.toHaveBeenCalled();
+        expect(Marker).not.toHaveBeenCalled();
+      } else {
+        expect(vi.mocked(MapView).mock.calls[0][0].provider).toBe(
+          label === "Google 地圖" ? "google" : undefined,
+        );
+        expect(
+          vi.mocked(Marker).mock.calls.map(([props]) => props.coordinate),
+        ).toEqual([
+          { latitude: 25.0478, longitude: 121.517 },
+          { latitude: 25.0697, longitude: 121.5525 },
+        ]);
+      }
+    },
+  );
+
+  it("keeps navigation available in earlier Android builds without packaged capability metadata", () => {
+    native.platform.OS = "android";
+    delete native.modules.DRTSDriverMapConfig;
+    const text = renderDriverTripMapText({
+      task: buildTask(),
+      order: buildOrder(),
+      driverLocation: null,
+    });
+    expect(text).toContain("可用下方座標開啟外部導航");
+    expect(MapView).not.toHaveBeenCalled();
   });
 
   it.each([
