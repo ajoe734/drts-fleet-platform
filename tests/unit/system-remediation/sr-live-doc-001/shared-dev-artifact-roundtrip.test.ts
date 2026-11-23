@@ -1145,6 +1145,16 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
     expect(persisted.missing).toContain(
       'driver_fee_plan:fixture-platform-funded-reimbursement/v1:shadowed'
     );
+    expect(persisted.fee_plan_readback_audit).toMatchObject({
+      active_plan: {
+        plan_name: 'someone-elses-plan',
+        version: 'v9',
+        service_fee_bps: 1500,
+        reimbursement_mode: 'mixed',
+      },
+      previous_plan: APPROVED_FIXTURE_FEE_PLAN,
+      total_plans: 2,
+    });
     expect(persisted.teardown).toEqual({
       driver_invitation_revoked: true,
       ops_session_revoked: true,

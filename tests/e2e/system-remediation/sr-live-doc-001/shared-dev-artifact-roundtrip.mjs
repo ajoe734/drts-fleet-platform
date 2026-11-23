@@ -647,6 +647,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       reimbursement_batch_id: null,
       public_info_version_id: publicInfoVersionId,
     },
+    fee_plan_readback_audit: null,
     clean_remittance_proof: null,
     eicar_remittance_proof: null,
     controlled_placard: null,
@@ -1053,6 +1054,133 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
 
     const existingPlans = await listDriverFeePlans('/api/driver-fee-plans');
     const activePlan = existingPlans[0];
+    const previousPlan = existingPlans[1] ?? null;
+    const includeFeePlanImpactAudit = Boolean(
+      options.includeFeePlanImpactAudit ??
+        env.SR_LIVE_DOC_READBACK_FEE_PLAN_AUDIT === 'true'
+    );
+
+    evidence.fee_plan_readback_audit = {
+      active_plan: activePlan ?? null,
+      previous_plan: previousPlan,
+      total_plans: existingPlans.length,
+      all_plans: existingPlans,
+      driver_statements: null,
+      reimbursement_batches: null,
+      fee_plan_audit_events: null,
+    };
+
+    if (includeFeePlanImpactAudit) {
+      try {
+        const statementsResp = await fetchImpl(
+          `${apiOrigin}/api/driver-statements`,
+          {
+            method: 'GET',
+            headers: buildApiHeaders({
+              apiIdToken,
+              appSessionToken: opsToken,
+            }),
+          }
+        );
+        const { json: statementsRaw } =
+          await readResponseJsonOrText(statementsResp);
+        const statementsData = unwrapEnvelope(statementsRaw);
+        if (
+          statementsResp.status === 200 &&
+          Array.isArray(statementsData?.items)
+        ) {
+          evidence.fee_plan_readback_audit.driver_statements =
+            statementsData.items.map((stmt) => ({
+              statement_id: stmt?.statement_id ?? stmt?.statementId ?? null,
+              driver_id: stmt?.driver_id ?? stmt?.driverId ?? null,
+              period_month: stmt?.period_month ?? stmt?.periodMonth ?? null,
+              fee_plan_version:
+                stmt?.fee_plan_version ?? stmt?.feePlanVersion ?? null,
+              status: stmt?.status ?? null,
+              totals: stmt?.totals ?? null,
+              created_at: stmt?.created_at ?? stmt?.createdAt ?? null,
+              updated_at: stmt?.updated_at ?? stmt?.updatedAt ?? null,
+            }));
+        }
+      } catch {
+        // Optional read-only audit enrichment
+      }
+
+      try {
+        const batchesResp = await fetchImpl(`${apiOrigin}/api/reimbursements`, {
+          method: 'GET',
+          headers: buildApiHeaders({
+            apiIdToken,
+            appSessionToken: opsToken,
+          }),
+        });
+        const { json: batchesRaw } = await readResponseJsonOrText(batchesResp);
+        const batchesData = unwrapEnvelope(batchesRaw);
+        if (batchesResp.status === 200 && Array.isArray(batchesData?.items)) {
+          evidence.fee_plan_readback_audit.reimbursement_batches =
+            batchesData.items.map((batch) => ({
+              batch_id: batch?.batch_id ?? batch?.batchId ?? null,
+              driver_id: batch?.driver_id ?? batch?.driverId ?? null,
+              period_month: batch?.period_month ?? batch?.periodMonth ?? null,
+              statement_id: batch?.statement_id ?? batch?.statementId ?? null,
+              status: batch?.status ?? null,
+              workflow_state:
+                batch?.workflow_state ?? batch?.workflowState ?? null,
+              total_amount: batch?.total_amount ?? batch?.totalAmount ?? null,
+            }));
+        }
+      } catch {
+        // Optional read-only audit enrichment
+      }
+
+      try {
+        const auditResp = await fetchImpl(`${apiOrigin}/api/audit`, {
+          method: 'GET',
+          headers: buildApiHeaders({
+            apiIdToken,
+            appSessionToken: opsToken,
+          }),
+        });
+        const { json: auditRaw } = await readResponseJsonOrText(auditResp);
+        const auditData = unwrapEnvelope(auditRaw);
+        if (auditResp.status === 200 && Array.isArray(auditData?.items)) {
+          evidence.fee_plan_readback_audit.fee_plan_audit_events =
+            auditData.items
+              .filter((evt) => {
+                const resType =
+                  evt?.resource_type ?? evt?.resourceType ?? '';
+                const actName = evt?.action_name ?? evt?.actionName ?? '';
+                return (
+                  resType === 'driver_fee_plan' ||
+                  resType === 'driver_statement' ||
+                  resType === 'driver_reimbursement_batch' ||
+                  actName === 'publish_driver_fee_plan' ||
+                  actName === 'generate_driver_statement' ||
+                  actName === 'generate_reimbursement_batch'
+                );
+              })
+              .map((evt) => ({
+                audit_id: evt?.audit_id ?? evt?.auditId ?? null,
+                action_name: evt?.action_name ?? evt?.actionName ?? null,
+                resource_type: evt?.resource_type ?? evt?.resourceType ?? null,
+                resource_id: evt?.resource_id ?? evt?.resourceId ?? null,
+                actor_id: evt?.actor_id ?? evt?.actorId ?? null,
+                actor_type: evt?.actor_type ?? evt?.actorType ?? null,
+                created_at:
+                  evt?.created_at ??
+                  evt?.createdAt ??
+                  evt?.occurred_at ??
+                  evt?.occurredAt ??
+                  null,
+                new_values_summary:
+                  evt?.new_values_summary ?? evt?.newValuesSummary ?? null,
+              }));
+        }
+      } catch {
+        // Optional read-only audit enrichment
+      }
+    }
+
     const isActivePlanOurs = isApprovedFixtureFeePlanIdentity(activePlan);
 
     if (isActivePlanOurs) {
@@ -1082,15 +1210,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         );
       }
 
-      const isTransientPriorUatFixture =
-        activePlan !== undefined &&
-        getFeePlanName(activePlan) === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
-        /^2026\.03-uat-[0-9a-f]{8}$/i.test(
-          String(getFeePlanVersion(activePlan) ?? '')
-        ) &&
-        env.SR_LIVE_DOC_REMEDIATE_TRANSIENT_UAT_FEE_PLAN === 'true';
-
-      if (activePlan !== undefined && !isTransientPriorUatFixture) {
+      if (activePlan !== undefined) {
         evidence.missing.push(
           `driver_fee_plan:${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION}:conflicting_active_plan`
         );
