@@ -65,49 +65,20 @@ const PORTAL_INVITATION_ENV_KEYS = [
   "AGENCY_INVITATION_ACCEPT_URL_BASE",
 ] as const;
 
-function parseTrustedHttpUrl(rawValue: string | undefined): URL | null {
-  const trimmed = rawValue?.trim();
-  if (!trimmed || /\s/.test(trimmed)) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (
-      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
-      parsed.username ||
-      parsed.password
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function resolveRealmResetBaseUrl(
+function callProductionPasswordResetResolver(
   realm: PasswordResetDeliveryRealm,
   env: NodeJS.ProcessEnv,
 ): string | null {
   const exportedResolver = (
     tenantInvitationDeliveryModule as Record<string, unknown>
   ).resolvePasswordResetBaseUrl;
-  if (typeof exportedResolver === "function") {
-    return (
-      exportedResolver as (
-        r: PasswordResetDeliveryRealm,
-        e: NodeJS.ProcessEnv,
-      ) => string | null
-    )(realm, env);
-  }
-  const raw =
-    realm === "agency"
-      ? env.AGENCY_INVITATION_ACCEPT_URL_BASE
-      : realm === "partner"
-        ? env.FLEET_INVITATION_ACCEPT_URL_BASE
-        : env.TENANT_INVITATION_ACCEPT_URL_BASE;
-  const parsed = parseTrustedHttpUrl(raw);
-  if (parsed) return `${parsed.origin}/reset-password`;
-  const legacy = parseTrustedHttpUrl(env.PASSWORD_RESET_URL_BASE);
-  return legacy ? env.PASSWORD_RESET_URL_BASE!.trim() : null;
+  expect(typeof exportedResolver).toBe("function");
+  return (
+    exportedResolver as (
+      r: PasswordResetDeliveryRealm,
+      e: NodeJS.ProcessEnv,
+    ) => string | null
+  )(realm, env);
 }
 
 function extractWorkflowStepRun(workflow: string, stepName: string): string {
@@ -406,19 +377,12 @@ describe("PORTAL-INVITATION-AND-RESET-RELEASE-CONFIG-20261123: shared-dev and pr
       FLEET_INVITATION_ACCEPT_URL_BASE: `${f.vars.PROD_FLEET_PARTNER_PORTAL_ORIGIN}/invite`,
       AGENCY_INVITATION_ACCEPT_URL_BASE: `${f.vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
     });
-
-    expect(resolveRealmResetBaseUrl("tenant", deployedEnv)).toBe(
-      `${f.vars.PROD_TENANT_CONSOLE_ORIGIN}/reset-password`,
-    );
-    expect(resolveRealmResetBaseUrl("partner", deployedEnv)).toBe(
-      `${f.vars.PROD_FLEET_PARTNER_PORTAL_ORIGIN}/reset-password`,
-    );
-    expect(resolveRealmResetBaseUrl("agency", deployedEnv)).toBe(
-      `${f.vars.PROD_AGENCY_PORTAL_ORIGIN}/reset-password`,
-    );
+    expect(deployedEnv).not.toHaveProperty("PASSWORD_RESET_URL_BASE");
 
     // Deliver invitations and password-reset emails through the controlled
-    // test mailbox using the exact env vars emitted by deployArgs.
+    // test mailbox using ONLY the exact env vars emitted by deployArgs.
+    vi.stubEnv("PASSWORD_RESET_URL_BASE", "");
+    delete process.env.PASSWORD_RESET_URL_BASE;
     for (const key of PORTAL_INVITATION_ENV_KEYS) {
       vi.stubEnv(key, deployedEnv[key]!);
     }
@@ -538,23 +502,18 @@ describe("PORTAL-INVITATION-AND-RESET-RELEASE-CONFIG-20261123: shared-dev and pr
     ];
 
     for (const { request, expectedOrigin } of resetCases) {
-      const resolvedBase = resolveRealmResetBaseUrl(request.realm, deployedEnv);
-      expect(resolvedBase).toBe(`${expectedOrigin}/reset-password`);
-      if (
-        typeof (tenantInvitationDeliveryModule as Record<string, unknown>)
-          .resolvePasswordResetBaseUrl !== "function"
-      ) {
-        vi.stubEnv("PASSWORD_RESET_URL_BASE", resolvedBase!);
-      }
       const outcome = await tenantDelivery.sendPasswordReset(request);
       expect(outcome.status).toBe("sent");
       expect(inbox.at(-1)?.body).toContain(
         `Reset your password: ${expectedOrigin}/reset-password?token=${request.rawToken}`,
       );
+      expect(
+        callProductionPasswordResetResolver(request.realm, deployedEnv),
+      ).toBe(`${expectedOrigin}/reset-password`);
     }
   });
 
-  it("routes shared-dev tenant invitations to /invite whether Google OIDC is enabled or disabled, while preserving OIDC and Enterprise Dispatch shared tenant realm origins", () => {
+  it("routes shared-dev tenant invitations to /invite whether Google OIDC is enabled or disabled, while preserving OIDC and Enterprise Dispatch shared tenant realm origins", async () => {
     const currentScript = extractWorkflowStepRun(
       devWorkflow,
       "Build API env vars",
@@ -642,15 +601,7 @@ describe("PORTAL-INVITATION-AND-RESET-RELEASE-CONFIG-20261123: shared-dev and pr
         "https://agency-run.dev.drts.invalid/invite",
       FLEET_INVITATION_ACCEPT_URL_BASE: "https://fleet.dev.drts.invalid/invite",
     });
-    expect(resolveRealmResetBaseUrl("tenant", fixedOidcDisabledEnv)).toBe(
-      "https://tenant-run.dev.drts.invalid/reset-password",
-    );
-    expect(resolveRealmResetBaseUrl("agency", fixedOidcDisabledEnv)).toBe(
-      "https://agency-run.dev.drts.invalid/reset-password",
-    );
-    expect(resolveRealmResetBaseUrl("partner", fixedOidcDisabledEnv)).toBe(
-      "https://fleet.dev.drts.invalid/reset-password",
-    );
+    expect(fixedOidcDisabledEnv).not.toHaveProperty("PASSWORD_RESET_URL_BASE");
     expect(
       buildFleetInvitationEmailBody(
         {
@@ -682,6 +633,114 @@ describe("PORTAL-INVITATION-AND-RESET-RELEASE-CONFIG-20261123: shared-dev and pr
     ).toContain(
       "Accept your invitation: https://agency-run.dev.drts.invalid/invite?token=ai_dev_token",
     );
+
+    // Invoke actual TenantInvitationDeliveryService.send and sendPasswordReset
+    // under the exact OIDC-disabled shared-dev deployment settings without
+    // PASSWORD_RESET_URL_BASE injection.
+    vi.stubEnv("PASSWORD_RESET_URL_BASE", "");
+    delete process.env.PASSWORD_RESET_URL_BASE;
+    for (const key of PORTAL_INVITATION_ENV_KEYS) {
+      vi.stubEnv(key, fixedOidcDisabledEnv[key]!);
+    }
+
+    outboxDir = await mkdtemp(
+      path.join(tmpdir(), "portal-release-dev-outbox-"),
+    );
+    const devInbox: Array<TransportMessage | PlatformTransportMessage> = [];
+    const devAck = (id: string): ProviderAcknowledgement => ({
+      provider: "controlled-test-receiver",
+      response: `250 Accepted as ${id}`,
+      providerMessageId: id,
+      acceptedAt: "2026-11-23T03:30:00.000Z",
+    });
+    const devTransport: MailTransport = {
+      provider: "controlled-test-receiver",
+      send: vi.fn(async (msg: TransportMessage) => {
+        devInbox.push(msg);
+        return devAck(`dev-outbox-${devInbox.length}`);
+      }),
+      sendPlatform: vi.fn(async (msg: PlatformTransportMessage) => {
+        devInbox.push(msg);
+        return devAck(`dev-platform-${devInbox.length}`);
+      }),
+    };
+    const devDelivery = new NotificationDeliveryService(
+      new FileMailOutbox(outboxDir),
+      devTransport,
+      {
+        now: () => new Date("2026-11-23T03:30:00.000Z"),
+        maxAttempts: 3,
+        retryDelayMs: 1000,
+        leaseMs: 1000,
+      },
+    );
+    const devTenantDelivery = new TenantInvitationDeliveryService(devDelivery);
+
+    const devTenantInvite = await devTenantDelivery.send({
+      invitationId: "inv-dev-tenant-oidc-disabled-001",
+      tenantId: "tenant-dev-001",
+      recipientEmail: "tenant-dev@controlled-receiver.test",
+      displayName: "Dev Tenant User",
+      expiresAt: "2026-11-24T03:30:00.000Z",
+      rawToken: "ti_dev_oidc_disabled_token_001",
+    });
+    expect(devTenantInvite.status).toBe("sent");
+    expect(devInbox.at(-1)?.body).toContain(
+      "Accept your invitation: https://tenant-run.dev.drts.invalid/invite?token=ti_dev_oidc_disabled_token_001",
+    );
+
+    const devResetCases: Array<{
+      request: PasswordResetDeliveryRequest;
+      expectedOrigin: string;
+    }> = [
+      {
+        request: {
+          dedupeKey: "dev-reset-tenant-001",
+          realm: "tenant",
+          tenantId: "tenant-dev-001",
+          recipientEmail: "tenant-dev-reset@controlled-receiver.test",
+          expiresAt: "2026-11-23T04:30:00.000Z",
+          rawToken: "pwr_dev_tenant_001",
+        },
+        expectedOrigin: "https://tenant-run.dev.drts.invalid",
+      },
+      {
+        request: {
+          dedupeKey: "dev-reset-partner-001",
+          realm: "partner",
+          tenantId: null,
+          recipientEmail: "fleet-dev-reset@controlled-receiver.test",
+          expiresAt: "2026-11-23T04:30:00.000Z",
+          rawToken: "pwr_dev_partner_001",
+        },
+        expectedOrigin: "https://fleet.dev.drts.invalid",
+      },
+      {
+        request: {
+          dedupeKey: "dev-reset-agency-001",
+          realm: "agency",
+          tenantId: null,
+          recipientEmail: "agency-dev-reset@controlled-receiver.test",
+          expiresAt: "2026-11-23T04:30:00.000Z",
+          rawToken: "pwr_dev_agency_001",
+        },
+        expectedOrigin: "https://agency-run.dev.drts.invalid",
+      },
+    ];
+
+    for (const { request, expectedOrigin } of devResetCases) {
+      const outcome = await devTenantDelivery.sendPasswordReset(request);
+      expect(outcome.status).toBe("sent");
+      expect(devInbox.at(-1)?.body).toContain(
+        `Reset your password: ${expectedOrigin}/reset-password?token=${request.rawToken}`,
+      );
+      expect(
+        callProductionPasswordResetResolver(
+          request.realm,
+          fixedOidcDisabledEnv,
+        ),
+      ).toBe(`${expectedOrigin}/reset-password`);
+    }
   });
 
   it("verifies /invite dual-entry (Google OIDC and password acceptance with the same token) and realm /reset-password pages across Tenant, Enterprise Dispatch, Agency, and Fleet portals", async () => {
