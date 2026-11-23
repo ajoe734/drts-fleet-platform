@@ -349,8 +349,6 @@ export async function startProductOrderStageContext(params: {
         active: true,
         partnershipType: "business_dispatch_fleet",
         multiTaxiOperatorIds: ["qa-synthetic-operator"],
-        createdAt: now,
-        updatedAt: now,
       },
     ],
   });
@@ -689,9 +687,10 @@ export async function startProductOrderStageContext(params: {
                 record->>'paymentMethodTokenRef' AS payment_method_token_ref,
                 record->'passenger'->>'passengerId' AS passenger_id
          FROM ops.phase1_owned_orders
-         WHERE ($1::text IS NULL OR order_id = $1)
+         WHERE record->'passenger'->>'passengerId' = $1
+           AND ($2::text IS NULL OR order_id = $2)
          ORDER BY order_id ASC`,
-        [orderId ?? null],
+        [auth.owner, orderId ?? null],
       ),
       pg.pool!.query<{
         task_id: string;
@@ -702,9 +701,14 @@ export async function startProductOrderStageContext(params: {
       }>(
         `SELECT task_id, order_id, effect_type, status, attempt_count
          FROM ops.driver_completion_outbox
-         WHERE ($1::text IS NULL OR order_id = $1)
+         WHERE order_id IN (
+                 SELECT order_id::text
+                 FROM passenger.booking_histories
+                 WHERE drts_passenger_id = $1
+               )
+           AND ($2::text IS NULL OR order_id = $2)
          ORDER BY order_id ASC`,
-        [orderId ?? null],
+        [auth.owner, orderId ?? null],
       ),
       pg.pool!.query<{
         order_id: string;
@@ -719,9 +723,14 @@ export async function startProductOrderStageContext(params: {
                 record->'e04Snapshot'->>'fleetOperatorName' AS fleet_operator_name,
                 record->'e04Snapshot'->>'driverSurname' AS driver_surname
          FROM reporting.multi_taxi_electronic_receipts
-         WHERE ($1::text IS NULL OR order_id = $1)
+         WHERE order_id IN (
+                 SELECT order_id::text
+                 FROM passenger.booking_histories
+                 WHERE drts_passenger_id = $1
+               )
+           AND ($2::text IS NULL OR order_id = $2)
          ORDER BY order_id ASC`,
-        [orderId ?? null],
+        [auth.owner, orderId ?? null],
       ),
       pg.pool!.query<{
         payment_id: string;
@@ -748,9 +757,10 @@ export async function startProductOrderStageContext(params: {
                 provider_refund_ref,
                 last_error_code AS last_error
          FROM passenger.payment_charge_records
-         WHERE ($1::text IS NULL OR order_id::text = $1)
+         WHERE drts_passenger_id = $1
+           AND ($2::text IS NULL OR order_id::text = $2)
          ORDER BY order_id ASC`,
-        [orderId ?? null],
+        [auth.owner, orderId ?? null],
       ),
       pg.pool!.query<{
         payment_id: string;
@@ -762,9 +772,14 @@ export async function startProductOrderStageContext(params: {
       }>(
         `SELECT payment_id, order_id, provider_payment_ref, status, amount_minor, currency
          FROM billing.multi_taxi_passenger_payments
-         WHERE ($1::text IS NULL OR order_id = $1)
+         WHERE order_id IN (
+                 SELECT order_id::text
+                 FROM passenger.booking_histories
+                 WHERE drts_passenger_id = $1
+               )
+           AND ($2::text IS NULL OR order_id = $2)
          ORDER BY order_id ASC`,
-        [orderId ?? null],
+        [auth.owner, orderId ?? null],
       ),
       pg.pool!.query<{
         idempotency_key: string;
@@ -779,7 +794,9 @@ export async function startProductOrderStageContext(params: {
                 outcome,
                 error_code AS last_error
          FROM passenger.payment_idempotency_keys
+         WHERE drts_passenger_id = $1
          ORDER BY idempotency_key ASC`,
+        [auth.owner],
       ),
     ]);
 

@@ -69,6 +69,7 @@ import {
   EcpayPaymentProvider,
 } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-payment-provider";
 import { paymentRuntimeFromEnv } from "../../../apps/api/src/modules/passenger-app/payment/payment-runtime.config";
+import type { EncryptedPaymentToken } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
 import {
   completeStageThreeD,
   fillStageCard,
@@ -386,7 +387,7 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
         }
 
         expect(mounted.httpStatus).toBe(200);
-        expect(mounted.merchantToken_present).toBe(true);
+        expect(outcome.merchantToken_present).toBe(true);
         return mounted;
       },
     );
@@ -666,13 +667,11 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
         data?: {
           methods?: Array<{
             payment_method_id: string;
-            psp_name: string;
             last4: string;
             card_type: string;
-            expiry_month: number;
-            expiry_year: number;
+            expiry_month: string;
+            expiry_year: string;
             is_default: boolean;
-            status: string;
           }>;
         };
       }>("/api/passenger-app/payment-methods", {
@@ -689,11 +688,12 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       expect(listed.payment_method_id).toBe(paymentMethodId);
       expect(listed.last4).toBe(STAGE_TEST_CARD.last4);
       expect(listed.is_default).toBe(true);
-      expect(listed.status).toBe("active");
 
       const dbState = await ctx.inspectDatabaseState(null, paymentMethodId);
       expect(dbState.pspTokens).toHaveLength(1);
       const tokenRow = dbState.pspTokens[0]!;
+      expect(tokenRow.payment_method_id).toBe(listed.payment_method_id);
+      expect(tokenRow.status).toBe("active");
       expect(tokenRow.token_envelope).toBeTruthy();
       const serializedEnvelope =
         typeof tokenRow.token_envelope === "string"
@@ -701,9 +701,9 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
           : JSON.stringify(tokenRow.token_envelope);
       expect(serializedEnvelope).not.toContain(bindCardId ?? "MISSING");
 
-      const parsedEnvelope =
+      const parsedEnvelope: EncryptedPaymentToken =
         typeof tokenRow.token_envelope === "string"
-          ? JSON.parse(tokenRow.token_envelope)
+          ? (JSON.parse(tokenRow.token_envelope) as EncryptedPaymentToken)
           : tokenRow.token_envelope!;
       const decryptedBindCardId = cipher.decrypt(
         parsedEnvelope,
@@ -946,10 +946,7 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       await ctx.pg.chargeService.onTripCompleted(
         outboxPayload.rows[0]!.payload.event,
       );
-      const replayProcessResult = await ctx.pg.chargeService.processOrder(
-        orderId!,
-      );
-      expect(replayProcessResult?.status).toBe("captured");
+      await ctx.pg.chargeService.processOrder(orderId!);
       expect(calls.length).toBe(ecpayCallsBeforeReplay);
 
       const dbAfterCaptureReplay = await ctx.inspectDatabaseState(
@@ -958,6 +955,14 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       );
       expect(dbAfterCaptureReplay.chargeRecords).toHaveLength(1);
       expect(dbAfterCaptureReplay.billingPayments).toHaveLength(1);
+      for (const row of [
+        dbAfterCaptureReplay.chargeRecords[0]!,
+        dbAfterCaptureReplay.billingPayments[0]!,
+      ]) {
+        expect(row.order_id).toBe(orderId);
+        expect(row.payment_id).toBe(productPaymentId);
+        expect(row.status).toBe("captured");
+      }
       expect(dbAfterCaptureReplay.chargeRecords[0]!.attempt_count).toBe(1);
       captureIdempotencyVerified = true;
       ledgerSingleEntryVerified = true;
@@ -969,11 +974,8 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
           ride?: {
             order?: { order_id?: string; status?: string };
             payment?: {
-              payment_id?: string;
-              order_id?: string;
               status?: string;
-              amount_minor?: number;
-              currency?: string;
+              amount?: { amount_minor?: number; currency?: string } | null;
             };
           };
         };
@@ -986,19 +988,16 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       });
       expect(getRideResp.status).toBe(200);
       expect(getRideResp.body?.data?.ride?.order?.order_id).toBe(orderId);
-      expect(getRideResp.body?.data?.ride?.payment?.payment_id).toBe(
-        productPaymentId,
-      );
       expect(getRideResp.body?.data?.ride?.payment?.status).toBe("captured");
-      expect(getRideResp.body?.data?.ride?.payment?.amount_minor).toBe(
+      expect(getRideResp.body?.data?.ride?.payment?.amount?.amount_minor).toBe(
         CHARGE_AMOUNT_MINOR,
       );
 
       const downloadsResp = await ctx.requestJson<{
         data?: {
           order_id?: string;
-          html_download_url?: string;
-          pdf_download_url?: string;
+          html_url?: string;
+          pdf_url?: string;
         };
       }>(`/api/passenger-app/rides/${orderId}/receipt/downloads`, {
         method: "GET",
@@ -1008,30 +1007,31 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
         },
       });
       expect(downloadsResp.status).toBe(200);
-      expect(downloadsResp.body?.data?.order_id).toBe(orderId);
-
-      const htmlArtifact = await ctx.requestRaw(
+      const downloads = downloadsResp.body?.data;
+      expect(downloads?.order_id).toBe(orderId);
+      expect(downloads?.html_url).toBe(
         `/api/passenger-app/rides/${orderId}/receipt/artifacts/html`,
-        {
-          method: "GET",
-          headers: {
-            authorization: `Bearer ${ctx.accessToken}`,
-          },
-        },
       );
+      expect(downloads?.pdf_url).toBe(
+        `/api/passenger-app/rides/${orderId}/receipt/artifacts/pdf`,
+      );
+
+      const htmlArtifact = await ctx.requestRaw(downloads!.html_url!, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+        },
+      });
       expect(htmlArtifact.status).toBe(200);
       expect(htmlArtifact.text).toContain("VISA ••••2222");
       expect(htmlArtifact.text).toContain("DRTS Stage 測試合作車隊（非正式）");
 
-      const pdfArtifact = await ctx.requestRaw(
-        `/api/passenger-app/rides/${orderId}/receipt/artifacts/pdf`,
-        {
-          method: "GET",
-          headers: {
-            authorization: `Bearer ${ctx.accessToken}`,
-          },
+      const pdfArtifact = await ctx.requestRaw(downloads!.pdf_url!, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
         },
-      );
+      });
       expect(pdfArtifact.status).toBe(200);
       expect(pdfArtifact.buffer.subarray(0, 8).toString("utf8")).toBe(
         "%PDF-1.7",

@@ -180,6 +180,7 @@ jobs:
             echo "::error::drts-dev-psp-sandbox is not 'true'; refusing to call a non-Stage ECPay endpoint."
             exit 1
           fi
+          pnpm exec vitest run tests/e2e/pax-psp-sandbox/product-order-stage-flow.test.ts --maxWorkers=1
           pnpm exec playwright test -c playwright.pax-psp-sandbox.config.ts
 
       - name: Record fail-closed run status

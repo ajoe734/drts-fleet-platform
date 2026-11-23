@@ -591,6 +591,39 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
     expect(harnessSource).toContain(
       'fare: { amountMinor: fareMinor, currency: "TWD" }',
     );
+
+    // 4. FINDING-01..04 regression checks on spec assertions & passenger-scoped DB inspection
+    expect(specSource).toContain(
+      "expect(outcome.merchantToken_present).toBe(true);",
+    );
+    expect(specSource).not.toContain("mounted.merchantToken_present");
+    expect(specSource).not.toContain('expect(listed.status).toBe("active")');
+    expect(specSource).toContain(
+      "expect(tokenRow.payment_method_id).toBe(listed.payment_method_id);",
+    );
+    expect(specSource).toContain('expect(tokenRow.status).toBe("active");');
+    expect(specSource).toContain(
+      "await ctx.pg.chargeService.processOrder(orderId!);",
+    );
+    expect(specSource).not.toContain("replayProcessResult");
+    expect(specSource).toContain(
+      "expect(getRideResp.body?.data?.ride?.payment?.amount?.amount_minor).toBe(",
+    );
+    expect(specSource).toContain(
+      "expect(downloads?.html_url).toBe(\n        `/api/passenger-app/rides/${orderId}/receipt/artifacts/html`,\n      );",
+    );
+    expect(specSource).toContain(
+      "expect(downloads?.pdf_url).toBe(\n        `/api/passenger-app/rides/${orderId}/receipt/artifacts/pdf`,\n      );",
+    );
+    expect(harnessSource).toContain(
+      "FROM passenger.payment_idempotency_keys\n         WHERE drts_passenger_id = $1",
+    );
+    expect(harnessSource).toContain(
+      "FROM passenger.payment_charge_records\n         WHERE drts_passenger_id = $1",
+    );
+    expect(harnessSource).toContain(
+      "FROM ops.phase1_owned_orders\n         WHERE record->'passenger'->>'passengerId' = $1",
+    );
   });
 });
 
@@ -793,6 +826,39 @@ describe.skipIf(!hostedPaymentEnabled)(
           orderResultResp.body?.data?.method?.payment_method_id ?? "";
         expect(paymentMethodId).toBeTruthy();
 
+        const listResp = await ctx.requestJson<{
+          data?: {
+            methods?: Array<{
+              payment_method_id: string;
+              last4: string;
+              card_type: string;
+              expiry_month: string;
+              expiry_year: string;
+              is_default: boolean;
+            }>;
+          };
+        }>("/api/passenger-app/payment-methods", {
+          headers: { authorization: `Bearer ${ctx.accessToken}` },
+        });
+        expect(listResp.status).toBe(200);
+        const listed = listResp.body?.data?.methods?.[0];
+        expect(listed?.payment_method_id).toBe(paymentMethodId);
+        expect(listed?.last4).toBe("2222");
+        expect(listed?.is_default).toBe(true);
+        expect(
+          Object.prototype.hasOwnProperty.call(listed ?? {}, "status"),
+        ).toBe(false);
+
+        const dbAfterBind = await ctx.inspectDatabaseState(
+          null,
+          paymentMethodId,
+        );
+        expect(dbAfterBind.pspTokens).toHaveLength(1);
+        expect(dbAfterBind.pspTokens[0]!.payment_method_id).toBe(
+          listed?.payment_method_id,
+        );
+        expect(dbAfterBind.pspTokens[0]!.status).toBe("active");
+
         const quote = await ctx.createQuote();
         const createRideResp = await ctx.requestJson<{
           data?: { ride?: { order?: { order_id?: string } } };
@@ -817,6 +883,12 @@ describe.skipIf(!hostedPaymentEnabled)(
         expect(orderId).toBeTruthy();
 
         await ctx.completeProductOrder(orderId, 8500);
+        const callsAfterCapture = calls.length;
+        const processOrderReturn =
+          await ctx.pg.chargeService.processOrder(orderId);
+        expect(processOrderReturn).toBeUndefined();
+        expect(calls.length).toBe(callsAfterCapture);
+
         const dbAfterCapture = await ctx.inspectDatabaseState(
           orderId,
           paymentMethodId,
@@ -827,16 +899,66 @@ describe.skipIf(!hostedPaymentEnabled)(
           `pax-payment:${orderId}`,
         );
         expect(dbAfterCapture.chargeRecords[0]!.status).toBe("captured");
+        expect(dbAfterCapture.chargeRecords[0]!.attempt_count).toBe(1);
         expect(dbAfterCapture.billingPayments[0]!.status).toBe("captured");
 
-        const htmlReceipt = await ctx.requestRaw(
+        const getRideResp = await ctx.requestJson<{
+          data?: {
+            ride?: {
+              order?: { order_id?: string; status?: string };
+              payment?: {
+                status?: string;
+                amount?: { amount_minor?: number; currency?: string } | null;
+              };
+            };
+          };
+        }>(`/api/passenger-app/rides/${orderId}`, {
+          headers: { authorization: `Bearer ${ctx.accessToken}` },
+        });
+        expect(getRideResp.status).toBe(200);
+        expect(getRideResp.body?.data?.ride?.order?.order_id).toBe(orderId);
+        expect(getRideResp.body?.data?.ride?.payment?.status).toBe("captured");
+        expect(
+          getRideResp.body?.data?.ride?.payment?.amount?.amount_minor,
+        ).toBe(8500);
+
+        const downloadsResp = await ctx.requestJson<{
+          data?: {
+            order_id?: string;
+            html_url?: string;
+            pdf_url?: string;
+          };
+        }>(`/api/passenger-app/rides/${orderId}/receipt/downloads`, {
+          headers: { authorization: `Bearer ${ctx.accessToken}` },
+        });
+        expect(downloadsResp.status).toBe(200);
+        expect(downloadsResp.body?.data?.order_id).toBe(orderId);
+        expect(downloadsResp.body?.data?.html_url).toBe(
           `/api/passenger-app/rides/${orderId}/receipt/artifacts/html`,
+        );
+        expect(downloadsResp.body?.data?.pdf_url).toBe(
+          `/api/passenger-app/rides/${orderId}/receipt/artifacts/pdf`,
+        );
+
+        const htmlReceipt = await ctx.requestRaw(
+          downloadsResp.body!.data!.html_url!,
           {
             headers: { authorization: `Bearer ${ctx.accessToken}` },
           },
         );
         expect(htmlReceipt.status).toBe(200);
         expect(htmlReceipt.text).toContain("VISA ••••2222");
+
+        const pdfReceipt = await ctx.requestRaw(
+          downloadsResp.body!.data!.pdf_url!,
+          {
+            headers: { authorization: `Bearer ${ctx.accessToken}` },
+          },
+        );
+        expect(pdfReceipt.status).toBe(200);
+        expect(pdfReceipt.buffer.subarray(0, 8).toString("utf8")).toBe(
+          "%PDF-1.7",
+        );
 
         const refundResp = await ctx.requestJson(
           `/api/passenger-app/platform/rides/${orderId}/refund`,

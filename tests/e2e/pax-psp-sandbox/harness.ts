@@ -298,7 +298,7 @@ export async function startHarness(
           headers,
           body:
             bodyBuffer && req.method !== "GET" && req.method !== "HEAD"
-              ? bodyBuffer
+              ? new Uint8Array(bodyBuffer)
               : undefined,
         });
         const upstreamBytes = Buffer.from(await upstream.arrayBuffer());
