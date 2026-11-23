@@ -11,7 +11,7 @@ const workflow = yaml.parse(
 );
 
 describe("protected production inventory actual exported boundaries", () => {
-  it.each(["rail.cjs", "run.cjs"])(
+  it.each(["rail.cjs", "run.cjs", "preflight.cjs", "driver-onboarding.cjs"])(
     "rejects unreviewed %s changes before any external read",
     async (file) => {
       const f = fixture();

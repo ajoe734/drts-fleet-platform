@@ -112,11 +112,19 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "98861b743c60ec06a26ed2824adeac644c66f1352a59fda7fac467806a1a5c53",
+      "ee31ab1d3edcb68113563d627b6d9eb86ad51b6eb0a1a5b7243d5eedc80e3b2b",
     ],
     [
       "run.cjs",
       "0066f0089089aeae8be1f514d35ac5eaab9990b92d8ae2e5419eb882929d142a",
+    ],
+    [
+      "preflight.cjs",
+      "ef4de5e235e2b3ebe208990fc022711eb3ac3b6fc2ed636c51ab7bdf6007a65d",
+    ],
+    [
+      "driver-onboarding.cjs",
+      "63e0a238a2acc8545d740530b499989eb9707463cec86ed32d376ce4c7b304cc",
     ],
   ]) {
     if (

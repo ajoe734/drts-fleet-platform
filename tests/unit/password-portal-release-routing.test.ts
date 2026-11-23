@@ -44,6 +44,9 @@ const {
   preflight,
 } = require("../../operations/verification/production-release-rail/preflight.cjs");
 const {
+  checkRail,
+} = require("../../operations/verification/production-readonly-inventory/collector.cjs");
+const {
   fixture: prodFixture,
   SHA: PROD_SHA,
   TAG: PROD_TAG,
@@ -323,10 +326,56 @@ describe("PORTAL-INVITATION-AND-RESET-RELEASE-CONFIG-20261123: shared-dev and pr
   });
 
   it("wires tenant, fleet, and agency invitation accept URLs and realm /reset-password origins in production buildPlan, preflight, and deployArgs", async () => {
+    expect(() => checkRail()).not.toThrow();
     const f = prodFixture();
     const built = buildPlan(f.vars, PROD_SHA, PROD_TAG, PROD_DEPLOYER);
     const plan = preflight(f.vars, PROD_SHA, PROD_TAG, PROD_DEPLOYER, f.cloud);
     const api = plan.services.find((s: { id: string }) => s.id === "api");
+
+    // Verify seamless integration with #3375 opt-in driver onboarding release config:
+    const onboardingFixture = prodFixture();
+    Object.assign(onboardingFixture.vars, {
+      PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED: "true",
+      PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS: Array(32)
+        .fill("AB")
+        .join(":"),
+      PROD_DRIVER_ONBOARDING_IOS_APP_ID:
+        "A1B2C3D4E5.com.cctechsupport.drts.driver",
+      PROD_REMOTE_SMTP_HOST: "smtp.drts.invalid",
+      PROD_REMOTE_SMTP_PORT: "587",
+      PROD_REMOTE_SMTP_FROM_EMAIL: "drivers@drts.invalid",
+      PROD_NOTIFICATION_FROM_EMAIL: "drivers@drts.invalid",
+      PROD_REMOTE_SMTP_USERNAME_SECRET: "drts-prod-smtp-user",
+      PROD_REMOTE_SMTP_PASSWORD_SECRET: "drts-prod-smtp-password",
+    });
+    Object.assign(onboardingFixture.values, {
+      "drts-prod-twilio-account-sid": `AC${"a".repeat(32)}`,
+      "drts-prod-twilio-api-key-sid": `SK${"b".repeat(32)}`,
+      "drts-prod-twilio-from-number": "+15005550006",
+    });
+    const combinedPlan = preflight(
+      onboardingFixture.vars,
+      PROD_SHA,
+      PROD_TAG,
+      PROD_DEPLOYER,
+      onboardingFixture.cloud,
+    );
+    expect(combinedPlan.services[0].env).toMatchObject({
+      DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED: "true",
+      DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS:
+        onboardingFixture.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS,
+      DRIVER_ONBOARDING_IOS_APP_ID:
+        onboardingFixture.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID,
+      TENANT_INVITATION_ACCEPT_URL_BASE: `${onboardingFixture.vars.PROD_TENANT_CONSOLE_ORIGIN}/invite`,
+      FLEET_INVITATION_ACCEPT_URL_BASE: `${onboardingFixture.vars.PROD_FLEET_PARTNER_PORTAL_ORIGIN}/invite`,
+      AGENCY_INVITATION_ACCEPT_URL_BASE: `${onboardingFixture.vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
+    });
+    expect(combinedPlan.services[0].secrets).toMatchObject({
+      DRIVER_ONBOARDING_CODE_PEPPER:
+        "drts-prod-driver-onboarding-code-pepper:7",
+      DRIVER_ONBOARDING_DELIVERY_KEY:
+        "drts-prod-driver-onboarding-delivery-key:7",
+    });
 
     expect(built.services[0].env).toMatchObject({
       TENANT_INVITATION_ACCEPT_URL_BASE: `${f.vars.PROD_TENANT_CONSOLE_ORIGIN}/invite`,

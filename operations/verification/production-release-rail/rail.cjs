@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- executable CommonJS deployment rail */
 const { publicEntryConfig } = require("./public-entry.cjs");
 const { artifactConfig } = require("./artifact-config.cjs");
+const { driverOnboardingConfig } = require("./driver-onboarding.cjs");
 // This is the configuration/argument builder used by deploy-prod.yml.
 // It performs no cloud calls. Plans contain names and pinned versions, never values.
 const TOPOLOGY = [
@@ -286,6 +287,7 @@ function buildPlan(vars, sha, tag, deployer) {
     apiEnv.PASSWORD_PEPPER_CURRENT_VERSION = need(
       "PROD_PASSWORD_PEPPER_CURRENT_VERSION",
     );
+  driverOnboardingConfig(vars, apiEnv, secretNames, prefix, need, reject);
   artifactConfig(vars, apiEnv, secretNames, need, reject, https);
   const backend = need("PROD_MAP_PROVIDER_BACKEND");
   if (!["mock", "google"].includes(backend))
