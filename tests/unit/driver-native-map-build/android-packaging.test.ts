@@ -76,73 +76,79 @@ const framework =
 it.skipIf(!aapt || !framework).each([
   ["configured", "fixture-driver-maps-key"],
   ["unconfigured", ""],
-])("links the packaged manifest to the %s resource", (_name, value) => {
-  const dir = mkdtempSync(join(tmpdir(), "driver-map-resources-"));
-  try {
-    // AGP supplies the namespace and generated string. Stub the other RN resources
-    // so aapt2 can link the complete product manifest without a device or signing.
-    mkdirSync(join(dir, "res/values"), { recursive: true });
-    writeFileSync(
-      join(dir, "AndroidManifest.xml"),
-      manifest.replace(
-        "<manifest ",
-        '<manifest package="com.cctechsupport.drts.driver" ',
-      ),
-    );
-    writeFileSync(
-      join(dir, "res/values/fixtures.xml"),
-      `<resources>
+])(
+  "links the packaged manifest to the %s resource",
+  (_name, value) => {
+    const dir = mkdtempSync(join(tmpdir(), "driver-map-resources-"));
+    try {
+      // AGP supplies the namespace and generated string. Stub the other RN resources
+      // so aapt2 can link the complete product manifest without a device or signing.
+      mkdirSync(join(dir, "res/values"), { recursive: true });
+      writeFileSync(
+        join(dir, "AndroidManifest.xml"),
+        manifest.replace(
+          "<manifest ",
+          '<manifest package="com.cctechsupport.drts.driver" ',
+        ),
+      );
+      writeFileSync(
+        join(dir, "res/values/fixtures.xml"),
+        `<resources>
       <string name="app_name">Driver</string><string name="expo_runtime_version">1</string>
       <style name="AppTheme"/><style name="Theme.App.SplashScreen" parent=""/>
       <item name="ic_launcher" type="mipmap">@android:color/transparent</item>
       <item name="ic_launcher_round" type="mipmap">@android:color/transparent</item>
       <string name="${resourceName}">${value}</string>
     </resources>`,
-    );
-    // aapt2 steps on a busy CI runner (parallel vitest workers) have exceeded
-    // 15 s each, so every step gets 60 s and the test its own 180 s budget.
-    const run = (...args: string[]) =>
-      execFileSync(aapt!, args, {
-        cwd: dir,
-        encoding: "utf8",
-        timeout: 60_000,
-      });
-    run("compile", "--dir", "res", "-o", "res.zip");
-    run(
-      "link",
-      "-I",
-      framework!,
-      "--manifest",
-      "AndroidManifest.xml",
-      "-o",
-      "fixture.apk",
-      "res.zip",
-    );
-    const resources = run("dump", "resources", "fixture.apk");
-    const resource = resources.match(
-      new RegExp(
-        `resource (0x[\\da-f]+) string/${resourceName}\\s*\\n\\s*\\(\\) "([^"]*)"`,
-      ),
-    );
-    expect(resource?.[2]).toBe(value);
-    const xml = run(
-      "dump",
-      "xmltree",
-      "fixture.apk",
-      "--file",
-      "AndroidManifest.xml",
-    );
-    const packagedQueries = xml
-      .split("E: queries")[1]
-      ?.split("E: application")[0];
-    for (const scheme of ["https", "google.navigation"]) {
-      expect(packagedQueries).toContain(`"${scheme}"`);
+      );
+      // aapt2 steps on a busy CI runner (parallel vitest workers) have exceeded
+      // 15 s each, so every step gets 60 s and the test its own 180 s budget.
+      const run = (...args: string[]) =>
+        execFileSync(aapt!, args, {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 60_000,
+        });
+      run("compile", "--dir", "res", "-o", "res.zip");
+      run(
+        "link",
+        "-I",
+        framework!,
+        "--manifest",
+        "AndroidManifest.xml",
+        "-o",
+        "fixture.apk",
+        "res.zip",
+      );
+      const resources = run("dump", "resources", "fixture.apk");
+      const resource = resources.match(
+        new RegExp(
+          `resource (0x[\\da-f]+) string/${resourceName}\\s*\\n\\s*\\(\\) "([^"]*)"`,
+        ),
+      );
+      expect(resource?.[2]).toBe(value);
+      const xml = run(
+        "dump",
+        "xmltree",
+        "fixture.apk",
+        "--file",
+        "AndroidManifest.xml",
+      );
+      const packagedQueries = xml
+        .split("E: queries")[1]
+        ?.split("E: application")[0];
+      for (const scheme of ["https", "google.navigation"]) {
+        expect(packagedQueries).toContain(`"${scheme}"`);
+      }
+      const metadata = xml
+        .split(/^\s*E: /m)
+        .find((element) =>
+          element.includes('"com.google.android.geo.API_KEY"'),
+        );
+      expect(metadata).toContain(resource![1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-    const metadata = xml
-      .split(/^\s*E: /m)
-      .find((element) => element.includes('"com.google.android.geo.API_KEY"'));
-    expect(metadata).toContain(resource![1]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}, 180_000);
+  },
+  180_000,
+);
