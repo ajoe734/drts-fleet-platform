@@ -109,7 +109,7 @@ function buildOrderFixture(overrides: Partial<ObjectData> = {}): ObjectData {
 }
 
 function buildControlledCaseFacts(options?: {
-  crossMonthUtcBoundary?: boolean;
+  crossMonthUtcBoundary?: boolean | undefined;
 }): R10ControlledCaseSourceFact[] {
   const cross = options?.crossMonthUtcBoundary === true;
   return SEVEN_OWN_CASES.map((item) => {
@@ -906,8 +906,8 @@ describe("R10 JSON Blob, CSV 6-month detail and PDF summary artifact validators"
 });
 
 function createSimulatedR10BrowserHarness(options?: {
-  injectUnownedPostOnRerun?: boolean;
-  crossMonthUtcBoundary?: boolean;
+  injectUnownedPostOnRerun?: boolean | undefined;
+  crossMonthUtcBoundary?: boolean | undefined;
 }) {
   const window = resolveSixMonthOperationsWindow("2026-11");
   const generations = {
