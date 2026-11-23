@@ -107,13 +107,67 @@ export function listConfiguredAuthProviders(): AuthProvider[] {
   return providers;
 }
 
+export const NATIVE_PASSENGER_OAUTH_STATE_PREFIX = "drtspassenger.";
+
+export interface ResolvedOAuthProviderRedirect {
+  providerRedirectUri: string;
+  nativeAppReturn: boolean;
+}
+
+function readOAuthRedirectAllowlist(): string[] {
+  return (process.env.OAUTH_REDIRECT_ALLOWLIST ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 /** Exact-match allowlist: the SD's open-redirect guard. Each entry is a full
  * callback URL (e.g. `https://ride.smarttransport.tw/auth/callback/google`),
  * not an origin, so one provider's entry can never authorize another's path. */
 export function isAllowedOAuthRedirectUri(redirectUri: string): boolean {
-  const allowlist = (process.env.OAUTH_REDIRECT_ALLOWLIST ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return allowlist.includes(redirectUri);
+  return readOAuthRedirectAllowlist().includes(redirectUri);
+}
+
+/** Google Web-server OAuth clients require a registered HTTPS redirect_uri at
+ * both authorization and token exchange even when the caller is the native app
+ * (`drtspassenger://auth/callback`). Other providers and direct HTTP(S) Web
+ * callbacks retain their exact allowlisted redirectUri unchanged. */
+export function resolveOAuthProviderRedirectUri(
+  provider: OAuthProvider,
+  requestedRedirectUri: string,
+): ResolvedOAuthProviderRedirect | null {
+  const allowlist = readOAuthRedirectAllowlist();
+  if (!allowlist.includes(requestedRedirectUri)) return null;
+  if (
+    provider !== "google" ||
+    /^https?:\/\//i.test(requestedRedirectUri) ||
+    requestedRedirectUri.startsWith("com.googleusercontent.apps.")
+  ) {
+    return {
+      providerRedirectUri: requestedRedirectUri,
+      nativeAppReturn: false,
+    };
+  }
+  const httpsEntries = allowlist.filter((entry) => {
+    try {
+      return new URL(entry).protocol === "https:";
+    } catch {
+      return false;
+    }
+  });
+  const googleHttpsRedirect =
+    httpsEntries.find((entry) =>
+      new URL(entry).pathname
+        .replace(/\/+$/, "")
+        .endsWith("/auth/callback/google"),
+    ) ??
+    httpsEntries.find((entry) => {
+      const pathname = new URL(entry).pathname.replace(/\/+$/, "");
+      return !pathname.endsWith("/facebook") && !pathname.endsWith("/line");
+    });
+  if (!googleHttpsRedirect) return null;
+  return {
+    providerRedirectUri: googleHttpsRedirect,
+    nativeAppReturn: true,
+  };
 }

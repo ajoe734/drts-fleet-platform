@@ -67,6 +67,7 @@ function failureMessage(error: unknown): string {
 /** Only callback query fields; transactionId remains the API start response. */
 export function callbackFields(
   url: string,
+  expectedState?: string,
 ): { code: string; state: string } | null {
   const query = url.split("?")[1]?.split("#")[0] ?? "";
   const fields: Record<string, string> = {};
@@ -80,9 +81,10 @@ export function callbackFields(
   } catch {
     return null;
   }
-  return fields.code && fields.state && !fields.error
-    ? { code: fields.code, state: fields.state }
-    : null;
+  if (!fields.code || !fields.state || fields.error) return null;
+  if (expectedState !== undefined && fields.state !== expectedState)
+    return null;
+  return { code: fields.code, state: fields.state };
 }
 function Action({
   id,
@@ -232,7 +234,7 @@ export function PassengerLoginScreen(props: PassengerLoginScreenProps) {
         setInfo("已取消第三方登入。");
         return;
       }
-      const fields = callbackFields(returned.url);
+      const fields = callbackFields(returned.url, start.state);
       if (!fields) {
         setError("第三方登入未完成，請重新嘗試。");
         return;

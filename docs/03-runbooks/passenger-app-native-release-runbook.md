@@ -87,7 +87,18 @@ bootstrap, without a fake default target or demo fallback. Absent service files
 leave the existing corresponding notification metadata unavailable. Missing
 optional providers do not become successful providers. The owner supplies real
 Firebase/APNs setup, Maps provisioning, backend/provider configuration and OAuth
-registrations for the functions being demonstrated. This proposal adds no new
+registrations for the functions being demonstrated. For Google sign-in with the
+shared Web-server OAuth client (`GOOGLE_OAUTH_CLIENT_ID` /
+`GOOGLE_OAUTH_CLIENT_SECRET`), `EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI`
+remains the registered app-scheme URI (`drtspassenger://auth/callback`), while
+the API `OAUTH_REDIRECT_ALLOWLIST` includes both `drtspassenger://auth/callback`
+and the Google-registered HTTPS callback
+(`https://<passenger-web-origin>/auth/callback/google`): `PassengerOAuthService`
+uses that allowlisted HTTPS callback for both Google authorization and token
+code exchange and binds a `drtspassenger.`-prefixed `state` so the HTTPS
+`/auth/callback/google` page returns control to the active
+`drtspassenger://auth/callback` mobile session without consuming Web BFF cookies
+or mixing with payment return routes. This proposal adds no new
 backend activation flag or security gate.
 
 ## Manual hosted caller and evidence
