@@ -55,6 +55,21 @@ describe("DRIVER-NATIVE-PRODUCTION-ORDER-API-20261123", () => {
   let prepareScript = "";
 
   beforeAll(() => {
+    // The transpiled api-client requires @drts/contracts, whose package entry
+    // is the built dist. CI unit shards do not run a build step, so build it
+    // here when absent instead of depending on another test in the same shard.
+    if (
+      !fs.existsSync(
+        path.join(REPO_ROOT, "packages", "contracts", "dist", "index.js"),
+      )
+    ) {
+      execFileSync("pnpm", ["--filter", "@drts/contracts", "build"], {
+        cwd: REPO_ROOT,
+        stdio: "ignore",
+        timeout: 170_000,
+      });
+    }
+
     suiteTempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "driver-prod-order-api-test-"),
     );
@@ -126,7 +141,7 @@ describe("DRIVER-NATIVE-PRODUCTION-ORDER-API-20261123", () => {
       wfText,
       "Prepare ephemeral EAS configuration",
     );
-  });
+  }, 180_000);
 
   afterAll(() => {
     if (suiteTempDir && fs.existsSync(suiteTempDir)) {
