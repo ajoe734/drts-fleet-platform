@@ -216,8 +216,9 @@ def accept_invitation(body, request, opener=None):
 def secret(name):
     result = subprocess.run(["gcloud", "secrets", "versions", "access", "latest", "--secret=" + name, "--project=" + PROJECT], capture_output=True, text=True, timeout=20, check=True).stdout.strip()
     require(result and "\n" not in result and "\r" not in result, "Invalid mailbox secret")
-    # The hosted parent inherits stderr so Actions registers the mask at once.
-    print("::add-mask::" + result.replace("%", "%25"), file=sys.stderr, flush=True)
+    # Masks are registered by the workflow's shell step before Playwright
+    # starts. Printing one here leaked the raw value: the Playwright reporter
+    # prefixes relayed lines with cursor escapes, so Actions never parsed it.
     # No raw values in argv, output JSON, files or failure diagnostics.
     return result
 
@@ -262,7 +263,7 @@ def main():
         recipient = derive_alias_recipient(username, flow)
         password = secret("drts-dev-smtp-password")
         sender = secret("drts-dev-smtp-from-email")
-        print("::add-mask::" + recipient.replace("%", "%25"), file=sys.stderr, flush=True)
+        # The workflow masks both +invite and +approve aliases up front.
     expected_id = "<" + delivery_id + "@notification.drts.invalid>"
     with observation_stage("imap_connection_failed"):
         client = imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=20)
