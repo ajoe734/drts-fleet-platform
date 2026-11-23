@@ -505,12 +505,7 @@ global.fetch = async (url, options) => {
       }),
     ).toBe(REGISTERED_PROD_ORIGIN);
 
-    expect(
-      resolveDriverApiBaseUrl({
-        envApiUrl: undefined,
-        manifestApiBaseUrl: undefined,
-      }),
-    ).toBe(REGISTERED_PROD_ORIGIN);
+    expect(resolveDriverApiBaseUrl({})).toBe(REGISTERED_PROD_ORIGIN);
 
     // Also verify via actual getDriverTaskOrder when eas.json profile env has legacy direct URL
     const fallbackFromLegacyEnv = runOrderOriginCase({
