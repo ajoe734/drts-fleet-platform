@@ -308,7 +308,6 @@ async function book(
   paymentMethodId: string,
   unpaidRejection = false,
   accessible = false,
-  info?: TestInfo,
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
@@ -391,8 +390,17 @@ async function book(
   expect(id).toMatch(/^[0-9a-f-]{36}$/);
   await expect(page).toHaveURL(new RegExp(`/rides/${id}$`));
   await expect(page.getByTestId("review-order-id")).toHaveText(id);
-  await assertPassengerSearchingRideDom(page, id, authority, info);
   return id;
+}
+
+async function bookAndCheckPassengerRide(
+  page: Page,
+  paymentMethodId: string,
+  options: { accessible?: boolean; info?: TestInfo } = {},
+) {
+  const orderId = await book(page, paymentMethodId, false, options.accessible);
+  await assertPassengerSearchingRideDom(page, orderId, authority, options.info);
+  return orderId;
 }
 
 async function opsRead(ops: Page, orderId: string) {
@@ -1622,7 +1630,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       bind(pax, "success"),
     );
     const normal = await step("A Passenger book", () =>
-      book(pax, firstMethod, false, false, info),
+      bookAndCheckPassengerRide(pax, firstMethod, { info }),
     );
     await step("A Ops create dispatch", () =>
       createDispatch(ops, normal, info),
@@ -1697,7 +1705,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     const retryMethod = await step("B bind retry-once simulated PSP", () =>
       bind(pax, "retry_once"),
     );
-    const retry = await step("B Passenger book", () => book(pax, retryMethod));
+    const retry = await step("B Passenger book", () =>
+      bookAndCheckPassengerRide(pax, retryMethod),
+    );
     expect(retry).not.toBe(normal);
     await step("B Ops create dispatch and assign", async () => {
       await createDispatch(ops, retry);
@@ -1785,7 +1795,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
 
     await ops.goto(`${OPS}/review`);
     const cancelled = await step("C Passenger book", () =>
-      book(pax, firstMethod),
+      bookAndCheckPassengerRide(pax, firstMethod),
     );
     expect(new Set([normal, retry, cancelled]).size).toBe(3);
     await step(
@@ -2041,7 +2051,7 @@ test("a wheelchair booking keeps its UUID and requirement through ordinary Ops a
     );
     const orderId = await step(
       "Wheelchair Passenger checks requirement, quotes and confirms the original order",
-      () => book(pax, method, false, true),
+      () => bookAndCheckPassengerRide(pax, method, { accessible: true }),
     );
     const booked = await authority(pax, orderId);
     expect(booked.order).toMatchObject({

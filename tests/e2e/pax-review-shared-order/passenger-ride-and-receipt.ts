@@ -4,6 +4,7 @@ import {
   expect,
   type Download,
   type Page,
+  type Response as BrowserResponse,
   type Route,
   type TestInfo,
 } from "@playwright/test";
@@ -412,6 +413,7 @@ export async function verifyOriginalPassengerReceiptInBrowser(
     pdfUrl?: string;
   },
   info: TestInfo,
+  options: { downloadTimeoutMs?: number } = {},
 ) {
   const snapshot = receipt.record.e04Snapshot;
   const viewReceiptLink = pax.getByRole("link", {
@@ -498,6 +500,7 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   const actualButtonHref = (await actionLink.getAttribute("href")) ?? "";
   expect(actualButtonHref.length).toBeGreaterThan(0);
 
+  const downloadTimeoutMs = options.downloadTimeoutMs ?? 5_000;
   const targetPathname = new URL(actualButtonHref, paxOrigin).pathname;
   const openedPages: Page[] = [];
   let capturedDownload: Download | null = null;
@@ -521,9 +524,9 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   let status = 0;
   let actualResponseUrl = "";
   let responseHeaders: Record<string, string> = {};
-  let bytes: Buffer = Buffer.alloc(0);
-  let deliveryMode: "browser_download" | "inline_or_new_tab" =
-    "inline_or_new_tab";
+  let browserResponse: BrowserResponse | null = null;
+  let deliveredBytes: Buffer | null = null;
+  let deliveryMode: "browser_download" | "inline_or_new_tab" | null = null;
   let suggestedFilename: string | null = null;
   let savedArtifactPath: string | null = null;
 
@@ -536,15 +539,11 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   const urlMatcher = (url: URL) => url.pathname === targetPathname;
   const interceptHandler = async (route: Route) => {
     try {
-      // Fetch the real browser-initiated GET once and fulfill the response unchanged
-      // so attachment download streams remain readable even when Chromium detaches
-      // the renderer stream for target="_blank" downloads.
       const fetched = await route.fetch({ maxRedirects: 0 });
       const fetchedBody = Buffer.from(await fetched.body());
       status = fetched.status();
       actualResponseUrl = fetched.url();
       responseHeaders = fetched.headers();
-      bytes = fetchedBody;
       await route.fulfill({ response: fetched, body: fetchedBody });
       resolveIntercepted();
     } catch (error) {
@@ -554,7 +553,23 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   };
 
   try {
+    const contextWaitForResponse =
+      typeof pax.context().waitForEvent === "function"
+        ? pax
+            .context()
+            .waitForEvent("response", {
+              timeout: 30_000,
+              predicate: (candidate: BrowserResponse) =>
+                candidate.request().method() === "GET" &&
+                new URL(candidate.url()).pathname === targetPathname,
+            })
+            .then((candidate: BrowserResponse) => {
+              browserResponse = candidate;
+              return candidate;
+            })
+        : null;
     if (typeof pax.context().route === "function") {
+      contextWaitForResponse?.catch(() => undefined);
       await pax.context().route(urlMatcher, interceptHandler, { times: 1 });
       await actionLink.click();
       await Promise.race([
@@ -572,38 +587,109 @@ export async function verifyOriginalPassengerReceiptInBrowser(
         ),
       ]);
     } else {
-      const responsePromise = pax.context().waitForEvent("response", {
-        timeout: 30_000,
-        predicate: (candidate) =>
-          candidate.request().method() === "GET" &&
-          new URL(candidate.url()).pathname === targetPathname,
-      });
+      if (!contextWaitForResponse) {
+        throw new Error(
+          `Browser context cannot observe GET ${targetPathname} response.`,
+        );
+      }
       await actionLink.click();
-      const response = await responsePromise;
+      const response = await contextWaitForResponse;
       status = response.status();
       actualResponseUrl = response.url();
       responseHeaders = response.headers();
-      bytes = Buffer.from(await response.body());
     }
+
+    expect(
+      actualButtonHref,
+      `Original receipt button on /rides/${orderId}/receipt must point to ${expectedArtifactPath}, not ${actualButtonHref}`,
+    ).toBe(expectedArtifactPath);
+    expect(
+      status,
+      `Original receipt button GET ${actualButtonHref} must succeed with HTTP 200`,
+    ).toBe(200);
+    expect(new URL(actualResponseUrl).pathname).toBe(expectedArtifactPath);
+
     const disposition = responseHeaders["content-disposition"] ?? "";
+    expect(disposition).toContain(`filename="${expectedFileName}"`);
+
     if (/attachment/i.test(disposition)) {
       const downloaded =
         capturedDownload ??
         (await Promise.race([
           downloadPromise,
           new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), 5_000),
+            setTimeout(() => resolve(null), downloadTimeoutMs),
           ),
         ]));
-      if (downloaded) {
-        deliveryMode = "browser_download";
-        suggestedFilename = downloaded.suggestedFilename();
-        savedArtifactPath = info.outputPath(
-          `original-e04-${orderId}.${expectedFormat}`,
+      if (!downloaded) {
+        throw new Error(
+          `Original receipt response for ${targetPathname} declared Content-Disposition="${disposition}", but browser did not complete an attachment download.`,
         );
-        await downloaded.saveAs(savedArtifactPath);
-        bytes = await readFile(savedArtifactPath);
       }
+      if (typeof downloaded.failure === "function") {
+        const failureReason = await downloaded.failure();
+        if (failureReason) {
+          throw new Error(
+            `Original receipt browser attachment download failed: ${failureReason}`,
+          );
+        }
+      }
+      deliveryMode = "browser_download";
+      suggestedFilename = downloaded.suggestedFilename();
+      expect(suggestedFilename).toBe(expectedFileName);
+      savedArtifactPath = info.outputPath(
+        `original-e04-${orderId}.${expectedFormat}`,
+      );
+      await downloaded.saveAs(savedArtifactPath);
+      deliveredBytes = await readFile(savedArtifactPath);
+      expect(
+        deliveredBytes.length,
+        "Downloaded original receipt artifact bytes must not be empty",
+      ).toBeGreaterThan(0);
+    } else {
+      const popupPage = openedPages.find((popup) => !popup.isClosed()) ?? null;
+      if (popupPage && typeof popupPage.waitForLoadState === "function") {
+        await popupPage.waitForLoadState("domcontentloaded");
+      }
+      const popupMatched =
+        popupPage !== null &&
+        typeof popupPage.url === "function" &&
+        popupPage.url().length > 0 &&
+        popupPage.url() !== "about:blank" &&
+        new URL(popupPage.url(), paxOrigin).pathname === targetPathname;
+      const inlineNavigated =
+        new URL(pax.url(), paxOrigin).pathname === targetPathname;
+      if (!popupMatched && !inlineNavigated) {
+        throw new Error(
+          `Original receipt response for ${targetPathname} was not an attachment, and no new-tab popup or inline page navigation to ${targetPathname} was verified.`,
+        );
+      }
+      deliveryMode = "inline_or_new_tab";
+      if (!browserResponse && contextWaitForResponse) {
+        browserResponse = await Promise.race([
+          contextWaitForResponse.catch(() => null),
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), 1_000),
+          ),
+        ]);
+      }
+      if (browserResponse) {
+        deliveredBytes = Buffer.from(await browserResponse.body());
+      } else if (
+        popupPage &&
+        typeof (popupPage as { content?: () => Promise<string> }).content ===
+          "function"
+      ) {
+        deliveredBytes = Buffer.from(await popupPage.content(), "utf8");
+      } else {
+        throw new Error(
+          `Original receipt inline/new-tab delivery for ${targetPathname} did not provide readable browser response bytes.`,
+        );
+      }
+      expect(
+        deliveredBytes.length,
+        "Inline/new-tab original receipt response body must not be empty",
+      ).toBeGreaterThan(0);
     }
   } finally {
     if (typeof pax.context().unroute === "function") {
@@ -621,6 +707,9 @@ export async function verifyOriginalPassengerReceiptInBrowser(
     }
   }
 
+  expect(deliveryMode).not.toBeNull();
+  expect(deliveredBytes).not.toBeNull();
+  const bytes = deliveredBytes!;
   const contentTypeHeader = responseHeaders["content-type"] ?? "";
   const mimeType = contentTypeHeader.split(";")[0]!.trim().toLowerCase();
   const contentDisposition = responseHeaders["content-disposition"] ?? "";
@@ -654,20 +743,6 @@ export async function verifyOriginalPassengerReceiptInBrowser(
       distinctFromNonformalRehearsalHtml: true,
     }),
   });
-
-  expect(
-    actualButtonHref,
-    `Original receipt button on /rides/${orderId}/receipt must point to ${expectedArtifactPath}, not ${actualButtonHref}`,
-  ).toBe(expectedArtifactPath);
-  expect(
-    status,
-    `Original receipt button GET ${actualButtonHref} must succeed with HTTP 200`,
-  ).toBe(200);
-  expect(new URL(actualResponseUrl).pathname).toBe(expectedArtifactPath);
-  expect(contentDisposition).toContain(`filename="${expectedFileName}"`);
-  if (suggestedFilename !== null) {
-    expect(suggestedFilename).toBe(expectedFileName);
-  }
 
   if (expectedFormat === "pdf") {
     expect(mimeType).toBe("application/pdf");
