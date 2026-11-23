@@ -200,18 +200,6 @@ async function enrollAndConfirmTotp(
   };
 }
 
-/** Advances past the step `confirm()` already consumed, same helper pattern
- * as `tests/unit/identity-session.test.ts`. */
-async function freshLoginCode(secret: string): Promise<string> {
-  vi.useFakeTimers();
-  try {
-    vi.advanceTimersByTime(31_000);
-    return await generate({ secret });
-  } finally {
-    vi.useRealTimers();
-  }
-}
-
 async function denialMessage(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
@@ -451,14 +439,22 @@ describe("PWD-LOGIN-011 SA/SD §11 負向驗收矩陣", () => {
       // A real valid code (not the forged fields above) still succeeds and
       // still reports the server's own verified amr, proving the forged
       // fields were inert rather than merely tested against a broken path.
-      const realCode = await freshLoginCode(secret);
-      const envelope = (await fixture.controller.passwordLogin("tenant", {
-        email: "mfa-forge@example.com",
-        password: CORRECT_PASSWORD,
-        tenantId,
-        totpCode: realCode,
-      })) as { data: { identity: { amr?: string[] } } };
-      expect(envelope.data.identity.amr).toEqual(["pwd", "otp"]);
+      // Enrollment consumed its step. Generate and verify on the same next
+      // step, leaving password hashing and other asynchronous work on real timers.
+      const nextStep = (Math.floor(Date.now() / 30_000) + 1) * 30_000;
+      vi.useFakeTimers({ toFake: ["Date"], now: nextStep });
+      try {
+        const realCode = await generate({ secret });
+        const envelope = (await fixture.controller.passwordLogin("tenant", {
+          email: "mfa-forge@example.com",
+          password: CORRECT_PASSWORD,
+          tenantId,
+          totpCode: realCode,
+        })) as { data: { identity: { amr?: string[] } } };
+        expect(envelope.data.identity.amr).toEqual(["pwd", "otp"]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
