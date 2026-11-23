@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import { maskOpaqueToken } from "../../../apps/api/src/common/sensitive-data-policy";
 import {
+  displayDateTime,
+  displayMinor,
+} from "../../../apps/agency-portal-web/lib/format";
+import {
   paginate,
   projectAgencyDailyDispatchRecord,
   projectAgencyTripRecord,
@@ -120,7 +124,7 @@ function buildTripAdminRecord(
     legalHold: {
       state: "none",
       family: "proof_bundle",
-      subjectId: SHARED_A_FIXTURE.tripId,
+      subjectId: SHARED_A_FIXTURE.orderId,
       activeHoldCount: 0,
       activeHolds: [],
     },
@@ -378,7 +382,7 @@ function createLocaleDetailPageStub(
     const row = currentRecord();
     const copy = COPY[activeLocale];
     if (label === copy.collected) {
-      const value = formatMinorLocale(
+      const value = displayMinor(
         row.collected_fare_minor,
         row.currency,
         activeLocale,
@@ -386,15 +390,11 @@ function createLocaleDetailPageStub(
       return `${value} (${row.payment_status})`;
     }
     if (label === copy.toll) {
-      const value = formatMinorLocale(
-        row.toll_minor,
-        row.currency,
-        activeLocale,
-      );
+      const value = displayMinor(row.toll_minor, row.currency, activeLocale);
       return `${value} (${row.toll_source})`;
     }
     if (label === copy.reserved) {
-      return taipeiTime(row.reserved_at, activeLocale);
+      return displayDateTime(row.reserved_at, activeLocale);
     }
     return "";
   };
