@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { NextRequest } from "next/server";
 import type { ExecutionContext } from "../../../apps/api/node_modules/@nestjs/common";
 import { Reflector } from "../../../apps/api/node_modules/@nestjs/core";
 import { generate } from "../../../apps/api/node_modules/otplib";
@@ -14,9 +15,23 @@ import {
 } from "vitest";
 
 import {
+  AGENCY_CSRF_COOKIE_NAME,
+  AGENCY_CSRF_HEADER_NAME,
+  AGENCY_SESSION_COOKIE_NAME,
+} from "../../../packages/agency-auth/src/constants";
+import {
   AGENCY_PORTAL_EXPORT_SCOPES,
   AGENCY_PORTAL_READ_SCOPES,
 } from "../../../packages/contracts/src/iam-policy-catalog";
+import {
+  handleListSessions,
+  handleRevokeSession,
+  handleTotpConfirm,
+  handleTotpEnroll,
+  handleTotpRegenerateRecoveryCodes,
+  type PortalCredentialConfig,
+} from "../../../packages/tenant-auth/src/credential-handlers";
+import { generateCsrfToken } from "../../../packages/tenant-auth/src/session";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import {
   AUTH_SCOPE_PRESETS,
@@ -757,5 +772,320 @@ describe("AGENCY-OWN-ACCOUNT-PASSWORD-JOURNEY-20261123 agency own-account TOTP a
     ).rejects.toMatchObject({
       code: "JWT_INVALID",
     });
+  });
+
+  it("connects the formal agency BFF credential forwarders (TOTP enroll, confirm, recovery-code regenerate, and self sessions) end-to-end through real BootstrapAuthGuard and controllers", async () => {
+    const f = await createFixture();
+    const member = await f.onboardAgencyMember({
+      agencyId: "agency_a",
+      email: "bff-chain@agency-a.example",
+      subject: "agency-a-bff-chain",
+      roleCode: "agency_viewer",
+    });
+    const colleague = await f.onboardAgencyMember({
+      agencyId: "agency_a",
+      email: "bff-colleague@agency-a.example",
+      subject: "agency-a-bff-colleague",
+      roleCode: "agency_exporter",
+    });
+
+    const pwdSession = await f.issueAgencySession(member, {
+      amr: ["pwd"],
+      authTime: new Date().toISOString(),
+    });
+    const secondOwnSession = await f.issueAgencySession(member, {
+      amr: ["pwd", "otp"],
+      authTime: new Date().toISOString(),
+    });
+    const colleagueSession = await f.issueAgencySession(colleague, {
+      amr: ["pwd", "otp"],
+      authTime: new Date().toISOString(),
+    });
+
+    const bffConfig: PortalCredentialConfig = {
+      realm: "agency",
+      sessionCookieName: AGENCY_SESSION_COOKIE_NAME,
+      csrfCookieName: AGENCY_CSRF_COOKIE_NAME,
+      csrfHeaderName: AGENCY_CSRF_HEADER_NAME,
+      apiBaseUrl: "https://api.example",
+      fetchImpl: async (url, init) => {
+        const parsed = new URL(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        const headers = new Headers(init?.headers);
+        const authHeader = headers.get("Authorization") ?? "";
+        const bearer = authHeader.startsWith("Bearer ")
+          ? authHeader.slice("Bearer ".length)
+          : undefined;
+        const bodyObj =
+          typeof init?.body === "string" && init.body
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : {};
+
+        try {
+          if (
+            method === "POST" &&
+            parsed.pathname === "/api/auth/agency/mfa/totp/enroll"
+          ) {
+            const identity = await f.activateGuard(
+              "POST",
+              parsed.pathname,
+              bearer,
+              TotpController,
+              TotpController.prototype.enroll,
+            );
+            const res = await f.totpController.enroll(
+              "agency",
+              identity,
+              {},
+              "req-bff-enroll",
+            );
+            return new Response(
+              JSON.stringify({
+                data: {
+                  otpauth_uri: res.data.otpauthUri,
+                  secret: res.data.secret,
+                },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          if (
+            method === "POST" &&
+            parsed.pathname === "/api/auth/agency/mfa/totp/confirm"
+          ) {
+            const identity = await f.activateGuard(
+              "POST",
+              parsed.pathname,
+              bearer,
+              TotpController,
+              TotpController.prototype.confirm,
+            );
+            const res = await f.totpController.confirm(
+              "agency",
+              identity,
+              { code: String(bodyObj.code ?? "") },
+              {},
+              "req-bff-confirm",
+            );
+            return new Response(
+              JSON.stringify({
+                data: { recovery_codes: res.data.recoveryCodes },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          if (
+            method === "POST" &&
+            parsed.pathname ===
+              "/api/auth/agency/mfa/totp/recovery-codes/regenerate"
+          ) {
+            const identity = await f.activateGuard(
+              "POST",
+              parsed.pathname,
+              bearer,
+              TotpController,
+              TotpController.prototype.regenerateRecoveryCodes,
+            );
+            const res = await f.totpController.regenerateRecoveryCodes(
+              "agency",
+              identity,
+              {},
+              "req-bff-regen",
+            );
+            return new Response(
+              JSON.stringify({
+                data: { recovery_codes: res.data.recoveryCodes },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          if (method === "GET" && parsed.pathname === "/api/auth/sessions") {
+            const identity = await f.activateGuard(
+              "GET",
+              parsed.pathname,
+              bearer,
+              AuthController,
+              AuthController.prototype.listSelfSessions,
+            );
+            const res = await f.authController.listSelfSessions(
+              identity,
+              "req-bff-sessions",
+            );
+            return new Response(JSON.stringify(res), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          const revokeMatch = parsed.pathname.match(
+            /^\/api\/auth\/sessions\/([^/]+)\/revoke$/,
+          );
+          if (method === "POST" && revokeMatch && revokeMatch[1]) {
+            const sid = decodeURIComponent(revokeMatch[1]);
+            const identity = await f.activateGuard(
+              "POST",
+              parsed.pathname,
+              bearer,
+              AuthController,
+              AuthController.prototype.revokeSelfSession,
+            );
+            const res = await f.authController.revokeSelfSession(
+              identity,
+              sid,
+              { reason: String(bodyObj.reason ?? "user_initiated") },
+              { headers: {} } as never,
+              "req-bff-revoke",
+            );
+            return new Response(JSON.stringify(res), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ error: "AUTH_ENDPOINT_NOT_FOUND" }),
+            { status: 404, headers: { "content-type": "application/json" } },
+          );
+        } catch (error) {
+          if (error instanceof ApiRequestError) {
+            return new Response(
+              JSON.stringify({
+                error: { code: error.code, message: error.message },
+              }),
+              {
+                status: error.getStatus(),
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          throw error;
+        }
+      },
+    };
+
+    const csrf = generateCsrfToken();
+    const makePost = (
+      path: string,
+      sessionToken: string,
+      body: Record<string, unknown> = {},
+      includeCsrf = true,
+    ) =>
+      new NextRequest(`https://agency.example${path}`, {
+        method: "POST",
+        headers: {
+          origin: "https://agency.example",
+          cookie: `${AGENCY_SESSION_COOKIE_NAME}=${sessionToken}; ${AGENCY_CSRF_COOKIE_NAME}=${csrf}`,
+          ...(includeCsrf ? { [AGENCY_CSRF_HEADER_NAME]: csrf } : {}),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+    // 1. BFF enroll -> Guard -> TotpController.enroll
+    const enrollRes = await handleTotpEnroll(
+      makePost("/api/auth/agency/mfa/totp/enroll", pwdSession.token),
+      bffConfig,
+    );
+    expect(enrollRes.status).toBe(200);
+    const enrollBody = (await enrollRes.json()) as {
+      data: { otpauth_uri: string; secret: string };
+    };
+    expect(enrollBody.data.secret.length).toBeGreaterThanOrEqual(16);
+
+    // 2. BFF confirm -> Guard -> TotpController.confirm
+    const totpCode = await generate({ secret: enrollBody.data.secret });
+    const confirmRes = await handleTotpConfirm(
+      makePost("/api/auth/agency/mfa/totp/confirm", pwdSession.token, {
+        code: totpCode,
+      }),
+      bffConfig,
+    );
+    expect(confirmRes.status).toBe(200);
+    const confirmBody = (await confirmRes.json()) as {
+      data: { recovery_codes: string[] };
+    };
+    expect(confirmBody.data.recovery_codes).toHaveLength(10);
+
+    // 3. BFF recovery-code regenerate enforces CSRF and rejects password-only session with 403 MFA_REQUIRED
+    const noCsrfRegenRes = await handleTotpRegenerateRecoveryCodes(
+      makePost(
+        "/api/auth/agency/mfa/totp/recovery-codes/regenerate",
+        secondOwnSession.token,
+        {},
+        false,
+      ),
+      bffConfig,
+    );
+    expect(noCsrfRegenRes.status).toBe(403);
+
+    const pwdOnlyRegenRes = await handleTotpRegenerateRecoveryCodes(
+      makePost(
+        "/api/auth/agency/mfa/totp/recovery-codes/regenerate",
+        pwdSession.token,
+      ),
+      bffConfig,
+    );
+    expect(pwdOnlyRegenRes.status).toBe(403);
+    expect(await pwdOnlyRegenRes.json()).toMatchObject({
+      error: { code: "MFA_REQUIRED" },
+    });
+
+    // 4. BFF recovery-code regenerate with fresh trusted-MFA session succeeds and replaces recovery codes
+    const mfaRegenRes = await handleTotpRegenerateRecoveryCodes(
+      makePost(
+        "/api/auth/agency/mfa/totp/recovery-codes/regenerate",
+        secondOwnSession.token,
+      ),
+      bffConfig,
+    );
+    expect(mfaRegenRes.status).toBe(200);
+    const mfaRegenBody = (await mfaRegenRes.json()) as {
+      data: { recovery_codes: string[] };
+    };
+    expect(mfaRegenBody.data.recovery_codes).toHaveLength(10);
+    expect(
+      mfaRegenBody.data.recovery_codes.some((c) =>
+        confirmBody.data.recovery_codes.includes(c),
+      ),
+    ).toBe(false);
+
+    // 5. BFF session list & own/cross-principal session revocation
+    const listRes = await handleListSessions(
+      new NextRequest("https://agency.example/api/auth/sessions", {
+        headers: {
+          cookie: `${AGENCY_SESSION_COOKIE_NAME}=${secondOwnSession.token}`,
+        },
+      }),
+      bffConfig,
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: Array<{ sessionId: string }>;
+    };
+    expect(listBody.data.map((s) => s.sessionId).sort()).toEqual(
+      [pwdSession.sessionId, secondOwnSession.sessionId].sort(),
+    );
+
+    const crossRevokeRes = await handleRevokeSession(
+      makePost(
+        `/api/auth/sessions/${colleagueSession.sessionId}/revoke`,
+        secondOwnSession.token,
+      ),
+      colleagueSession.sessionId,
+      bffConfig,
+    );
+    expect(crossRevokeRes.status).toBe(403);
+    expect(await crossRevokeRes.json()).toMatchObject({
+      error: { code: "AUTHZ_SCOPE_DENIED" },
+    });
+
+    const ownRevokeRes = await handleRevokeSession(
+      makePost(
+        `/api/auth/sessions/${pwdSession.sessionId}/revoke`,
+        secondOwnSession.token,
+      ),
+      pwdSession.sessionId,
+      bffConfig,
+    );
+    expect(ownRevokeRes.status).toBe(200);
+    expect(await f.signer.verifyAccessToken(pwdSession.token)).toBeNull();
   });
 });

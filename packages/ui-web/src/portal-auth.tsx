@@ -39,6 +39,10 @@ function record(value: unknown): JsonRecord | null {
     : null;
 }
 
+function unwrapRecord(value: JsonRecord | null): JsonRecord | null {
+  return record(value?.data) ?? value;
+}
+
 async function postJson(
   url: string,
   body: JsonRecord,
@@ -91,7 +95,10 @@ function Field({
 }: {
   label: ReactNode;
   hint?: ReactNode;
-  children: (ids: { inputId: string; describedBy: string | undefined }) => ReactNode;
+  children: (ids: {
+    inputId: string;
+    describedBy: string | undefined;
+  }) => ReactNode;
 }) {
   const inputId = useId();
   const hintId = useId();
@@ -113,7 +120,11 @@ function Field({
 function ErrorNotice({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <div role="alert" aria-live="polite" style={{ color: "#b91c1c", fontSize: 13 }}>
+    <div
+      role="alert"
+      aria-live="polite"
+      style={{ color: "#b91c1c", fontSize: 13 }}
+    >
       {message}
     </div>
   );
@@ -143,11 +154,19 @@ type VerificationMode = "none" | "totp" | "recovery";
  * field. It starts collapsed and auto-expands on any login failure without
  * clearing the password the user already typed. */
 export function PortalPasswordLoginForm(props: PortalPasswordLoginFormProps) {
-  const { messages: m, endpoint, forgotPasswordHref, successHref, csrfToken, children } = props;
+  const {
+    messages: m,
+    endpoint,
+    forgotPasswordHref,
+    successHref,
+    csrfToken,
+    children,
+  } = props;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [verificationOpen, setVerificationOpen] = useState(false);
-  const [verificationMode, setVerificationMode] = useState<VerificationMode>("totp");
+  const [verificationMode, setVerificationMode] =
+    useState<VerificationMode>("totp");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,13 +223,28 @@ export function PortalPasswordLoginForm(props: PortalPasswordLoginFormProps) {
         type="button"
         aria-expanded={verificationOpen}
         onClick={() => setVerificationOpen((open) => !open)}
-        style={{ justifySelf: "start", background: "none", border: "none", padding: 0, textDecoration: "underline", cursor: "pointer", fontSize: 13 }}
+        style={{
+          justifySelf: "start",
+          background: "none",
+          border: "none",
+          padding: 0,
+          textDecoration: "underline",
+          cursor: "pointer",
+          fontSize: 13,
+        }}
       >
         {verificationOpen ? m.verificationToggleHide : m.verificationToggleShow}
       </button>
 
       {verificationOpen ? (
-        <div style={{ display: "grid", gap: 10, paddingLeft: 4, borderLeft: "2px solid #E4E7EC" }}>
+        <div
+          style={{
+            display: "grid",
+            gap: 10,
+            paddingLeft: 4,
+            borderLeft: "2px solid #E4E7EC",
+          }}
+        >
           <div role="group" style={{ display: "flex", gap: 12, fontSize: 13 }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input
@@ -232,8 +266,14 @@ export function PortalPasswordLoginForm(props: PortalPasswordLoginFormProps) {
             </label>
           </div>
           <Field
-            label={verificationMode === "totp" ? m.totpCodeLabel : m.recoveryCodeLabel}
-            hint={verificationMode === "totp" ? m.totpCodeHint : m.recoveryCodeHint}
+            label={
+              verificationMode === "totp"
+                ? m.totpCodeLabel
+                : m.recoveryCodeLabel
+            }
+            hint={
+              verificationMode === "totp" ? m.totpCodeHint : m.recoveryCodeHint
+            }
           >
             {({ inputId, describedBy }) => (
               <input
@@ -314,7 +354,9 @@ function NewPasswordFields({
 
 /** Invitation accept-with-password (SA/SD §5). The accept endpoint issues no
  * session, so a successful accept immediately chains into password-login. */
-export function PortalInvitationPasswordForm(props: PortalInvitationPasswordFormProps) {
+export function PortalInvitationPasswordForm(
+  props: PortalInvitationPasswordFormProps,
+) {
   const { messages: m, endpoint, loginEndpoint, token, successHref } = props;
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -330,7 +372,10 @@ export function PortalInvitationPasswordForm(props: PortalInvitationPasswordForm
     }
     setBusy(true);
     setError(null);
-    const accept = await postJson(endpoint, { invitationToken: token, password });
+    const accept = await postJson(endpoint, {
+      invitationToken: token,
+      password,
+    });
     if (!accept.ok) {
       setBusy(false);
       setError(errorMessage(accept.data, m.genericError));
@@ -360,7 +405,13 @@ export function PortalInvitationPasswordForm(props: PortalInvitationPasswordForm
           />
         )}
       </Field>
-      <NewPasswordFields m={m} password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
+      <NewPasswordFields
+        m={m}
+        password={password}
+        confirm={confirm}
+        onPassword={setPassword}
+        onConfirm={setConfirm}
+      />
       <ErrorNotice message={error} />
       <button type="submit" disabled={busy} style={primaryButtonStyle}>
         {busy ? m.busy : m.savePassword}
@@ -406,7 +457,13 @@ export function PortalResetPasswordForm(props: PortalResetPasswordFormProps) {
 
   return (
     <form onSubmit={onSubmit} style={{ display: "grid", gap: 16 }}>
-      <NewPasswordFields m={m} password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
+      <NewPasswordFields
+        m={m}
+        password={password}
+        confirm={confirm}
+        onPassword={setPassword}
+        onConfirm={setConfirm}
+      />
       <ErrorNotice message={error} />
       <button type="submit" disabled={busy} style={primaryButtonStyle}>
         {busy ? m.busy : m.savePassword}
@@ -465,7 +522,13 @@ type Enrollment = { otpauthUri: string; secret: string };
  * the accessible fallback SA/SD requires and avoids adding an npm dependency
  * outside this task's write_scopes. */
 export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
-  const { messages: m, enrollEndpoint, confirmEndpoint, csrfToken, onEnrolled } = props;
+  const {
+    messages: m,
+    enrollEndpoint,
+    confirmEndpoint,
+    csrfToken,
+    onEnrolled,
+  } = props;
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [code, setCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
@@ -478,9 +541,14 @@ export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
     setError(null);
     const result = await postJson(enrollEndpoint, {}, csrfToken);
     setBusy(false);
-    const otpauthUri = result.data?.otpauth_uri;
-    const secret = result.data?.secret;
-    if (!result.ok || typeof otpauthUri !== "string" || typeof secret !== "string") {
+    const payload = unwrapRecord(result.data);
+    const otpauthUri = payload?.otpauth_uri ?? payload?.otpauthUri;
+    const secret = payload?.secret;
+    if (
+      !result.ok ||
+      typeof otpauthUri !== "string" ||
+      typeof secret !== "string"
+    ) {
       setError(errorMessage(result.data, m.genericError));
       return;
     }
@@ -493,12 +561,15 @@ export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
     setError(null);
     const result = await postJson(confirmEndpoint, { code }, csrfToken);
     setBusy(false);
-    const codes = result.data?.recovery_codes;
+    const payload = unwrapRecord(result.data);
+    const codes = payload?.recovery_codes ?? payload?.recoveryCodes;
     if (!result.ok || !Array.isArray(codes)) {
       setError(errorMessage(result.data, m.genericError));
       return;
     }
-    setRecoveryCodes(codes.filter((entry): entry is string => typeof entry === "string"));
+    setRecoveryCodes(
+      codes.filter((entry): entry is string => typeof entry === "string"),
+    );
     onEnrolled?.();
   }
 
@@ -532,19 +603,29 @@ export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
           ))}
         </ul>
         <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" onClick={() => copy(recoveryCodes.join("\n"))} style={primaryButtonStyle}>
+          <button
+            type="button"
+            onClick={() => copy(recoveryCodes.join("\n"))}
+            style={primaryButtonStyle}
+          >
             {m.copy}
           </button>
           <button
             type="button"
-            onClick={() => download(recoveryCodes.join("\n"), "drts-recovery-codes.txt")}
+            onClick={() =>
+              download(recoveryCodes.join("\n"), "drts-recovery-codes.txt")
+            }
             style={primaryButtonStyle}
           >
             {m.download}
           </button>
         </div>
         {copyStatus ? <p role="status">{copyStatus}</p> : null}
-        <button type="button" onClick={() => setRecoveryCodes(null)} style={{ justifySelf: "start" }}>
+        <button
+          type="button"
+          onClick={() => setRecoveryCodes(null)}
+          style={{ justifySelf: "start" }}
+        >
           {m.dismissRecoveryCodes}
         </button>
       </div>
@@ -557,7 +638,12 @@ export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
         <h2>{m.totpEnrollTitle}</h2>
         <p>{m.totpEnrollDescription}</p>
         <ErrorNotice message={error} />
-        <button type="button" disabled={busy} onClick={startEnrollment} style={primaryButtonStyle}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={startEnrollment}
+          style={primaryButtonStyle}
+        >
           {busy ? m.busy : m.startTotpEnrollment}
         </button>
       </div>
@@ -569,12 +655,26 @@ export function PortalTotpSetupPanel(props: PortalTotpSetupPanelProps) {
       <h2>{m.totpEnrollTitle}</h2>
       <Field label={m.manualSecretLabel} hint={m.manualSecretHint}>
         {({ inputId, describedBy }) => (
-          <input id={inputId} type="text" readOnly value={enrollment.secret} aria-describedby={describedBy} style={fieldInputStyle} />
+          <input
+            id={inputId}
+            type="text"
+            readOnly
+            value={enrollment.secret}
+            aria-describedby={describedBy}
+            style={fieldInputStyle}
+          />
         )}
       </Field>
       <Field label={m.otpauthUriLabel} hint={m.otpauthUriHint}>
         {({ inputId, describedBy }) => (
-          <input id={inputId} type="text" readOnly value={enrollment.otpauthUri} aria-describedby={describedBy} style={fieldInputStyle} />
+          <input
+            id={inputId}
+            type="text"
+            readOnly
+            value={enrollment.otpauthUri}
+            aria-describedby={describedBy}
+            style={fieldInputStyle}
+          />
         )}
       </Field>
       <Field label={m.confirmTotpCodeLabel}>
@@ -608,31 +708,57 @@ type SessionSummary = {
 };
 
 function readSessions(value: unknown): SessionSummary[] {
-  if (!Array.isArray(value)) return [];
+  const rawList = Array.isArray(value)
+    ? value
+    : Array.isArray(record(value)?.data)
+      ? (record(value)!.data as unknown[])
+      : [];
   const sessions: SessionSummary[] = [];
-  for (const entry of value) {
+  for (const entry of rawList) {
     const row = record(entry);
-    if (!row || typeof row.session_id !== "string") continue;
+    const sessionId =
+      typeof row?.session_id === "string"
+        ? row.session_id
+        : typeof row?.sessionId === "string"
+          ? row.sessionId
+          : null;
+    if (!row || !sessionId) continue;
+    const rawAuthTime = row.auth_time ?? row.authTime;
+    const rawMethods = Array.isArray(row.auth_methods)
+      ? row.auth_methods
+      : Array.isArray(row.authMethods)
+        ? row.authMethods
+        : [];
     sessions.push({
-      sessionId: row.session_id,
+      sessionId,
       realm: typeof row.realm === "string" ? row.realm : "",
-      authTime: typeof row.auth_time === "string" ? row.auth_time : null,
-      authMethods: Array.isArray(row.auth_methods)
-        ? row.auth_methods.filter((m): m is string => typeof m === "string")
-        : [],
-      isCurrent: row.is_current === true,
+      authTime: typeof rawAuthTime === "string" ? rawAuthTime : null,
+      authMethods: rawMethods.filter((m): m is string => typeof m === "string"),
+      isCurrent: row.is_current === true || row.isCurrent === true,
     });
   }
   return sessions;
 }
 
-/** Self-service session inventory + logout-all (SA/SD §9). Does not include
- * "add a password" / "change password without a reset token" / "regenerate
- * recovery codes": no apps/api endpoint exists for any of those yet. */
-export function PortalAccountSecurityPanel(props: PortalAccountSecurityPanelProps) {
-  const { messages: m, sessionsEndpoint, sessionRevokeBase, logoutAllEndpoint, totpSetupHref, csrfToken } = props;
+/** Self-service session inventory, recovery-code regeneration + logout-all (SA/SD §9). */
+export function PortalAccountSecurityPanel(
+  props: PortalAccountSecurityPanelProps,
+) {
+  const {
+    messages: m,
+    sessionsEndpoint,
+    sessionRevokeBase,
+    logoutAllEndpoint,
+    totpSetupHref,
+    totpRegenerateRecoveryCodesEndpoint,
+    csrfToken,
+  } = props;
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
   async function load() {
     const result = await getJson(sessionsEndpoint);
@@ -644,7 +770,11 @@ export function PortalAccountSecurityPanel(props: PortalAccountSecurityPanelProp
   }, []);
 
   async function revoke(sessionId: string) {
-    await postJson(`${sessionRevokeBase}/${encodeURIComponent(sessionId)}/revoke`, {}, csrfToken);
+    await postJson(
+      `${sessionRevokeBase}/${encodeURIComponent(sessionId)}/revoke`,
+      {},
+      csrfToken,
+    );
     setStatus(m.sessionRevoked);
     await load();
   }
@@ -654,12 +784,112 @@ export function PortalAccountSecurityPanel(props: PortalAccountSecurityPanelProp
     window.location.reload();
   }
 
+  async function regenerateRecoveryCodes() {
+    if (!totpRegenerateRecoveryCodesEndpoint) return;
+    setRegenBusy(true);
+    setRegenError(null);
+    setCopyStatus(null);
+    const result = await postJson(
+      totpRegenerateRecoveryCodesEndpoint,
+      {},
+      csrfToken,
+    );
+    setRegenBusy(false);
+    const payload = unwrapRecord(result.data);
+    const codes = payload?.recovery_codes ?? payload?.recoveryCodes;
+    if (!result.ok || !Array.isArray(codes)) {
+      setRecoveryCodes(null);
+      setRegenError(errorMessage(result.data, m.genericError));
+      return;
+    }
+    setRecoveryCodes(
+      codes.filter((entry): entry is string => typeof entry === "string"),
+    );
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(m.copied);
+    } catch {
+      setCopyStatus(m.copyFailed);
+    }
+  }
+
+  function download(text: string, filename: string) {
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <section style={{ display: "grid", gap: 8 }}>
         <a href={totpSetupHref} style={primaryButtonStyle}>
           {m.totpEnrollTitle}
         </a>
+        {totpRegenerateRecoveryCodesEndpoint ? (
+          <>
+            <button
+              type="button"
+              disabled={regenBusy}
+              onClick={regenerateRecoveryCodes}
+              style={{ ...primaryButtonStyle, justifySelf: "start" }}
+            >
+              {regenBusy
+                ? m.busy
+                : (m.regenerateRecoveryCodes ?? m.recoveryCodesTitle)}
+            </button>
+            <ErrorNotice message={regenError} />
+            {recoveryCodes ? (
+              <div style={{ display: "grid", gap: 12 }}>
+                <h3>{m.recoveryCodesTitle}</h3>
+                <p role="alert">{m.recoveryCodesNotice}</p>
+                <ul style={{ fontFamily: "monospace", fontSize: 14 }}>
+                  {recoveryCodes.map((entry) => (
+                    <li key={entry}>{entry}</li>
+                  ))}
+                </ul>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => copy(recoveryCodes.join("\n"))}
+                    style={primaryButtonStyle}
+                  >
+                    {m.copy}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      download(
+                        recoveryCodes.join("\n"),
+                        "drts-recovery-codes.txt",
+                      )
+                    }
+                    style={primaryButtonStyle}
+                  >
+                    {m.download}
+                  </button>
+                </div>
+                {copyStatus ? <p role="status">{copyStatus}</p> : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecoveryCodes(null);
+                    setCopyStatus(null);
+                  }}
+                  style={{ justifySelf: "start" }}
+                >
+                  {m.dismissRecoveryCodes}
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </section>
 
       <section style={{ display: "grid", gap: 12 }}>
@@ -668,11 +898,19 @@ export function PortalAccountSecurityPanel(props: PortalAccountSecurityPanelProp
         {sessions === null ? null : sessions.length === 0 ? (
           <p>{m.sessionsEmpty}</p>
         ) : (
-          <ul style={{ display: "grid", gap: 10, listStyle: "none", padding: 0 }}>
+          <ul
+            style={{ display: "grid", gap: 10, listStyle: "none", padding: 0 }}
+          >
             {sessions.map((session) => (
               <li
                 key={session.sessionId}
-                style={{ border: "1px solid #E4E7EC", borderRadius: 8, padding: 12, display: "grid", gap: 4 }}
+                style={{
+                  border: "1px solid #E4E7EC",
+                  borderRadius: 8,
+                  padding: 12,
+                  display: "grid",
+                  gap: 4,
+                }}
               >
                 <div>
                   {m.sessionRealmLabel}: {session.realm}
@@ -689,7 +927,11 @@ export function PortalAccountSecurityPanel(props: PortalAccountSecurityPanelProp
                   </div>
                 ) : null}
                 {!session.isCurrent ? (
-                  <button type="button" onClick={() => revoke(session.sessionId)} style={{ justifySelf: "start" }}>
+                  <button
+                    type="button"
+                    onClick={() => revoke(session.sessionId)}
+                    style={{ justifySelf: "start" }}
+                  >
                     {m.revokeSession}
                   </button>
                 ) : null}
