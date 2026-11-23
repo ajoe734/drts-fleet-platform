@@ -72,6 +72,7 @@ type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
 const NEW_DRIVER_INITIAL_FORM: DriverDraftInput = {
   name: "",
   mobile: "",
+  email: "",
   professionalDriverLicenseNo: "",
   professionalDriverLicenseExpiry: "",
   taxiDriverRegistrationNo: "",
@@ -252,6 +253,23 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   }
   return payload.data;
+}
+
+function supplyRequestErrorMessage(
+  error: unknown,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (error instanceof Error) {
+    const code = (error as { code?: string }).code;
+    if (code === "DRIVER_ONBOARDING_EMAIL_INVALID") {
+      return t("supply.driverField.emailInvalid");
+    }
+    if (code === "DRIVER_ONBOARDING_MOBILE_INVALID") {
+      return t("supply.driverField.mobileInvalid");
+    }
+    return error.message;
+  }
+  return String(error);
 }
 
 function FieldInput(
@@ -942,9 +960,36 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
   );
 }
 
+function restoreDriverOnboardingDraft(
+  raw: string | null,
+  initial: DriverDraftInput,
+): DriverDraftInput {
+  if (!raw) return initial;
+  try {
+    const saved: unknown = JSON.parse(raw);
+    // Drafts saved before onboarding email was added still have valid input.
+    // Only migrate the absent optional field; validate every other field below.
+    if (
+      saved &&
+      typeof saved === "object" &&
+      !Array.isArray(saved) &&
+      !Object.hasOwn(saved, "email")
+    ) {
+      raw = JSON.stringify({ ...saved, email: "" });
+    }
+  } catch {
+    return initial;
+  }
+  return restoreSupplyDraft(raw, initial);
+}
+
 // In-memory fallback retains drafts across SPA history navigation when storage is unavailable.
 const supplyDraftMemory = new Map<string, string>();
-function useSupplyDraft<T extends object>(key: string, initial: T) {
+function useSupplyDraft<T extends object>(
+  key: string,
+  initial: T,
+  restoreDraft: (raw: string | null, initial: T) => T = restoreSupplyDraft,
+) {
   const [form, updateForm] = useState(initial);
   const current = useRef(initial);
   const [restoreVersion, setRestoreVersion] = useState(0);
@@ -957,7 +1002,7 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
       } catch {
         /* Memory fallback. */
       }
-      current.current = restoreSupplyDraft(raw, initial);
+      current.current = restoreDraft(raw, initial);
       updateForm(current.current);
       setRestoreVersion((version) => version + 1);
     }
@@ -969,7 +1014,7 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
     };
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
-  }, [key, initial]);
+  }, [key, initial, restoreDraft]);
   const setForm: Dispatch<SetStateAction<T>> = (next) => {
     const value =
       typeof next === "function"
@@ -1012,6 +1057,7 @@ export function NewDriverSubmissionForm({
   const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:driver`,
     NEW_DRIVER_INITIAL_FORM,
+    restoreDriverOnboardingDraft,
   );
 
   // Every edited value is protected, including optional fields and product choices (R25).
@@ -1033,7 +1079,7 @@ export function NewDriverSubmissionForm({
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(supplyRequestErrorMessage(err, t));
     } finally {
       setSaving(false);
     }
@@ -1079,6 +1125,7 @@ export function NewDriverSubmissionForm({
             form={form}
             setForm={setForm}
             formKey="new-driver"
+            showOnboardingEmail
           />
         </DraftFormFrame>
       </div>
@@ -1126,7 +1173,10 @@ export function NewVehicleSubmissionForm({
     } catch (err) {
       const code = (err as { code?: string })?.code;
       const msg = err instanceof Error ? err.message : String(err);
-      if (code === "PLATE_ALREADY_EXISTS" || msg.includes("already registered")) {
+      if (
+        code === "PLATE_ALREADY_EXISTS" ||
+        msg.includes("already registered")
+      ) {
         setPlateExistsRenewalPlate(form.plateNo.trim().toUpperCase());
       }
       setError(msg);
@@ -1166,7 +1216,14 @@ export function NewVehicleSubmissionForm({
           </>
         }
       />
-      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         {plateExistsRenewalPlate ? (
           <div
             role="region"
@@ -1185,7 +1242,8 @@ export function NewVehicleSubmissionForm({
                 href={`/supply/renewals/new?plateNo=${encodeURIComponent(plateExistsRenewalPlate)}`}
                 style={cardLinkStyle(theme)}
               >
-                {t("supply.vehicleNew.plateExistsRenewalAction")} ({plateExistsRenewalPlate})
+                {t("supply.vehicleNew.plateExistsRenewalAction")} (
+                {plateExistsRenewalPlate})
               </Link>
             </div>
           </div>
@@ -1590,7 +1648,8 @@ export function NewSupplyRenewalForm({
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                {t("supply.renewal.currentCanonicalSummary")} ({selectedDriver.driverId})
+                {t("supply.renewal.currentCanonicalSummary")} (
+                {selectedDriver.driverId})
               </div>
               <div style={{ color: theme.textMuted }}>
                 {t("supply.driverField.licenseExpiry")}:{" "}
@@ -1628,13 +1687,14 @@ export function NewSupplyRenewalForm({
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                {t("supply.renewal.currentCanonicalSummary")} ({selectedVehicle.vehicleId} · {selectedVehicle.plateNo})
+                {t("supply.renewal.currentCanonicalSummary")} (
+                {selectedVehicle.vehicleId} · {selectedVehicle.plateNo})
               </div>
               <div style={{ color: theme.textMuted }}>
                 Policy: {selectedVehicle.activePolicyId || "—"} (
                 {selectedVehicle.activePolicyStatus || "—"} ·{" "}
-                {selectedVehicle.activePolicyEndAt?.slice(0, 10) || "—"}) · Contract:{" "}
-                {selectedVehicle.activeContractId || "—"} (
+                {selectedVehicle.activePolicyEndAt?.slice(0, 10) || "—"}) ·
+                Contract: {selectedVehicle.activeContractId || "—"} (
                 {selectedVehicle.activeContractStatus || "—"} ·{" "}
                 {selectedVehicle.activeContractEndAt?.slice(0, 10) || "—"})
               </div>
@@ -1748,11 +1808,15 @@ function DriverDraftFields({
   form,
   setForm,
   formKey = "detail",
+  showOnboardingEmail = false,
+  emailReadOnly = false,
 }: {
   form: DriverDraftInput;
   setForm: Dispatch<SetStateAction<DriverDraftInput>>;
   /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
   formKey?: string;
+  showOnboardingEmail?: boolean;
+  emailReadOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const theme = buildFleetTheme();
@@ -1797,6 +1861,28 @@ function DriverDraftFields({
             }
           />
         </FormField>
+        {showOnboardingEmail ? (
+          <FormField
+            id={fid("email")}
+            label={t("supply.driverField.email")}
+            hint={t("supply.driverField.emailHint")}
+          >
+            <FieldInput
+              id={fid("email")}
+              type="email"
+              autoComplete="email"
+              maxLength={254}
+              readOnly={emailReadOnly}
+              value={form.email ?? ""}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  email: e.currentTarget.value,
+                }))
+              }
+            />
+          </FormField>
+        ) : null}
         <FormField
           id={fid("licenseNo")}
           label={t("supply.driverField.licenseNo")}
@@ -2463,7 +2549,7 @@ export function SupplySubmissionDetailView({
         mountedRef.current &&
         (label !== "upload" || uploadEpochRef.current === startEpoch)
       ) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(supplyRequestErrorMessage(err, t));
       }
     } finally {
       if (label === "upload" && uploadEpochRef.current === startEpoch) {
@@ -2748,6 +2834,10 @@ export function SupplySubmissionDetailView({
               <DriverDraftFields
                 form={driverForm}
                 setForm={setDriverDraftSafe}
+                showOnboardingEmail={
+                  detail.submission.submissionType === "driver_onboarding"
+                }
+                emailReadOnly={!editable}
               />
             ) : vehicleForm ? (
               <VehicleDraftFields

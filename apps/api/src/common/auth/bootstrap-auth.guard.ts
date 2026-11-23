@@ -178,6 +178,7 @@ function isStrictAuthEnvironment(): boolean {
 // run unchanged; only the one-time-use ledger write is skipped for these.
 const REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS = new Set([
   "internal:scheduled-tasks:mail-outbox:drain",
+  "internal:scheduled-tasks:driver-onboarding-notifications:drain",
   "internal:scheduled-tasks:approval-timeout-reminders:run",
   "internal:scheduled-tasks:billing-monthly:run",
   "internal:scheduled-tasks:regulatory-expiry:run",

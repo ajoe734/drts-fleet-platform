@@ -1189,8 +1189,15 @@ export class RegulatoryRegistryService
     }
 
     const changes: PersistRegulatoryRegistryChanges = {};
+    const stageDriverOnboarding =
+      current.submissionType === "driver_onboarding" &&
+      Boolean(executor && this.regulatoryRegistryRepository?.isEnabled());
     const canonicalDriver = command.driverDraft
-      ? this.provisionDriverFromDraft(command.driverDraft, command.approvedAt)
+      ? this.provisionDriverFromDraft(
+          command.driverDraft,
+          command.approvedAt,
+          !stageDriverOnboarding,
+        )
       : null;
     if (canonicalDriver) {
       changes.drivers = [this.cloneDriver(canonicalDriver)];
@@ -1300,12 +1307,14 @@ export class RegulatoryRegistryService
       };
       changes.driverCredentials = [driverCredential];
 
-      this.driverCredentials = [
-        ...this.driverCredentials.filter(
-          (c) => c.driverId !== resolvedCanonicalDriverId,
-        ),
-        driverCredential,
-      ];
+      if (!stageDriverOnboarding) {
+        this.driverCredentials = [
+          ...this.driverCredentials.filter(
+            (c) => c.driverId !== resolvedCanonicalDriverId,
+          ),
+          driverCredential,
+        ];
+      }
     }
 
     const vehicleAffiliation = resolvedCanonicalVehicleId
@@ -1356,6 +1365,7 @@ export class RegulatoryRegistryService
       canonicalPolicyId: policy?.policyId ?? null,
       vehicleAffiliation,
       supplyPair,
+      ...(stageDriverOnboarding ? { stagedChanges: changes } : {}),
     };
   }
 
@@ -4603,6 +4613,7 @@ export class RegulatoryRegistryService
   private provisionDriverFromDraft(
     draft: DriverSupplyDraft,
     approvedAt: string,
+    publish: boolean,
   ): DriverRegistryRecord {
     const driverId = `drv_${randomUUID()}`;
     const created = this.decorateDriver({
@@ -4629,7 +4640,7 @@ export class RegulatoryRegistryService
       deviceBindings: [],
     });
 
-    this.drivers = [this.cloneDriver(created), ...this.drivers];
+    if (publish) this.drivers = [this.cloneDriver(created), ...this.drivers];
     return created;
   }
 

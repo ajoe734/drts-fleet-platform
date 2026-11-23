@@ -233,9 +233,23 @@ export async function runNormalPartnerJourney(
         });
         expect(invitation.registrationCode).toBeTruthy();
         await driver.goto(`${DRIVER}/onboarding`);
+        await expect(
+          driver.getByLabel("裝置註冊碼", { exact: true }),
+        ).toBeVisible();
+        const legacyMode = driver.getByRole("button", {
+          name: "使用舊版註冊碼",
+          exact: true,
+        });
+        if (await legacyMode.count()) await legacyMode.click();
+        await expect(
+          driver.getByLabel("登記手機號碼", { exact: true }),
+        ).toHaveCount(0);
         await driver
           .getByLabel("裝置註冊碼", { exact: true })
           .fill(invitation.registrationCode);
+        await expect(
+          driver.getByLabel("裝置註冊碼", { exact: true }),
+        ).toHaveValue(invitation.registrationCode);
         const [registered] = await Promise.all([
           driver.waitForResponse(
             (response) =>
