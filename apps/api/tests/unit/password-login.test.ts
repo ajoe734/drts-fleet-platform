@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { generate } from "otplib";
 import {
   afterAll,
   afterEach,
@@ -15,19 +16,31 @@ import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { PasswordHashingService } from "../../src/common/auth/password-hashing.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import type {
+  CanonicalIdentityInvitationRecord,
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
   CanonicalIdentityRoleBindingRecord,
+  CanonicalIdentitySessionRecord,
   PartnerChannelEntryRecord,
 } from "@drts/contracts";
 import { AgencyDirectoryRepository } from "../../src/modules/agency-access/agency-directory.repository";
 import { AuthController } from "../../src/modules/auth/auth.controller";
-import { IdentityRepository } from "../../src/modules/identity/identity.repository";
+import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
+import { TotpCredentialRepository } from "../../src/modules/auth/totp-credential.repository";
+import { TotpController } from "../../src/modules/auth/totp.controller";
+import { TotpService } from "../../src/modules/auth/totp.service";
+import { FleetPartnerService } from "../../src/modules/fleet-partner/fleet-partner.service";
+import {
+  FLEET_INVITATION_ISSUER,
+  IdentityRepository,
+} from "../../src/modules/identity/identity.repository";
 import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
+import { PartnerUserIdentityLinkRepository } from "../../src/modules/tenant-partner/partner-user-identity-link.repository";
 import {
   TenantInvitationDeliveryService,
   type TenantInvitationDeliveryRequest,
 } from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
+import { TenantPartnerRepository } from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 // PWD-LOGIN-005 (SA/SD §4,
@@ -41,11 +54,18 @@ const PRIOR_ENV = { ...process.env };
 beforeAll(() => {
   process.env.APP_ENV = "local";
   process.env.AUTH_MODE = "local";
+  process.env.OIDC_MOCK_MODE = "true";
   process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
   process.env.PASSWORD_PEPPER_SECRETS_JSON = JSON.stringify({
     v1: "password-login-test-pepper-value-32chars!",
   });
   process.env.PASSWORD_PEPPER_CURRENT_VERSION = "v1";
+  process.env.TOTP_ENCRYPTION_KEYS_JSON = JSON.stringify({
+    activeKeyId: "v1",
+    keys: {
+      v1: Buffer.alloc(32, 0x5a).toString("base64"),
+    },
+  });
 });
 
 afterAll(() => {
@@ -71,6 +91,8 @@ class CapturingInvitationDelivery extends TenantInvitationDeliveryService {
 function createFixture() {
   const identityRepository = new IdentityRepository();
   const agencyDirectoryRepository = new AgencyDirectoryRepository();
+  const partnerUserIdentityLinkRepository =
+    new PartnerUserIdentityLinkRepository();
   const securityEventsService = new SecurityEventsService();
   const delivery = new CapturingInvitationDelivery();
   const tenantPartnerService = new TenantPartnerService(
@@ -90,6 +112,7 @@ function createFixture() {
     tenantPartnerService,
     undefined,
     agencyDirectoryRepository,
+    partnerUserIdentityLinkRepository,
   );
   const controller = new AuthController(
     jwtAuthService,
@@ -108,8 +131,10 @@ function createFixture() {
   return {
     identityRepository,
     agencyDirectoryRepository,
+    partnerUserIdentityLinkRepository,
     securityEventsService,
     tenantPartnerService,
+    jwtAuthService,
     delivery,
     controller,
   };
@@ -683,6 +708,16 @@ describe("POST /api/auth/:realm/password-login", () => {
     expect(envelope.data.partnerEntry.partnerId).toBe(fleetPartnerId);
     expect(envelope.data.identity.realm).toBe("partner");
     expect(envelope.data.identity.roles).toEqual(["fleet_partner_admin"]);
+    expect(
+      await fixture.jwtAuthService.verifyAccessToken(envelope.data.accessToken),
+    ).toMatchObject({
+      realm: "partner",
+      partnerId: fleetPartnerId,
+      partnerEntrySlug: entrySlug,
+      roles: ["fleet_partner_admin"],
+      amr: ["pwd"],
+      acr: "aal1",
+    });
   });
 
   it("answers an unknown partner account the same way as an unknown tenant account", async () => {
@@ -1273,5 +1308,1322 @@ describe("POST /api/auth/:realm/credentials/password", () => {
       partnerId: entrySlug,
     })) as { data: { accessToken: string } };
     expect(loginEnvelope.data.accessToken).toBeTruthy();
+    expect(
+      await fixture.jwtAuthService.verifyAccessToken(
+        loginEnvelope.data.accessToken,
+      ),
+    ).not.toBeNull();
+  });
+});
+
+function createFleetDurableSessionPortMock() {
+  const principals = new Map<string, CanonicalIdentityPrincipalRecord>();
+  const principalsByIssuerSubject = new Map<
+    string,
+    CanonicalIdentityPrincipalRecord
+  >();
+  const memberships = new Map<string, CanonicalIdentityMembershipRecord>();
+  const membershipsBySourceRef = new Map<
+    string,
+    CanonicalIdentityMembershipRecord
+  >();
+  const roleBindingsByMembership = new Map<
+    string,
+    CanonicalIdentityRoleBindingRecord[]
+  >();
+  const roleBindingsBySourceRef = new Map<
+    string,
+    CanonicalIdentityRoleBindingRecord
+  >();
+  const invitationsById = new Map<string, CanonicalIdentityInvitationRecord>();
+  const invitationsByTokenHash = new Map<
+    string,
+    CanonicalIdentityInvitationRecord
+  >();
+  const sessions = new Map<string, CanonicalIdentitySessionRecord>();
+  const fleetPartnersActive = new Map<string, boolean>();
+  const partnerEntries = new Map<string, PartnerChannelEntryRecord>();
+  const links = new Map<
+    string,
+    {
+      entrySlug: string;
+      partnerUserRef: string;
+      drtsPassengerId: string;
+      status: string;
+      consentScope: string;
+      linkedAt?: string;
+      lastSeenAt?: string;
+      createdAt?: string;
+      updatedAt?: string;
+    }
+  >();
+  const passwordCredentials = new Map<
+    string,
+    {
+      principalId: string;
+      passwordHash: string;
+      passwordAlgo: string;
+      pepperVersion: string;
+      failedAttempts: number;
+      lockedUntil: string | null;
+      mustChangeAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }
+  >();
+
+  function toPersistedSessionRow(record: CanonicalIdentitySessionRecord) {
+    return {
+      session_id: record.sessionId,
+      source_ref: record.sourceRef,
+      principal_id: record.principalId,
+      membership_id: record.membershipId ?? null,
+      realm: record.realm,
+      status: record.status,
+      auth_time: record.authTime,
+      auth_methods: [...record.authMethods],
+      token_version: record.tokenVersion,
+      idle_expires_at: record.idleExpiresAt ?? null,
+      absolute_expires_at: record.absoluteExpiresAt,
+      revoked_at: record.revokedAt ?? null,
+      revoked_by_principal_id: record.revokedByPrincipalId ?? null,
+      revoke_reason: record.revokeReason ?? null,
+      device_summary: record.deviceSummary ?? {},
+      risk_summary: record.riskSummary ?? {},
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+      record,
+    };
+  }
+
+  function upsertPrincipalRow(record: CanonicalIdentityPrincipalRecord) {
+    const prior = principals.get(record.principalId);
+    if (prior) {
+      principalsByIssuerSubject.delete(`${prior.issuer}::${prior.subject}`);
+    }
+    const persisted = prior
+      ? {
+          ...record,
+          principalId: prior.principalId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    principals.set(persisted.principalId, persisted);
+    principalsByIssuerSubject.set(
+      `${persisted.issuer}::${persisted.subject}`,
+      persisted,
+    );
+    return persisted;
+  }
+
+  function upsertMembershipRow(record: CanonicalIdentityMembershipRecord) {
+    const prior = record.sourceRef
+      ? membershipsBySourceRef.get(record.sourceRef)
+      : memberships.get(record.membershipId);
+    const persisted = prior
+      ? {
+          ...record,
+          membershipId: prior.membershipId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    memberships.set(persisted.membershipId, persisted);
+    if (persisted.sourceRef) {
+      membershipsBySourceRef.set(persisted.sourceRef, persisted);
+    }
+    return persisted;
+  }
+
+  function upsertRoleBindingRow(record: CanonicalIdentityRoleBindingRecord) {
+    const prior = record.sourceRef
+      ? roleBindingsBySourceRef.get(record.sourceRef)
+      : undefined;
+    const persisted = prior
+      ? {
+          ...record,
+          roleBindingId: prior.roleBindingId,
+          createdAt: prior.createdAt,
+        }
+      : record;
+    if (persisted.sourceRef) {
+      roleBindingsBySourceRef.set(persisted.sourceRef, persisted);
+    }
+    const list = roleBindingsByMembership.get(persisted.membershipId) ?? [];
+    const idx = list.findIndex((b) => b.sourceRef === persisted.sourceRef);
+    if (idx >= 0) list[idx] = persisted;
+    else list.push(persisted);
+    roleBindingsByMembership.set(persisted.membershipId, list);
+    return persisted;
+  }
+
+  function upsertInvitationRow(record: CanonicalIdentityInvitationRecord) {
+    invitationsById.set(record.invitationId, record);
+    invitationsByTokenHash.set(record.tokenHash, record);
+  }
+
+  const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+    const text = sql.trim();
+
+    if (
+      text.startsWith("BEGIN") ||
+      text.startsWith("COMMIT") ||
+      text.startsWith("ROLLBACK") ||
+      text.startsWith("SAVEPOINT")
+    ) {
+      return { rows: [] };
+    }
+    if (text.includes("FROM admin.phase1_partner_channel_entries")) {
+      if (text.includes("WHERE entry_slug = $1")) {
+        const entry = partnerEntries.get(params[0] as string);
+        return { rows: entry ? [{ record: entry }] : [] };
+      }
+      return {
+        rows: [...partnerEntries.values()].map((record) => ({ record })),
+      };
+    }
+    if (
+      text.includes("FROM iam.identity_principals p") &&
+      text.includes(
+        "JOIN iam.identity_memberships m ON m.principal_id = p.principal_id",
+      )
+    ) {
+      const [scopeRef, partnerId, emailNormalized, entrySlug] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const rows: Array<{ principal_id: string }> = [];
+      for (const m of memberships.values()) {
+        if (
+          m.realm !== "partner" ||
+          m.scopeRef !== scopeRef ||
+          m.partnerId !== partnerId
+        ) {
+          continue;
+        }
+        const p = principals.get(m.principalId);
+        if (
+          p &&
+          p.email?.toLowerCase() === emailNormalized &&
+          p.principalType === "human" &&
+          p.sourceRef === `jwt_principal:partner:${p.principalId}` &&
+          m.sourceRef === `fleet_member:${entrySlug}:${p.principalId}`
+        ) {
+          rows.push({ principal_id: p.principalId });
+        }
+      }
+      return { rows };
+    }
+    if (text.startsWith("SELECT principal_id FROM iam.identity_principals")) {
+      const rec = principals.get(params[0] as string);
+      return { rows: rec ? [{ principal_id: rec.principalId }] : [] };
+    }
+    if (
+      text.includes("FROM iam.identity_principals") &&
+      text.includes("WHERE email_normalized = $1")
+    ) {
+      const emailNormalized = (params[0] as string).toLowerCase();
+      return {
+        rows: [...principals.values()]
+          .filter((p) => p.email?.toLowerCase() === emailNormalized)
+          .map((record) => ({ record })),
+      };
+    }
+    if (
+      text.includes("FROM iam.identity_principals") &&
+      text.includes("WHERE issuer = $1 AND subject = $2")
+    ) {
+      const rec = principalsByIssuerSubject.get(`${params[0]}::${params[1]}`);
+      return { rows: rec ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("FROM iam.identity_principals") &&
+      text.includes("WHERE principal_id = $1")
+    ) {
+      const rec = principals.get(params[0] as string);
+      return { rows: rec ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("FROM iam.identity_memberships") &&
+      text.includes("WHERE principal_id = $1")
+    ) {
+      return {
+        rows: [...memberships.values()]
+          .filter((m) => m.principalId === params[0])
+          .map((record) => ({ record })),
+      };
+    }
+    if (
+      text.includes("FROM iam.identity_memberships") &&
+      text.includes("WHERE source_ref = $1")
+    ) {
+      const rec = membershipsBySourceRef.get(params[0] as string);
+      return { rows: rec ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("FROM iam.identity_memberships") &&
+      text.includes("WHERE membership_id = $1")
+    ) {
+      const rec = memberships.get(params[0] as string);
+      if (!rec) return { rows: [] };
+      if (
+        text.includes(
+          "realm = 'partner' AND scope_ref = $2 AND partner_id = $3",
+        ) &&
+        (rec.realm !== "partner" ||
+          rec.scopeRef !== params[1] ||
+          rec.partnerId !== params[2])
+      ) {
+        return { rows: [] };
+      }
+      return { rows: [{ record: rec }] };
+    }
+    if (
+      text.includes("FROM iam.identity_role_bindings") &&
+      text.includes("WHERE source_ref = $1")
+    ) {
+      const rec = roleBindingsBySourceRef.get(params[0] as string);
+      return { rows: rec ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("FROM iam.identity_role_bindings") &&
+      text.includes("WHERE membership_id = $1")
+    ) {
+      const list = roleBindingsByMembership.get(params[0] as string) ?? [];
+      return { rows: list.map((record) => ({ record })) };
+    }
+    if (text.includes("FROM iam.privileged_role_grants")) {
+      return { rows: [] };
+    }
+    if (
+      text.includes("FROM iam.identity_invitations") &&
+      text.includes("token_hash = $1")
+    ) {
+      const rec = invitationsByTokenHash.get(params[0] as string);
+      const nowMs = Date.parse(params[1] as string);
+      const valid =
+        rec &&
+        !rec.acceptedAt &&
+        !rec.revokedAt &&
+        Date.parse(rec.expiresAt) > nowMs;
+      return { rows: valid ? [{ record: rec }] : [] };
+    }
+    if (
+      text.includes("UPDATE iam.identity_invitations") &&
+      text.includes("SET delivery_status = $2::text")
+    ) {
+      const rec = invitationsById.get(params[0] as string);
+      if (!rec || rec.realm !== "partner") return { rows: [] };
+      const updated: CanonicalIdentityInvitationRecord = {
+        ...rec,
+        deliveryStatus:
+          params[1] as CanonicalIdentityInvitationRecord["deliveryStatus"],
+        updatedAt: params[2] as string,
+      };
+      upsertInvitationRow(updated);
+      return { rows: [{ record: updated }] };
+    }
+    if (
+      text.includes("UPDATE iam.identity_invitations") &&
+      text.includes("SET revoked_at = $2::timestamptz") &&
+      text.includes("WHERE membership_id = $1")
+    ) {
+      for (const inv of invitationsById.values()) {
+        if (
+          inv.membershipId === params[0] &&
+          !inv.acceptedAt &&
+          !inv.revokedAt
+        ) {
+          upsertInvitationRow({
+            ...inv,
+            revokedAt: params[1] as string,
+            updatedAt: params[1] as string,
+          });
+        }
+      }
+      return { rows: [] };
+    }
+    if (text.includes("SELECT active FROM admin.phase1_fleet_partners")) {
+      const active = fleetPartnersActive.get(params[0] as string);
+      return { rows: active === undefined ? [] : [{ active }] };
+    }
+    if (text.includes("INSERT INTO admin.phase1_partner_user_identity_links")) {
+      const entrySlug = params[0] as string;
+      const partnerUserRef = params[1] as string;
+      const drtsPassengerId = params[2] as string;
+      const key = `${entrySlug}::${partnerUserRef}`;
+      for (const existing of links.values()) {
+        if (
+          existing.entrySlug === entrySlug &&
+          existing.drtsPassengerId === drtsPassengerId &&
+          existing.consentScope === "fleet_staff_invitation" &&
+          existing.partnerUserRef !== partnerUserRef
+        ) {
+          return { rows: [] };
+        }
+      }
+      const existingForKey = links.get(key);
+      if (existingForKey) {
+        if (
+          existingForKey.entrySlug === entrySlug &&
+          existingForKey.partnerUserRef === partnerUserRef &&
+          existingForKey.drtsPassengerId === drtsPassengerId &&
+          existingForKey.status === "active" &&
+          existingForKey.consentScope === "fleet_staff_invitation"
+        ) {
+          return { rows: [{ record: existingForKey }] };
+        }
+        return { rows: [] };
+      }
+      const record = JSON.parse(params[4] as string) as {
+        entrySlug: string;
+        partnerUserRef: string;
+        drtsPassengerId: string;
+        status: string;
+        consentScope: string;
+      };
+      links.set(key, record);
+      return { rows: [{ record }] };
+    }
+    if (
+      text.includes("FROM admin.phase1_partner_user_identity_links") &&
+      text.includes("WHERE entry_slug = $1") &&
+      text.includes("AND drts_passenger_id = $2")
+    ) {
+      for (const existing of links.values()) {
+        if (
+          existing.entrySlug === params[0] &&
+          existing.drtsPassengerId === params[1]
+        ) {
+          return { rows: [{ record: existing }] };
+        }
+      }
+      return { rows: [] };
+    }
+    if (
+      text.includes("FROM admin.phase1_partner_user_identity_links") &&
+      text.includes("WHERE entry_slug = $1") &&
+      text.includes("AND partner_user_ref = $2")
+    ) {
+      const rec = links.get(`${params[0]}::${params[1]}`);
+      return { rows: rec ? [{ record: rec }] : [] };
+    }
+    if (text.includes("UPDATE admin.phase1_partner_user_identity_links")) {
+      const key = `${params[0]}::${params[1]}`;
+      const existing = links.get(key);
+      if (!existing) return { rows: [] };
+      const updated = {
+        ...existing,
+        lastSeenAt: params[2] as string,
+        updatedAt: params[2] as string,
+      };
+      links.set(key, updated);
+      return { rows: [{ record: updated }] };
+    }
+    if (text.includes("INSERT INTO iam.identity_principals")) {
+      const record = JSON.parse(
+        params[11] as string,
+      ) as CanonicalIdentityPrincipalRecord;
+      const existing = principalsByIssuerSubject.get(
+        `${record.issuer}::${record.subject}`,
+      );
+      if (existing && existing.principalId !== record.principalId) {
+        throw Object.assign(
+          new Error(
+            "duplicate key value violates unique constraint iam_identity_principals_issuer_subject_key",
+          ),
+          { code: "23505" },
+        );
+      }
+      const persisted = upsertPrincipalRow(record);
+      return { rows: [{ record: persisted }] };
+    }
+    if (text.includes("INSERT INTO iam.identity_memberships")) {
+      const record = JSON.parse(
+        params[12] as string,
+      ) as CanonicalIdentityMembershipRecord;
+      const persisted = upsertMembershipRow(record);
+      return { rows: [{ record: persisted }] };
+    }
+    if (text.includes("INSERT INTO iam.identity_role_bindings")) {
+      const record = JSON.parse(
+        params[10] as string,
+      ) as CanonicalIdentityRoleBindingRecord;
+      const persisted = upsertRoleBindingRow(record);
+      return { rows: [{ record: persisted }] };
+    }
+    if (text.includes("INSERT INTO iam.identity_invitations")) {
+      const record = JSON.parse(
+        params[17] as string,
+      ) as CanonicalIdentityInvitationRecord;
+      upsertInvitationRow(record);
+      return { rows: [{ record }] };
+    }
+    if (text.includes("INSERT INTO iam.identity_password_credentials")) {
+      const principalId = params[0] as string;
+      const now = params[4] as string;
+      const prior = passwordCredentials.get(principalId);
+      passwordCredentials.set(principalId, {
+        principalId,
+        passwordHash: params[1] as string,
+        passwordAlgo: params[2] as string,
+        pepperVersion: params[3] as string,
+        failedAttempts: 0,
+        lockedUntil: null,
+        mustChangeAt: null,
+        createdAt: prior?.createdAt ?? now,
+        updatedAt: now,
+      });
+      return { rows: [] };
+    }
+    if (
+      text.includes("SELECT principal_id, password_hash") &&
+      text.includes("FROM iam.identity_password_credentials")
+    ) {
+      const cred = passwordCredentials.get(params[0] as string);
+      if (!cred) return { rows: [] };
+      return {
+        rows: [
+          {
+            principal_id: cred.principalId,
+            password_hash: cred.passwordHash,
+            password_algo: cred.passwordAlgo,
+            pepper_version: cred.pepperVersion,
+            failed_attempts: cred.failedAttempts,
+            locked_until: cred.lockedUntil,
+            must_change_at: cred.mustChangeAt,
+            created_at: cred.createdAt,
+            updated_at: cred.updatedAt,
+          },
+        ],
+      };
+    }
+    if (
+      text.includes("SELECT failed_attempts, locked_until") &&
+      text.includes("FROM iam.identity_password_credentials")
+    ) {
+      const cred = passwordCredentials.get(params[0] as string);
+      if (!cred) return { rows: [] };
+      return {
+        rows: [
+          {
+            failed_attempts: cred.failedAttempts,
+            locked_until: cred.lockedUntil,
+          },
+        ],
+      };
+    }
+    if (
+      text.includes("UPDATE iam.identity_password_credentials") &&
+      text.includes("SET failed_attempts = 0, locked_until = NULL")
+    ) {
+      const cred = passwordCredentials.get(params[0] as string);
+      if (cred) {
+        passwordCredentials.set(cred.principalId, {
+          ...cred,
+          failedAttempts: 0,
+          lockedUntil: null,
+          updatedAt: params[1] as string,
+        });
+      }
+      return { rows: [] };
+    }
+    if (text.includes("INSERT INTO iam.identity_sessions")) {
+      const record = JSON.parse(
+        params[18] as string,
+      ) as CanonicalIdentitySessionRecord;
+      sessions.set(record.sessionId, record);
+      return { rows: [toPersistedSessionRow(record)] };
+    }
+    if (
+      text.includes("SELECT * FROM iam.identity_sessions") &&
+      text.includes("WHERE session_id = $1")
+    ) {
+      const rec = sessions.get(params[0] as string);
+      return { rows: rec ? [toPersistedSessionRow(rec)] : [] };
+    }
+    if (
+      text.includes("SELECT * FROM iam.identity_sessions") &&
+      text.includes("WHERE principal_id = $1")
+    ) {
+      return {
+        rows: [...sessions.values()]
+          .filter((s) => s.principalId === params[0])
+          .map(toPersistedSessionRow),
+      };
+    }
+    if (
+      text.includes("UPDATE iam.identity_sessions") &&
+      text.includes("WHERE session_id = $1::text")
+    ) {
+      const existing = sessions.get(params[0] as string);
+      if (!existing) return { rows: [] };
+      const updated: CanonicalIdentitySessionRecord = {
+        ...existing,
+        status: "revoked",
+        revokedAt: params[1] as string,
+        revokedByPrincipalId: (params[2] as string | null) ?? null,
+        revokeReason: params[3] as string,
+        updatedAt: params[1] as string,
+      };
+      sessions.set(updated.sessionId, updated);
+      return { rows: [toPersistedSessionRow(updated)] };
+    }
+    if (
+      text.includes("UPDATE iam.identity_sessions") &&
+      text.includes("WHERE principal_id = $1::text AND status = 'active'")
+    ) {
+      const revokedIds: Array<{ session_id: string }> = [];
+      for (const session of sessions.values()) {
+        if (session.principalId === params[0] && session.status === "active") {
+          sessions.set(session.sessionId, {
+            ...session,
+            status: "revoked",
+            revokedAt: params[1] as string,
+            revokedByPrincipalId: (params[2] as string | null) ?? null,
+            revokeReason: params[3] as string,
+            updatedAt: params[1] as string,
+          });
+          revokedIds.push({ session_id: session.sessionId });
+        }
+      }
+      return { rows: revokedIds };
+    }
+    if (text.includes("UPDATE iam.identity_refresh_families")) {
+      return { rows: [] };
+    }
+
+    throw new Error(`Unmocked Fleet durable session query: ${text}`);
+  });
+
+  const databaseService = {
+    isEnabled: () => true,
+    connect: async () => ({ query, release: vi.fn() }),
+    query,
+  };
+
+  return {
+    databaseService,
+    setFleetPartnerActive(fleetPartnerId: string, active: boolean) {
+      fleetPartnersActive.set(fleetPartnerId, active);
+    },
+    seedPersistedFleetEntry(options: {
+      entrySlug: string;
+      fleetPartnerId: string;
+      updatedAt?: string;
+      status?: "active" | "inactive" | "revoked";
+      activeFlag?: boolean;
+    }): PartnerChannelEntryRecord {
+      const now = options.updatedAt ?? new Date().toISOString();
+      const entry: PartnerChannelEntryRecord = {
+        partnerId: options.fleetPartnerId,
+        partnerCode: `fleet_code_${options.entrySlug}`,
+        partnerType: "fleet_partner",
+        programId: `program-${options.entrySlug}`,
+        programCode: null,
+        tenantId: `tenant-${options.entrySlug}`,
+        bankCode: null,
+        entrySlug: options.entrySlug,
+        displayName: `Fleet Entry ${options.entrySlug}`,
+        businessDispatchSubtype: "enterprise_dispatch",
+        authMode: "partner_api_key",
+        eligibilityMode: "none",
+        entryHost: null,
+        entryPath: `/partner/${options.entrySlug}`,
+        themeAccent: null,
+        brandingMetadata: null,
+        eligibilityContract: null,
+        status: options.status ?? "active",
+        activeFlag: options.activeFlag ?? true,
+        revokedAt: null,
+        revokedBy: null,
+        revokeReason: null,
+        createdAt: now,
+        updatedAt: now,
+        auditMetadata: {
+          source: "seed_bootstrap",
+          requestId: null,
+          createdBy: "system:seed",
+          updatedBy: "system:seed",
+        },
+      };
+      partnerEntries.set(options.entrySlug, entry);
+      return entry;
+    },
+    getPrincipal(principalId: string) {
+      return principals.get(principalId) ?? null;
+    },
+    setPrincipalStatus(
+      principalId: string,
+      status: CanonicalIdentityPrincipalRecord["status"],
+    ) {
+      const existing = principals.get(principalId);
+      if (existing) {
+        upsertPrincipalRow({
+          ...existing,
+          status,
+          updatedAt: new Date(Date.now() + 1000).toISOString(),
+        });
+      }
+    },
+    deletePasswordCredential(principalId: string) {
+      passwordCredentials.delete(principalId);
+    },
+    setLinkStatus(entrySlug: string, partnerUserRef: string, status: string) {
+      const key = `${entrySlug}::${partnerUserRef}`;
+      const existing = links.get(key);
+      if (existing) {
+        links.set(key, { ...existing, status });
+      }
+    },
+    getLink(entrySlug: string, partnerUserRef: string) {
+      return links.get(`${entrySlug}::${partnerUserRef}`) ?? null;
+    },
+    getLinkCount() {
+      return links.size;
+    },
+  };
+}
+
+describe("FLEET-PASSWORD-MEMBER-SESSION-20261123: password-invited Fleet member durable session, cold-start resolvePartnerEntries, MFA/sessions, and Google/re-invite preservation", () => {
+  it("reproduces from formal invitation -> accept-with-password -> cold-start password-login, verifies durable state without a Google link, and permits continuous TOTP MFA and session operations", async () => {
+    const mock = createFleetDurableSessionPortMock();
+    const entrySlug = `fleet-cold-start-${randomUUID()}`;
+    const fleetPartnerId = `fleet-partner-cold-${randomUUID()}`;
+    mock.setFleetPartnerActive(fleetPartnerId, true);
+    mock.seedPersistedFleetEntry({
+      entrySlug,
+      fleetPartnerId,
+      updatedAt: "2026-11-23T01:00:00.000Z",
+    });
+
+    const identityRepository = new IdentityRepository(
+      mock.databaseService as never,
+    );
+    const linkRepository = new PartnerUserIdentityLinkRepository(
+      mock.databaseService as never,
+    );
+    const tenantPartnerRepository = new TenantPartnerRepository(
+      mock.databaseService as never,
+    );
+
+    // Cold-start instance: in-memory `listPartnerEntries(entrySlug)` does not
+    // hold the DB-persisted entry until `resolvePartnerEntries(entrySlug)`
+    // loads `admin.phase1_partner_channel_entries` through `TenantPartnerRepository`.
+    const coldTenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      tenantPartnerRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      identityRepository,
+    );
+    expect(coldTenantPartnerService.listPartnerEntries(entrySlug)).toEqual([]);
+
+    const deliveredInvitations: Array<{
+      invitationId: string;
+      rawToken: string;
+      recipientEmail: string;
+    }> = [];
+    const fleetPartnerService = new FleetPartnerService(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      {
+        isEnabled: () => true,
+        findActiveFleetPartnerById: async (id: string) =>
+          id === fleetPartnerId ? { fleetPartnerId: id, active: true } : null,
+      } as never,
+      undefined,
+      identityRepository,
+      coldTenantPartnerService,
+      linkRepository,
+      {
+        isEnabled: () => true,
+        recordEventRequired: vi.fn(async () => undefined),
+      } as never,
+      {
+        send: vi.fn(
+          async (req: {
+            invitationId: string;
+            rawToken: string;
+            recipientEmail: string;
+          }) => {
+            deliveredInvitations.push(req);
+            return {
+              status: "sent" as const,
+              attemptedAt: new Date().toISOString(),
+            };
+          },
+        ),
+      } as never,
+    );
+
+    const manager = {
+      realm: "platform",
+      actorType: "platform_admin",
+      actorId: "manager-cold-start",
+      principalId: "principal-manager-cold-start",
+      scopes: ["foundation:write"],
+      amr: [],
+    } as never;
+
+    const email = `invited-pwd-${randomUUID()}@fleet.example.org`;
+    const issuedInvite = await fleetPartnerService.inviteFleetStaff(
+      fleetPartnerId,
+      {
+        entrySlug,
+        email,
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+    );
+    expect(deliveredInvitations).toHaveLength(1);
+
+    // Second cold-started TenantPartnerService instance for the login/auth
+    // controller, proving `issuePartnerPasswordSession` resolves the persisted
+    // entry via `resolvePartnerEntries` even when in-memory `listPartnerEntries`
+    // starts empty.
+    const authColdTenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      tenantPartnerRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      identityRepository,
+    );
+    expect(authColdTenantPartnerService.listPartnerEntries(entrySlug)).toEqual(
+      [],
+    );
+
+    const jwtAuthService = new JwtAuthService(
+      identityRepository,
+      authColdTenantPartnerService,
+      undefined,
+      undefined,
+      linkRepository,
+    );
+    const totpRepository = new TotpCredentialRepository();
+    const totpService = new TotpService(
+      totpRepository,
+      new PasswordHashingService(),
+    );
+    const totpController = new TotpController(totpService);
+    const authController = new AuthController(
+      jwtAuthService,
+      authColdTenantPartnerService,
+      {} as never,
+      new SecurityEventsService(),
+      undefined,
+      undefined,
+      identityRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      totpService,
+      totpRepository,
+    );
+
+    // 1. Accept invitation with password via the formal acceptance endpoint.
+    const acceptEnvelope =
+      (await authController.acceptFleetStaffInvitationWithPassword({
+        invitationToken: deliveredInvitations[0]!.rawToken,
+        password: CORRECT_PASSWORD,
+      })) as {
+        data: {
+          accepted: boolean;
+          entrySlug: string;
+          fleetPartnerId: string;
+          principalId: string;
+          membershipId: string;
+          roleCode: string;
+        };
+      };
+    expect(acceptEnvelope.data).toEqual({
+      accepted: true,
+      entrySlug,
+      fleetPartnerId,
+      principalId: issuedInvite.member.principalId,
+      membershipId: issuedInvite.member.membershipId,
+      roleCode: "fleet_partner_ops",
+    });
+
+    // No Google identity link was created or fabricated.
+    expect(
+      await linkRepository.findByDrtsPassengerId(
+        entrySlug,
+        issuedInvite.member.principalId,
+      ),
+    ).toBeNull();
+    expect(mock.getLinkCount()).toBe(0);
+    expect(mock.getPrincipal(issuedInvite.member.principalId)?.issuer).toBe(
+      FLEET_INVITATION_ISSUER,
+    );
+
+    // 2. Log in with password via `POST /api/auth/partner/password-login` on the
+    // cold-started TenantPartnerService instance. Also verify any browser-smuggled
+    // loginMethod/amr claim in the body is ignored.
+    const resolveEntriesSpy = vi.spyOn(
+      authColdTenantPartnerService,
+      "resolvePartnerEntries",
+    );
+    const loginEnvelope = (await authController.passwordLogin("partner", {
+      email,
+      password: CORRECT_PASSWORD,
+      partnerId: entrySlug,
+      ...({
+        amr: ["pwd", "otp"],
+        loginMethod: "google",
+        mfa: true,
+      } as Record<string, unknown>),
+    })) as {
+      data: {
+        accessToken: string;
+        partnerEntry: PartnerChannelEntryRecord;
+        identity: {
+          principalId?: string | null;
+          membershipId?: string | null;
+          partnerId?: string | null;
+          partnerEntrySlug?: string | null;
+          roles: string[];
+          amr?: string[];
+        };
+      };
+    };
+    expect(resolveEntriesSpy).toHaveBeenCalledWith(entrySlug);
+    expect(loginEnvelope.data.accessToken).toBeTruthy();
+    expect(loginEnvelope.data.identity).toMatchObject({
+      principalId: issuedInvite.member.principalId,
+      membershipId: issuedInvite.member.membershipId,
+      partnerId: fleetPartnerId,
+      partnerEntrySlug: entrySlug,
+      roles: ["fleet_partner_ops"],
+      amr: ["pwd"],
+    });
+
+    // 3. Verify the token on a separate cold-started JwtAuthService +
+    // TenantPartnerService instance (simulating another Cloud Run instance).
+    const verifierColdTenantService = new TenantPartnerService(
+      new AuditNotificationService(),
+      tenantPartnerRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      identityRepository,
+    );
+    const verifierJwtService = new JwtAuthService(
+      identityRepository,
+      verifierColdTenantService,
+      undefined,
+      undefined,
+      linkRepository,
+    );
+    const verifiedPayload = await verifierJwtService.verifyAccessToken(
+      loginEnvelope.data.accessToken,
+    );
+    expect(verifiedPayload).not.toBeNull();
+    expect(verifiedPayload).toMatchObject({
+      realm: "partner",
+      actorType: "partner_user",
+      principalId: issuedInvite.member.principalId,
+      membershipId: issuedInvite.member.membershipId,
+      partnerId: fleetPartnerId,
+      partnerEntrySlug: entrySlug,
+      roles: ["fleet_partner_ops"],
+      amr: ["pwd"],
+      acr: "aal1",
+    });
+
+    // 4. Using the verified request identity, the member can read /api/auth/session,
+    // list their active sessions (/api/auth/sessions), and enroll + confirm TOTP MFA.
+    const verifiedIdentity = verifierJwtService.toRequestIdentity(
+      verifiedPayload!,
+    );
+    const csrfHeaders = { "x-drts-csrf": "1" };
+
+    expect(authController.getAuthSession(verifiedIdentity).data).toMatchObject({
+      active: true,
+      identity: {
+        principalId: issuedInvite.member.principalId,
+        membershipId: issuedInvite.member.membershipId,
+        partnerId: fleetPartnerId,
+        roles: ["fleet_partner_ops"],
+      },
+    });
+
+    const sessionsBeforeMfa = (await authController.listSelfSessions(
+      verifiedIdentity,
+    )) as { data: Array<{ sessionId: string; isCurrent: boolean }> };
+    expect(sessionsBeforeMfa.data).toHaveLength(1);
+    expect(sessionsBeforeMfa.data[0]).toMatchObject({
+      sessionId: verifiedIdentity.sessionId,
+      isCurrent: true,
+    });
+
+    const enrollEnvelope = (await totpController.enroll(
+      "partner",
+      verifiedIdentity,
+      csrfHeaders,
+    )) as { data: { otpauthUri: string; secret: string } };
+    expect(enrollEnvelope.data.secret).toBeTruthy();
+    expect(enrollEnvelope.data.otpauthUri).toContain("otpauth://totp/");
+
+    const nowStep = Math.floor(Date.now() / 1000 / 30);
+    const confirmCode = await generate({
+      secret: enrollEnvelope.data.secret,
+      epoch: (nowStep - 1) * 30,
+    });
+    const confirmEnvelope = (await totpController.confirm(
+      "partner",
+      verifiedIdentity,
+      { code: confirmCode },
+      csrfHeaders,
+    )) as { data: { recoveryCodes: string[] } };
+    expect(confirmEnvelope.data.recoveryCodes).toHaveLength(10);
+
+    // Session remains valid right after TOTP confirmation; member can log out.
+    expect(
+      await verifierJwtService.verifyAccessToken(
+        loginEnvelope.data.accessToken,
+      ),
+    ).not.toBeNull();
+    await authController.logout(
+      verifiedIdentity,
+      { reason: "self_logout" },
+      { headers: csrfHeaders },
+    );
+    expect(
+      await verifierJwtService.verifyAccessToken(
+        loginEnvelope.data.accessToken,
+      ),
+    ).toBeNull();
+
+    // 5. Re-login after TOTP confirmation requires the second factor, then
+    // issues a durable `amr: ["pwd", "otp"]` session that can regenerate
+    // recovery codes and manage sessions.
+    await expectUniformDenial(
+      authController.passwordLogin("partner", {
+        email,
+        password: CORRECT_PASSWORD,
+        partnerId: entrySlug,
+      }),
+    );
+
+    const loginTotpCode = await generate({
+      secret: enrollEnvelope.data.secret,
+      epoch: nowStep * 30,
+    });
+    const mfaLoginEnvelope = (await authController.passwordLogin("partner", {
+      email,
+      password: CORRECT_PASSWORD,
+      partnerId: entrySlug,
+      totpCode: loginTotpCode,
+    })) as {
+      data: {
+        accessToken: string;
+        identity: { amr?: string[] };
+      };
+    };
+    expect(mfaLoginEnvelope.data.identity.amr).toEqual(["pwd", "otp"]);
+
+    const verifiedMfaPayload = await verifierJwtService.verifyAccessToken(
+      mfaLoginEnvelope.data.accessToken,
+    );
+    expect(verifiedMfaPayload).toMatchObject({
+      principalId: issuedInvite.member.principalId,
+      membershipId: issuedInvite.member.membershipId,
+      amr: ["pwd", "otp"],
+      acr: "aal1",
+    });
+
+    const mfaIdentity = verifierJwtService.toRequestIdentity(
+      verifiedMfaPayload!,
+    );
+    const regenerated = (await totpController.regenerateRecoveryCodes(
+      "partner",
+      mfaIdentity,
+      csrfHeaders,
+    )) as { data: { recoveryCodes: string[] } };
+    expect(regenerated.data.recoveryCodes).toHaveLength(10);
+
+    // If the persisted password credential is removed, or the membership is
+    // deactivated, or the principal is suspended, or the Fleet entry becomes
+    // inactive, `verifyAccessToken` immediately rejects the session.
+    mock.deletePasswordCredential(issuedInvite.member.principalId);
+    expect(
+      await verifierJwtService.verifyAccessToken(
+        mfaLoginEnvelope.data.accessToken,
+      ),
+    ).toBeNull();
+
+    // Restore credential, then deactivate membership via FleetPartnerService.
+    const rehashed = await new PasswordHashingService().hash(CORRECT_PASSWORD);
+    await identityRepository.setPasswordCredentialForPrincipal(
+      issuedInvite.member.principalId,
+      {
+        passwordHash: rehashed.hash,
+        passwordAlgo: rehashed.algo,
+        pepperVersion: rehashed.pepperVersion,
+      },
+    );
+    expect(
+      await verifierJwtService.verifyAccessToken(
+        mfaLoginEnvelope.data.accessToken,
+      ),
+    ).not.toBeNull();
+
+    await fleetPartnerService.deactivateFleetStaffMember(
+      fleetPartnerId,
+      entrySlug,
+      issuedInvite.member.membershipId,
+      manager,
+    );
+    expect(
+      await verifierJwtService.verifyAccessToken(
+        mfaLoginEnvelope.data.accessToken,
+      ),
+    ).toBeNull();
+  });
+
+  it("preserves Google OIDC Fleet login binding, link disablement revocation, and #3356 same-member Google re-invitation after deactivation", async () => {
+    const mock = createFleetDurableSessionPortMock();
+    const entrySlug = `fleet-google-reinvite-${randomUUID()}`;
+    const fleetPartnerId = `fleet-partner-google-${randomUUID()}`;
+    mock.setFleetPartnerActive(fleetPartnerId, true);
+    mock.seedPersistedFleetEntry({
+      entrySlug,
+      fleetPartnerId,
+      updatedAt: "2026-11-23T01:30:00.000Z",
+    });
+
+    const identityRepository = new IdentityRepository(
+      mock.databaseService as never,
+    );
+    const linkRepository = new PartnerUserIdentityLinkRepository(
+      mock.databaseService as never,
+    );
+    const tenantPartnerRepository = new TenantPartnerRepository(
+      mock.databaseService as never,
+    );
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      tenantPartnerRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      identityRepository,
+      identityRepository,
+    );
+    await tenantPartnerService.resolvePartnerEntries(entrySlug);
+
+    const deliveredTokens: string[] = [];
+    const fleetPartnerService = new FleetPartnerService(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      {
+        isEnabled: () => true,
+        findActiveFleetPartnerById: async (id: string) =>
+          id === fleetPartnerId ? { fleetPartnerId: id, active: true } : null,
+      } as never,
+      undefined,
+      identityRepository,
+      tenantPartnerService,
+      linkRepository,
+      {
+        isEnabled: () => true,
+        recordEventRequired: vi.fn(async () => undefined),
+      } as never,
+      {
+        send: vi.fn(async (req: { rawToken: string }) => {
+          deliveredTokens.push(req.rawToken);
+          return {
+            status: "sent" as const,
+            attemptedAt: new Date().toISOString(),
+          };
+        }),
+      } as never,
+    );
+    const jwtAuthService = new JwtAuthService(
+      identityRepository,
+      tenantPartnerService,
+      undefined,
+      undefined,
+      linkRepository,
+    );
+    const oidcService = new OidcPkceService(
+      jwtAuthService,
+      tenantPartnerService,
+      undefined,
+      linkRepository,
+      undefined,
+      identityRepository,
+    );
+
+    const manager = {
+      realm: "platform",
+      actorType: "platform_admin",
+      actorId: "manager-google-reinvite",
+      principalId: "principal-manager-google-reinvite",
+      scopes: ["foundation:write"],
+      amr: [],
+    } as never;
+
+    // 1. Invite and accept via Google OIDC (default mock OIDC email is admin@acme.example).
+    const email = "admin@acme.example";
+    const oidcCode = "partner_fleet_google_reinvite_subject";
+    const oidcSub = `sub_oidc_${createHash("sha256").update(oidcCode).digest("hex").slice(0, 12)}`;
+
+    const firstInvite = await fleetPartnerService.inviteFleetStaff(
+      fleetPartnerId,
+      {
+        entrySlug,
+        email,
+        roleCode: "fleet_partner_ops",
+      },
+      manager,
+    );
+    expect(deliveredTokens).toHaveLength(1);
+
+    const inviteLoginState = oidcService.generateLoginParameters("partner", {
+      partnerId: entrySlug,
+      invitationToken: deliveredTokens[0]!,
+    });
+    const initialGoogleSession =
+      await oidcService.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          code: oidcCode,
+          state: inviteLoginState.state,
+          partnerId: entrySlug,
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+        },
+        { stateToken: inviteLoginState.stateToken },
+      );
+    expect(initialGoogleSession.identity).toMatchObject({
+      principalId: firstInvite.member.principalId,
+      membershipId: firstInvite.member.membershipId,
+      partnerId: fleetPartnerId,
+      partnerEntrySlug: entrySlug,
+      roles: ["fleet_partner_ops"],
+    });
+    expect(
+      await jwtAuthService.verifyAccessToken(initialGoogleSession.accessToken),
+    ).not.toBeNull();
+
+    // Disabling the Google identity link immediately invalidates the Google session.
+    mock.setLinkStatus(entrySlug, oidcSub, "disabled");
+    expect(
+      await jwtAuthService.verifyAccessToken(initialGoogleSession.accessToken),
+    ).toBeNull();
+    mock.setLinkStatus(entrySlug, oidcSub, "active");
+    expect(
+      await jwtAuthService.verifyAccessToken(initialGoogleSession.accessToken),
+    ).not.toBeNull();
+
+    // 2. Deactivate the member and re-invite the same person (#3356).
+    await fleetPartnerService.deactivateFleetStaffMember(
+      fleetPartnerId,
+      entrySlug,
+      firstInvite.member.membershipId,
+      manager,
+    );
+    expect(
+      await jwtAuthService.verifyAccessToken(initialGoogleSession.accessToken),
+    ).toBeNull();
+
+    const reinvited = await fleetPartnerService.inviteFleetStaff(
+      fleetPartnerId,
+      {
+        entrySlug,
+        email,
+        roleCode: "fleet_partner_finance",
+      },
+      manager,
+    );
+    expect(deliveredTokens).toHaveLength(2);
+    expect(reinvited.member.principalId).toBe(firstInvite.member.principalId);
+    expect(reinvited.member.membershipId).toBe(firstInvite.member.membershipId);
+
+    // Direct ordinary Google login before re-verifying the fresh invitation is blocked.
+    const prematureState = oidcService.generateLoginParameters("partner", {
+      partnerId: entrySlug,
+    });
+    await expect(
+      oidcService.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          code: oidcCode,
+          state: prematureState.state,
+          partnerId: entrySlug,
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+        },
+        { stateToken: prematureState.stateToken },
+      ),
+    ).rejects.toMatchObject({ code: "IAM_PRINCIPAL_NOT_ACTIVE" });
+
+    // A different Google sub with the same email is rejected without consuming the invitation.
+    const wrongSubState = oidcService.generateLoginParameters("partner", {
+      partnerId: entrySlug,
+      invitationToken: deliveredTokens[1]!,
+    });
+    await expect(
+      oidcService.exchangePartnerCallbackSession(
+        {
+          provider: "oidc",
+          code: "partner_different_google_subject",
+          state: wrongSubState.state,
+          partnerId: entrySlug,
+          callbackUrl: "http://localhost:3000/api/auth/callback",
+        },
+        { stateToken: wrongSubState.stateToken },
+      ),
+    ).rejects.toMatchObject({ code: "AUTH_SESSION_EXCHANGE_DENIED" });
+
+    // Re-verifying with the original Google account succeeds, reuses the single
+    // fleet_staff_invitation link, and issues a durable session with the new role.
+    const reverifyState = oidcService.generateLoginParameters("partner", {
+      partnerId: entrySlug,
+      invitationToken: deliveredTokens[1]!,
+    });
+    const reverifiedSession = await oidcService.exchangePartnerCallbackSession(
+      {
+        provider: "oidc",
+        code: oidcCode,
+        state: reverifyState.state,
+        partnerId: entrySlug,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+      },
+      { stateToken: reverifyState.stateToken },
+    );
+    expect(reverifiedSession.identity).toMatchObject({
+      principalId: firstInvite.member.principalId,
+      membershipId: firstInvite.member.membershipId,
+      partnerId: fleetPartnerId,
+      partnerEntrySlug: entrySlug,
+      roles: ["fleet_partner_finance"],
+    });
+    expect(mock.getLinkCount()).toBe(1);
+    expect(
+      await jwtAuthService.verifyAccessToken(reverifiedSession.accessToken),
+    ).toMatchObject({
+      principalId: firstInvite.member.principalId,
+      membershipId: firstInvite.member.membershipId,
+      roles: ["fleet_partner_finance"],
+    });
   });
 });
