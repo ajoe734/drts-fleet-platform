@@ -30,6 +30,7 @@ import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-part
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import {
   OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
+  OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityMultiTaxiTripCompletedEvent,
 } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
@@ -46,6 +47,7 @@ import { PaymentMethodService } from "../../../apps/api/src/modules/passenger-ap
 import { PaymentRefundController } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.controller";
 import { PaymentRefundService } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.service";
 import type { PaymentRuntime } from "../../../apps/api/src/modules/passenger-app/payment/payment-runtime.config";
+import type { EncryptedPaymentToken } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
 import { PassengerReceiptController } from "../../../apps/api/src/modules/passenger-app/receipt/passenger-receipt.controller";
 import { PassengerPushDevicesRepository } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository";
 import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
@@ -92,11 +94,11 @@ export interface ProductOrderDatabaseInspection {
     payment_method_id: string;
     drts_passenger_id: string;
     psp_name: string;
-    token_envelope: string | null;
+    token_envelope: EncryptedPaymentToken | string | null;
     last4: string;
     card_type: string;
-    expiry_month: number;
-    expiry_year: number;
+    expiry_month: string;
+    expiry_year: string;
     is_default: boolean;
     status: string;
   }>;
@@ -151,7 +153,6 @@ export interface ProductOrderDatabaseInspection {
     operation: string;
     entity_id: string;
     outcome: string;
-    provider_ref: string | null;
     last_error: string | null;
   }>;
 }
@@ -232,14 +233,19 @@ export async function startProductOrderStageContext(params: {
   });
 
   const auth = await pg.authenticatedAccount("email", params.passengerEmail);
-  await pg.accounts.updateMe(auth.identity, {
-    displayName: "Stage Product Order QA",
-    contactPhone: "0900000000",
-    contactConsent: true,
-    termsVersion: "qa-terms",
-    privacyVersion: "qa-privacy",
-    feeAcknowledgementVersion: "qa-fees",
-  });
+  let bookingProfileReady = false;
+  async function ensureBookingProfile() {
+    if (bookingProfileReady) return;
+    await pg.accounts.updateMe(auth.identity, {
+      displayName: "Stage Product Order QA",
+      contactPhone: "0900000000",
+      contactConsent: true,
+      termsVersion: "qa-terms",
+      privacyVersion: "qa-privacy",
+      feeAcknowledgementVersion: "qa-fees",
+    });
+    bookingProfileReady = true;
+  }
 
   const { fares } = await pg.fareServices();
 
@@ -382,6 +388,7 @@ export async function startProductOrderStageContext(params: {
     new CertificateSupportRepository(pg.database),
   );
   const emitter = new EventEmitter2();
+  emitter.on(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, async () => undefined);
   emitter.on(
     OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT,
     async (event: OwnedMobilityMultiTaxiTripCompletedEvent) => {
@@ -390,6 +397,7 @@ export async function startProductOrderStageContext(params: {
     },
   );
   Reflect.set(owned, "eventEmitter", emitter);
+  Reflect.set(owned, "multiTaxiRepository", pg.taxi);
 
   const multi = new MultiTaxiService(
     owned,
@@ -510,6 +518,7 @@ export async function startProductOrderStageContext(params: {
   }
 
   async function createQuote() {
+    await ensureBookingProfile();
     const origin = {
       lat: 25.08,
       lng: 121.55,
@@ -520,7 +529,7 @@ export async function startProductOrderStageContext(params: {
       lng: 121.57,
       address: "台北市內湖區內湖路一段360號",
     };
-    const scheduledAt = new Date(Date.now() + 25 * 60_000).toISOString();
+    const scheduledAt = new Date(Date.now() + 2 * 86_400_000).toISOString();
     const quote = await fares.quote(auth.identity, {
       originLat: origin.lat,
       originLng: origin.lng,
@@ -568,7 +577,7 @@ export async function startProductOrderStageContext(params: {
         completedAt,
         actualDistanceKm: 1.25,
         actualDurationSec: 360,
-        fare: { amountMinor: fareMinor, currency: "NTD" },
+        fare: { amountMinor: fareMinor, currency: "TWD" },
         proof: { photos: [] },
         actualFareBreakdown: {
           startMinor: fareMinor,
@@ -579,15 +588,18 @@ export async function startProductOrderStageContext(params: {
       },
       `stage-driver-complete:${orderId}`,
     );
-    await Reflect.get(owned, "driverCompletionOutboxDrainPromise");
+    while (Reflect.get(owned, "driverCompletionOutboxDrainPromise")) {
+      await Reflect.get(owned, "driverCompletionOutboxDrainPromise");
+    }
 
     const outboxResult = await pg.pool!.query<{
       task_id: string;
       order_id: string;
       status: string;
       attempt_count: number;
+      last_error: string | null;
     }>(
-      `SELECT task_id, order_id, status, attempt_count
+      `SELECT task_id, order_id, status, attempt_count, last_error
        FROM ops.driver_completion_outbox
        WHERE order_id = $1 AND effect_type = 'multi_taxi_certificate'`,
       [orderId],
@@ -595,6 +607,11 @@ export async function startProductOrderStageContext(params: {
     const outboxRow = outboxResult.rows[0];
     if (!outboxRow) {
       throw new Error("completion_outbox_row_missing");
+    }
+    if (outboxRow.status !== "delivered" && outboxRow.last_error) {
+      throw new Error(
+        `completion_outbox_delivery_failed:${outboxRow.status}:${outboxRow.last_error}`,
+      );
     }
     return {
       taskId: assignment.taskId,
@@ -623,19 +640,27 @@ export async function startProductOrderStageContext(params: {
         payment_method_id: string;
         drts_passenger_id: string;
         psp_name: string;
-        token_envelope: string | null;
+        token_envelope: EncryptedPaymentToken | string | null;
         last4: string;
         card_type: string;
-        expiry_month: number;
-        expiry_year: number;
+        expiry_month: string;
+        expiry_year: string;
         is_default: boolean;
         status: string;
       }>(
-        `SELECT payment_method_id, drts_passenger_id, psp_name, token_envelope,
-                last4, card_type, expiry_month, expiry_year, is_default, status
+        `SELECT payment_method_id::text AS payment_method_id,
+                drts_passenger_id,
+                provider AS psp_name,
+                token_envelope,
+                last4,
+                card_type,
+                expiry_month,
+                expiry_year,
+                is_default,
+                status
          FROM passenger.psp_tokens
          WHERE drts_passenger_id = $1
-           AND ($2::text IS NULL OR payment_method_id = $2)
+           AND ($2::text IS NULL OR payment_method_id::text = $2)
          ORDER BY created_at ASC`,
         [auth.owner, paymentMethodId ?? null],
       ),
@@ -644,10 +669,12 @@ export async function startProductOrderStageContext(params: {
         drts_passenger_id: string;
         fare_snapshot_id: string;
       }>(
-        `SELECT order_id, drts_passenger_id, fare_snapshot_id
+        `SELECT order_id::text AS order_id,
+                drts_passenger_id,
+                fare_snapshot_id::text AS fare_snapshot_id
          FROM passenger.booking_histories
          WHERE drts_passenger_id = $1
-           AND ($2::text IS NULL OR order_id = $2)
+           AND ($2::text IS NULL OR order_id::text = $2)
          ORDER BY created_at ASC`,
         [auth.owner, orderId ?? null],
       ),
@@ -687,11 +714,11 @@ export async function startProductOrderStageContext(params: {
         driver_surname: string | null;
       }>(
         `SELECT order_id,
-                trip_id,
+                COALESCE(record->>'tripId', record->>'trip_id', '') AS trip_id,
                 record->'e04Snapshot'->>'paymentMethodDisplay' AS payment_method_display,
                 record->'e04Snapshot'->>'fleetOperatorName' AS fleet_operator_name,
                 record->'e04Snapshot'->>'driverSurname' AS driver_surname
-         FROM ops.multi_taxi_electronic_receipts
+         FROM reporting.multi_taxi_electronic_receipts
          WHERE ($1::text IS NULL OR order_id = $1)
          ORDER BY order_id ASC`,
         [orderId ?? null],
@@ -709,11 +736,19 @@ export async function startProductOrderStageContext(params: {
         provider_refund_ref: string | null;
         last_error: string | null;
       }>(
-        `SELECT payment_id, order_id, drts_passenger_id, payment_method_id,
-                amount_minor, currency, status, attempt_count,
-                provider_capture_ref, provider_refund_ref, last_error
+        `SELECT payment_id,
+                order_id::text AS order_id,
+                drts_passenger_id,
+                payment_method_id::text AS payment_method_id,
+                amount_minor,
+                currency,
+                status,
+                attempt_count,
+                provider_capture_ref,
+                provider_refund_ref,
+                last_error_code AS last_error
          FROM passenger.payment_charge_records
-         WHERE ($1::text IS NULL OR order_id = $1)
+         WHERE ($1::text IS NULL OR order_id::text = $1)
          ORDER BY order_id ASC`,
         [orderId ?? null],
       ),
@@ -736,10 +771,13 @@ export async function startProductOrderStageContext(params: {
         operation: string;
         entity_id: string;
         outcome: string;
-        provider_ref: string | null;
         last_error: string | null;
       }>(
-        `SELECT idempotency_key, operation, entity_id, outcome, provider_ref, last_error
+        `SELECT idempotency_key,
+                operation,
+                entity_id::text AS entity_id,
+                outcome,
+                error_code AS last_error
          FROM passenger.payment_idempotency_keys
          ORDER BY idempotency_key ASC`,
       ),

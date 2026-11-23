@@ -4,8 +4,13 @@
  * and service-level bind -> 3DS callback -> capture -> receipt -> refund ->
  * unbind lifecycle.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { encryptEcpayData } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-cipher";
+import {
+  decryptEcpayData,
+  encryptEcpayData,
+} from "../../../apps/api/src/modules/passenger-app/payment/ecpay-cipher";
 import { EcpayPaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-payment-provider";
 import { PaymentChargeRepository } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.repository";
 import { PaymentChargeService } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.service";
@@ -424,7 +429,7 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
 
       currentStep = "01_session";
       const session = await methodService.createBindingSession(passengerId, {
-        email: "stage@example.invalid",
+        email: "pax-psp-sandbox@example.com",
       });
       expect(session.provider).toBe("ecpay");
       expect(session.serverType).toBe("Stage");
@@ -500,6 +505,92 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("verifies Stage GetTokenbyBindingCard ConsumerInfo.Email format, CreatePassengerRideCommand camelCase body, and V0056/V0115 SQL schema alignment", async () => {
+    let capturedGetTokenData: Record<string, unknown> | null = null;
+    const provider = new EcpayPaymentProvider({
+      merchantId: TEST_MERCHANT_ID,
+      hashKey: TEST_HASH_KEY,
+      hashIv: TEST_HASH_IV,
+      sandbox: true,
+      fetchFn: async (_url, init) => {
+        const envelope = JSON.parse(String(init.body)) as { Data: string };
+        capturedGetTokenData = decryptEcpayData(
+          envelope.Data,
+          TEST_HASH_KEY,
+          TEST_HASH_IV,
+        );
+        return new Response(
+          JSON.stringify(
+            buildSignedEcpayEnvelope({
+              RtnCode: 1,
+              RtnMsg: "OK",
+              Token: "STAGE_MERCHANT_TOKEN_OK",
+              TokenExpireDate: "2026/11/23 12:00:00",
+            }),
+          ),
+          { status: 200 },
+        );
+      },
+    });
+
+    const specSource = readFileSync(
+      path.resolve(
+        process.cwd(),
+        "tests/e2e/pax-psp-sandbox/ecpay-stage-sandbox.spec.ts",
+      ),
+      "utf8",
+    );
+    const harnessSource = readFileSync(
+      path.resolve(
+        process.cwd(),
+        "tests/e2e/pax-psp-sandbox/product-order-harness.ts",
+      ),
+      "utf8",
+    );
+    const v0115Sql = readFileSync(
+      path.resolve(
+        process.cwd(),
+        "infra/migrations/V0115__passenger_payment_core.sql",
+      ),
+      "utf8",
+    );
+
+    // 1. Stage GetTokenbyBindingCard rejects .invalid TLD with 5100011; spec must use @example.com
+    expect(specSource).toContain(
+      'const SYNTHETIC_EMAIL = "pax-psp-sandbox@example.com";',
+    );
+    expect(specSource).not.toContain("@example.invalid");
+    await provider.createBindingSession("drts_passenger_stage_email_check", {
+      email: "pax-psp-sandbox@example.com",
+    });
+    const consumerInfo = (capturedGetTokenData?.ConsumerInfo ?? {}) as Record<
+      string,
+      unknown
+    >;
+    expect(consumerInfo.Email).toBe("pax-psp-sandbox@example.com");
+    expect(consumerInfo.Phone).toBeUndefined();
+
+    // 2. PassengerBookingController.createRide expects CreatePassengerRideCommand camelCase fields
+    expect(specSource).toContain("scheduledAt: quote.scheduledAt");
+    expect(specSource).toContain("fareSnapshotId: quote.fareSnapshotId");
+    expect(specSource).toContain("paymentMethodId,");
+    expect(specSource).toContain("passengerConfirmedAt:");
+
+    // 3. product-order-harness.ts SQL and completion currency align with V0115 and V0056
+    expect(v0115Sql).toContain("provider text NOT NULL");
+    expect(v0115Sql).toContain("last_error_code text");
+    expect(v0115Sql).toContain("error_code text");
+    expect(harnessSource).toContain("provider AS psp_name");
+    expect(harnessSource).toContain("last_error_code AS last_error");
+    expect(harnessSource).toContain("error_code AS last_error");
+    expect(harnessSource).toContain(
+      "FROM reporting.multi_taxi_electronic_receipts",
+    );
+    expect(harnessSource).toContain(
+      'fare: { amountMinor: fareMinor, currency: "TWD" }',
+    );
   });
 });
 
@@ -635,7 +726,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       const cipher = new PaymentTokenCipher(TEST_KEY_RING);
       const ctx = await startProductOrderStageContext({
         runtime: { provider, cipher },
-        passengerEmail: "pg-stage-order@example.invalid",
+        passengerEmail: "pax-psp-sandbox@example.com",
       });
 
       try {
@@ -715,10 +806,10 @@ describe.skipIf(!hostedPaymentEnabled)(
           body: JSON.stringify({
             origin: quote.origin,
             destination: quote.destination,
-            scheduled_at: quote.scheduledAt,
-            fare_snapshot_id: quote.fareSnapshotId,
-            payment_method_id: paymentMethodId,
-            passenger_confirmed_at: new Date(Date.now() - 1000).toISOString(),
+            scheduledAt: quote.scheduledAt,
+            fareSnapshotId: quote.fareSnapshotId,
+            paymentMethodId: paymentMethodId,
+            passengerConfirmedAt: new Date(Date.now() - 1000).toISOString(),
           }),
         });
         expect(createRideResp.status).toBe(201);

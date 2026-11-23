@@ -104,6 +104,7 @@ import {
 
 const CHARGE_AMOUNT_TWD = 85;
 const CHARGE_AMOUNT_MINOR = CHARGE_AMOUNT_TWD * 100;
+const SYNTHETIC_EMAIL = "pax-psp-sandbox@example.com";
 const ORDER_RESULT_PATH =
   /\/api\/passenger-app\/payment-methods\/ecpay\/order-result(?:[?#]|$)/;
 
@@ -146,7 +147,7 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
     process.env.GITHUB_RUN_ID
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${runAttempt}`
       : null;
-  const syntheticEmail = `pax-stage-order-${runKey}@example.invalid`;
+  const syntheticEmail = SYNTHETIC_EMAIL;
 
   const calls: EcpayCallRecord[] = [];
   const steps: StepRecord[] = [];
@@ -694,10 +695,18 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       expect(dbState.pspTokens).toHaveLength(1);
       const tokenRow = dbState.pspTokens[0]!;
       expect(tokenRow.token_envelope).toBeTruthy();
-      expect(tokenRow.token_envelope).not.toContain(bindCardId ?? "MISSING");
+      const serializedEnvelope =
+        typeof tokenRow.token_envelope === "string"
+          ? tokenRow.token_envelope
+          : JSON.stringify(tokenRow.token_envelope);
+      expect(serializedEnvelope).not.toContain(bindCardId ?? "MISSING");
 
+      const parsedEnvelope =
+        typeof tokenRow.token_envelope === "string"
+          ? JSON.parse(tokenRow.token_envelope)
+          : tokenRow.token_envelope!;
       const decryptedBindCardId = cipher.decrypt(
-        tokenRow.token_envelope!,
+        parsedEnvelope,
         ctx.passengerId,
         paymentMethodId!,
       );
@@ -787,17 +796,16 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       const bookingPayload = {
         origin: quote.origin,
         destination: quote.destination,
-        scheduled_at: quote.scheduledAt,
-        fare_snapshot_id: quote.fareSnapshotId,
-        payment_method_id: paymentMethodId,
-        passenger_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+        scheduledAt: quote.scheduledAt,
+        fareSnapshotId: quote.fareSnapshotId,
+        paymentMethodId,
+        passengerConfirmedAt: new Date(Date.now() - 1_000).toISOString(),
       };
       const createRideResp = await ctx.requestJson<{
         data?: {
           ride?: {
             order?: {
               order_id?: string;
-              payment_method_token_ref?: string;
             };
           };
         };
@@ -816,10 +824,6 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       expect(orderId).toBeTruthy();
       productOrderId = orderId;
       outcome.orderId = orderId;
-      outcome.orderPaymentMethodId =
-        createRideResp.body?.data?.ride?.order?.payment_method_token_ref ??
-        null;
-      expect(outcome.orderPaymentMethodId).toBe(paymentMethodId);
 
       // 2. Booking idempotency replay with the same x-request-id returns the exact same orderId
       const replayRideResp = await ctx.requestJson<{
@@ -844,6 +848,10 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
       expect(replayRideResp.body?.data?.ride?.order?.order_id).toBe(orderId);
       const dbAfterBookingReplay = await ctx.inspectDatabaseState(orderId);
       expect(dbAfterBookingReplay.bookingHistories).toHaveLength(1);
+      expect(dbAfterBookingReplay.ownedOrders).toHaveLength(1);
+      outcome.orderPaymentMethodId =
+        dbAfterBookingReplay.ownedOrders[0]?.payment_method_token_ref ?? null;
+      expect(outcome.orderPaymentMethodId).toBe(paymentMethodId);
       bookingIdempotencyVerified = true;
       outcome.bookingReplayIdempotent = true;
 
@@ -1138,8 +1146,7 @@ test("ECPay Stage: product session, 3DS bind controller, same product order, cap
             accept: "application/json",
           },
           body: JSON.stringify({
-            reason:
-              "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 stage refund replay",
+            reason: "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 stage refund check",
           }),
         });
         outcome.refundReplayHttpStatus = replayRefund.status;
