@@ -6,10 +6,6 @@ const {
   TOPOLOGY,
   API_SECRETS,
 } = require("../production-release-rail/rail.cjs");
-const {
-  DRIVER_ONBOARDING_SECRETS,
-  driverOnboardingEnabled,
-} = require("../production-release-rail/driver-onboarding.cjs");
 const TARGET = Object.freeze({
   project: "drts-prod-devcc-20260825",
   region: "us-central1",
@@ -560,14 +556,6 @@ function inventory(env) {
       "release-smoke-headers",
     ].map((s) => `${prefix}-${s}`),
   );
-  if (driverOnboardingEnabled(env, () => fail("CONFIG_REJECTED")))
-    for (const [key, suffix] of Object.entries(DRIVER_ONBOARDING_SECRETS)) {
-      const actual =
-        (key.startsWith("TWILIO_") && env[`PROD_${key}_SECRET`]) ||
-        `${prefix}-${suffix}`;
-      if (!SECRET_NAME.test(actual)) fail("CONFIG_REJECTED");
-      secrets.add(actual);
-    }
   for (const key of [
     ...OPTIONAL_SECRETS,
     ...ARTIFACT_SECRETS.filter(

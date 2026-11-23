@@ -11,42 +11,6 @@ const workflow = yaml.parse(
 );
 
 describe("protected production inventory actual exported boundaries", () => {
-  it("accepts the reviewed production lineage with opt-in onboarding secret metadata", async () => {
-    expect(() => c.checkRail()).not.toThrow();
-    const f = fixture({
-      PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED: "true",
-      PROD_TWILIO_ACCOUNT_SID_SECRET: "operator-selected-twilio-sid",
-    });
-    const report = await c.collect(f.env, SHA, f.transport);
-    expect(report.collection).toBe("complete");
-    for (const name of [
-      "drts-prod-driver-onboarding-code-pepper",
-      "drts-prod-driver-onboarding-delivery-key",
-      "operator-selected-twilio-sid",
-      "drts-prod-twilio-api-key-sid",
-      "drts-prod-twilio-api-key-secret",
-      "drts-prod-twilio-from-number",
-    ])
-      expect(
-        f.plan.operations.some(
-          (op: any) =>
-            op.kind === "versions" &&
-            new URL(op.url).pathname.endsWith(`/secrets/${name}/versions`),
-        ),
-      ).toBe(true);
-    expect(
-      f.plan.operations.some((op: any) =>
-        new URL(op.url).pathname.endsWith(
-          "/secrets/drts-prod-twilio-account-sid/versions",
-        ),
-      ),
-    ).toBe(false);
-    expect(c.serialize(report)).not.toContain(SENTINEL);
-    for (const call of f.calls) {
-      expect(call.method).toBe("GET");
-      expect(new URL(call.url).pathname).not.toContain(":access");
-    }
-  });
   it.each(["rail.cjs", "run.cjs", "preflight.cjs", "driver-onboarding.cjs"])(
     "rejects unreviewed %s changes before any external read",
     async (file) => {
@@ -76,6 +40,7 @@ describe("protected production inventory actual exported boundaries", () => {
     },
   );
   it("collects the complete original-rail inventory, revisions and actual LB join with no readiness inference", async () => {
+    expect(() => c.checkRail()).not.toThrow();
     const f = fixture();
     const report = await c.collect(f.env, SHA, f.transport);
     const saved = c.serialize(report);

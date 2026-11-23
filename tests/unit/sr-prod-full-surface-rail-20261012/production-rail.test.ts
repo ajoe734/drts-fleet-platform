@@ -116,7 +116,7 @@ describe("driver onboarding normal production release configuration", () => {
       ["TWILIO_API_KEY_SID", "twilio-api-key-sid"],
       ["TWILIO_API_KEY_SECRET", "twilio-api-key-secret"],
       ["TWILIO_FROM_NUMBER", "twilio-from-number"],
-    ]) {
+    ] as const) {
       expect(built.services[0].secrets[key]).toBe(`drts-prod-${suffix}`);
       expect(api.secrets[key]).toBe(`drts-prod-${suffix}:7`);
     }
