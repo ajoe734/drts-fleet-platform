@@ -73,6 +73,31 @@ function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
+function unwrapEnvelope(payload) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'data' in payload &&
+    payload.data !== undefined
+  ) {
+    return payload.data;
+  }
+  return payload;
+}
+
+function sanitizeDiagnosticSnippet(text) {
+  if (typeof text !== 'string' || !text) {
+    return '';
+  }
+  return text
+    .replace(
+      /("(?:token|access_token|accessToken|refresh_token|refreshToken|registration_code|registrationCode|id_token|idToken)"\s*:\s*)"[^"]*"/gi,
+      '$1"[REDACTED]"'
+    )
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]')
+    .slice(0, 300);
+}
+
 export async function inspectSharedDevProviderActivation({
   projectId,
   region,
@@ -575,18 +600,27 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         },
         body: '{}',
       });
-      const { json: tokenBody, text: tokenText } =
+      const { json: tokenBodyRaw, text: tokenText } =
         await readResponseJsonOrText(tokenResp);
-      if (tokenResp.status !== 200 || !tokenBody?.token) {
+      const tokenBody = unwrapEnvelope(tokenBodyRaw);
+      const mintedOpsToken =
+        tokenBody?.token ??
+        tokenBody?.accessToken ??
+        tokenBody?.access_token ??
+        null;
+      if (
+        (tokenResp.status !== 200 && tokenResp.status !== 201) ||
+        !mintedOpsToken
+      ) {
         evidence.missing.push('platform_admin_ops_session');
         throw new Error(
-          `Failed to mint platform_admin session via ${tokenUrl}: status=${tokenResp.status} body=${tokenText.slice(0, 300)}`
+          `Failed to mint platform_admin session via ${tokenUrl}: status=${tokenResp.status} body=${sanitizeDiagnosticSnippet(tokenText)}`
         );
       }
-      opsToken = String(tokenBody.token).trim();
+      opsToken = String(mintedOpsToken).trim();
       mask(opsToken);
       issuedOpsSessionId =
-        tokenBody.session_id ?? tokenBody.sessionId ?? null;
+        tokenBody?.session_id ?? tokenBody?.sessionId ?? null;
     }
 
     const opsSessionResp = await fetchImpl(`${apiOrigin}/api/auth/session`, {
@@ -601,16 +635,18 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/auth/session (ops)',
       observedRuntimeSha
     );
-    const { json: opsSessionBody, text: opsSessionText } =
+    const { json: opsSessionRaw, text: opsSessionText } =
       await readResponseJsonOrText(opsSessionResp);
-    if (opsSessionResp.status !== 200 || !opsSessionBody) {
+    const opsSessionData = unwrapEnvelope(opsSessionRaw);
+    const opsIdentity = opsSessionData?.identity ?? opsSessionData;
+    if (opsSessionResp.status !== 200 || !opsIdentity) {
       evidence.missing.push('verified_platform_admin_ops_session');
       throw new Error(
-        `Failed to verify Ops session at ${apiOrigin}/api/auth/session: status=${opsSessionResp.status} body=${opsSessionText.slice(0, 300)}`
+        `Failed to verify Ops session at ${apiOrigin}/api/auth/session: status=${opsSessionResp.status} body=${sanitizeDiagnosticSnippet(opsSessionText)}`
       );
     }
-    const opsScopes = Array.isArray(opsSessionBody.scopes)
-      ? opsSessionBody.scopes
+    const opsScopes = Array.isArray(opsIdentity.scopes)
+      ? opsIdentity.scopes
       : [];
     for (const requiredScope of [
       'billing:read',
@@ -625,14 +661,15 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         );
       }
     }
-    if (!issuedOpsSessionId && opsSessionBody.sessionId && !preSuppliedOpsToken) {
-      issuedOpsSessionId = opsSessionBody.sessionId;
+    if (!issuedOpsSessionId && opsIdentity.sessionId && !preSuppliedOpsToken) {
+      issuedOpsSessionId = opsIdentity.sessionId;
     }
     evidence.role_sessions.ops = {
-      session_id: opsSessionBody.sessionId ?? issuedOpsSessionId ?? null,
-      actor_type: opsSessionBody.actorType ?? null,
-      realm: opsSessionBody.realm ?? null,
-      role: opsSessionBody.role ?? null,
+      session_id: opsIdentity.sessionId ?? issuedOpsSessionId ?? null,
+      actor_id: opsIdentity.actorId ?? opsIdentity.principalId ?? null,
+      actor_type: opsIdentity.actorType ?? null,
+      realm: opsIdentity.realm ?? null,
+      role: opsIdentity.role ?? null,
       scopes: opsScopes,
       source: preSuppliedOpsToken
         ? 'pre_supplied_env'
@@ -664,17 +701,18 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         '/api/auth/driver/device/invite',
         observedRuntimeSha
       );
-      const { json: inviteBody, text: inviteText } =
+      const { json: inviteBodyRaw, text: inviteText } =
         await readResponseJsonOrText(inviteResp);
+      const inviteBody = unwrapEnvelope(inviteBodyRaw);
       const registrationCode =
-        inviteBody?.registration_code ?? inviteBody?.registrationCode ?? null;
+        inviteBody?.registrationCode ?? inviteBody?.registration_code ?? null;
       if (
         (inviteResp.status !== 200 && inviteResp.status !== 201) ||
         !registrationCode
       ) {
         evidence.missing.push(`driver_device_invitation:${driverId}`);
         throw new Error(
-          `Failed to issue driver device invitation for ${driverId}: status=${inviteResp.status} body=${inviteText.slice(0, 300)}`
+          `Failed to issue driver device invitation for ${driverId}: status=${inviteResp.status} body=${sanitizeDiagnosticSnippet(inviteText)}`
         );
       }
       issuedDriverRegistrationCode = String(registrationCode).trim();
@@ -702,17 +740,21 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         '/api/auth/driver/device/register',
         observedRuntimeSha
       );
-      const { json: registerBody, text: registerText } =
+      const { json: registerBodyRaw, text: registerText } =
         await readResponseJsonOrText(registerResp);
+      const registerBody = unwrapEnvelope(registerBodyRaw);
       const mintedDriverToken =
-        registerBody?.access_token ?? registerBody?.accessToken ?? null;
+        registerBody?.accessToken ??
+        registerBody?.access_token ??
+        registerBody?.token ??
+        null;
       if (
         (registerResp.status !== 200 && registerResp.status !== 201) ||
         !mintedDriverToken
       ) {
         evidence.missing.push(`driver_device_session:${driverId}`);
         throw new Error(
-          `Failed to register driver device session for ${driverId}: status=${registerResp.status} body=${registerText.slice(0, 300)}`
+          `Failed to register driver device session for ${driverId}: status=${registerResp.status} body=${sanitizeDiagnosticSnippet(registerText)}`
         );
       }
       driverToken = String(mintedDriverToken).trim();
@@ -731,16 +773,18 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/auth/session (driver)',
       observedRuntimeSha
     );
-    const { json: driverSessionBody, text: driverSessionText } =
+    const { json: driverSessionRaw, text: driverSessionText } =
       await readResponseJsonOrText(driverSessionResp);
-    if (driverSessionResp.status !== 200 || !driverSessionBody) {
+    const driverSessionData = unwrapEnvelope(driverSessionRaw);
+    const driverIdentity = driverSessionData?.identity ?? driverSessionData;
+    if (driverSessionResp.status !== 200 || !driverIdentity) {
       evidence.missing.push(`verified_driver_session:${driverId}`);
       throw new Error(
-        `Failed to verify Driver session at ${apiOrigin}/api/auth/session: status=${driverSessionResp.status} body=${driverSessionText.slice(0, 300)}`
+        `Failed to verify Driver session at ${apiOrigin}/api/auth/session: status=${driverSessionResp.status} body=${sanitizeDiagnosticSnippet(driverSessionText)}`
       );
     }
-    const driverScopes = Array.isArray(driverSessionBody.scopes)
-      ? driverSessionBody.scopes
+    const driverScopes = Array.isArray(driverIdentity.scopes)
+      ? driverIdentity.scopes
       : [];
     if (!driverScopes.includes('driver:write')) {
       evidence.missing.push('driver_scope:driver:write');
@@ -748,17 +792,19 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `Driver session is missing required scope "driver:write"; actual scopes: ${driverScopes.join(', ')}`
       );
     }
-    if (driverSessionBody.driverId && driverSessionBody.driverId !== driverId) {
+    const resolvedDriverActorId =
+      driverIdentity.driverId ?? driverIdentity.actorId ?? null;
+    if (resolvedDriverActorId && resolvedDriverActorId !== driverId) {
       throw new Error(
-        `Driver session bound to unexpected driverId "${driverSessionBody.driverId}", expected "${driverId}"`
+        `Driver session bound to unexpected driverId "${resolvedDriverActorId}", expected "${driverId}"`
       );
     }
     evidence.role_sessions.driver = {
-      session_id: driverSessionBody.sessionId ?? null,
-      driver_id: driverSessionBody.driverId ?? driverId,
-      actor_type: driverSessionBody.actorType ?? null,
-      realm: driverSessionBody.realm ?? null,
-      role: driverSessionBody.role ?? null,
+      session_id: driverIdentity.sessionId ?? null,
+      driver_id: resolvedDriverActorId ?? driverId,
+      actor_type: driverIdentity.actorType ?? null,
+      realm: driverIdentity.realm ?? null,
+      role: driverIdentity.role ?? null,
       scopes: driverScopes,
       source: preSuppliedDriverToken
         ? 'pre_supplied_env'
@@ -778,18 +824,21 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/driver-fee-plans',
       observedRuntimeSha
     );
-    const { json: feePlansBody, text: feePlansText } =
+    const { json: feePlansRaw, text: feePlansText } =
       await readResponseJsonOrText(feePlansResp);
-    if (feePlansResp.status !== 200 || !Array.isArray(feePlansBody?.items)) {
+    const feePlansData = unwrapEnvelope(feePlansRaw);
+    if (feePlansResp.status !== 200 || !Array.isArray(feePlansData?.items)) {
       throw new Error(
-        `Failed to list driver fee plans: status=${feePlansResp.status} body=${feePlansText.slice(0, 300)}`
+        `Failed to list driver fee plans: status=${feePlansResp.status} body=${sanitizeDiagnosticSnippet(feePlansText)}`
       );
     }
-    const fixturePlanExists = feePlansBody.items.some(
+    const fixturePlanExists = feePlansData.items.some(
       (item) =>
         item &&
-        item.planCode === 'fixture-platform-funded-reimbursement' &&
-        item.status === 'published'
+        item.status === 'published' &&
+        (item.planName === 'fixture-platform-funded-reimbursement' ||
+          item.planCode === 'fixture-platform-funded-reimbursement' ||
+          item.reimbursementMode === 'platform_funded')
     );
     if (!fixturePlanExists) {
       const publishPlanResp = await fetchImpl(
@@ -802,8 +851,12 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
             extraHeaders: { 'Content-Type': 'application/json' },
           }),
           body: JSON.stringify({
+            planName: 'fixture-platform-funded-reimbursement',
             planCode: 'fixture-platform-funded-reimbursement',
+            version: `2026.03-uat-${randomUUID().slice(0, 8)}`,
             versionCode: 'v1',
+            serviceFeeBps: 1200,
+            reimbursementMode: 'platform_funded',
           }),
         }
       );
@@ -812,14 +865,18 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         '/api/driver-fee-plans/publish',
         observedRuntimeSha
       );
-      if (publishPlanResp.status !== 200 && publishPlanResp.status !== 201) {
+      if (
+        publishPlanResp.status !== 200 &&
+        publishPlanResp.status !== 201 &&
+        publishPlanResp.status !== 409
+      ) {
         const { text: publishPlanText } =
           await readResponseJsonOrText(publishPlanResp);
         evidence.missing.push(
           'driver_fee_plan:fixture-platform-funded-reimbursement'
         );
         throw new Error(
-          `Failed to publish fixture driver fee plan: status=${publishPlanResp.status} body=${publishPlanText.slice(0, 300)}`
+          `Failed to publish fixture driver fee plan: status=${publishPlanResp.status} body=${sanitizeDiagnosticSnippet(publishPlanText)}`
         );
       }
     }
@@ -831,10 +888,14 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         headers: buildApiHeaders({
           apiIdToken,
           appSessionToken: opsToken,
-          extraHeaders: { 'Content-Type': 'application/json' },
+          extraHeaders: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `uat-stmt-${driverId}-${billingPeriod}-${randomUUID()}`,
+          },
         }),
         body: JSON.stringify({
           driverId,
+          periodMonth: billingPeriod,
           billingPeriod,
           planCode: 'fixture-platform-funded-reimbursement',
         }),
@@ -845,10 +906,16 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/driver-statements/generate',
       observedRuntimeSha
     );
-    const { json: statementBody, text: statementText } =
+    const { json: statementRaw, text: statementText } =
       await readResponseJsonOrText(statementResp);
+    const statementData = unwrapEnvelope(statementRaw);
     const reimbursementBatchId =
-      statementBody?.reimbursementBatch?.batchId ?? null;
+      (Array.isArray(statementData?.reimbursementBatchIds) &&
+      statementData.reimbursementBatchIds.length > 0
+        ? statementData.reimbursementBatchIds[0]
+        : null) ??
+      statementData?.reimbursementBatch?.batchId ??
+      null;
     if (
       (statementResp.status !== 200 && statementResp.status !== 201) ||
       !reimbursementBatchId
@@ -857,7 +924,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `synthetic_reimbursement_batch:${driverId}:${billingPeriod}`
       );
       throw new Error(
-        `Failed to resolve synthetic reimbursement batch for ${driverId} (${billingPeriod}): status=${statementResp.status} body=${statementText.slice(0, 300)}`
+        `Failed to resolve synthetic reimbursement batch for ${driverId} (${billingPeriod}): status=${statementResp.status} body=${sanitizeDiagnosticSnippet(statementText)}`
       );
     }
     evidence.synthetic_fixtures.reimbursement_batch_id = reimbursementBatchId;
@@ -877,8 +944,9 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       `/api/reimbursements/${reimbursementBatchId}`,
       observedRuntimeSha
     );
-    const { json: batchBody, text: batchText } =
+    const { json: batchRaw, text: batchText } =
       await readResponseJsonOrText(batchResp);
+    const batchBody = unwrapEnvelope(batchRaw);
     if (
       batchResp.status !== 200 ||
       batchBody?.batchId !== reimbursementBatchId ||
@@ -888,7 +956,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `verified_reimbursement_batch:${reimbursementBatchId}`
       );
       throw new Error(
-        `Failed to verify reimbursement batch ${reimbursementBatchId}: status=${batchResp.status} body=${batchText.slice(0, 300)}`
+        `Failed to verify reimbursement batch ${reimbursementBatchId}: status=${batchResp.status} body=${sanitizeDiagnosticSnippet(batchText)}`
       );
     }
 
@@ -907,15 +975,19 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/platform-admin/public-info',
       observedRuntimeSha
     );
-    const { json: publicInfoBody, text: publicInfoText } =
+    const { json: publicInfoRaw, text: publicInfoText } =
       await readResponseJsonOrText(publicInfoResp);
-    if (publicInfoResp.status !== 200 || !Array.isArray(publicInfoBody?.items)) {
+    const publicInfoData = unwrapEnvelope(publicInfoRaw);
+    if (publicInfoResp.status !== 200 || !Array.isArray(publicInfoData?.items)) {
       throw new Error(
-        `Failed to list platform-admin public info versions: status=${publicInfoResp.status} body=${publicInfoText.slice(0, 300)}`
+        `Failed to list platform-admin public info versions: status=${publicInfoResp.status} body=${sanitizeDiagnosticSnippet(publicInfoText)}`
       );
     }
-    const targetPublicInfo = publicInfoBody.items.find(
-      (item) => item && item.publicInfoVersionId === publicInfoVersionId
+    const targetPublicInfo = publicInfoData.items.find(
+      (item) =>
+        item &&
+        (item.versionId === publicInfoVersionId ||
+          item.publicInfoVersionId === publicInfoVersionId)
     );
     if (!targetPublicInfo || targetPublicInfo.status !== 'published') {
       evidence.missing.push(`public_info_version:${publicInfoVersionId}`);
@@ -939,10 +1011,14 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           headers: buildApiHeaders({
             apiIdToken,
             appSessionToken: driverToken,
-            extraHeaders: { 'Content-Type': 'application/json' },
+            extraHeaders: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': `uat-stage-${label}-${randomUUID()}`,
+            },
           }),
           body: JSON.stringify({
             contentBase64: bytes.toString('base64'),
+            contentType: 'application/pdf',
           }),
         }
       );
@@ -951,25 +1027,31 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `/api/reimbursements/proofs/staged-content (${label})`,
         observedRuntimeSha
       );
-      const { json: stageBody, text: stageText } =
+      const { json: stageRaw, text: stageText } =
         await readResponseJsonOrText(stageResp);
-      const stagedContentRef = stageBody?.staged_content_ref ?? null;
+      const stageBody = unwrapEnvelope(stageRaw);
+      const stagedContentRef =
+        stageBody?.stagedContentRef ?? stageBody?.staged_content_ref ?? null;
+      const stagedContentHash =
+        stageBody?.contentHash ?? stageBody?.content_hash ?? null;
+      const stagedSizeBytes =
+        stageBody?.sizeBytes ?? stageBody?.size_bytes ?? null;
       if (
         (stageResp.status !== 200 && stageResp.status !== 201) ||
         !stagedContentRef
       ) {
         throw new Error(
-          `Failed to stage ${label} remittance proof content: status=${stageResp.status} body=${stageText.slice(0, 300)}`
+          `Failed to stage ${label} remittance proof content: status=${stageResp.status} body=${sanitizeDiagnosticSnippet(stageText)}`
         );
       }
-      if (stageBody.content_hash !== expectedSha256) {
+      if (stagedContentHash !== expectedSha256) {
         throw new Error(
-          `Staged ${label} content_hash mismatch: expected ${expectedSha256}, got ${stageBody.content_hash}`
+          `Staged ${label} content_hash mismatch: expected ${expectedSha256}, got ${stagedContentHash}`
         );
       }
-      if (stageBody.size_bytes !== bytes.byteLength) {
+      if (stagedSizeBytes !== bytes.byteLength) {
         throw new Error(
-          `Staged ${label} size_bytes mismatch: expected ${bytes.byteLength}, got ${stageBody.size_bytes}`
+          `Staged ${label} size_bytes mismatch: expected ${bytes.byteLength}, got ${stagedSizeBytes}`
         );
       }
 
@@ -980,10 +1062,15 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           headers: buildApiHeaders({
             apiIdToken,
             appSessionToken: driverToken,
-            extraHeaders: { 'Content-Type': 'application/json' },
+            extraHeaders: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': `uat-upload-${label}-${randomUUID()}`,
+            },
           }),
           body: JSON.stringify({
+            batchId: reimbursementBatchId,
             reimbursementBatchId,
+            originalFilename: fileName,
             fileName,
             mimeType: 'application/pdf',
             proofReference,
@@ -998,23 +1085,25 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `/api/reimbursements/proofs (${label})`,
         observedRuntimeSha
       );
-      let { json: proofBody, text: uploadText } =
+      const { json: uploadRaw, text: uploadText } =
         await readResponseJsonOrText(uploadResp);
+      let proofBody = unwrapEnvelope(uploadRaw);
+      const proofId =
+        proofBody?.proofId ?? proofBody?.remittance_proof_id ?? null;
       if (
         (uploadResp.status !== 200 && uploadResp.status !== 201) ||
-        !proofBody?.remittance_proof_id
+        !proofId
       ) {
         throw new Error(
-          `Failed to upload ${label} remittance proof: status=${uploadResp.status} body=${uploadText.slice(0, 300)}`
+          `Failed to upload ${label} remittance proof: status=${uploadResp.status} body=${sanitizeDiagnosticSnippet(uploadText)}`
         );
       }
 
-      const proofId = proofBody.remittance_proof_id;
+      let scanState = proofBody?.scanState ?? proofBody?.scan_state ?? null;
+      let rejectionReason =
+        proofBody?.rejectionReason ?? proofBody?.rejection_reason ?? null;
       let scanAttempts = 1;
-      while (
-        proofBody.scan_state === 'pending_scan' &&
-        scanAttempts < scanMaxAttempts
-      ) {
+      while (scanState === 'pending_scan' && scanAttempts < scanMaxAttempts) {
         await sleep(scanPollIntervalMs);
         scanAttempts += 1;
         const rescanResp = await fetchImpl(
@@ -1035,21 +1124,31 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           observedRuntimeSha
         );
         const rescanParsed = await readResponseJsonOrText(rescanResp);
+        if (rescanResp.status === 503) {
+          // Scanner cold start returns 503 REMITTANCE_PROOF_SCANNER_UNAVAILABLE while clamd loads
+          continue;
+        }
+        const rescanData = unwrapEnvelope(rescanParsed.json);
         if (
           (rescanResp.status !== 200 && rescanResp.status !== 201) ||
-          !rescanParsed.json
+          !rescanData
         ) {
           throw new Error(
-            `Failed to re-scan ${label} proof ${proofId}: status=${rescanResp.status} body=${rescanParsed.text.slice(0, 300)}`
+            `Failed to re-scan ${label} proof ${proofId}: status=${rescanResp.status} body=${sanitizeDiagnosticSnippet(rescanParsed.text)}`
           );
         }
-        proofBody = rescanParsed.json;
+        proofBody = rescanData;
+        scanState = proofBody?.scanState ?? proofBody?.scan_state ?? null;
+        rejectionReason =
+          proofBody?.rejectionReason ?? proofBody?.rejection_reason ?? null;
       }
 
       return {
         proofId,
         stagedContentRef,
         proofBody,
+        scanState,
+        rejectionReason,
         scanAttempts,
       };
     }
@@ -1065,14 +1164,14 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       proofReference: `UAT-CLEAN-${runTag}`,
     });
 
-    if (cleanUpload.proofBody.scan_state !== 'clean') {
+    if (cleanUpload.scanState !== 'clean') {
       throw new Error(
-        `Clean remittance proof ${cleanUpload.proofId} did not reach scan_state="clean": got scan_state="${cleanUpload.proofBody.scan_state}" rejection_reason="${cleanUpload.proofBody.rejection_reason}"`
+        `Clean remittance proof ${cleanUpload.proofId} did not reach scan_state="clean": got scan_state="${cleanUpload.scanState}" rejection_reason="${cleanUpload.rejectionReason}"`
       );
     }
-    if (cleanUpload.proofBody.rejection_reason !== null) {
+    if (cleanUpload.rejectionReason !== null) {
       throw new Error(
-        `Clean remittance proof ${cleanUpload.proofId} unexpected rejection_reason: ${cleanUpload.proofBody.rejection_reason}`
+        `Clean remittance proof ${cleanUpload.proofId} unexpected rejection_reason: ${cleanUpload.rejectionReason}`
       );
     }
 
@@ -1083,7 +1182,9 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         headers: buildApiHeaders({
           apiIdToken,
           appSessionToken: opsToken,
+          extraHeaders: { 'Content-Type': 'application/json' },
         }),
+        body: JSON.stringify({}),
       }
     );
     assertObservedRuntimeHeader(
@@ -1091,15 +1192,17 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       `/api/reimbursements/proofs/${cleanUpload.proofId}/readback`,
       observedRuntimeSha
     );
-    const { json: cleanReadbackBody, text: cleanReadbackText } =
+    const { json: cleanReadbackRaw, text: cleanReadbackText } =
       await readResponseJsonOrText(cleanReadbackResp);
-    const cleanReadbackPath = cleanReadbackBody?.readback_url ?? null;
+    const cleanReadbackBody = unwrapEnvelope(cleanReadbackRaw);
+    const cleanReadbackPath =
+      cleanReadbackBody?.readbackUrl ?? cleanReadbackBody?.readback_url ?? null;
     if (
       (cleanReadbackResp.status !== 200 && cleanReadbackResp.status !== 201) ||
       !cleanReadbackPath
     ) {
       throw new Error(
-        `Failed to acquire Ops readback URL for clean proof ${cleanUpload.proofId}: status=${cleanReadbackResp.status} body=${cleanReadbackText.slice(0, 300)}`
+        `Failed to acquire Ops readback URL for clean proof ${cleanUpload.proofId}: status=${cleanReadbackResp.status} body=${sanitizeDiagnosticSnippet(cleanReadbackText)}`
       );
     }
 
@@ -1122,7 +1225,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       await readResponseJsonOrText(cleanDownloadResp);
     if (cleanDownloadResp.status !== 200) {
       throw new Error(
-        `Failed to download clean remittance proof from ${cleanReadbackPath}: status=${cleanDownloadResp.status} body=${cleanDownloadText.slice(0, 300)}`
+        `Failed to download clean remittance proof from ${cleanReadbackPath}: status=${cleanDownloadResp.status} body=${sanitizeDiagnosticSnippet(cleanDownloadText)}`
       );
     }
     const cleanDownloadedSha256 = sha256Hex(cleanDownloadedBytes);
@@ -1143,8 +1246,8 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       remittance_proof_id: cleanUpload.proofId,
       reimbursement_batch_id: reimbursementBatchId,
       staged_content_ref: cleanUpload.stagedContentRef,
-      scan_state: cleanUpload.proofBody.scan_state,
-      rejection_reason: cleanUpload.proofBody.rejection_reason,
+      scan_state: cleanUpload.scanState,
+      rejection_reason: cleanUpload.rejectionReason,
       scan_attempts: cleanUpload.scanAttempts,
       uploaded_byte_length: SYNTHETIC_CLEAN_PDF_BYTES.byteLength,
       downloaded_byte_length: cleanDownloadedBytes.byteLength,
@@ -1164,11 +1267,11 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     });
 
     if (
-      eicarUpload.proofBody.scan_state !== 'rejected' ||
-      eicarUpload.proofBody.rejection_reason !== 'MALWARE_DETECTED'
+      eicarUpload.scanState !== 'rejected' ||
+      eicarUpload.rejectionReason !== 'MALWARE_DETECTED'
     ) {
       throw new Error(
-        `EICAR remittance proof ${eicarUpload.proofId} was not rejected with MALWARE_DETECTED: got scan_state="${eicarUpload.proofBody.scan_state}" rejection_reason="${eicarUpload.proofBody.rejection_reason}"`
+        `EICAR remittance proof ${eicarUpload.proofId} was not rejected with MALWARE_DETECTED: got scan_state="${eicarUpload.scanState}" rejection_reason="${eicarUpload.rejectionReason}"`
       );
     }
 
@@ -1179,7 +1282,9 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         headers: buildApiHeaders({
           apiIdToken,
           appSessionToken: opsToken,
+          extraHeaders: { 'Content-Type': 'application/json' },
         }),
+        body: JSON.stringify({}),
       }
     );
     assertObservedRuntimeHeader(
@@ -1187,19 +1292,22 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       `/api/reimbursements/proofs/${eicarUpload.proofId}/readback`,
       observedRuntimeSha
     );
-    const { json: eicarReadbackBody } =
+    const { json: eicarReadbackRaw } =
       await readResponseJsonOrText(eicarReadbackResp);
+    const eicarReadbackBody = unwrapEnvelope(eicarReadbackRaw);
+    const eicarReadbackPath =
+      eicarReadbackBody?.readbackUrl ?? eicarReadbackBody?.readback_url ?? null;
 
     let eicarDownloadDeniedStatus = eicarReadbackResp.status;
     let eicarDownloadDeniedCode =
-      eicarReadbackBody?.error?.code ?? eicarReadbackBody?.code ?? null;
+      eicarReadbackRaw?.error?.code ?? eicarReadbackBody?.code ?? null;
 
     if (
       (eicarReadbackResp.status === 200 || eicarReadbackResp.status === 201) &&
-      eicarReadbackBody?.readback_url
+      eicarReadbackPath
     ) {
       const eicarDownloadUrl = new URL(
-        eicarReadbackBody.readback_url,
+        eicarReadbackPath,
         apiOrigin
       ).toString();
       const eicarDownloadResp = await fetchImpl(eicarDownloadUrl, {
@@ -1211,7 +1319,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       });
       assertObservedRuntimeHeader(
         eicarDownloadResp,
-        eicarReadbackBody.readback_url,
+        eicarReadbackPath,
         observedRuntimeSha
       );
       const { json: eicarDownloadBody, text: eicarDownloadText } =
@@ -1224,7 +1332,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         eicarDownloadDeniedCode !== 'REMITTANCE_PROOF_NOT_CLEAN'
       ) {
         throw new Error(
-          `EICAR remittance proof download must be denied with 409 REMITTANCE_PROOF_NOT_CLEAN: got status=${eicarDownloadResp.status} body=${eicarDownloadText.slice(0, 300)}`
+          `EICAR remittance proof download must be denied with 409 REMITTANCE_PROOF_NOT_CLEAN: got status=${eicarDownloadResp.status} body=${sanitizeDiagnosticSnippet(eicarDownloadText)}`
         );
       }
     } else if (
@@ -1240,8 +1348,8 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       remittance_proof_id: eicarUpload.proofId,
       reimbursement_batch_id: reimbursementBatchId,
       staged_content_ref: eicarUpload.stagedContentRef,
-      scan_state: eicarUpload.proofBody.scan_state,
-      rejection_reason: eicarUpload.proofBody.rejection_reason,
+      scan_state: eicarUpload.scanState,
+      rejection_reason: eicarUpload.rejectionReason,
       scan_attempts: eicarUpload.scanAttempts,
       byte_length: CANONICAL_EICAR_BYTES.byteLength,
       sha256: CANONICAL_EICAR_SHA256,
@@ -1272,17 +1380,22 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       '/api/platform-admin/placards',
       observedRuntimeSha
     );
-    const { json: placardBody, text: placardText } =
+    const { json: placardRaw, text: placardText } =
       await readResponseJsonOrText(createPlacardResp);
+    const placardBody = unwrapEnvelope(placardRaw);
     const placardVersionId =
-      placardBody?.placard_version_id ?? placardBody?.placardVersionId ?? null;
+      placardBody?.placardVersionId ?? placardBody?.placard_version_id ?? null;
     const placardDownloadPath =
-      placardBody?.download_url ?? placardBody?.downloadUrl ?? null;
+      placardBody?.artifactDownloadUrl ??
+      placardBody?.downloadMetadata?.downloadUrl ??
+      placardBody?.download_url ??
+      placardBody?.downloadUrl ??
+      null;
     const placardManifestHash =
-      placardBody?.download_metadata?.manifest_hash ??
-      placardBody?.downloadMetadata?.manifestHash ??
-      placardBody?.artifact_manifest_hash ??
       placardBody?.artifactManifestHash ??
+      placardBody?.downloadMetadata?.manifestHash ??
+      placardBody?.download_metadata?.manifest_hash ??
+      placardBody?.artifact_manifest_hash ??
       null;
     if (
       (createPlacardResp.status !== 200 && createPlacardResp.status !== 201) ||
@@ -1291,7 +1404,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       !placardManifestHash
     ) {
       throw new Error(
-        `Failed to create controlled placard version: status=${createPlacardResp.status} body=${placardText.slice(0, 300)}`
+        `Failed to create controlled placard version: status=${createPlacardResp.status} body=${sanitizeDiagnosticSnippet(placardText)}`
       );
     }
 
@@ -1315,7 +1428,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       await readResponseJsonOrText(placardDownloadResp);
     if (placardDownloadResp.status !== 200) {
       throw new Error(
-        `Failed to download controlled placard ${placardVersionId}: status=${placardDownloadResp.status} body=${placardDownloadText.slice(0, 300)}`
+        `Failed to download controlled placard ${placardVersionId}: status=${placardDownloadResp.status} body=${sanitizeDiagnosticSnippet(placardDownloadText)}`
       );
     }
     const placardPdfHeader = placardBytes.subarray(0, 5).toString('utf8');
@@ -1408,7 +1521,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
 
     const placardArtifactGcs = await inspectGcsObjectGenerationAndBytes({
       bucket: documentBucket,
-      objectKey: `document-artifacts/placard/${placardVersionId}`,
+      objectKey: `document-artifacts/placard/${encodeURIComponent(placardVersionId)}`,
       runtimeServiceAccount,
       execFileImpl,
     });
@@ -1467,7 +1580,9 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     return evidence;
   } catch (error) {
     evidence.status = 'failed';
-    evidence.error = error instanceof Error ? error.message : String(error);
+    evidence.error = sanitizeDiagnosticSnippet(
+      error instanceof Error ? error.message : String(error)
+    );
     throw error;
   } finally {
     // Revoke temporary driver invitation / device session before revoking Ops session
@@ -1555,7 +1670,7 @@ if (isDirectExecution) {
     })
     .catch((error) => {
       console.error(
-        `Shared-dev artifact roundtrip failed: ${error instanceof Error ? error.message : String(error)}`
+        `Shared-dev artifact roundtrip failed: ${sanitizeDiagnosticSnippet(error instanceof Error ? error.message : String(error))}`
       );
       process.exitCode = 1;
     });

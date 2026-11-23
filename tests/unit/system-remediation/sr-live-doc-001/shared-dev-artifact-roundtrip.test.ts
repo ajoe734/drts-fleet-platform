@@ -281,9 +281,11 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       parsedUrl.pathname === '/control-plane-proxy/auth/token' &&
       method === 'POST'
     ) {
-      return jsonResponse(200, {
-        token: 'ops-jwt-token-001',
-        session_id: 'ops-session-001',
+      return jsonResponse(201, {
+        data: {
+          token: 'ops-jwt-token-001',
+          sessionId: 'ops-session-001',
+        },
       });
     }
 
@@ -294,27 +296,38 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     ) {
       if (headers.Authorization === 'Bearer ops-jwt-token-001') {
         return jsonResponse(200, {
-          sessionId: 'ops-session-001',
-          actorType: 'workforce_user',
-          realm: 'workforce',
-          role: 'platform_admin',
-          scopes: [
-            'billing:read',
-            'billing:write',
-            'foundation:read',
-            'foundation:write',
-            'driver:provision',
-          ],
+          data: {
+            active: true,
+            identity: {
+              sessionId: 'ops-session-001',
+              actorId: 'principal_platform_admin_default',
+              actorType: 'platform_admin',
+              realm: 'platform',
+              role: 'platform_admin',
+              scopes: [
+                'billing:read',
+                'billing:write',
+                'foundation:read',
+                'foundation:write',
+                'driver:provision',
+              ],
+            },
+          },
         });
       }
       if (headers.Authorization === 'Bearer driver-jwt-token-001') {
         return jsonResponse(200, {
-          sessionId: 'driver-session-001',
-          driverId: 'drv-demo-001',
-          actorType: 'driver_user',
-          realm: 'driver',
-          role: 'driver',
-          scopes: ['driver:read', 'driver:write'],
+          data: {
+            active: true,
+            identity: {
+              sessionId: 'driver-session-001',
+              actorId: 'drv-demo-001',
+              actorType: 'driver_user',
+              realm: 'driver',
+              role: 'driver',
+              scopes: ['driver:read', 'driver:write'],
+            },
+          },
         });
       }
       return jsonResponse(401, { code: 'UNAUTHORIZED' });
