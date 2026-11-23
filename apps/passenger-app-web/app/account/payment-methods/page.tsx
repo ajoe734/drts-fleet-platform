@@ -7,7 +7,13 @@ import { useEffect, useState } from "react";
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
 import { ECPAY_ACTION_ORIGINS } from "../../../components/payment/ecpay-csp";
 import { EcpayHostedFields } from "../../../components/payment/ecpay-hosted-fields";
-import { PaymentMethodsScreen } from "../../../components/payment/payment-methods-screen";
+import {
+  PaymentMethodsScreen,
+  type Ecpay3dsReturnStatus,
+} from "../../../components/payment/payment-methods-screen";
+
+export const NATIVE_PASSENGER_PAYMENT_RETURN_URI =
+  "drtspassenger://payment-methods/return";
 import {
   useReviewDemo,
   useTrialMode,
@@ -19,7 +25,11 @@ import {
   isEcpayHostedFieldsRuntime,
 } from "../../../lib/payment/runtime-fields";
 
-export default function PaymentMethodsPage() {
+export default function PaymentMethodsPage({
+  ecpay3dsReturn,
+}: {
+  ecpay3dsReturn?: Ecpay3dsReturnStatus | null;
+} = {}) {
   const review = useReviewDemo();
   const trial = useTrialMode();
   const [captureResult, setCaptureResult] = useState<"success" | "retry_once">(
@@ -97,6 +107,8 @@ export default function PaymentMethodsPage() {
           ) : undefined
         }
         approvedActionOrigins={approvedActionOrigins}
+        nativeReturnUri={NATIVE_PASSENGER_PAYMENT_RETURN_URI}
+        {...(ecpay3dsReturn !== undefined ? { ecpay3dsReturn } : {})}
       />
     </>
   );

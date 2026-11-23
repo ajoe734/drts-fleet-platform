@@ -87,6 +87,7 @@ import { NativePassengerApplication } from "../../../components/application/nati
 ).IS_REACT_ACT_ENVIRONMENT = true;
 const BASE = "https://native-payment-bootstrap.example.invalid";
 const CALLBACK = "drtspassenger://auth/callback";
+const PAYMENT_RETURN = "drtspassenger://payment-methods/return";
 const METHODS = "/api/passenger-app/payment-methods";
 const SESSION = `${METHODS}?binding_session=1`;
 const CHANNEL = "drts-native-ecpay-fields";
@@ -364,7 +365,7 @@ beforeEach(() => {
   external.browser.mockReset();
   external.browser.mockResolvedValue({
     type: "success",
-    url: `${CALLBACK}?payment_return=1`,
+    url: `${PAYMENT_RETURN}?ecpay_3ds=completed`,
   });
 });
 afterEach(async () => {
@@ -398,10 +399,17 @@ describe("configured Native payment bootstrap with actual SDK and external SIM b
       expect(f.gets()).toHaveLength(before);
       expect(present(tree, "payment-success")).toBe(false);
     }
+    external.browser.mockResolvedValueOnce({
+      type: "success",
+      url: `${CALLBACK}?code=oauth-login-callback`,
+    });
+    await press(tree, "payment-verify");
+    expect(f.gets()).toHaveLength(before);
+    expect(present(tree, "payment-success")).toBe(false);
     await press(tree, "payment-verify");
     expect(external.browser).toHaveBeenLastCalledWith(
       f.state.bindResult.next_action_url,
-      CALLBACK,
+      PAYMENT_RETURN,
     );
     expect(f.gets()).toHaveLength(before + 1);
     expect(present(tree, "payment-pending")).toBe(true);
