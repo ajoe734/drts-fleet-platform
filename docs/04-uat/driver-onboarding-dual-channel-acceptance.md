@@ -135,7 +135,7 @@ timeout 90s pnpm exec eslint \
 
 本次 dispatch 已在原 DRV-ONB-013 擴充前述三檔 `write_scopes` 並完成衝突評估；原 owner 沿已發布的 `ed025019e1f6e44797949a0644d402a0d537c76e` 與 PR #3358 續作，不改寫前輪候選與修復歷史。前兩節的 scope 等待描述為當時紀錄，現已解除；規劃 helper 與本產品修復分離，原任務沒有 helper 依賴。
 
-套用既有 `unit-shard-repair/allocation-scope-proposal.patch`：僅追加 `driver_onboarding_allocations` 的 V0140–V0142 及 amendment，兩份 guards 共六處 collectors 納入該群組。核對三份正式 SQL 的 schema、tables、indexes、checks 與 FK；沒有改動 migrations、既有分配、amendments 或任何 assertion。本 checkpoint 尚待正式 guards、影響回歸與靜態檢查，結果會補於本節；不作為已驗證候選。沿用既有 evidence 目錄，只新增本輪 delta，保留舊失敗與已修項。
+套用既有 `unit-shard-repair/allocation-scope-proposal.patch`：僅追加 `driver_onboarding_allocations` 的 V0140–V0142 及 amendment，兩份 guards 共六處 collectors 納入該群組。核對三份正式 SQL 的 schema、tables、indexes、checks 與 FK；沒有改動 migrations、既有分配、amendments 或任何 assertion。該 anchor 建立時尚待正式 guards、影響回歸與靜態檢查；本節下列記錄為其後完成的結果與未解 finding，目前仍不作為可交審候選。沿用既有 evidence 目錄，只新增本輪 delta，保留舊失敗與已修項。
 
 修復 anchor 為 `95f17311c8aac7a96508e53ea65dce8cbf86fc8f`，已普通推送至原 PR #3358。本輪證據仍在 `EVIDENCE_DIR/unit-shard-repair/`；檢查命令、SHA、diff hash、版本及 exit code 由 `run-check.py` 與同名 `.json`／`.exit` 記錄。
 
@@ -150,3 +150,5 @@ timeout 90s pnpm exec eslint \
 原 scope 外四檔的最小修復提案保留在 `onboarding-ci-scope-proposal-20261123.patch`，來源 hashes 與修正邊界見 `onboarding-ci-scope-request-20261123.json`。提案未套用、未執行，`git apply --check` 僅代表可套用，不算修正版通過。新 finding 透過原 task 的 `progress` 請 Supervisor 核對平行衝突並擴 scope；尚未 handoff 不完整候選。
 
 本輪首次 allocation 檢查 `allocation-fixed-20261123.*` 因 worker 再次掛回 canonical 的 Zod 3.25.76，未執行任何案例，不能當產品失敗或通過。恢復 ignored 依賴後才得到正式 58 pass。首次 root typecheck `allocation-root-typecheck-20261123.*` 另因 Next 16.2／16.4 及 workspace 來源混用失敗（exit 2），不作為產品修復證據；已依前輪記錄恢復 27 個本 worktree 專屬 link farms，第三方依賴 lockfile hash 與此分支相同，共用 checkout 未改。新依賴紀錄為 `dependency-links-20261123.json`、`workspace-link-farms-20261123.json`；停用增量快取的 root typecheck 結果另列，不以舊 SHA 綠燈代替。
+
+環境恢復後的正式 root gate 已結束：`timeout 240s env NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck:root --incremental false` 為 exit 0，見 `allocation-root-typecheck-consistent-deps-20261123.{log,json,exit}`。本輪沒有重跑全部 workspace typechecks，不能以此 root pass 宣稱完整 CI 通過。所有本輪已啟動的必要檢查均已結束並讀取結果；allocation 與既有產品回歸已驗證，尚待上述四檔 scope 協調、修正版 hosted browser／custody 結果及新候選的 Gemini review／CI／merge。最終 delta manifest 為 `allocation-closeout-20261123.json`；分支保留 checkpoint，不以舊 candidate SHA 交審。
