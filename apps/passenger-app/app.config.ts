@@ -37,6 +37,7 @@ export default function passengerAppConfig(): ExpoConfig {
       "expo-secure-store",
       ["expo-build-properties", { ios: { useFrameworks: "static" } }],
       "./plugins/with-passenger-firebase.cjs",
+      "./plugins/with-passenger-ios-firebase-podfile.cjs",
     ],
     ios: {
       bundleIdentifier: "com.cctechsupport.drts.passenger",
