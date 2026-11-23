@@ -152,10 +152,30 @@ export interface FleetSupplyRenewalTargetsResponse {
 // §2.2 Driver Submission
 // ---------------------------------------------------------------------------
 
+export type DriverOnboardingChannel = "email" | "sms";
+
+export type DriverOnboardingStatus =
+  | "queued"
+  | "sending"
+  | "accepted"
+  | "delivered"
+  | "failed"
+  | "uncertain"
+  | "skipped"
+  | "expired";
+
+export interface DriverOnboardingDeliverySummary {
+  channel: DriverOnboardingChannel;
+  status: DriverOnboardingStatus;
+  maskedRecipient: string | null;
+  reasonCode: string | null;
+}
+
 export interface DriverSupplyDraft {
   submissionId: string;
   name: string;
   mobile: string;
+  email?: string | null;
 
   professionalDriverLicenseNo: string;
   professionalDriverLicenseExpiry: string;

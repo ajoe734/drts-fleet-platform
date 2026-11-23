@@ -26,6 +26,7 @@ import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned
 import { SafetyOperatorController } from "../../apps/api/src/modules/safety-operator/safety-operator.controller";
 import { SafetyOperatorService } from "../../apps/api/src/modules/safety-operator/safety-operator.service";
 import { DriverDeviceSessionService } from "../../apps/api/src/modules/auth/driver-device-session.service";
+import { DriverActivationLinksController } from "../../apps/api/src/modules/auth/driver-activation-links.controller";
 import { NotificationsController } from "../../apps/api/src/modules/audit-notification/notifications.controller";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
@@ -43,6 +44,14 @@ const HTTP_DECORATORS = new Map<string, string>([
   ["Head", "HEAD"],
   ["Options", "OPTIONS"],
   ["Sse", "GET"],
+]);
+
+// Exact public proof exchanges and the static activation asset; future methods
+// on the same path must still satisfy the protected-route assertions.
+const PUBLIC_DRIVER_ROUTE_KEYS = new Set([
+  "POST /auth/driver/device/register",
+  "POST /auth/driver/device/refresh",
+  "GET /driver-activate",
 ]);
 
 interface DiscoveredDriverRoute {
@@ -298,13 +307,10 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
 
   describe("Criterion 4 & 5: Runtime Derivation & Zero Unguarded Endpoints", () => {
     it("verifies every driver-facing route has either explicit guard decorators or central policy (no unguarded routes)", () => {
-      const publicRoutes = new Set([
-        "/auth/driver/device/register",
-        "/auth/driver/device/refresh",
-      ]);
-
       for (const route of driverRoutes) {
-        if (publicRoutes.has(route.routePath)) {
+        if (
+          PUBLIC_DRIVER_ROUTE_KEYS.has(`${route.httpMethod} ${route.routePath}`)
+        ) {
           expect(route.effectiveOpen).toBe(true);
           continue;
         }
@@ -343,18 +349,31 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
     };
     const guard = new BootstrapAuthGuard(reflector as any);
 
-    it("rejects unauthenticated requests on all protected driver routes with 401 AUTH_REQUIRED", async () => {
-      const publicRoutes = new Set([
-        "/api/auth/driver/device/register",
-        "/api/auth/driver/device/refresh",
-      ]);
+    it("allows the static activation fallback with its real public metadata in strict auth", async () => {
+      process.env.DRTS_ENV = "production";
+      await expect(
+        Promise.resolve(
+          guard.canActivate(
+            createExecutionContext(
+              DriverActivationLinksController.prototype.activationFallback,
+              DriverActivationLinksController,
+              { headers: {}, method: "GET", originalUrl: "/driver-activate" },
+            ),
+          ),
+        ),
+      ).resolves.toBe(true);
+    });
 
+    it("rejects unauthenticated requests on all protected driver routes with 401 AUTH_REQUIRED", async () => {
       for (const route of driverRoutes) {
         const fullPath = route.routePath.startsWith("/api")
           ? route.routePath
           : `/api${route.routePath}`;
 
-        if (publicRoutes.has(fullPath)) continue;
+        if (
+          PUBLIC_DRIVER_ROUTE_KEYS.has(`${route.httpMethod} ${route.routePath}`)
+        )
+          continue;
 
         const req: Record<string, unknown> = {
           headers: {},

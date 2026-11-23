@@ -221,6 +221,12 @@
       "amended_at": "2026-11-18",
       "scope": "Added audit_log_actor_ref_allocations with V0139__audit_log_actor_ref.sql only; all previous allocations, amendments and task ownership entries remain unchanged.",
       "reason": "Durable admin.audit_logs rows lost their actor because actor_id is uuid and writers stored normalizeUuidOrNull(principal_<uuid>). Registered at origin/dev b18c521b2cbe0278c94d5e6bf0e8206f9b1c1171, whose highest reserved migration is V0138 (portal_password_login_allocations)."
+    },
+    {
+      "amended_by_task_id": "DRV-ONB-013",
+      "amended_at": "2026-11-23",
+      "scope": "Append driver_onboarding_allocations V0140-V0142; preserve all previous allocations, amendments and task ownership entries.",
+      "reason": "Registers the three driver-onboarding migrations already present at checkpoint ed025019e1f6e44797949a0644d402a0d537c76e. The ledger previously ended at V0139, causing both existing highest-migration guards to reject 142 > 139. The guard collectors include the new group; all existing assertions remain unchanged."
     }
   ],
   "voice_application_allocations": [
@@ -1105,6 +1111,50 @@
       "referenced_tables": ["admin.audit_logs"],
       "table_invariants": [
         "admin.audit_logs.actor_ref: nullable varchar(255) holding the verbatim actor identifier. actor_id stays uuid; real principal IDs are principal_<uuid> and were stored as NULL there. Additive column only; existing rows and the V0080 append-only triggers are unchanged."
+      ]
+    }
+  ],
+  "driver_onboarding_allocations": [
+    {
+      "task_id": "DRV-ONB-013",
+      "version": "V0140",
+      "migration_filename": "V0140__driver_supply_email.sql",
+      "domain": "driver_onboarding_contact",
+      "target_schema": "fleet",
+      "primary_tables": [],
+      "modifies_existing_tables": ["fleet.driver_supply_drafts"],
+      "table_invariants": [
+        "Adds nullable email text to fleet.driver_supply_drafts with IF NOT EXISTS; preserves pre-existing drafts and all existing columns."
+      ]
+    },
+    {
+      "task_id": "DRV-ONB-013",
+      "version": "V0141",
+      "migration_filename": "V0141__driver_onboarding_invitation_proofs.sql",
+      "domain": "driver_onboarding_invitation_proofs",
+      "target_schema": "iam",
+      "primary_tables": [],
+      "modifies_existing_tables": ["iam.driver_device_invitations"],
+      "table_invariants": [
+        "Adds nullable onboarding_contact_hash and activation_token_hash to the existing invitation authority; existing invitation rows are preserved.",
+        "Unique partial activation-token index rejects duplicate non-null token hashes; the contact/created_at/invitation_id partial index supports lookup without introducing another invitation table."
+      ]
+    },
+    {
+      "task_id": "DRV-ONB-013",
+      "version": "V0142",
+      "migration_filename": "V0142__driver_onboarding_delivery.sql",
+      "domain": "driver_onboarding_channel_delivery",
+      "target_schema": "fleet",
+      "primary_tables": ["fleet.driver_onboarding_deliveries"],
+      "referenced_tables": [
+        "fleet.supply_submissions",
+        "iam.driver_device_invitations"
+      ],
+      "table_invariants": [
+        "Unique (submission_id, channel) permits one independent email and SMS delivery per submission; channel/status checks and non-negative attempt_count constrain persisted state.",
+        "Encrypted payload is present exactly for queued/sending deliveries; those states require invitation_id and expires_at. Sending requires both lease_id and lease_expires_at.",
+        "Foreign keys reference the existing submission/invitation authorities with ON DELETE CASCADE; queued due-time and sending lease-expiry partial indexes support independent retry and lease recovery."
       ]
     }
   ]

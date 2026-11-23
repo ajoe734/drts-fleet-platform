@@ -4,11 +4,13 @@ import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { DatabaseModule } from "../../common/db/database.module";
 import { DriverProfileModule } from "../driver-profile/driver-profile.module";
 import { IdentityModule } from "../identity/identity.module";
-import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
+// Initialize the mobility graph before registry captures its CommonJS exports.
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { AuthController } from "./auth.controller";
 import { BreakGlassController } from "./break-glass.controller";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
+import { DriverActivationLinksController } from "./driver-activation-links.controller";
 import { DriverDeviceSessionRepository } from "./driver-device-session.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { GoogleWorkloadIdentityAdapter } from "./google-workload-identity.adapter";
@@ -30,7 +32,12 @@ import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
     IdentityModule,
     IdempotencyModule,
   ],
-  controllers: [AuthController, BreakGlassController, TotpController],
+  controllers: [
+    AuthController,
+    BreakGlassController,
+    TotpController,
+    DriverActivationLinksController,
+  ],
   providers: [
     JwtAuthService,
     DriverDeviceSessionRepository,
