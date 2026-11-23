@@ -1,10 +1,19 @@
 name: Build Driver App (iOS, EAS)
 
-# Manual-only cloud build for apps/driver-app. It never runs on push or pull
-# requests because iOS builds consume paid EAS capacity and signing resources.
+# Manual-only cloud build or read-only existing build lookup for apps/driver-app.
+# It never runs on push or pull requests because iOS builds consume paid EAS
+# capacity and signing resources.
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Execution mode (build queues an iOS build; lookup-existing performs read-only EAS build:view and signed artifact verification)
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - lookup-existing
       profile:
         description: EAS build profile
         required: true
@@ -25,6 +34,21 @@ on:
         required: true
         default: false
         type: boolean
+      android_build_id:
+        description: Controlled Driver Android EAS build UUID for lookup-existing mode
+        required: false
+        default: cb4b7f81-90bd-481e-970a-fbb1009582c0
+        type: string
+      ios_build_id:
+        description: Controlled Driver iOS EAS build UUID for lookup-existing mode
+        required: false
+        default: 3f4d1b8b-9811-4d03-ab31-e7554de30bff
+        type: string
+      expected_source_sha:
+        description: Expected 40-char git commit SHA for the existing builds in lookup-existing mode
+        required: false
+        default: 0e722795dec202e960e504a8fa67526fc567ed0f
+        type: string
 
 permissions:
   contents: read
@@ -39,16 +63,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      WORKFLOW_MODE: ${{ inputs.mode || 'build' }}
       BUILD_API_URL: ${{ inputs.api_url }}
       BUILD_PROFILE: ${{ inputs.profile }}
       DRIVER_APP_EAS_PROJECT_ID: ${{ vars.DRIVER_APP_EAS_PROJECT_ID }}
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
+      LOOKUP_ANDROID_BUILD_ID: ${{ inputs.android_build_id || 'cb4b7f81-90bd-481e-970a-fbb1009582c0' }}
+      LOOKUP_IOS_BUILD_ID: ${{ inputs.ios_build_id || '3f4d1b8b-9811-4d03-ab31-e7554de30bff' }}
+      LOOKUP_EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha || '0e722795dec202e960e504a8fa67526fc567ed0f' }}
     defaults:
       run:
         working-directory: apps/driver-app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Guard credentials, project linkage, and inputs
         shell: bash
@@ -68,23 +99,37 @@ jobs:
             exit 1
           fi
 
-          case "$BUILD_PROFILE" in
-            development-simulator|development|preview|production) ;;
+          case "${WORKFLOW_MODE:-build}" in
+            build)
+              case "$BUILD_PROFILE" in
+                development-simulator|development|preview|production) ;;
+                *)
+                  echo "::error::Unsupported EAS build profile: $BUILD_PROFILE"
+                  exit 1
+                  ;;
+              esac
+
+              if [[ ! "$BUILD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+                echo "::error::api_url must be a direct HTTPS API origin."
+                exit 1
+              fi
+
+              if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" && "$BUILD_PROFILE" != "production" ]]; then
+                echo "::error::TestFlight auto-submit is allowed only with the production profile."
+                exit 1
+              fi
+              ;;
+            lookup-existing)
+              if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" ]]; then
+                echo "::error::TestFlight submission is forbidden in lookup-existing mode."
+                exit 1
+              fi
+              ;;
             *)
-              echo "::error::Unsupported EAS build profile: $BUILD_PROFILE"
+              echo "::error::Unsupported workflow mode: ${WORKFLOW_MODE:-}"
               exit 1
               ;;
           esac
-
-          if [[ ! "$BUILD_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
-            echo "::error::api_url must be a direct HTTPS API origin."
-            exit 1
-          fi
-
-          if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" && "$BUILD_PROFILE" != "production" ]]; then
-            echo "::error::TestFlight auto-submit is allowed only with the production profile."
-            exit 1
-          fi
 
       - uses: pnpm/action-setup@v4
         with:
@@ -97,11 +142,32 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Guard read-only existing build lookup inputs
+        if: ${{ inputs.mode == 'lookup-existing' }}
+        working-directory: .
+        run: node operations/verification/native-existing-builds/lookup.cjs guard
+
+      - name: Read back existing Driver EAS builds and inspect signed artifacts
+        if: ${{ inputs.mode == 'lookup-existing' }}
+        working-directory: .
+        run: node operations/verification/native-existing-builds/lookup.cjs lookup
+
+      - name: Upload redacted existing Driver build receipt
+        if: ${{ always() && inputs.mode == 'lookup-existing' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-eas-existing-builds-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/native-existing-builds/driver-existing-builds-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Install workspace dependencies
+        if: ${{ (inputs.mode || 'build') == 'build' }}
         run: pnpm install --frozen-lockfile
         working-directory: .
 
       - name: Verify API target before consuming EAS capacity
+        if: ${{ (inputs.mode || 'build') == 'build' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -111,6 +177,7 @@ jobs:
             "${BUILD_API_URL%/}/health" >/dev/null
 
       - name: Prepare ephemeral EAS configuration
+        if: ${{ (inputs.mode || 'build') == 'build' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -142,6 +209,7 @@ jobs:
           jq empty eas.json
 
       - name: Validate resolved iOS build configuration
+        if: ${{ (inputs.mode || 'build') == 'build' }}
         run: >-
           npx --yes eas-cli@21.4.0 config
           --platform ios
@@ -149,7 +217,7 @@ jobs:
           --non-interactive
 
       - name: Queue EAS iOS build
-        if: ${{ inputs.submit == false }}
+        if: ${{ (inputs.mode || 'build') == 'build' && inputs.submit == false }}
         run: >-
           npx --yes eas-cli@21.4.0 build
           --platform ios
@@ -158,7 +226,7 @@ jobs:
           --no-wait
 
       - name: Queue EAS iOS build and TestFlight submission
-        if: ${{ inputs.submit }}
+        if: ${{ (inputs.mode || 'build') == 'build' && inputs.submit }}
         run: >-
           npx --yes eas-cli@21.4.0 build
           --platform ios
