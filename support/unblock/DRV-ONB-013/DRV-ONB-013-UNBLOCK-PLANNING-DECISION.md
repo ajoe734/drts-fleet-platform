@@ -1,10 +1,32 @@
 # DRV-ONB-013 規劃判定與 scope 協調路由
 
 - Helper：`DRV-ONB-013-UNBLOCK-PLANNING-DECISION`；parent：`DRV-ONB-013`。
-- 原 owner／reviewer 均維持 `Codex2`／`Gemini`；日期：2026-11-22 UTC。
+- 原 owner／reviewer 均維持 `Codex2`／`Gemini`；初稿：2026-11-22 UTC；本輪核對：2026-11-23 UTC。
 - Helper branch：`codex2/drv-onb-013-unblock-planning-decision`；讀取基準與 fetch 後 `origin/dev`：`f23a1d8a860cd4298bc562a9a1a5f1a2f4e2b928`。
 - 交付範圍：本決策文件及 `PHASE1_OPEN_QUESTIONS.md` 的對應路由；產品、migration、共用 ledger 及 guards 尚未修改。
-- **目前交付狀態：規劃已定位，Supervisor 寫入 scope／parent next／helper disposition 尚待完成。先保留 draft PR，不 handoff 或合併 helper。**
+- **目前交付狀態：Supervisor 的三檔 scope 聯集、parent next 與 helper blocked disposition 已於 11/23 讀回。修正下述舊 SHA 的跨分支來源引用後，以 PR #3360 新候選 handoff Gemini；parent 的產品修補仍待原 owner 在 PR #3358 完成。**
+
+## 2026-11-23 續作核對與候選修正
+
+本輪先核實既有 published HEAD `4a1e48c4c43380908e94fdb5ced261fd2fcd6f14`：本機、遠端分支及 [PR #3360](https://github.com/ajoe734/drts-fleet-platform/pull/3360) head 一致、working tree 乾淨，沒有已鎖定的 helper candidate。指定 release CLI 的兩份 task slices 確認：
+
+- parent／helper owner 與 reviewer 仍為 `Codex2`／`Gemini`；parent 保持 `blocked`。
+- 原 parent scope 已包含下列 follow-up 指定的三檔；Supervisor 的平行衝突核對摘要已記入 parent next。
+- helper 的 `resolved_parent_status: blocked`、`resolved_parent_waiting_for: Codex2` 已落盤；`resolved_parent_next` 與 parent 的具體 next 完全相同，長度低於 4000 字。
+
+因此 11/22 的角色拒絕仍是有效歷史證據，但其「尚待 Supervisor 寫入」限制已由本輪 machine-truth 讀回解除。下面的請求與操作序列保留作追溯，**不要重放已滿足的請求**。helper merge 後仍須保留 blocked parent disposition，原 owner 依 scope 協調後的 next 執行產品修復。
+
+舊 SHA 的 [Canonical consistency job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/45046311602/job/137281582245) 為 **FAIL**：本 helper 將只存在於 parent PR 的 UAT 文件寫成 helper repo 內路徑。正式 `check_canonical_consistency.py --ci --base origin/dev --head HEAD` 在乾淨舊 HEAD 最小重現相同 missing-path finding、exit 1。已用 `git show` 核對 parent checkpoint `ed025019e1f6e44797949a0644d402a0d537c76e` 的兩個原 finding sections，將來源表改為該 commit 的固定 GitHub blob 連結，讓 reviewer 可直接讀到真正來源。本輪只補此引用及 scope 讀回狀態，不複製 parent 驗收檔、不修改 checker 或產品程式。
+
+本輪 delta evidence root：`/home/lupin/workspace/drts-fleet-platform/.local/drv-onb-013-unblock-planning-decision-20261122/handoff-20261123/`。`readback-and-before.json` 保存 CLI 讀回、舊 SHA 重現、parent 原文件 hash／size 及前輪 evidence inventory；本輪檢查與最終出版 receipt 分別記於 `checks-committed.json`、`publication.json`。以下表格補充原驗收表，不覆蓋原 finding 或未驗項：
+
+| Finding／驗收項                                    | 原始碼依據與修改位置                                               | 舊版重現 → 本次結果                                                                       | 命令、版本與證據                                                                                                                                | 未驗項與具體限制                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| parent concrete next／safe helper disposition      | release CLI `show` parent／helper；原三檔 scope 與 resolved fields | 11/22 寫入遭拒 → 11/23 讀回三檔已納入，兩份 next 相同，blocked disposition 已記錄         | `readback-and-before.json`；正式兩次 `show` exit 0；Supervisor 協調摘要見 parent next                                                           | parent 仍 blocked，產品修補、review／CI／merge 不由 helper 取代。 |
+| CI-CITED-PARENT-UAT：helper 引用未合入 parent 文件 | 本文正式依據表；正式 checker `check_cited_paths`                   | `4a1e48c4` 正式 checker exit 1 → 改為 parent checkpoint 固定來源連結，同一 checker exit 0 | `checks-committed.json` 記錄本輪完整 SHA、格式／consistency／diff／trailers／兩段 bash syntax 結果；`publication.json` 記錄 remote／PR equality | 新候選 hosted CI 待 GitHub bus 收錄；舊 failure 不宣稱為綠燈。    |
+| helper exact-SHA handoff                           | 原 PR #3360、原兩份規劃文件                                        | 舊 SHA 保留；追加 task-scoped 修正並普通 push，鎖定最終本機／remote／PR 同 SHA            | 新完整 candidate SHA／branch 由 handoff 與 `publication.json` 記錄                                                                              | Gemini 獨立 review、CI、merge 尚待；不呼叫 done。                 |
+
+本輪未套用 parent proposal、未重跑產品 suites；舊 **56 pass／2 fail** 仍只代表原 allocation 缺漏。未啟動 VM 產品／browser／DB／Docker 或部署。
 
 ## 判定與正式依據
 
@@ -12,16 +34,16 @@
 
 正式依據：
 
-| 依據                                                                                                                                          | 本次採用的界線                                                                                                                               |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AI_COLLABORATION_GUIDE.md` §0.5、§0.7、§2、§5                                                                                                | backlog／交接以 machine truth 為準；額外檔案由 Supervisor 核對平行衝突並更新原 task scope；不能以規劃文件或舊 SHA 綠燈取代新候選驗收。       |
-| `phase1_prd_detailed_v1.md` §2 P4；`phase1_system_analysis_v1.md` §6.3                                                                        | Driver App 已有裝置權限、onboarding／auth 範圍。本 helper 不改此產品邊界。                                                                   |
-| `phase1_migration_plan_v1.md` §3.1；dev pack `05_engineering_conventions_and_ai_dev_playbook.md` §5.2.5、§5.6                                 | schema 以正式 SQL migrations 為依據；保留既有資料，登記具體編號與檔名。不得為過測試刪除、改名或改寫已發布 migrations。                       |
-| `docs/04-uat/system-remediation-20260906/schema-allocation.json` 的 `boundary_invariants`、歷次 `amendments`                                  | 沿用 append-only 分配模式，保留既有 allocation、owner、amendment 與無碰撞規則。                                                              |
-| parent `task_spec_ref`：`docs/04-uat/driver-onboarding-dual-channel-acceptance.md`「Migration allocation 缺漏定位」及「舊版司機草稿還原修復」 | allocation 是未修 finding；舊草稿修復已有 checkpoint 證據。原母文件的全部 finding／限制繼續有效，本 helper 不覆蓋或宣稱它們通過新候選。      |
-| `tools/development-orchestrator/skills/candidate-lifecycle.md` 的 unblock parent disposition                                                  | helper 仍留下 scope／實作工作時，必須在 merge 前記錄 `resolved_parent_status: blocked` 及具體 next；否則預設 resolution 可能錯誤恢復母任務。 |
+| 依據                                                                                                                                                                                                                                                                                                                   | 本次採用的界線                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AI_COLLABORATION_GUIDE.md` §0.5、§0.7、§2、§5                                                                                                                                                                                                                                                                         | backlog／交接以 machine truth 為準；額外檔案由 Supervisor 核對平行衝突並更新原 task scope；不能以規劃文件或舊 SHA 綠燈取代新候選驗收。       |
+| `phase1_prd_detailed_v1.md` §2 P4；`phase1_system_analysis_v1.md` §6.3                                                                                                                                                                                                                                                 | Driver App 已有裝置權限、onboarding／auth 範圍。本 helper 不改此產品邊界。                                                                   |
+| `phase1_migration_plan_v1.md` §3.1；dev pack `05_engineering_conventions_and_ai_dev_playbook.md` §5.2.5、§5.6                                                                                                                                                                                                          | schema 以正式 SQL migrations 為依據；保留既有資料，登記具體編號與檔名。不得為過測試刪除、改名或改寫已發布 migrations。                       |
+| `docs/04-uat/system-remediation-20260906/schema-allocation.json` 的 `boundary_invariants`、歷次 `amendments`                                                                                                                                                                                                           | 沿用 append-only 分配模式，保留既有 allocation、owner、amendment 與無碰撞規則。                                                              |
+| parent `task_spec_ref`：[driver-onboarding-dual-channel-acceptance.md（parent checkpoint ed025019）](https://github.com/ajoe734/drts-fleet-platform/blob/ed025019e1f6e44797949a0644d402a0d537c76e/docs/04-uat/driver-onboarding-dual-channel-acceptance.md)「Migration allocation 缺漏定位」及「舊版司機草稿還原修復」 | allocation 是未修 finding；舊草稿修復已有 checkpoint 證據。原母文件的全部 finding／限制繼續有效，本 helper 不覆蓋或宣稱它們通過新候選。      |
+| `tools/development-orchestrator/skills/candidate-lifecycle.md` 的 unblock parent disposition                                                                                                                                                                                                                           | helper 仍留下 scope／實作工作時，必須在 merge 前記錄 `resolved_parent_status: blocked` 及具體 next；否則預設 resolution 可能錯誤恢復母任務。 |
 
-因此不新增另一個人類產品決策，也不調降雙通道通知、同一邀請僅成功一次、交易一致性、strict ingress、遮罩或實機驗收要求。`PHASE1_OPEN_QUESTIONS.md` 將本項列為「規劃已定位、scope 協調待辦」；無需以新 decision-ledger 項目覆寫既有產品契約。
+因此不新增另一個人類產品決策，也不調降雙通道通知、同一邀請僅成功一次、交易一致性、strict ingress、遮罩或實機驗收要求。`PHASE1_OPEN_QUESTIONS.md` 將本項列為「規劃已定位、scope 已記錄、母任務修補待辦」；無需以新 decision-ledger 項目覆寫既有產品契約。
 
 ## 實際來源與 finding
 
@@ -59,9 +81,9 @@ timeout 120s pnpm exec vitest run \
   tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts
 ```
 
-## 必須由 genuine Supervisor 寫入的機器路由
+## 11/22 genuine Supervisor 寫入請求（11/23 已讀回滿足）
 
-本輪以原 `AI_NAME=Codex2` 及原 dispatch fence，透過指定 release CLI 實際嘗試兩項必要寫入，均 **exit 1**：
+11/22 以原 `AI_NAME=Codex2` 及原 dispatch fence，透過指定 release CLI 實際嘗試兩項必要寫入，均 **exit 1**；以下是當時結果，11/23 讀回見本文首節：
 
 | 寫入                                                                 | release 拒絕訊息                                                     | 結果                          |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------- |
@@ -103,7 +125,7 @@ AI_NAME=Supervisor "$CLI" note DRV-ONB-013 "$(jq -r '.parent_next' "$REQUEST")"
 
 **讀回成功前，本 helper 不 handoff／合併。** 成功後原 owner 才鎖定已 push、與 PR head 相同的 helper SHA，交 Gemini 審查此規劃交付。scope 實際寫入及 owner 可執行時，由 Supervisor 依既有 lifecycle 以新證據恢復原任務；helper 的規劃交付不替代母任務修復或驗收。
 
-## §0.7 驗收與證據表
+## 11/22 §0.7 驗收與證據表（11/23 補充見首節）
 
 | Finding／驗收項                                                          | 原始碼依據與修改位置                                                                             | 舊版重現 → 本次結果                                                                                             | 命令、退出碼、版本與證據                                                                                               | 未驗項與具體限制                                                                                         |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |

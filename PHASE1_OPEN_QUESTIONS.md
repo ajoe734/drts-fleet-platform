@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-### Q-DRV-ONB-013-20261122 — planning settled; Supervisor scope coordination pending
+### Q-DRV-ONB-013-20261122 — planning settled; Supervisor scope recorded; parent repair pending
 
 DRV-ONB-013 的實際 blocker 是 V0140–V0142 尚未登記於共用 schema
 allocation ledger，且修正所需 ledger／兩份既有 guards 不在原任務
@@ -17,12 +17,18 @@ Supervisor 依協作規範 §0.7 核對平行衝突後，擴充原任務三檔 s
 正式 guards／受影響回歸，更新原 finding 表並以新 SHA 交 Gemini 審查。
 目前 56 pass／2 fail 是原 allocation 缺漏重現；proposal 尚未套用。
 
-本次 worker 對 parent note 與 helper disposition 的正式 CLI 寫入均遭
+11/22 worker 對 parent note 與 helper disposition 的正式 CLI 寫入均遭
 dispatch guard 拒絕。genuine Supervisor 必須先寫入具體 parent next、
 範圍聯集與 helper `resolved_parent_status: blocked`、
 `resolved_parent_waiting_for: Codex2` 及相同 `resolved_parent_next`，讀回後
 才可 helper handoff／merge。scope 協調完成前 parent 保持 blocked；不得
 以 helper 合併自動恢復或繞過範圍。
+
+11/23 原 owner 已透過指定 release CLI 讀回三檔 scope 聯集及 parent
+具體 next；與 helper 的 blocked disposition／resolved_parent_next
+一致，前置協調已滿足。helper 可沿既有 PR #3360 handoff Gemini；parent
+仍由原 owner 在 PR #3358 完成 allocation／guards 修補與新 SHA 驗證，
+不因本規劃交付自動恢復或取得產品驗收。
 詳見[決策、逐 finding 證據與精確 Supervisor CLI 請求](support/unblock/DRV-ONB-013/DRV-ONB-013-UNBLOCK-PLANNING-DECISION.md)。
 
 ### Q-BUREAU-R12-20261025 — planning settled; original hosted acceptance remains blocked
