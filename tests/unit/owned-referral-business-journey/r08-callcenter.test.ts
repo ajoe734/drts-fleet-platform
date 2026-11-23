@@ -825,6 +825,10 @@ async function fullHarness(fault = "") {
   let searchQuery = "";
   let loadedSessions: ObjectData[] = [];
   let selectedSession: ObjectData | undefined;
+  const abortedRequests: { method: string; url: string; reason?: string }[] =
+    [];
+  let unownedForwarded = 0;
+  let unownedFulfilled = 0;
   const identity = h.proof.identity;
   const session = h.session;
   const callback = h.callback;
@@ -1131,7 +1135,6 @@ async function fullHarness(fault = "") {
         );
         selectedSession = filtered.find((item) => item.callId === "SIM-call");
         if (fault === "reloaded UI unowned post") {
-          let aborted = false;
           await routeHandler({
             request: () => ({
               url: () => `${ORIGIN}${PATH}/transfer-to-complaint`,
@@ -1139,14 +1142,25 @@ async function fullHarness(fault = "") {
               postData: () => "{}",
               headers: () => ({ "content-type": "application/json" }),
             }),
-            fetch: async () =>
-              serve(`${ORIGIN}${PATH}/transfer-to-complaint`, "POST", "{}"),
-            fulfill: async () => undefined,
-            abort: async () => {
-              aborted = true;
+            fetch: async () => {
+              unownedForwarded++;
+              return serve(
+                `${ORIGIN}${PATH}/transfer-to-complaint`,
+                "POST",
+                "{}",
+              );
+            },
+            fulfill: async () => {
+              unownedFulfilled++;
+            },
+            abort: async (reason?: string) => {
+              abortedRequests.push({
+                method: "POST",
+                url: `${ORIGIN}${PATH}/transfer-to-complaint`,
+                ...(reason ? { reason } : {}),
+              });
             },
           });
-          if (aborted) throw new Error("r08-no-unowned-ui-post");
         }
         return;
       }
@@ -1229,6 +1243,30 @@ async function fullHarness(fault = "") {
           "x-drts-candidate-sha": "7".repeat(40),
           "content-type": "text/html",
         });
+      if (fault === "reload unowned post") {
+        await routeHandler({
+          request: () => ({
+            url: () => `${ORIGIN}${BASE}/callcenter/sessions`,
+            method: () => "POST",
+            postData: () => "{}",
+            headers: () => ({ "content-type": "application/json" }),
+          }),
+          fetch: async () => {
+            unownedForwarded++;
+            return serve(`${ORIGIN}${BASE}/callcenter/sessions`, "POST", "{}");
+          },
+          fulfill: async () => {
+            unownedFulfilled++;
+          },
+          abort: async (reason?: string) => {
+            abortedRequests.push({
+              method: "POST",
+              url: `${ORIGIN}${BASE}/callcenter/sessions`,
+              ...(reason ? { reason } : {}),
+            });
+          },
+        });
+      }
       await routeHandler({
         request: () => ({
           url: () => `${ORIGIN}${BASE}/callcenter/sessions`,
@@ -1339,6 +1377,9 @@ async function fullHarness(fault = "") {
     writes,
     disk,
     h,
+    abortedRequests,
+    unownedForwarded: () => unownedForwarded,
+    unownedFulfilled: () => unownedFulfilled,
     isStopped: () => stopped,
     route: () => routeHandler,
     finish: async (reason: "completed" | "runner-interrupted") => {
@@ -1606,6 +1647,7 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     "reloaded UI wrong case link",
     "reloaded UI wrong card call",
     "reloaded UI transfer enabled",
+    "reload unowned post",
     "reloaded UI unowned post",
     "case assigned on reload",
   ])(
@@ -1614,10 +1656,54 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
       const f = await fullHarness(fault);
       await expect(f.run.run()).rejects.toThrow();
       expect(f.writes).toHaveLength(6);
+      expect(f.run.snapshot().producers).toHaveLength(4);
       expect(f.run.snapshot().result).toBe("failed");
+      expect(f.run.snapshot().uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.unresolved).toContain(
+        "operator-ui-refresh-unverified",
+      );
       const result = await f.finish("runner-interrupted");
       expect(result.wholeRunPassed).toBe(false);
+      expect(result.unresolved).toContain(
+        "r08-required-original-ui-replay-unverified",
+      );
+      expect(result.unresolved).toContain("r08-operator-ui-refresh-unverified");
       expect(f.run.snapshot().cleanup).toBe("verified");
+      expect(f.writes.slice(6).map((w) => w.path)).toEqual([
+        `${BASE}/callcenter/callbacks/SIM-callback/cancel`,
+        `${BASE}/complaints/SIM-case/close`,
+        `${PATH}/close`,
+      ]);
+    },
+  );
+  it.each(["reload unowned post", "reloaded UI unowned post"])(
+    "aborts %s without pending submit or mock click throw, marks wholeRunPassed=false even on completed finalizer, and completes FULL cleanup",
+    async (fault) => {
+      const f = await fullHarness(fault);
+      await expect(f.run.run()).rejects.toThrow("r08-no-unowned-ui-post");
+      expect(f.abortedRequests).toHaveLength(1);
+      expect(f.abortedRequests[0]?.reason).toBe("failed");
+      expect(f.unownedForwarded()).toBe(0);
+      expect(f.unownedFulfilled()).toBe(0);
+      expect(f.writes).toHaveLength(6);
+      expect(f.run.snapshot().producers).toHaveLength(4);
+      expect(f.run.snapshot().result).toBe("failed");
+      expect(f.run.snapshot().uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.unresolved).toContain(
+        "operator-ui-refresh-unverified",
+      );
+      const summary = await f.finish("completed");
+      expect(summary.wholeRunPassed).toBe(false);
+      expect(summary.unresolved).toContain(
+        "r08-required-original-ui-replay-unverified",
+      );
+      expect(summary.unresolved).toContain(
+        "r08-operator-ui-refresh-unverified",
+      );
+      expect(f.run.snapshot().cleanup).toBe("verified");
+      expect(f.writes).toHaveLength(9);
       expect(f.writes.slice(6).map((w) => w.path)).toEqual([
         `${BASE}/callcenter/callbacks/SIM-callback/cancel`,
         `${BASE}/complaints/SIM-case/close`,

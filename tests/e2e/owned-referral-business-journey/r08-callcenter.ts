@@ -199,6 +199,7 @@ export class R08Callcenter {
   private replayEligible = false;
   private replayStarted = false;
   private refreshStarted = false;
+  private refreshInvalidated = false;
   private cleanupStarted = false;
 
   constructor(
@@ -460,6 +461,13 @@ export class R08Callcenter {
     return { listCase, detailCase };
   }
 
+  invalidateUiRefresh() {
+    this.refreshInvalidated = true;
+    delete this.state.uiRefresh;
+    if (!this.state.unresolved.includes("operator-ui-refresh-unverified"))
+      this.state.unresolved.push("operator-ui-refresh-unverified");
+  }
+
   async verifyUiRefresh(
     observation: R08UiRefreshObservation,
   ): Promise<R08UiRefreshReadback> {
@@ -473,6 +481,7 @@ export class R08Callcenter {
     );
     this.refreshStarted = true;
     try {
+      requireFact(!this.refreshInvalidated, "r08-no-unowned-ui-post");
       await this.guard();
       requireFact(
         observation.reloadedStatus === 200 &&
@@ -504,6 +513,7 @@ export class R08Callcenter {
           (detailCase.relatedIncidentId ?? null) === null,
         "r08-refresh-no-case-create-or-assign",
       );
+      requireFact(!this.refreshInvalidated, "r08-no-unowned-ui-post");
       const readback: R08UiRefreshReadback = {
         status: "verified",
         reloadedPath: "/callcenter",
@@ -526,6 +536,7 @@ export class R08Callcenter {
       await this.checkpoint();
       return copy(readback);
     } catch (error) {
+      delete this.state.uiRefresh;
       await this.unknown("operator-ui-refresh-unverified");
       throw error;
     }
@@ -702,6 +713,7 @@ export class R08ExistingFull {
   private cleanupStarted = false;
   private closed = false;
   private reloading = false;
+  private routeError: unknown;
   private reloadedSessions:
     | {
         status: number;
@@ -758,8 +770,12 @@ export class R08ExistingFull {
       this.state.transfer = this.helper.snapshot();
       if (this.state.transfer.uiRefresh)
         this.state.uiRefresh = copy(this.state.transfer.uiRefresh);
+      else delete this.state.uiRefresh;
     }
     await this.ports.finalizer.checkpointOwned("r08-own-call-custody");
+  }
+  private assertNoRouteError() {
+    if (this.routeError) throw this.routeError;
   }
   private checked(
     status: number,
@@ -875,6 +891,7 @@ export class R08ExistingFull {
         if (request.method() === "POST") {
           requireFact(
             !this.closed &&
+              !this.reloading &&
               pending &&
               !pending.started &&
               url.pathname === pending.path,
@@ -1028,6 +1045,11 @@ export class R08ExistingFull {
         }
       });
     } catch (error) {
+      this.routeError ??= error;
+      if (this.reloading || this.helper?.snapshot().replay === "verified") {
+        delete this.state.uiRefresh;
+        this.helper?.invalidateUiRefresh();
+      }
       const pending = this.pending;
       this.pending = undefined;
       await route.abort("failed").catch(() => undefined);
@@ -1040,6 +1062,7 @@ export class R08ExistingFull {
     action: () => Promise<unknown>,
     accept: (data: ObjectData) => void = () => undefined,
   ) {
+    this.assertNoRouteError();
     requireFact(!this.pending, "r08-single-ui-command-in-flight");
     let resolve!: () => void, reject!: (error: unknown) => void;
     const ack = new Promise<void>((yes, no) => {
@@ -1066,6 +1089,7 @@ export class R08ExistingFull {
     } finally {
       clearTimeout(timer);
     }
+    this.assertNoRouteError();
   }
   async run() {
     await this.save();
@@ -1311,8 +1335,10 @@ export class R08ExistingFull {
       this.reloading = true;
       this.reloadedSessions = undefined;
       let reloaded = await page.reload({ timeout: 15_000 });
+      this.assertNoRouteError();
       if (reloaded && reloaded.url() !== callcenterUrl) {
         const returned = await page.goto(callcenterUrl, { timeout: 15_000 });
+        this.assertNoRouteError();
         requireFact(
           returned?.status() === 200 &&
             returned.headers()["x-drts-candidate-sha"] ===
@@ -1321,6 +1347,7 @@ export class R08ExistingFull {
         );
         this.reloadedSessions = undefined;
         reloaded = await page.reload({ timeout: 15_000 });
+        this.assertNoRouteError();
       }
       requireFact(
         reloaded?.status() === 200 &&
@@ -1338,6 +1365,7 @@ export class R08ExistingFull {
           body: await response.text(),
         };
       });
+      this.assertNoRouteError();
       requireFact(
         reloadedBrowser.status === 200 &&
           reloadedBrowser.sha === this.ports.runtimeSha &&
@@ -1365,11 +1393,14 @@ export class R08ExistingFull {
         })
         .first();
       await reselectButton.click({ timeout: 15_000 });
+      this.assertNoRouteError();
       await page
         .locator('input[type="search"]')
         .first()
         .fill(callId, { timeout: 15_000 });
+      this.assertNoRouteError();
       await reselectButton.click({ timeout: 15_000 });
+      this.assertNoRouteError();
       const complaintLink = page
         .getByRole("link", {
           name: /^(Complaint detail|客訴明細)$/i,
@@ -1396,6 +1427,7 @@ export class R08ExistingFull {
       const transferText =
         (await transfer.textContent({ timeout: 15_000 })) ?? "";
       this.reloading = false;
+      this.assertNoRouteError();
       requireFact(
         Boolean(this.reloadedSessions),
         "r08-reloaded-ui-sessions-bff-read-observed",
@@ -1431,6 +1463,7 @@ export class R08ExistingFull {
         transferDisabled,
         transferText,
       });
+      this.assertNoRouteError();
       requireFact(
         this.state.producers.length === 4,
         "r08-refresh-no-additional-producer-command",
@@ -1439,6 +1472,10 @@ export class R08ExistingFull {
       await this.save();
     } catch (error) {
       await this.stop();
+      if (this.helper?.snapshot().replay === "verified") {
+        delete this.state.uiRefresh;
+        this.helper.invalidateUiRefresh();
+      }
       this.state.result = "failed";
       await this.save();
       throw error;
