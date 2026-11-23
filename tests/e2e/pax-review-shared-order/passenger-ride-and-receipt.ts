@@ -330,7 +330,7 @@ export async function assertPassengerCompletedRideDom(
     timeout: 20_000,
   });
   await expect(pax.getByText("本次行程", { exact: true })).toBeVisible();
-  await expect(pax.getByText("服務評分", { exact: true })).toBeVisible();
+  await expect(pax.getByText(/^服務評分(?:\*必填)?$/)).toBeVisible();
   await expect(pax.getByTestId("passenger-live-driver-position")).toHaveCount(
     0,
   );
