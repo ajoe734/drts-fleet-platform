@@ -432,6 +432,14 @@ jobs:
           else:
               status = "failed"
 
+          roundtrip_data = {}
+          if roundtrip_path.exists():
+              try:
+                  roundtrip_data = json.loads(roundtrip_path.read_text(encoding="utf-8", errors="replace"))
+              except Exception:
+                  roundtrip_data = {}
+          roundtrip_recorded_status = roundtrip_data.get("status") if isinstance(roundtrip_data, dict) else None
+
           status_path.write_text(json.dumps({
               "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
               "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
@@ -442,6 +450,7 @@ jobs:
               "gate_outcome": gate_outcome,
               "shared_dev_roundtrip_enabled": roundtrip_enabled,
               "shared_dev_roundtrip_outcome": roundtrip_outcome,
+              "shared_dev_roundtrip_status": roundtrip_recorded_status,
               "shared_dev_roundtrip_evidence_present": roundtrip_path.exists(),
               "report_present": report_path.exists(),
           }, indent=2) + "\n")

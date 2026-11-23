@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CANONICAL_EICAR_BYTES,
   CANONICAL_EICAR_SHA256,
+  CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK,
   SYNTHETIC_CLEAN_PDF_BYTES,
   SYNTHETIC_CLEAN_PDF_SHA256,
+  buildSyntheticCleanPdfBytes,
   inspectGcsObjectGenerationAndBytes,
   inspectSharedDevProviderActivation,
   redactExecutionLogText,
@@ -52,6 +54,23 @@ const APPROVED_FIXTURE_FEE_PLAN: MockFeePlanItem = {
   reimbursement_mode: 'platform_funded',
 };
 
+interface MockDriverStatementItem {
+  statement_id?: string;
+  driver_id?: string;
+  period_month?: string;
+  fee_plan_version?: string;
+  status?: string;
+}
+
+interface MockReimbursementBatchItem {
+  batch_id?: string;
+  driver_id?: string;
+  period_month?: string;
+  statement_id?: string;
+  status?: string;
+  workflow_state?: string;
+}
+
 interface MockHarnessOptions {
   providerEnvOverrides?: Record<string, string>;
   cleanInitialScanState?: 'clean' | 'pending_scan';
@@ -71,6 +90,9 @@ interface MockHarnessOptions {
   perPathCandidateShaHeader?: Record<string, string | null>;
   feePlanItems?: MockFeePlanItem[];
   feePlanReadbackSequence?: MockFeePlanItem[][];
+  driverStatementItems?: MockDriverStatementItem[];
+  reimbursementBatchItems?: MockReimbursementBatchItem[];
+  reimbursementBatchDetailsById?: Record<string, MockReimbursementBatchItem>;
   placardCreateStatus?: number;
   placardCreatePayload?: unknown;
   opsJwtToken?: string;
@@ -95,6 +117,9 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
   let cleanScans = 0;
   let eicarScans = 0;
   let feePlanGetCount = 0;
+  let lastStagedCleanBytes: Buffer = SYNTHETIC_CLEAN_PDF_BYTES;
+  let lastStagedCleanSha256: string = SYNTHETIC_CLEAN_PDF_SHA256;
+  let lastUploadedBatchId = 'reimb-drv-demo-001-2026-03';
   const currentCleanStagedRef = 'staged-clean-001';
   const currentEicarStagedRef = 'staged-eicar-001';
   const currentPlacardVersionId = 'placard-version-uat-001';
@@ -155,7 +180,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     if (storageIdx !== -1 && args[storageIdx + 1] === 'objects') {
       const uri = args[storageIdx + 3] ?? '';
       let generation = '1775640000123456';
-      if (uri.includes(SYNTHETIC_CLEAN_PDF_SHA256)) {
+      if (uri.includes(lastStagedCleanSha256)) {
         generation = options.gcsCleanGeneration ?? '1775640000111111';
       } else if (uri.includes(CANONICAL_EICAR_SHA256)) {
         generation = '1775640000222222';
@@ -165,7 +190,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       return {
         stdout: JSON.stringify({
           generation,
-          size: String(SYNTHETIC_CLEAN_PDF_BYTES.byteLength),
+          size: String(lastStagedCleanBytes.byteLength),
         }),
         stderr: '',
       };
@@ -175,10 +200,10 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       const uriWithGen = args[storageIdx + 2] ?? '';
       if (
         uriWithGen.includes(
-          `remittance-proof/content/${SYNTHETIC_CLEAN_PDF_SHA256}`
+          `remittance-proof/content/${lastStagedCleanSha256}`
         )
       ) {
-        return { stdout: SYNTHETIC_CLEAN_PDF_BYTES, stderr: '' };
+        return { stdout: lastStagedCleanBytes, stderr: '' };
       }
       if (
         uriWithGen.includes(`remittance-proof/consumed/${currentCleanStagedRef}`)
@@ -187,8 +212,8 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
           stdout: Buffer.from(
             JSON.stringify({
               stagedContentRef: currentCleanStagedRef,
-              contentHash: SYNTHETIC_CLEAN_PDF_SHA256,
-              sizeBytes: SYNTHETIC_CLEAN_PDF_BYTES.byteLength,
+              contentHash: lastStagedCleanSha256,
+              sizeBytes: lastStagedCleanBytes.byteLength,
             }),
             'utf8'
           ),
@@ -440,7 +465,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       return jsonResponse(
         200,
         {
-          items: [
+          items: options.driverStatementItems ?? [
             {
               statement_id: 'stmt-drv-demo-001-2026-03',
               driver_id: 'drv-demo-001',
@@ -463,7 +488,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       return jsonResponse(
         200,
         {
-          items: [
+          items: options.reimbursementBatchItems ?? [
             {
               batch_id: 'reimb-drv-demo-001-2026-03',
               driver_id: 'drv-demo-001',
@@ -526,14 +551,49 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
 
     if (
       parsedUrl.origin === API_ORIGIN &&
-      parsedUrl.pathname === '/api/reimbursements/reimb-drv-demo-001-2026-03' &&
+      parsedUrl.pathname.startsWith('/api/reimbursements/reimb') &&
       method === 'GET'
     ) {
-      return jsonResponse(200, {
-        batchId: 'reimb-drv-demo-001-2026-03',
-        driverId: 'drv-demo-001',
-        billingPeriod: '2026-03',
-      });
+      const requestedBatchId = decodeURIComponent(
+        parsedUrl.pathname.slice('/api/reimbursements/'.length)
+      );
+      const customBatch =
+        options.reimbursementBatchDetailsById?.[requestedBatchId] ??
+        options.reimbursementBatchItems?.find(
+          (item) => item.batch_id === requestedBatchId
+        );
+      if (customBatch) {
+        return jsonResponse(
+          200,
+          {
+            batch_id: customBatch.batch_id,
+            batchId: customBatch.batch_id,
+            driver_id: customBatch.driver_id,
+            driverId: customBatch.driver_id,
+            period_month: customBatch.period_month,
+            billingPeriod: customBatch.period_month,
+            statement_id: customBatch.statement_id,
+            statementId: customBatch.statement_id,
+            status: customBatch.status,
+            workflow_state: customBatch.workflow_state,
+            workflowState: customBatch.workflow_state,
+          },
+          {},
+          parsedUrl.pathname
+        );
+      }
+      if (requestedBatchId === 'reimb-drv-demo-001-2026-03') {
+        return jsonResponse(
+          200,
+          {
+            batchId: 'reimb-drv-demo-001-2026-03',
+            driverId: 'drv-demo-001',
+            billingPeriod: '2026-03',
+          },
+          {},
+          parsedUrl.pathname
+        );
+      }
     }
 
     if (
@@ -559,7 +619,11 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       const parsedBody = JSON.parse(body ?? '{}');
       const rawBytes = Buffer.from(parsedBody.contentBase64 ?? '', 'base64');
       const hash = sha256Hex(rawBytes);
-      const isClean = hash === SYNTHETIC_CLEAN_PDF_SHA256;
+      const isClean = hash !== CANONICAL_EICAR_SHA256;
+      if (isClean) {
+        lastStagedCleanBytes = rawBytes;
+        lastStagedCleanSha256 = hash;
+      }
       const stagedRef = isClean
         ? currentCleanStagedRef
         : currentEicarStagedRef;
@@ -576,17 +640,21 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       method === 'POST'
     ) {
       const parsedBody = JSON.parse(body ?? '{}');
-      if (parsedBody.contentHash === SYNTHETIC_CLEAN_PDF_SHA256) {
+      lastUploadedBatchId =
+        parsedBody.reimbursementBatchId ??
+        parsedBody.batchId ??
+        'reimb-drv-demo-001-2026-03';
+      if (parsedBody.contentHash === lastStagedCleanSha256) {
         const initialState = options.cleanInitialScanState ?? 'clean';
         return jsonResponse(201, {
           remittance_proof_id: 'proof-clean-001',
-          reimbursement_batch_id: parsedBody.reimbursementBatchId,
+          reimbursement_batch_id: lastUploadedBatchId,
           scan_state: initialState,
           rejection_reason: null,
           content: {
             staged_content_ref: currentCleanStagedRef,
-            content_hash: SYNTHETIC_CLEAN_PDF_SHA256,
-            size_bytes: SYNTHETIC_CLEAN_PDF_BYTES.byteLength,
+            content_hash: lastStagedCleanSha256,
+            size_bytes: lastStagedCleanBytes.byteLength,
           },
         });
       }
@@ -597,7 +665,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       };
       return jsonResponse(201, {
         remittance_proof_id: 'proof-eicar-001',
-        reimbursement_batch_id: parsedBody.reimbursementBatchId,
+        reimbursement_batch_id: lastUploadedBatchId,
         scan_state:
           initialEicarState === 'pending_scan'
             ? 'pending_scan'
@@ -622,7 +690,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       cleanScans += 1;
       return jsonResponse(200, {
         remittance_proof_id: 'proof-clean-001',
-        reimbursement_batch_id: 'reimb-drv-demo-001-2026-03',
+        reimbursement_batch_id: lastUploadedBatchId,
         scan_state: cleanScans >= 1 ? 'clean' : 'pending_scan',
         rejection_reason: null,
       });
@@ -640,7 +708,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       };
       return jsonResponse(200, {
         remittance_proof_id: 'proof-eicar-001',
-        reimbursement_batch_id: 'reimb-drv-demo-001-2026-03',
+        reimbursement_batch_id: lastUploadedBatchId,
         scan_state: eicarScans >= 1 ? finalVerdict.scan_state : 'pending_scan',
         rejection_reason:
           eicarScans >= 1 ? finalVerdict.rejection_reason : null,
@@ -681,7 +749,7 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     ) {
       return binaryResponse(
         200,
-        options.cleanDownloadBytes ?? SYNTHETIC_CLEAN_PDF_BYTES
+        options.cleanDownloadBytes ?? lastStagedCleanBytes
       );
     }
 
@@ -945,7 +1013,17 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
     ).rejects.toThrow(/409 REMITTANCE_PROOF_NOT_CLEAN/);
 
     const persisted = JSON.parse(readFileSync(evidencePath, 'utf8'));
-    expect(persisted.status).toBe('failed');
+    expect(persisted.status).toBe('partial');
+    expect(persisted.sub_branches).toMatchObject({
+      remittance_proof: { status: 'failed' },
+      controlled_placard: {
+        status: 'passed',
+        placard_version_id: 'placard-version-uat-001',
+      },
+    });
+    expect(persisted.controlled_placard?.placard_version_id).toBe(
+      'placard-version-uat-001'
+    );
     expect(persisted.teardown).toEqual({
       driver_invitation_revoked: true,
       ops_session_revoked: true,
@@ -1242,9 +1320,25 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
     expect(generateCalls).toHaveLength(0);
 
     const persisted = JSON.parse(readFileSync(evidencePath, 'utf8'));
-    expect(persisted.status).toBe('failed');
+    expect(persisted.status).toBe('partial');
     expect(persisted.missing).toContain(
       'driver_fee_plan:fixture-platform-funded-reimbursement/v1:shadowed'
+    );
+    expect(persisted.sub_branches).toMatchObject({
+      remittance_proof: {
+        status: 'failed',
+        reused_controlled_historical_batch: false,
+      },
+      controlled_placard: {
+        status: 'passed',
+        placard_version_id: 'placard-version-uat-001',
+      },
+    });
+    expect(persisted.controlled_placard?.placard_version_id).toBe(
+      'placard-version-uat-001'
+    );
+    expect(persisted.gcs_objects?.placard_document_artifact?.generation).toBe(
+      '1775640000333333'
     );
     expect(persisted.fee_plan_readback_audit).toMatchObject({
       active_plan: {
@@ -1546,6 +1640,346 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
     expect(auditDriftPersisted.teardown).toEqual({
       driver_invitation_revoked: true,
       ops_session_revoked: true,
+    });
+  });
+
+  it('reuses controlled historical batch (drv-demo-001 / 2026-03 / statement-340ea444 / reimbursement-b532ab86 / c125-operational-setup-v1 1500 bps) read-only without publishing fee plans or generating statements, uploads run-distinct clean proof, and preserves batch state', async () => {
+    const evidencePath = makeTempEvidencePath();
+    const conflictingPlan: MockFeePlanItem = {
+      fee_plan_id: 'fee-plan-377dc534-160a-4e8a-ab62-31c195048e53',
+      plan_name: 'fixture-platform-funded-reimbursement',
+      version: '2026.03-uat-cbcb8aa1',
+      status: 'published',
+      service_fee_bps: 1200,
+      reimbursement_mode: 'platform_funded',
+    };
+    const historicalC125Plan: MockFeePlanItem = {
+      fee_plan_id: 'fee-plan-864e12d8-1e05-44db-9b7c-8b151824b3e1',
+      plan_name: 'C125 Operational Setup Driver Fee Plan',
+      version: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.historical_plan,
+      status: 'published',
+      service_fee_bps: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.basis_points,
+      reimbursement_mode: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.funding,
+    };
+
+    const harness = createMockSharedDevHarness({
+      feePlanItems: [conflictingPlan, historicalC125Plan],
+      driverStatementItems: [
+        {
+          statement_id: 'statement-08cc790b-96e9-4c3a-b79d-23896664b8da',
+          driver_id: 'drv-demo-001',
+          period_month: '2026-03',
+          fee_plan_version: '2026.03-uat-cbcb8aa1',
+          status: 'generated',
+        },
+        {
+          statement_id:
+            CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_statement,
+          driver_id: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.driver,
+          period_month: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.period,
+          fee_plan_version:
+            CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.historical_plan,
+          status: 'generated',
+        },
+      ],
+      reimbursementBatchItems: [
+        {
+          batch_id: 'reimbursement-b32a20a8-91cc-4623-bd98-f71b1ac65a08',
+          driver_id: 'drv-demo-001',
+          period_month: '2026-03',
+          statement_id: 'statement-08cc790b-96e9-4c3a-b79d-23896664b8da',
+          status: 'pending',
+          workflow_state: 'pending_approval',
+        },
+        {
+          batch_id: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_batch,
+          driver_id: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.driver,
+          period_month: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.period,
+          statement_id:
+            CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_statement,
+          status: CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.batch_status,
+          workflow_state:
+            CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.workflow_state,
+        },
+      ],
+    });
+
+    const result = await runSharedDevArtifactRoundtrip({
+      evidencePath,
+      candidateSha: CANDIDATE_SHA,
+      includeFeePlanImpactAudit: true,
+      apiOrigin: API_ORIGIN,
+      platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+      projectId: PROJECT_ID,
+      region: REGION,
+      apiIdToken: 'wif-id-token-api',
+      platformIdToken: 'wif-id-token-platform',
+      fetchImpl: harness.fetchImpl,
+      execFileImpl: harness.execFileImpl,
+      scanPollIntervalMs: 1,
+    });
+
+    expect(result.status).toBe('passed');
+    expect(result.synthetic_fixtures.reimbursement_batch_id).toBe(
+      CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_batch
+    );
+    expect(result.controlled_historical_batch_reuse).toMatchObject({
+      matched: true,
+      reused: true,
+      alternative_current_conflicting_plan_excluded: true,
+      mismatches: [],
+      observed: {
+        driver: 'drv-demo-001',
+        period: '2026-03',
+        historical_plan: {
+          version: 'c125-operational-setup-v1',
+          service_fee_bps: 1500,
+          reimbursement_mode: 'platform_funded',
+          status: 'published',
+        },
+        statement: {
+          statement_id: 'statement-340ea444-87e1-478c-8f67-0b8169ad3e96',
+          fee_plan_version: 'c125-operational-setup-v1',
+        },
+        batch: {
+          batch_id: 'reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4',
+          statement_id: 'statement-340ea444-87e1-478c-8f67-0b8169ad3e96',
+          status: 'pending',
+          workflow_state: 'pending_approval',
+        },
+        post_roundtrip_batch_state: {
+          batch_id: 'reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4',
+          status: 'pending',
+          workflow_state: 'pending_approval',
+        },
+      },
+    });
+
+    // Zero writes to fee plans or driver statements
+    expect(
+      harness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-fee-plans/publish')
+      )
+    ).toHaveLength(0);
+    expect(
+      harness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-statements/generate')
+      )
+    ).toHaveLength(0);
+
+    // Clean proof used a run-distinct PDF payload and targeted the controlled historical batch
+    expect(result.clean_remittance_proof?.reimbursement_batch_id).toBe(
+      CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_batch
+    );
+    expect(result.clean_remittance_proof?.bytes_equal).toBe(true);
+    expect(result.clean_remittance_proof?.uploaded_sha256).not.toBe(
+      SYNTHETIC_CLEAN_PDF_SHA256
+    );
+    expect(result.clean_remittance_proof?.uploaded_byte_length).toBeGreaterThan(
+      SYNTHETIC_CLEAN_PDF_BYTES.byteLength
+    );
+    expect(result.eicar_remittance_proof?.reimbursement_batch_id).toBe(
+      CONTROLLED_HISTORICAL_REIMBURSEMENT_LINK.expected_batch
+    );
+    expect(result.controlled_placard?.placard_version_id).toBe(
+      'placard-version-uat-001'
+    );
+    expect(result.sub_branches).toEqual({
+      remittance_proof: {
+        status: 'passed',
+        reused_controlled_historical_batch: true,
+        reimbursement_batch_id:
+          'reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4',
+        error: null,
+      },
+      controlled_placard: {
+        status: 'passed',
+        public_info_version_id: 'public-info-demo-001',
+        placard_version_id: 'placard-version-uat-001',
+        error: null,
+      },
+    });
+    expect(buildSyntheticCleanPdfBytes('tag-a').toString('utf8')).toContain(
+      '% drts-live-doc-clean-proof-tag-a'
+    );
+  });
+
+  it('executes controlled placard branch independently and records partial status with concrete reasons when controlled historical batch mismatches or when public-info-demo-001 is missing', async () => {
+    // Sub-case A: Controlled historical batch status drifted (e.g. status="paid") -> proof branch fails closed without writes, placard branch still runs and passes -> status="partial"
+    const partialPlacardOnlyPath = makeTempEvidencePath();
+    const driftedHistoricalHarness = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          fee_plan_id: 'fee-plan-377dc534-160a-4e8a-ab62-31c195048e53',
+          plan_name: 'fixture-platform-funded-reimbursement',
+          version: '2026.03-uat-cbcb8aa1',
+          status: 'published',
+          service_fee_bps: 1200,
+          reimbursement_mode: 'platform_funded',
+        },
+        {
+          fee_plan_id: 'fee-plan-864e12d8-1e05-44db-9b7c-8b151824b3e1',
+          plan_name: 'C125 Operational Setup Driver Fee Plan',
+          version: 'c125-operational-setup-v1',
+          status: 'published',
+          service_fee_bps: 1500,
+          reimbursement_mode: 'platform_funded',
+        },
+      ],
+      driverStatementItems: [
+        {
+          statement_id: 'statement-340ea444-87e1-478c-8f67-0b8169ad3e96',
+          driver_id: 'drv-demo-001',
+          period_month: '2026-03',
+          fee_plan_version: 'c125-operational-setup-v1',
+          status: 'generated',
+        },
+      ],
+      reimbursementBatchItems: [
+        {
+          batch_id: 'reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4',
+          driver_id: 'drv-demo-001',
+          period_month: '2026-03',
+          statement_id: 'statement-340ea444-87e1-478c-8f67-0b8169ad3e96',
+          status: 'paid',
+          workflow_state: 'paid',
+        },
+      ],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: partialPlacardOnlyPath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: driftedHistoricalHarness.fetchImpl,
+        execFileImpl: driftedHistoricalHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(/Controlled historical batch reuse also failed/);
+
+    const partialPlacardPersisted = JSON.parse(
+      readFileSync(partialPlacardOnlyPath, 'utf8')
+    );
+    expect(partialPlacardPersisted.status).toBe('partial');
+    expect(partialPlacardPersisted.missing).toContain(
+      'controlled_historical_batch:reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4:batch_status:expected=pending,actual=paid'
+    );
+    expect(partialPlacardPersisted.missing).toContain(
+      'controlled_historical_batch:reimbursement-b532ab86-495e-4ef0-a581-920c8756eeb4:batch_workflow_state:expected=pending_approval,actual=paid'
+    );
+    expect(partialPlacardPersisted.clean_remittance_proof).toBeNull();
+    expect(partialPlacardPersisted.controlled_placard).toMatchObject({
+      placard_version_id: 'placard-version-uat-001',
+      public_info_version_id: 'public-info-demo-001',
+      hash_matches_manifest: true,
+    });
+    expect(
+      partialPlacardPersisted.gcs_objects?.placard_document_artifact?.generation
+    ).toBe('1775640000333333');
+    expect(partialPlacardPersisted.sub_branches).toMatchObject({
+      remittance_proof: { status: 'failed' },
+      controlled_placard: {
+        status: 'passed',
+        placard_version_id: 'placard-version-uat-001',
+      },
+    });
+
+    // Sub-case B: Proof branch passes, placard branch fails due to missing/unpublished public-info-demo-001 -> status="partial"
+    const partialProofOnlyPath = makeTempEvidencePath();
+    const missingPublicInfoHarness = createMockSharedDevHarness({
+      publicInfoItems: [],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: partialProofOnlyPath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: missingPublicInfoHarness.fetchImpl,
+        execFileImpl: missingPublicInfoHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Required synthetic public info version "public-info-demo-001" is missing or not published/
+    );
+
+    const partialProofPersisted = JSON.parse(
+      readFileSync(partialProofOnlyPath, 'utf8')
+    );
+    expect(partialProofPersisted.status).toBe('partial');
+    expect(partialProofPersisted.missing).toContain(
+      'public_info_version:public-info-demo-001'
+    );
+    expect(
+      partialProofPersisted.clean_remittance_proof?.remittance_proof_id
+    ).toBe('proof-clean-001');
+    expect(
+      partialProofPersisted.eicar_remittance_proof?.remittance_proof_id
+    ).toBe('proof-eicar-001');
+    expect(partialProofPersisted.controlled_placard).toBeNull();
+    expect(
+      partialProofPersisted.gcs_objects?.clean_remittance_content?.generation
+    ).toBe('1775640000111111');
+    expect(
+      partialProofPersisted.gcs_objects?.placard_document_artifact
+    ).toBeNull();
+    expect(partialProofPersisted.sub_branches).toMatchObject({
+      remittance_proof: { status: 'passed' },
+      controlled_placard: { status: 'failed' },
+    });
+
+    // Sub-case C: Both branches fail -> status="failed"
+    const bothFailedPath = makeTempEvidencePath();
+    const bothFailedHarness = createMockSharedDevHarness({
+      feePlanItems: [
+        {
+          fee_plan_id: 'fee-plan-other-009',
+          plan_name: 'someone-elses-plan',
+          version: 'v9',
+          status: 'published',
+          service_fee_bps: 1500,
+          reimbursement_mode: 'mixed',
+        },
+      ],
+      publicInfoItems: [],
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: bothFailedPath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: bothFailedHarness.fetchImpl,
+        execFileImpl: bothFailedHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Conflicting active fee plan someone-elses-plan\/v9 .* Required synthetic public info version "public-info-demo-001" is missing/
+    );
+
+    const bothFailedPersisted = JSON.parse(
+      readFileSync(bothFailedPath, 'utf8')
+    );
+    expect(bothFailedPersisted.status).toBe('failed');
+    expect(bothFailedPersisted.sub_branches).toMatchObject({
+      remittance_proof: { status: 'failed' },
+      controlled_placard: { status: 'failed' },
     });
   });
 });
