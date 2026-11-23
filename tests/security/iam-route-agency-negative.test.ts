@@ -12,6 +12,7 @@ import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
+  isAgencyAllowedWriteRoute,
 } from "../../apps/api/src/common/auth/auth.constants";
 import type { AuthenticatedRequestLike } from "../../apps/api/src/common/auth/auth.types";
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
@@ -331,7 +332,7 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
         route,
       );
       const key = `${route.httpMethod} ${route.routePath}`;
-      if (AGENCY_WRITE_ROUTE_ALLOWLIST.has(key)) {
+      if (isAgencyAllowedWriteRoute(route.httpMethod, route.routePath)) {
         allowedRoutes.push(key);
         continue;
       }
@@ -341,7 +342,12 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
     }
     expect(notDenied).toEqual([]);
     expect(allowedRoutes.sort()).toEqual(
-      [...AGENCY_WRITE_ROUTE_ALLOWLIST].sort(),
+      [
+        ...[...AGENCY_WRITE_ROUTE_ALLOWLIST].filter(
+          (entry) => !entry.startsWith("POST auth/agency/mfa/totp/"),
+        ),
+        "POST auth/sessions/r13-param/revoke",
+      ].sort(),
     );
   });
 
@@ -385,7 +391,12 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
     ["GET", "regulatory-registry/vehicles", [], []],
     ["GET", "regulatory-registry/drivers", [], []],
     ["GET", "complaints", [], []],
-    ["GET", "auth/sessions", [], []],
+    [
+      "GET",
+      "identity/sessions",
+      ["platform", "ops", "tenant"],
+      ["identity:sessions:read"],
+    ],
     ["GET", "r13-unclassified/default-authenticated", [], []],
   ])(
     "denies an agency session on %s %s",
@@ -399,7 +410,7 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
     },
   );
 
-  it("allows the agency session on its own read routes and auth/session", async () => {
+  it("allows the agency session on its own read routes, auth/session, and auth/sessions", async () => {
     for (const [routePath, scope] of [
       ["agency/trip-records", "agency:trip_records:read"],
       ["agency/reports/operations-summary", "agency:reports:read"],
@@ -415,6 +426,13 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
     }
     expect(
       await outcome(guard, agencyRequest("GET", "auth/session", viewerToken), {
+        open: false,
+        realms: [],
+        scopes: [],
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      await outcome(guard, agencyRequest("GET", "auth/sessions", viewerToken), {
         open: false,
         realms: [],
         scopes: [],
