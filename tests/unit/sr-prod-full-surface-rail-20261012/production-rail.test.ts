@@ -752,6 +752,12 @@ describe("production complete topology and strict startup rail", () => {
         "data.identity.agency_id": "agency-fixture",
       },
     });
+    expect(plan.services[0].env.TENANT_INVITATION_ACCEPT_URL_BASE).toBe(
+      `${vars.PROD_TENANT_CONSOLE_ORIGIN}/invite`,
+    );
+    expect(plan.services[0].env.FLEET_INVITATION_ACCEPT_URL_BASE).toBe(
+      `${vars.PROD_FLEET_PARTNER_PORTAL_ORIGIN}/invite`,
+    );
     expect(plan.services[0].env.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(
       `${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
     );
@@ -759,9 +765,18 @@ describe("production complete topology and strict startup rail", () => {
     expect(agencyArgs[agencyArgs.indexOf("--set-secrets") + 1]).toContain(
       "BFF_STATE_SECRET=drts-prod-bff-state-secret:7",
     );
-    expect(
-      deployArgs(plan, plan.services[0], imagesFor(plan).api).join(" "),
-    ).toContain(
+    const apiDeployArgs = deployArgs(
+      plan,
+      plan.services[0],
+      imagesFor(plan).api,
+    ).join(" ");
+    expect(apiDeployArgs).toContain(
+      `TENANT_INVITATION_ACCEPT_URL_BASE=${vars.PROD_TENANT_CONSOLE_ORIGIN}/invite`,
+    );
+    expect(apiDeployArgs).toContain(
+      `FLEET_INVITATION_ACCEPT_URL_BASE=${vars.PROD_FLEET_PARTNER_PORTAL_ORIGIN}/invite`,
+    );
+    expect(apiDeployArgs).toContain(
       `AGENCY_INVITATION_ACCEPT_URL_BASE=${vars.PROD_AGENCY_PORTAL_ORIGIN}/invite`,
     );
     commands.length = 0;
