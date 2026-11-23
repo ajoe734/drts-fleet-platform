@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  driverCredentialExpiryMs,
+  driverCredentialExpirySql,
+} from "./driver-credential-expiry";
 import { AuditLogRepository } from "../audit-notification/audit-log.repository";
 import type {
   DisclosureSubjectType,
@@ -2419,9 +2423,9 @@ export class RegulatoryRegistryRepository {
     }>(
       `/* preexpiry-source */ SELECT d.record FROM reg.phase1_registry_drivers d
        WHERE (
-         ((d.record->>'licenseExpiry')::timestamptz > $1 AND (d.record->>'licenseExpiry')::timestamptz <= $5)
-         OR ((d.record->>'professionalDriverLicenseExpiry')::timestamptz > $1 AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $5)
-         OR ((d.record->>'taxiDriverRegistrationExpiry')::timestamptz > $1 AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $5)
+         (${driverCredentialExpirySql("d.record->>'licenseExpiry'")} > $1 AND ${driverCredentialExpirySql("d.record->>'licenseExpiry'")} <= $5)
+         OR (${driverCredentialExpirySql("d.record->>'professionalDriverLicenseExpiry'")} > $1 AND ${driverCredentialExpirySql("d.record->>'professionalDriverLicenseExpiry'")} <= $5)
+         OR (${driverCredentialExpirySql("d.record->>'taxiDriverRegistrationExpiry'")} > $1 AND ${driverCredentialExpirySql("d.record->>'taxiDriverRegistrationExpiry'")} <= $5)
          OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='driver'
            AND e.entity_id=d.driver_id AND e.credential_type LIKE 'preexpiry:%'
            AND e.status IN ('pending','leased','completed'))
@@ -2498,9 +2502,9 @@ export class RegulatoryRegistryRepository {
           SELECT d.record
           FROM reg.phase1_registry_drivers d
           LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id = dp.driver_id
-          WHERE ((d.record->>'licenseExpiry' IS NOT NULL AND (d.record->>'licenseExpiry')::timestamptz <= $1)
-             OR (d.record->>'professionalDriverLicenseExpiry' IS NOT NULL AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $1)
-             OR (d.record->>'taxiDriverRegistrationExpiry' IS NOT NULL AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $1)
+          WHERE ((d.record->>'licenseExpiry' IS NOT NULL AND ${driverCredentialExpirySql("d.record->>'licenseExpiry'")} <= $1)
+             OR (d.record->>'professionalDriverLicenseExpiry' IS NOT NULL AND ${driverCredentialExpirySql("d.record->>'professionalDriverLicenseExpiry'")} <= $1)
+             OR (d.record->>'taxiDriverRegistrationExpiry' IS NOT NULL AND ${driverCredentialExpirySql("d.record->>'taxiDriverRegistrationExpiry'")} <= $1)
              OR (dp.training_status = 'expired'))
             AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
             AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
@@ -2953,7 +2957,7 @@ export class RegulatoryRegistryRepository {
               Date.parse(source[field] ?? "") !== sourceExpiryMs ||
               (reminder !== null &&
                 (source.lifecycleStatus !== "active" ||
-                  sourceExpiryMs <= asOfMs));
+                  driverCredentialExpiryMs(source[field]) <= asOfMs));
         } else if (
           snapshot.credential_type === "vehicle_contract" ||
           preexpiry?.credential === "vehicle_contract"

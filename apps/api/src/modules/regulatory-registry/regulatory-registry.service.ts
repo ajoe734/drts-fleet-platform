@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { driverCredentialExpiryMs } from "./driver-credential-expiry";
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
@@ -184,7 +185,7 @@ function areDriverLicensesValid(
   ];
   for (const d of dates) {
     if (d) {
-      const time = Date.parse(d);
+      const time = driverCredentialExpiryMs(d);
       if (!Number.isNaN(time) && time <= referenceDateMs) {
         return false;
       }
@@ -2086,7 +2087,7 @@ export class RegulatoryRegistryService
     const approvedAtMs = Date.parse(approvedAt);
     if (
       driver.licenseExpiry &&
-      Date.parse(driver.licenseExpiry) > approvedAtMs
+      driverCredentialExpiryMs(driver.licenseExpiry) > approvedAtMs
     ) {
       await repository.supersedeActiveExpiryEventsForEntity?.(
         "driver",
@@ -2098,7 +2099,8 @@ export class RegulatoryRegistryService
     }
     if (
       driver.professionalDriverLicenseExpiry &&
-      Date.parse(driver.professionalDriverLicenseExpiry) > approvedAtMs
+      driverCredentialExpiryMs(driver.professionalDriverLicenseExpiry) >
+        approvedAtMs
     ) {
       await repository.supersedeActiveExpiryEventsForEntity?.(
         "driver",
@@ -2110,7 +2112,8 @@ export class RegulatoryRegistryService
     }
     if (
       driver.taxiDriverRegistrationExpiry &&
-      Date.parse(driver.taxiDriverRegistrationExpiry) > approvedAtMs
+      driverCredentialExpiryMs(driver.taxiDriverRegistrationExpiry) >
+        approvedAtMs
     ) {
       await repository.supersedeActiveExpiryEventsForEntity?.(
         "driver",
@@ -2991,10 +2994,10 @@ export class RegulatoryRegistryService
           driver.taxiDriverRegistrationExpiry,
         ]
           .filter((d): d is string => Boolean(d && typeof d === "string"))
-          .map((d) => Date.parse(d))
+          .map((d) => driverCredentialExpiryMs(d))
           .filter((t) => !Number.isNaN(t));
 
-        return dates.some((t) => t >= referenceDateMs && t <= cutoff);
+        return dates.some((t) => t > referenceDateMs && t <= cutoff);
       })
       .map((driver) => this.cloneDriver(driver));
   }
@@ -6562,7 +6565,10 @@ export class RegulatoryRegistryService
     )
       return;
     const now = Date.now();
-    if (command.licenseExpiry && Date.parse(command.licenseExpiry) > now) {
+    if (
+      command.licenseExpiry &&
+      driverCredentialExpiryMs(command.licenseExpiry) > now
+    ) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
         "driver",
         driverId,
@@ -6571,7 +6577,7 @@ export class RegulatoryRegistryService
     }
     if (
       command.professionalDriverLicenseExpiry &&
-      Date.parse(command.professionalDriverLicenseExpiry) > now
+      driverCredentialExpiryMs(command.professionalDriverLicenseExpiry) > now
     ) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
         "driver",
@@ -6581,7 +6587,7 @@ export class RegulatoryRegistryService
     }
     if (
       command.taxiDriverRegistrationExpiry &&
-      Date.parse(command.taxiDriverRegistrationExpiry) > now
+      driverCredentialExpiryMs(command.taxiDriverRegistrationExpiry) > now
     ) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
         "driver",
@@ -6911,7 +6917,9 @@ export class RegulatoryRegistryService
             PREEXPIRY_CREDENTIAL_FIELDS,
           )) {
             const expiry = driver[field];
+            // Preserve v1 source identity/payload while using the effective cutoff.
             const expiryMs = Date.parse(expiry ?? "");
+            const expiresAtMs = driverCredentialExpiryMs(expiry);
             for (const days of [30, 7] as const) {
               const family = `preexpiry:${credential}:${days}`;
               const prior = await repository.findActiveExpiryEventsForEntity(
@@ -6928,7 +6936,7 @@ export class RegulatoryRegistryService
                 return (
                   recorded !== expiryMs ||
                   driver.lifecycleStatus !== "active" ||
-                  (expiryMs <= asOfMs && e.status !== "completed")
+                  (expiresAtMs <= asOfMs && e.status !== "completed")
                 );
               });
               await repository.supersedeExpiryEvents(
@@ -6940,8 +6948,8 @@ export class RegulatoryRegistryService
                 !expiry ||
                 !Number.isFinite(expiryMs) ||
                 driver.lifecycleStatus !== "active" ||
-                expiryMs <= asOfMs ||
-                expiryMs - days * 86400000 > asOfMs
+                expiresAtMs <= asOfMs ||
+                expiresAtMs - days * 86400000 > asOfMs
               )
                 continue;
               const fingerprint = createHash("sha256")
@@ -7408,7 +7416,7 @@ export class RegulatoryRegistryService
             ];
             const datesExpired = dates.some((dt) => {
               if (!dt) return false;
-              const ms = Date.parse(dt);
+              const ms = driverCredentialExpiryMs(dt);
               return !Number.isNaN(ms) && ms <= asOfMs;
             });
             if (datesExpired) return true;
@@ -7470,7 +7478,7 @@ export class RegulatoryRegistryService
           }> = [];
 
           if (locked.licenseExpiry) {
-            const ms = Date.parse(locked.licenseExpiry);
+            const ms = driverCredentialExpiryMs(locked.licenseExpiry);
             if (!Number.isNaN(ms) && ms <= asOfMs) {
               checks.push({
                 fieldName: "licenseExpiry",
@@ -7480,7 +7488,9 @@ export class RegulatoryRegistryService
             }
           }
           if (locked.professionalDriverLicenseExpiry) {
-            const ms = Date.parse(locked.professionalDriverLicenseExpiry);
+            const ms = driverCredentialExpiryMs(
+              locked.professionalDriverLicenseExpiry,
+            );
             if (!Number.isNaN(ms) && ms <= asOfMs) {
               checks.push({
                 fieldName: "professionalDriverLicenseExpiry",
@@ -7490,7 +7500,9 @@ export class RegulatoryRegistryService
             }
           }
           if (locked.taxiDriverRegistrationExpiry) {
-            const ms = Date.parse(locked.taxiDriverRegistrationExpiry);
+            const ms = driverCredentialExpiryMs(
+              locked.taxiDriverRegistrationExpiry,
+            );
             if (!Number.isNaN(ms) && ms <= asOfMs) {
               checks.push({
                 fieldName: "taxiDriverRegistrationExpiry",
