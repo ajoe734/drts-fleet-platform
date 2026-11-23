@@ -1,6 +1,11 @@
 // Reuse the opt-in, association and conventional secret-name contracts from
 // operations/deployment/resolve-driver-onboarding-secret-mounts.sh. Values are
 // resolved only by the normal preflight numeric-version freeze, never here.
+// SupplyReviewService enqueues in fleet.driver_onboarding_deliveries within
+// the approval transaction. Its existing drain controller still needs an
+// externally provisioned scheduler with Google workload identity, exact route
+// POST internal/scheduled-tasks/driver-onboarding-notifications/drain and
+// system scope driver:onboarding:notify. This builder provisions neither.
 const DRIVER_ONBOARDING_SECRETS = Object.freeze({
   DRIVER_ONBOARDING_CODE_PEPPER: "driver-onboarding-code-pepper",
   DRIVER_ONBOARDING_DELIVERY_KEY: "driver-onboarding-delivery-key",

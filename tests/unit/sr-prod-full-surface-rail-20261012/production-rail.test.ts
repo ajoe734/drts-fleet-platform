@@ -132,6 +132,9 @@ describe("driver onboarding normal production release configuration", () => {
     expect(args[args.indexOf("--set-secrets") + 1]).toContain(
       "DRIVER_ONBOARDING_DELIVERY_KEY=drts-prod-driver-onboarding-delivery-key:7",
     );
+    expect(args[args.indexOf("--set-secrets") + 1]).toContain(
+      "DRIVER_ONBOARDING_CODE_PEPPER=drts-prod-driver-onboarding-code-pepper:7",
+    );
     expect(args[args.indexOf("--set-secrets") + 1]).not.toContain(":latest");
     expect(plan.services.slice(1)).toEqual(candidate().plan.services.slice(1));
     expect(api.env).not.toHaveProperty("NOTIFICATION_OUTBOX_TYPE");
