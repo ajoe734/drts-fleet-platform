@@ -661,13 +661,20 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         );
       }
     }
-    if (!issuedOpsSessionId && opsIdentity.sessionId && !preSuppliedOpsToken) {
-      issuedOpsSessionId = opsIdentity.sessionId;
+    const opsSessionId =
+      opsIdentity.session_id ?? opsIdentity.sessionId ?? null;
+    if (!issuedOpsSessionId && opsSessionId && !preSuppliedOpsToken) {
+      issuedOpsSessionId = opsSessionId;
     }
     evidence.role_sessions.ops = {
-      session_id: opsIdentity.sessionId ?? issuedOpsSessionId ?? null,
-      actor_id: opsIdentity.actorId ?? opsIdentity.principalId ?? null,
-      actor_type: opsIdentity.actorType ?? null,
+      session_id: opsSessionId ?? issuedOpsSessionId ?? null,
+      actor_id:
+        opsIdentity.actor_id ??
+        opsIdentity.actorId ??
+        opsIdentity.principal_id ??
+        opsIdentity.principalId ??
+        null,
+      actor_type: opsIdentity.actor_type ?? opsIdentity.actorType ?? null,
       realm: opsIdentity.realm ?? null,
       role: opsIdentity.role ?? null,
       scopes: opsScopes,
@@ -865,16 +872,25 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       );
     }
     const resolvedDriverActorId =
-      driverIdentity.driverId ?? driverIdentity.actorId ?? null;
+      driverIdentity.driver_id ??
+      driverIdentity.driverId ??
+      driverIdentity.actor_id ??
+      driverIdentity.actorId ??
+      null;
     if (resolvedDriverActorId && resolvedDriverActorId !== driverId) {
       throw new Error(
         `Driver session bound to unexpected driverId "${resolvedDriverActorId}", expected "${driverId}"`
       );
     }
     evidence.role_sessions.driver = {
-      session_id: driverIdentity.sessionId ?? null,
+      session_id:
+        driverIdentity.session_id ??
+        driverIdentity.sessionId ??
+        driverIdentity.driver_binding_id ??
+        driverIdentity.driverBindingId ??
+        null,
       driver_id: resolvedDriverActorId ?? driverId,
-      actor_type: driverIdentity.actorType ?? null,
+      actor_type: driverIdentity.actor_type ?? driverIdentity.actorType ?? null,
       realm: driverIdentity.realm ?? null,
       role: driverIdentity.role ?? null,
       scopes: driverScopes,
@@ -905,12 +921,21 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       );
     }
     const activeTopPlan = feePlansData.items[0] ?? null;
+    const activeTopPlanMode =
+      activeTopPlan?.reimbursement_mode ??
+      activeTopPlan?.reimbursementMode ??
+      null;
+    const activeTopPlanCode =
+      activeTopPlan?.plan_code ??
+      activeTopPlan?.planCode ??
+      activeTopPlan?.plan_name ??
+      activeTopPlan?.planName ??
+      null;
     const fixturePlanIsTopActive = Boolean(
       activeTopPlan &&
         activeTopPlan.status === 'published' &&
-        (activeTopPlan.reimbursementMode === 'platform_funded' ||
-          activeTopPlan.planCode === 'fixture-platform-funded-reimbursement' ||
-          activeTopPlan.planName === 'fixture-platform-funded-reimbursement')
+        (activeTopPlanMode === 'platform_funded' ||
+          activeTopPlanCode === 'fixture-platform-funded-reimbursement')
     );
     if (!fixturePlanIsTopActive) {
       const publishPlanResp = await fetchImpl(
@@ -981,11 +1006,15 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     const { json: statementRaw, text: statementText } =
       await readResponseJsonOrText(statementResp);
     const statementData = unwrapEnvelope(statementRaw);
+    const batchIdsList =
+      statementData?.reimbursement_batch_ids ??
+      statementData?.reimbursementBatchIds ??
+      null;
     const reimbursementBatchId =
-      (Array.isArray(statementData?.reimbursementBatchIds) &&
-      statementData.reimbursementBatchIds.length > 0
-        ? statementData.reimbursementBatchIds[0]
+      (Array.isArray(batchIdsList) && batchIdsList.length > 0
+        ? batchIdsList[0]
         : null) ??
+      statementData?.reimbursement_batch?.batch_id ??
       statementData?.reimbursementBatch?.batchId ??
       null;
     if (
@@ -1019,10 +1048,13 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     const { json: batchRaw, text: batchText } =
       await readResponseJsonOrText(batchResp);
     const batchBody = unwrapEnvelope(batchRaw);
+    const verifiedBatchId = batchBody?.batch_id ?? batchBody?.batchId ?? null;
+    const verifiedBatchDriverId =
+      batchBody?.driver_id ?? batchBody?.driverId ?? null;
     if (
       batchResp.status !== 200 ||
-      batchBody?.batchId !== reimbursementBatchId ||
-      batchBody?.driverId !== driverId
+      verifiedBatchId !== reimbursementBatchId ||
+      verifiedBatchDriverId !== driverId
     ) {
       evidence.missing.push(
         `verified_reimbursement_batch:${reimbursementBatchId}`
@@ -1058,7 +1090,9 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     const targetPublicInfo = publicInfoData.items.find(
       (item) =>
         item &&
-        (item.versionId === publicInfoVersionId ||
+        (item.version_id === publicInfoVersionId ||
+          item.versionId === publicInfoVersionId ||
+          item.public_info_version_id === publicInfoVersionId ||
           item.publicInfoVersionId === publicInfoVersionId)
     );
     if (!targetPublicInfo || targetPublicInfo.status !== 'published') {
@@ -1161,7 +1195,10 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         await readResponseJsonOrText(uploadResp);
       let proofBody = unwrapEnvelope(uploadRaw);
       const proofId =
-        proofBody?.proofId ?? proofBody?.remittance_proof_id ?? null;
+        proofBody?.proof_id ??
+        proofBody?.proofId ??
+        proofBody?.remittance_proof_id ??
+        null;
       if (
         (uploadResp.status !== 200 && uploadResp.status !== 201) ||
         !proofId
@@ -1458,16 +1495,18 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     const placardVersionId =
       placardBody?.placardVersionId ?? placardBody?.placard_version_id ?? null;
     const placardDownloadPath =
+      placardBody?.artifact_download_url ??
       placardBody?.artifactDownloadUrl ??
+      placardBody?.download_metadata?.download_url ??
       placardBody?.downloadMetadata?.downloadUrl ??
       placardBody?.download_url ??
       placardBody?.downloadUrl ??
       null;
     const placardManifestHash =
-      placardBody?.artifactManifestHash ??
-      placardBody?.downloadMetadata?.manifestHash ??
-      placardBody?.download_metadata?.manifest_hash ??
       placardBody?.artifact_manifest_hash ??
+      placardBody?.artifactManifestHash ??
+      placardBody?.download_metadata?.manifest_hash ??
+      placardBody?.downloadMetadata?.manifestHash ??
       null;
     if (
       (createPlacardResp.status !== 200 && createPlacardResp.status !== 201) ||
