@@ -362,7 +362,19 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
               ...(serverMaterialized ? { method: wireMethod(OWNER_CARD) } : {}),
             });
           }
-          // Mobile browser has NO pax_session web cookie -> BFF returns 401 for /api/passenger-app/me or /payment-methods
+          // The BFF forwards GET /me. The account API rejects an anonymous session.
+          if (url === `${API_ORIGIN}/api/passenger-app/me`) {
+            expect(new Headers(init?.headers).get("authorization")).toBeNull();
+            return Response.json(
+              {
+                error: {
+                  code: "unauthorized",
+                  message: "An active passenger session is required.",
+                },
+              },
+              { status: 401 },
+            );
+          }
           if (url.startsWith("/api/passenger-app/")) {
             const verb = (init?.method ?? "GET") as "GET" | "POST";
             return bff[verb](
@@ -430,6 +442,12 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
       const returnLink = await screen.findByRole("link", {
         name: "返回 App 付款方式",
       });
+      const mobileNotice = {
+        completed: /此瀏覽器無網頁登入狀態.+重新查詢同帳號的綁卡結果/,
+        failed: /綁定失敗或發卡行拒絕.+回到 App 確認或重試/,
+        unknown: /卡片綁定尚待確認.+回到 App 重新查詢付款方式/,
+      };
+      await screen.findByText(mobileNotice[expectedQuery]);
       const returnHref = returnLink.getAttribute("href")!;
       expect(returnHref).toBe(
         `${NATIVE_PASSENGER_PAYMENT_RETURN_URI}?ecpay_3ds=${expectedQuery}`,
@@ -649,6 +667,7 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
     );
     const view1 = renderWeb(<PaymentMethodsPage />);
     await screen.findByText("尚未設定付款卡片");
+    await screen.findByText(/由下方信用卡清單確認此帳號的實際綁卡結果/);
     expect(screen.queryByText("VISA •••• 4242")).toBeNull();
     expect(
       screen

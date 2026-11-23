@@ -63,16 +63,14 @@ function ecpay3dsReturnNotice(
   if (status === "failed") {
     return hasWebSession
       ? T.bindingFailed
-      : `${T.bindingFailed} 若使用手機 App，請點選「返回 App 付款方式」回到 App 確認或重試。`;
+      : `${T.bindingFailed} ${T.returnToAppToRetry}`;
   }
   if (status === "unknown") {
-    return hasWebSession
-      ? T.pending
-      : `${T.pending} 若使用手機 App，請點選「返回 App 付款方式」回到 App 重新查詢付款方式。`;
+    return hasWebSession ? T.pending : `${T.pending} ${T.returnToAppToRefresh}`;
   }
   return hasWebSession
-    ? "已收到綠界安全驗證回傳，請由下方信用卡清單確認此帳號的實際綁卡結果。"
-    : "已收到綠界安全驗證回傳；此瀏覽器無網頁登入狀態，請點選「返回 App 付款方式」回到 App 重新查詢同帳號的綁卡結果。";
+    ? T.verificationReturned
+    : T.verificationReturnedWithoutWebSession;
 }
 
 export interface PaymentMethodsScreenProps {
@@ -391,7 +389,7 @@ export function PaymentMethodsScreen({
               href={nativeAppReturnHref}
               data-testid="payment-native-app-return"
             >
-              返回 App 付款方式
+              {T.returnToAppPaymentMethods}
             </a>
           </>
         ) : (
@@ -415,7 +413,7 @@ export function PaymentMethodsScreen({
             {ecpay3dsReturnNotice(ecpayReturnStatus, true)}
           </AuthAlert>
           <a href={nativeAppReturnHref} data-testid="payment-native-app-return">
-            返回 App 付款方式
+            {T.returnToAppPaymentMethods}
           </a>
         </>
       )}
