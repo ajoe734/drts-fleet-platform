@@ -1295,14 +1295,38 @@ export class MultiTaxiRepository {
     orderId: string,
     executor: Pick<DatabaseService, "query">,
   ): Promise<number | null> {
+    // One atomic statement for both channels. A partner route owns its V0104
+    // counter row from route creation. A first-party route (V0143) gets its
+    // counter row on its first allocation; the FK admits only orders that have
+    // a first-party route, and the NOT EXISTS guard keeps an order that also
+    // has a partner counter on the partner sequence alone.
     const result = await executor.query<{
       event_sequence: string | number;
     }>(
       `
-        UPDATE mobility.phase1_partner_notification_sequences
-        SET next_sequence = next_sequence + 1
-        WHERE order_id = $1
-        RETURNING next_sequence - 1 AS event_sequence
+        WITH partner AS (
+          UPDATE mobility.phase1_partner_notification_sequences
+          SET next_sequence = next_sequence + 1
+          WHERE order_id = $1
+          RETURNING next_sequence - 1 AS event_sequence
+        ), first_party AS (
+          INSERT INTO mobility.phase1_first_party_notification_sequences AS s (
+            order_id, next_sequence
+          )
+          SELECT r.order_id, 2
+          FROM mobility.phase1_order_first_party_notification_routes r
+          WHERE r.order_id = $1
+            AND NOT EXISTS (
+              SELECT 1 FROM mobility.phase1_partner_notification_sequences p
+              WHERE p.order_id = $1
+            )
+          ON CONFLICT (order_id)
+            DO UPDATE SET next_sequence = s.next_sequence + 1
+          RETURNING next_sequence - 1 AS event_sequence
+        )
+        SELECT event_sequence FROM partner
+        UNION ALL
+        SELECT event_sequence FROM first_party
       `,
       [orderId],
     );
