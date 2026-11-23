@@ -490,7 +490,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
   ).trim();
 
   const scanMaxAttempts = Number(
-    options.scanMaxAttempts ?? env.SR_LIVE_DOC_SCAN_MAX_ATTEMPTS ?? 15
+    options.scanMaxAttempts ?? env.SR_LIVE_DOC_SCAN_MAX_ATTEMPTS ?? 60
   );
   const scanPollIntervalMs = Number(
     options.scanPollIntervalMs ?? env.SR_LIVE_DOC_SCAN_POLL_INTERVAL_MS ?? 2000

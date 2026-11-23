@@ -68,6 +68,8 @@ on:
       - gemini2/doc-live-runner-upgrade-20261005-*
       - gemini2/gcs-actual-proof-and-placard-acceptance-20261123
       - gemini2/gcs-actual-proof-and-placard-acceptance-20261123-*
+      - gemini/gcs-actual-proof-and-placard-acceptance-20261123
+      - gemini/gcs-actual-proof-and-placard-acceptance-20261123-*
     paths:
       - .github/workflows/live-document-acceptance.yml
       - tests/e2e/system-remediation/sr-live-doc-001/**
