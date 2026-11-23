@@ -21,6 +21,8 @@ import { NotificationDeliveryService } from "../../../../apps/api/src/modules/no
 import {
   DeliveryTransportError,
   type MailTransport,
+  type OutgoingMailMessage,
+  type PlatformTransportMessage,
   type ProviderAcknowledgement,
   type TransportMessage,
 } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
@@ -332,14 +334,14 @@ describe("SR-MAIL-001 tenant invitation email delivery", () => {
       "https://tenant.controlled-receiver.test/reset-password",
     );
     try {
-      const sentMessages: TransportMessage[] = [];
+      const sentMessages: OutgoingMailMessage[] = [];
       const transport: MailTransport = {
         provider: "controlled-test-receiver",
         send: vi.fn(async (message: TransportMessage) => {
           sentMessages.push(message);
           return acknowledgement(`outbox-${sentMessages.length}`);
         }),
-        sendPlatform: vi.fn(async (message: TransportMessage) => {
+        sendPlatform: vi.fn(async (message: PlatformTransportMessage) => {
           sentMessages.push(message);
           return acknowledgement(`platform-${sentMessages.length}`);
         }),
