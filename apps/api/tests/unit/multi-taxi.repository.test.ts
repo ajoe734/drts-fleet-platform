@@ -370,4 +370,85 @@ describe("MultiTaxiRepository rating governance reads", () => {
       ["driver-001"],
     );
   });
+
+  it("matches completed driver task_id and operational record trip_id in listPassengerRatingReviews and resolves canonical_trip_id in findPassengerRatingReview", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("count(*)::integer AS total_items")) {
+        return { rows: [{ total_items: 1 }] };
+      }
+      if (sql.includes("AS comment_excerpt")) {
+        return {
+          rows: [
+            {
+              rating_id: "ca5e20c7-470c-4a62-b107-654aa581d626",
+              order_id: "580e0ebf-c1e6-41c4-93dc-449bd92a010f",
+              trip_id: "85f7a59f-ee43-4734-869a-42f2aa1031ae",
+              driver_id: "2ef2301a-6a1f-44a4-b865-2fd7a035e2b5",
+              driver_display_name: "Driver One",
+              score: 5,
+              tags: ["safe"],
+              comment_excerpt: "Canonical trip match",
+              status: "active",
+              submitted_at: "2026-11-19T12:24:10.000Z",
+              updated_at: "2026-11-19T12:24:10.000Z",
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM ops.passenger_trip_ratings r")) {
+        return {
+          rows: [
+            {
+              ...activeRatingRow,
+              rating_id: "ca5e20c7-470c-4a62-b107-654aa581d626",
+              order_id: "580e0ebf-c1e6-41c4-93dc-449bd92a010f",
+              trip_id: "6c7e412a-2ae4-4fd6-946b-a55f9563c35b",
+              canonical_trip_id: "85f7a59f-ee43-4734-869a-42f2aa1031ae",
+              order_no: "DRTS-PAX-20261119-001",
+              driver_display_name: "Driver One",
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM ops.driver_rating_summaries")) {
+        return { rows: [ratedSummaryRow] };
+      }
+      if (sql.includes("FROM ops.passenger_rating_moderation_audits")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    });
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const listResult = await repository.listPassengerRatingReviews({
+      status: null,
+      score: null,
+      tag: null,
+      driverId: null,
+      tripOrOrder: "85f7a59f-ee43-4734-869a-42f2aa1031ae",
+      from: null,
+      to: null,
+      page: 1,
+      pageSize: 20,
+    });
+    expect(listResult.totalItems).toBe(1);
+    expect(listResult.items[0]?.tripId).toBe(
+      "85f7a59f-ee43-4734-869a-42f2aa1031ae",
+    );
+    const listSql = query.mock.calls.map(([s]) => String(s)).join("\n");
+    expect(listSql).toContain("FROM ops.phase1_driver_tasks dt");
+    expect(listSql).toContain(
+      "FROM reporting.multi_taxi_trip_operational_records mtr",
+    );
+
+    const detailResult = await repository.findPassengerRatingReview(
+      "ca5e20c7-470c-4a62-b107-654aa581d626",
+    );
+    expect(detailResult?.rating.tripId).toBe(
+      "85f7a59f-ee43-4734-869a-42f2aa1031ae",
+    );
+  });
 });

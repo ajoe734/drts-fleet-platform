@@ -1360,4 +1360,99 @@ describe("MultiTaxiService trip operational records", () => {
       await service.getTripOperationalRecord("mtr-order-committed-1"),
     ).toBeNull();
   });
+
+  it("canonicalizes passenger rating tripId to the completed driver task_id and supports admin search by certificate tripId or legacy assignmentId", async () => {
+    const { service, ownedMobilityService } = createService();
+    const orderId = "580e0ebf-c1e6-41c4-93dc-449bd92a010f";
+    const assignmentId = "6c7e412a-2ae4-4fd6-946b-a55f9563c35b";
+    const taskId = "85f7a59f-ee43-4734-869a-42f2aa1031ae";
+    const driverId = "2ef2301a-6a1f-44a4-b865-2fd7a035e2b5";
+
+    const sampleOrder = {
+      orderId,
+      orderNo: "DRTS-PAX-20261119-001",
+      runtimeProfileCode: "multi_taxi_direct",
+      timingMode: "on_demand",
+      status: "completed",
+      passenger: {
+        passengerId: "pax-shared-a",
+        name: "Passenger A",
+        phone: "0912345678",
+      },
+      pickup: { address: "Pickup" },
+      dropoff: { address: "Dropoff" },
+      reservationWindowStart: null,
+      cancelableUntil: null,
+      cancelledAt: null,
+      createdAt: "2026-11-19T12:00:00.000Z",
+      updatedAt: "2026-11-19T12:24:10.000Z",
+    };
+    ownedMobilityService.listOrders = vi.fn(() => [sampleOrder]);
+    (
+      ownedMobilityService as unknown as {
+        listDriverTasks: ReturnType<typeof vi.fn>;
+      }
+    ).listDriverTasks = vi.fn(() => [
+      {
+        taskId,
+        orderId,
+        assignmentId,
+        driverId,
+        vehicleId: "veh-001",
+        status: "completed",
+        completedAt: "2026-11-19T12:24:10.000Z",
+        updatedAt: "2026-11-19T12:24:10.000Z",
+      },
+    ]);
+
+    const internalService = service as unknown as {
+      ratingsById: Map<string, Record<string, unknown>>;
+      ratingsByPassengerOrder: Map<string, Record<string, unknown>>;
+      ratingKey: (o: string, p: string) => string;
+      rebuildInMemoryDriverRatingSummary: (d: string, t: string) => void;
+    };
+    const historicalRating = {
+      ratingId: "ca5e20c7-470c-4a62-b107-654aa581d626",
+      orderId,
+      tripId: assignmentId,
+      driverId,
+      passengerSubjectRef: "pax-shared-a",
+      score: 5,
+      tags: ["safe"],
+      comment: "Historical assignmentId rating",
+      status: "active",
+      submittedAt: "2026-11-19T12:24:10.000Z",
+      updatedAt: "2026-11-19T12:24:10.000Z",
+    };
+    internalService.ratingsById.set(
+      historicalRating.ratingId,
+      historicalRating,
+    );
+    internalService.ratingsByPassengerOrder.set(
+      internalService.ratingKey(orderId, "pax-shared-a"),
+      historicalRating,
+    );
+    internalService.rebuildInMemoryDriverRatingSummary(
+      driverId,
+      historicalRating.updatedAt,
+    );
+
+    const byTripId = await service.listPassengerRatingReviews({
+      tripOrOrder: taskId,
+    });
+    expect(byTripId.pageInfo.totalItems).toBe(1);
+    expect(byTripId.items[0]?.tripId).toBe(taskId);
+
+    const byAssignmentId = await service.listPassengerRatingReviews({
+      tripOrOrder: assignmentId,
+    });
+    expect(byAssignmentId.pageInfo.totalItems).toBe(1);
+    expect(byAssignmentId.items[0]?.tripId).toBe(taskId);
+
+    const detail = await service.getPassengerRatingReview(
+      historicalRating.ratingId,
+      true,
+    );
+    expect(detail.rating.tripId).toBe(taskId);
+  });
 });
