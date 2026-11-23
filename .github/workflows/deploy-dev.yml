@@ -816,12 +816,14 @@ jobs:
       - name: Resolve API secret mounts
         id: api_secrets
         env:
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
           ARTIFACT_PROVIDER_SECRET_SUFFIX: ${{ steps.artifact_providers.outputs.secret_suffix }}
         run: |
           set -euo pipefail
 
-          secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
-          project_id="${{ needs.prepare.outputs.project_id }}"
+          secret_prefix="${SECRET_PREFIX}"
+          project_id="${PROJECT_ID}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           referral_embed_secret_args="$web_secret_args"
@@ -1081,74 +1083,14 @@ jobs:
 
           # Driver onboarding dual-channel notifications (DRV-ONB-006) are
           # opt-in (default false) and fail-closed. When enabled, verify secret
-          # metadata only (never create, read, or print secret values) for
-          # DRIVER_ONBOARDING_CODE_PEPPER (at least 32 bytes),
-          # DRIVER_ONBOARDING_DELIVERY_KEY (64 hex), complete Remote SMTP
-          # (REMOTE_SMTP_* and NOTIFICATION_FROM_EMAIL), and complete Twilio SMS
-          # (TWILIO_*), plus the Android/iOS App Links association variables.
-          driver_onboarding_raw="${DEV_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED:-${DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED:-false}}"
-          driver_onboarding_normalized="$(printf '%s' "$driver_onboarding_raw" | tr '[:upper:]' '[:lower:]')"
-          driver_onboarding_notifications_enabled=false
-          case "$driver_onboarding_normalized" in
-            true) driver_onboarding_notifications_enabled=true ;;
-            false|"") driver_onboarding_notifications_enabled=false ;;
-            *)
-              echo "::error::Invalid DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED value: ${driver_onboarding_raw}. Use true/false."
-              exit 1
-              ;;
-          esac
-          if [[ "$driver_onboarding_notifications_enabled" == true ]]; then
-            driver_onboarding_android_raw="${DEV_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS:-${DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS:-}}"
-            driver_onboarding_ios_app_id="$(printf '%s' "${DEV_DRIVER_ONBOARDING_IOS_APP_ID:-${DRIVER_ONBOARDING_IOS_APP_ID:-}}" | tr -d '[:space:]')"
-            if [[ -z "$driver_onboarding_android_raw" || -z "$driver_onboarding_ios_app_id" ]]; then
-              echo "::error::Enabling DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED requires DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS and DRIVER_ONBOARDING_IOS_APP_ID."
-              exit 1
-            fi
-            if [[ ! "$driver_onboarding_ios_app_id" =~ ^[A-Z0-9]{10}\.com\.cctechsupport\.drts\.driver$ ]]; then
-              echo "::error::DRIVER_ONBOARDING_IOS_APP_ID must match <TEAMID>.com.cctechsupport.drts.driver."
-              exit 1
-            fi
-            IFS=',' read -r -a driver_onboarding_fp_items <<<"$driver_onboarding_android_raw"
-            driver_onboarding_fp_count=0
-            for fp_item in "${driver_onboarding_fp_items[@]}"; do
-              fp_cleaned="$(printf '%s' "$fp_item" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-              if [[ ! "$fp_cleaned" =~ ^([A-F0-9]{2}:){31}[A-F0-9]{2}$ ]]; then
-                echo "::error::DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS must be comma-separated SHA-256 certificate fingerprints (AA:BB:...:FF)."
-                exit 1
-              fi
-              driver_onboarding_fp_count=$((driver_onboarding_fp_count + 1))
-            done
-            if [[ "$driver_onboarding_fp_count" -eq 0 ]]; then
-              echo "::error::DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS must contain at least one SHA-256 certificate fingerprint."
-              exit 1
-            fi
-            if [[ "$smtp_secret_count" -ne 6 ]]; then
-              echo "::error::Enabling DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED requires complete Remote SMTP secrets (REMOTE_SMTP_* and NOTIFICATION_FROM_EMAIL)."
-              exit 1
-            fi
-            driver_onboarding_code_pepper_secret="${secret_prefix}-driver-onboarding-code-pepper"
-            driver_onboarding_delivery_key_secret="${secret_prefix}-driver-onboarding-delivery-key"
-            if ! gcloud secrets describe "$driver_onboarding_code_pepper_secret" --project "$project_id" >/dev/null 2>&1; then
-              echo "::error::Enabling DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED requires Secret Manager secret ${driver_onboarding_code_pepper_secret} (DRIVER_ONBOARDING_CODE_PEPPER, at least 32 bytes)."
-              exit 1
-            fi
-            if ! gcloud secrets describe "$driver_onboarding_delivery_key_secret" --project "$project_id" >/dev/null 2>&1; then
-              echo "::error::Enabling DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED requires Secret Manager secret ${driver_onboarding_delivery_key_secret} (DRIVER_ONBOARDING_DELIVERY_KEY, 64 hex)."
-              exit 1
-            fi
-            driver_onboarding_twilio_mounts=""
-            for twilio_setting in TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER; do
-              twilio_suffix="$(printf '%s' "$twilio_setting" | tr '[:upper:]_' '[:lower:]-')"
-              twilio_secret="${secret_prefix}-${twilio_suffix}"
-              if ! gcloud secrets describe "$twilio_secret" --project "$project_id" >/dev/null 2>&1; then
-                echo "::error::Enabling DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED requires complete Twilio SMS secrets (missing ${twilio_secret})."
-                exit 1
-              fi
-              driver_onboarding_twilio_mounts="${driver_onboarding_twilio_mounts},${twilio_setting}=${twilio_secret}:latest"
-            done
-            secret_args="${secret_args},DRIVER_ONBOARDING_CODE_PEPPER=${driver_onboarding_code_pepper_secret}:latest,DRIVER_ONBOARDING_DELIVERY_KEY=${driver_onboarding_delivery_key_secret}:latest${driver_onboarding_twilio_mounts}"
+          # metadata only (never create, read, or print secret values) via the
+          # deployment helper for DRIVER_ONBOARDING_CODE_PEPPER (at least 32
+          # bytes), DRIVER_ONBOARDING_DELIVERY_KEY (64 hex), complete Remote
+          # SMTP, complete Twilio SMS, and Android/iOS App Links variables.
+          driver_onboarding_mounts="$(operations/deployment/resolve-driver-onboarding-secret-mounts.sh "$secret_prefix" "$project_id" "$smtp_secret_count")"
+          if [[ -n "$driver_onboarding_mounts" ]]; then
+            secret_args="${secret_args},${driver_onboarding_mounts}"
           fi
-          echo "driver_onboarding_notifications_enabled=${driver_onboarding_notifications_enabled}" >> "$GITHUB_OUTPUT"
 
           echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
           echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
