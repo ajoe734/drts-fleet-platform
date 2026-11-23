@@ -182,7 +182,7 @@ describe("Passenger Ride UI Acceptance", () => {
     ]);
     expect(
       screen
-        .getAllByRole("link", { name: "客服 02-2944-0985" })
+        .getAllByRole("link", { name: "聯絡客服 02-2944-0985" })
         .every((link) => link.getAttribute("href") === "tel:02-2944-0985"),
     ).toBe(true);
     expect(screen.queryByRole("link", { name: "行程紀錄" })).toBeNull();
