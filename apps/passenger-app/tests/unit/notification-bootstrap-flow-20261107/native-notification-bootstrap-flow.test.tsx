@@ -275,7 +275,7 @@ interface HttpCall {
   authorization: string | null;
   body?: string;
 }
-function httpBoundary() {
+function httpBoundary(beforeRideResponse?: (id: string) => Promise<void>) {
   const state = {
     deviceSequence: 0,
     unregisterSuccess: true,
@@ -337,6 +337,7 @@ function httpBoundary() {
           const id = decodeURIComponent(
             path.slice("/api/passenger-app/rides/".length),
           );
+          if (beforeRideResponse) await beforeRideResponse(id);
           if (id.startsWith("sim-owned-"))
             return success({ ride: ownedRide(id) });
           return response({ error: { code: "ride_not_found" } }, 404);
@@ -760,6 +761,51 @@ describe("configured native notifications with actual bootstrap, owner clients a
     expect(f.posts()).toHaveLength(1);
     expect(external.getInitial).toHaveBeenCalledTimes(1);
     expect(f.state.unexpected).toEqual([]);
+  });
+
+  it.each(["sim-owned-earlier", "sim-foreign-earlier"])(
+    "keeps the most recently opened notification when %s returns late",
+    async (earlier) => {
+      const later = "sim-owned-selected";
+      const held = deferred<void>();
+      const f = httpBoundary(async (id) => {
+        if (id === earlier) await held.promise;
+      });
+      const { runtime } = await configured(f);
+      const open = external.openedHistory.at(-1)!;
+      await nativeWork(() => open({ data: { ride_ref: earlier } }));
+      expect(f.rides().at(-1)).toMatchObject({
+        path: `/api/passenger-app/rides/${earlier}`,
+        authorization: `Bearer ${PAIR_A.accessToken}`,
+      });
+      await nativeWork(() => open({ data: { ride_ref: later } }));
+      const expectedRoute = { kind: "ride", orderId: later };
+      expect(runtime.getSnapshot().route).toEqual(expectedRoute);
+      const reads = f.rides().length;
+      const message = runtime.getSnapshot().pushMessage;
+      await nativeWork(() => held.resolve());
+      expect(runtime.getSnapshot().route).toEqual(expectedRoute);
+      expect(f.rides()).toHaveLength(reads);
+      expect(runtime.getSnapshot().pushMessage).toBe(message);
+    },
+  );
+
+  it("keeps a pending owned ride when an unrelated notification has no ride reference", async () => {
+    const ride = "sim-owned-pending";
+    const held = deferred<void>();
+    const f = httpBoundary(async () => held.promise);
+    const { runtime } = await configured(f);
+    const open = external.openedHistory.at(-1)!;
+    await nativeWork(() => open({ data: { ride_ref: ride } }));
+    expect(f.rides()).toHaveLength(1);
+    await nativeWork(() => open({ data: { orderId: "unrelated" } }));
+    expect(f.rides()).toHaveLength(1);
+    await nativeWork(() => held.resolve());
+    expect(runtime.getSnapshot().route).toEqual({
+      kind: "ride",
+      orderId: ride,
+    });
+    expect(runtime.getSnapshot().pushMessage).toBe("已讀取通知所屬行程。");
   });
 
   it("drops delayed initial, SDK and Alert work across identity replacement, logout and unmount while preserving an unconfirmed device revocation", async () => {
