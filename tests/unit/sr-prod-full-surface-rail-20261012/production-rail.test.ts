@@ -317,11 +317,11 @@ describe("driver onboarding normal production release configuration", () => {
       Object.assign(process.env, env);
       const controller = new DriverActivationLinksController();
       expect(
-        controller.androidAssociation()[0].target.sha256_cert_fingerprints,
+        controller.androidAssociation()[0]!.target.sha256_cert_fingerprints,
       ).toEqual([first, other]);
-      expect(controller.appleAssociation().applinks.details[0].appIDs).toEqual([
-        f.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID,
-      ]);
+      expect(controller.appleAssociation().applinks.details[0]!.appIDs).toEqual(
+        [f.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID],
+      );
     } finally {
       process.env = previous;
     }
