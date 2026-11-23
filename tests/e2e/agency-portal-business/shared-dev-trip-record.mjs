@@ -172,7 +172,7 @@ export async function body(response, status = 200) {
 
 export async function visit(page, path, cfg) {
   const response = await page.goto(`${cfg.origin}${path}`, {
-    waitUntil: "domcontentloaded",
+    waitUntil: "load",
   });
   check(response?.status() === 200, "ui-http-200-required");
   check(
@@ -215,6 +215,7 @@ export async function openContext(browser, cfg) {
       // transport. The browser follows Location as a new, separately scoped hop.
       const response = await route.fetch({
         maxRedirects: 0,
+        timeout: 60000,
         headers: {
           ...route.request().headers(),
           "X-Serverless-Authorization": `Bearer ${process.env.AGENCY_ID_TOKEN}`,
@@ -699,6 +700,8 @@ export async function probe(name, operation) {
   };
   try {
     await operation(browser, cfg, record);
+  } catch {
+    result.checks.push({ check: "probe-aborted", status: "fail" });
   } finally {
     await browser.close();
     result.status =
@@ -725,7 +728,14 @@ async function main() {
         let row;
         await record(`${role}:R11-detail-refresh`, async () => {
           row = await readDetail(opened.page, cfg);
-          return { sameRecord: true, refreshed: true };
+          return {
+            sameRecord: true,
+            refreshed: true,
+            routeSource: row.route.source,
+            paymentStatus: row.payment_status,
+            collectedFareMinor: row.collected_fare_minor,
+            retainUntil: row.retain_until,
+          };
         });
         await record(`${role}:R13-dated-daily-dispatch`, () =>
           dailyDispatch(opened.page, cfg, row),

@@ -1,4 +1,5 @@
 // Normal shared portal UI only; no mocked data, seeded accounts or DOM edits.
+/* global document, getComputedStyle, innerWidth */
 import { pathToFileURL } from "node:url";
 import {
   api,
