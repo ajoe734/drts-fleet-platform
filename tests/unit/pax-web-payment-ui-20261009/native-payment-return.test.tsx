@@ -22,9 +22,12 @@ import {
 } from "../../../packages/passenger-client/src/index";
 import * as uiTokens from "../../../packages/ui-tokens/src/index";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
-import PaymentMethodsPage, {
+import * as paymentMethodsPageModule from "../../../apps/passenger-app-web/app/account/payment-methods/page";
+import PaymentMethodsPage from "../../../apps/passenger-app-web/app/account/payment-methods/page";
+import {
   NATIVE_PASSENGER_PAYMENT_RETURN_URI as WEB_NATIVE_PAYMENT_RETURN_URI,
-} from "../../../apps/passenger-app-web/app/account/payment-methods/page";
+  PaymentMethodsScreen,
+} from "../../../apps/passenger-app-web/components/payment/payment-methods-screen";
 import {
   NATIVE_PASSENGER_PAYMENT_RETURN_URI,
   redirectSystemPath,
@@ -271,7 +274,9 @@ afterEach(() => {
 });
 
 describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay OrderResultURL -> Web return page -> Expo payment browser return -> owner payment-methods readback", () => {
-  it("aligns fixed payment return URI drtspassenger://payment-methods/return across web return page, native payment browser adapter, and +native-intent while keeping OAuth callback distinct", () => {
+  it("aligns fixed payment return URI drtspassenger://payment-methods/return across web return page, native payment browser adapter, and +native-intent while keeping OAuth callback distinct and preserving Next page export/prop contracts", () => {
+    expect(Object.keys(paymentMethodsPageModule)).toEqual(["default"]);
+    expect(PaymentMethodsPage.length).toBe(0);
     expect(NATIVE_PASSENGER_PAYMENT_RETURN_URI).toBe(
       "drtspassenger://payment-methods/return",
     );
@@ -680,5 +685,16 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
     await screen.findByText("卡片綁定尚待確認，未收到完成結果；請勿重複綁定。");
     await screen.findByText("VISA •••• 4242");
     view4.unmount();
+
+    // 5. Regular PaymentMethodsScreen component supports direct ecpay3dsReturn status injection without Next page props
+    window.history.replaceState({}, "", "/account/payment-methods");
+    const view5 = renderWeb(<PaymentMethodsScreen ecpay3dsReturn="failed" />);
+    await screen.findByText("綁定失敗或發卡行拒絕，請改用其他卡片。");
+    expect(
+      screen
+        .getByRole("link", { name: "返回 App 付款方式" })
+        .getAttribute("href"),
+    ).toBe("drtspassenger://payment-methods/return?ecpay_3ds=failed");
+    view5.unmount();
   });
 });
