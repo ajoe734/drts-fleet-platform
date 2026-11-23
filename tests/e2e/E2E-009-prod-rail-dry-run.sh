@@ -116,16 +116,14 @@ assert_contains "$WORKFLOW_PROD" "group: deploy-prod" "prod concurrency group is
 assert_contains "$WORKFLOW_PROD" "migrate:" "prod migrate job exists (non-skeleton)"
 assert_contains "$WORKFLOW_PROD" "deploy:" "prod deploy job exists (non-skeleton)"
 assert_contains "$WORKFLOW_PROD" "health-check:" "prod health-check job exists (non-skeleton)"
-assert_contains "$BRANCH_STRATEGY" "gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0" "branch strategy documents deploy command"
+assert_contains "$BRANCH_STRATEGY" 'gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${PROD_TAG:?}"' "deploy command sets workflow branch and product tag"
 
 save_check "deploy_dry_run" "status" "pass"
 save_check "deploy_dry_run" "mode" "real_workflow_dispatch_contract"
 
 log_surface "rollback by tag — operator command path"
 
-assert_contains "$BRANCH_STRATEGY" "# Redeploy yesterday's prod tag (rollback)" "rollback heading is documented"
-assert_contains "$BRANCH_STRATEGY" "gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0" "rollback by tag command is documented"
-assert_contains "$BRANCH_STRATEGY" "operator runs \`gh workflow run deploy-prod.yml -f tag=prod/v<date>\`" "operator-driven prod tag deploy is documented"
+assert_contains "$BRANCH_STRATEGY" 'gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${ROLLBACK_TAG:?}" -f skip_migration=true' "rollback command sets workflow branch, known-good tag and migration skip"
 
 save_check "rollback" "status" "pass"
 save_check "rollback" "mode" "tag_redeploy_contract"
