@@ -333,20 +333,38 @@ function prepareEphemeralEasProject(tempDir, config, repoRoot) {
   return projectDir;
 }
 
-function redactAndClassifyCliError(stderr, exitCode = 1) {
-  const text = typeof stderr === "string" ? stderr : String(stderr || "");
-  const stderrSha256 = sha256Hex(text);
+function streamToText(value) {
+  if (typeof value === "string") return value;
+  if (Buffer.isBuffer(value)) return value.toString("utf8");
+  return String(value || "");
+}
+
+function redactAndClassifyCliError(stderr, exitCode = 1, stdout = "") {
+  const stderrText = streamToText(stderr);
+  const stdoutText = streamToText(stdout);
+  const combinedText = stdoutText
+    ? `${stderrText}\n${stdoutText}`
+    : stderrText;
+  const stderrSha256 = sha256Hex(stderrText);
   const markers = [];
-  if (/Entity Not Authorized|UNAUTHORIZED_ERROR|not authorized/i.test(text)) {
+  if (
+    /Entity Not Authorized|UNAUTHORIZED_ERROR|not authorized|You don't have the required permissions|required permissions to perform this operation|Owner of project identified by/i.test(
+      combinedText,
+    )
+  ) {
     markers.push("ENTITY_NOT_AUTHORIZED");
   }
-  if (/GraphQL request failed/i.test(text)) {
+  if (/GraphQL request failed/i.test(combinedText)) {
     markers.push("GRAPHQL_REQUEST_FAILED");
   }
-  if (/Invalid token|Authentication|not logged in|401|403/i.test(text)) {
+  if (
+    /Invalid token|Authentication|not logged in|An Expo user account is required|Either log in with|set the.*EXPO_TOKEN|401|403/i.test(
+      combinedText,
+    )
+  ) {
     markers.push("AUTHENTICATION_ERROR");
   }
-  if (/Couldn't find any builds|Build not found|NOT_FOUND/i.test(text)) {
+  if (/Couldn't find any builds|Build not found|NOT_FOUND/i.test(combinedText)) {
     markers.push("BUILD_NOT_FOUND");
   }
 
@@ -755,7 +773,11 @@ function defaultEasBuildViewRunner(buildId, projectDir, env) {
       timeout: LIMITS.cliTimeoutMs,
     },
   );
-  return JSON.parse(stdout);
+  try {
+    return JSON.parse(stdout);
+  } catch (parseErr) {
+    throw Object.assign(parseErr, { stdout, stderr: "", status: 1 });
+  }
 }
 
 function assertRedactedReceipt(receipt, env = {}) {
@@ -826,14 +848,24 @@ async function lookupExistingBuilds(env, options = {}) {
       try {
         rawBuild = await viewBuild(target.buildId, projectDir, env);
       } catch (err) {
+        const hasStdoutStream =
+          typeof err?.stdout === "string" || Buffer.isBuffer(err?.stdout);
         const stderr =
           typeof err?.stderr === "string"
             ? err.stderr
             : Buffer.isBuffer(err?.stderr)
               ? err.stderr.toString("utf8")
-              : err?.message || "";
+              : hasStdoutStream
+                ? ""
+                : err?.message || "";
+        const stdout =
+          typeof err?.stdout === "string"
+            ? err.stdout
+            : Buffer.isBuffer(err?.stdout)
+              ? err.stdout.toString("utf8")
+              : "";
         const exitCode = Number.isInteger(err?.status) ? err.status : 1;
-        const classified = redactAndClassifyCliError(stderr, exitCode);
+        const classified = redactAndClassifyCliError(stderr, exitCode, stdout);
         if (classified.isAuthorizationDenial) {
           authDenied = true;
         }

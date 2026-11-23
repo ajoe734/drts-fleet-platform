@@ -897,4 +897,132 @@ describe("NATIVE-EXISTING-EAS-HOSTED-BUILD-LOOKUP-20261123", () => {
     );
     expect(JSON.stringify(receipt)).not.toContain(SENTINEL_TOKEN);
   });
+
+  it("classifies early EAS CLI 21.4.0 stdout-only errors paired with generic stderr while preserving stderrSha256 and second-build behavior", async () => {
+    const genericStderr =
+      "Using EAS CLI without version control system is not recommended, use this mode only if you know what you are doing.\n    Error: build:view command failed.\n";
+    const expectedStderrSha256 = lookup.sha256Hex(genericStderr);
+
+    // 1. Early stdout-only authorization denial (before enableJsonOutput redirects stdout to stderr)
+    // must classify as UNAUTHORIZED_PROJECT_OR_BUILD_READ, retain stderrSha256 of generic stderr,
+    // and skip the second build without retrying.
+    const authDeniedCalls: string[] = [];
+    const authDeniedReceipt = await lookup.lookupExistingBuilds(baseEnv(), {
+      repoRoot: REPO_ROOT,
+      viewBuild: async (buildId: string) => {
+        authDeniedCalls.push(buildId);
+        throw Object.assign(new Error("Synthetic runner error"), {
+          stdout: `You don't have the required permissions to perform this operation.\nOriginal error message: Entity Not Authorized (${buildId}) token=${SENTINEL_TOKEN}\n`,
+          stderr: genericStderr,
+          status: 1,
+        });
+      },
+    });
+
+    expect(authDeniedCalls).toEqual([ANDROID_ID]);
+    expect(authDeniedReceipt.status).toBe(
+      "blocked_unauthorized_awaiting_operator",
+    );
+    expect(authDeniedReceipt.awaitingOperatorAction).toBe(true);
+    expect(authDeniedReceipt.builds[0].id).toBe(ANDROID_ID);
+    expect(authDeniedReceipt.builds[0].readbackStatus).toBe(
+      "blocked_cli_view_failed",
+    );
+    expect(authDeniedReceipt.builds[0].cliFailure).toEqual({
+      exitCode: 1,
+      stderrSha256: expectedStderrSha256,
+      classification: "UNAUTHORIZED_PROJECT_OR_BUILD_READ",
+      isAuthorizationDenial: true,
+      matchedMarkers: ["ENTITY_NOT_AUTHORIZED"],
+    });
+    expect(authDeniedReceipt.builds[1].id).toBe(IOS_ID);
+    expect(authDeniedReceipt.builds[1].readbackStatus).toBe(
+      "skipped_after_authorization_denial",
+    );
+    expect(authDeniedReceipt.builds[1].cliFailure).toBeNull();
+    expect(
+      authDeniedReceipt.downstreamCardBindings[
+        "NATIVE-SIGNED-BUILD-READBACK-20261123"
+      ].status,
+    ).toBe("blocked_existing_github_identity_unauthorized");
+    expect(JSON.stringify(authDeniedReceipt)).not.toContain(SENTINEL_TOKEN);
+    expect(JSON.stringify(authDeniedReceipt)).not.toContain(
+      "Entity Not Authorized",
+    );
+
+    // 2. Early stdout-only non-interactive authentication failure (SessionManager ensureLoggedInAsync)
+    // must classify as AUTHENTICATION_REJECTED, retain stderrSha256, and skip the second build.
+    const authRejectedCalls: string[] = [];
+    const authRejectedReceipt = await lookup.lookupExistingBuilds(baseEnv(), {
+      repoRoot: REPO_ROOT,
+      viewBuild: async (buildId: string) => {
+        authRejectedCalls.push(buildId);
+        throw Object.assign(new Error("Synthetic runner error"), {
+          stdout: `An Expo user account is required to proceed.\nEither log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI (Learn more: https://docs.expo.dev/accounts/programmatic-access/) token=${SENTINEL_TOKEN}\n`,
+          stderr: genericStderr,
+          status: 1,
+        });
+      },
+    });
+
+    expect(authRejectedCalls).toEqual([ANDROID_ID]);
+    expect(authRejectedReceipt.status).toBe(
+      "blocked_unauthorized_awaiting_operator",
+    );
+    expect(authRejectedReceipt.awaitingOperatorAction).toBe(true);
+    expect(authRejectedReceipt.builds[0].cliFailure).toEqual({
+      exitCode: 1,
+      stderrSha256: expectedStderrSha256,
+      classification: "AUTHENTICATION_REJECTED",
+      isAuthorizationDenial: true,
+      matchedMarkers: ["AUTHENTICATION_ERROR"],
+    });
+    expect(authRejectedReceipt.builds[1].id).toBe(IOS_ID);
+    expect(authRejectedReceipt.builds[1].readbackStatus).toBe(
+      "skipped_after_authorization_denial",
+    );
+    expect(JSON.stringify(authRejectedReceipt)).not.toContain(SENTINEL_TOKEN);
+    expect(JSON.stringify(authRejectedReceipt)).not.toMatch(/https?:\/\//i);
+
+    // 3. Early stdout-only non-authorization failure (BUILD_NOT_FOUND) paired with generic stderr
+    // must classify as BUILD_NOT_FOUND with isAuthorizationDenial=false and continue to query the second build.
+    const notFoundCalls: string[] = [];
+    const notFoundReceipt = await lookup.lookupExistingBuilds(baseEnv(), {
+      repoRoot: REPO_ROOT,
+      viewBuild: async (buildId: string) => {
+        notFoundCalls.push(buildId);
+        throw Object.assign(new Error("Synthetic runner error"), {
+          stdout: `Couldn't find any builds for the project ${buildId}\n`,
+          stderr: genericStderr,
+          status: 1,
+        });
+      },
+    });
+
+    expect(notFoundCalls).toEqual([ANDROID_ID, IOS_ID]);
+    expect(notFoundReceipt.status).toBe("incomplete_or_failed");
+    expect(notFoundReceipt.awaitingOperatorAction).toBe(false);
+    expect(notFoundReceipt.builds[0].id).toBe(ANDROID_ID);
+    expect(notFoundReceipt.builds[0].readbackStatus).toBe(
+      "blocked_cli_view_failed",
+    );
+    expect(notFoundReceipt.builds[0].cliFailure).toEqual({
+      exitCode: 1,
+      stderrSha256: expectedStderrSha256,
+      classification: "BUILD_NOT_FOUND",
+      isAuthorizationDenial: false,
+      matchedMarkers: ["BUILD_NOT_FOUND"],
+    });
+    expect(notFoundReceipt.builds[1].id).toBe(IOS_ID);
+    expect(notFoundReceipt.builds[1].readbackStatus).toBe(
+      "blocked_cli_view_failed",
+    );
+    expect(notFoundReceipt.builds[1].cliFailure).toEqual({
+      exitCode: 1,
+      stderrSha256: expectedStderrSha256,
+      classification: "BUILD_NOT_FOUND",
+      isAuthorizationDenial: false,
+      matchedMarkers: ["BUILD_NOT_FOUND"],
+    });
+  });
 });
