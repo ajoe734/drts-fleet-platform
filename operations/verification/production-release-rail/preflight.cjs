@@ -9,6 +9,7 @@ const {
 } = require("node:crypto");
 const { buildPlan, reject } = require("./rail.cjs");
 const { checkPublicEntryPolicies } = require("./public-entry.cjs");
+const { validateDriverOnboardingRuntime } = require("./driver-onboarding.cjs");
 
 // Load the production validators without starting Nest or any product server.
 // The compiler is locked by pnpm-lock.yaml; all checks remain offline except
@@ -74,6 +75,7 @@ function validateRuntime(plan, values, checks = validators()) {
   const report = checks.auth(env);
   if (!report.valid) reject(report.issues.map((i) => i.control).join(", "));
   validateArtifactRuntime(env, checks);
+  validateDriverOnboardingRuntime(env, checks, reject);
   const providers = plan.services.find((s) => s.id === "passenger-app-web")
     .publicEntry.expectedProviders;
   // Match PassengerAppModule's actual SMS_PORT binding, rather than treating

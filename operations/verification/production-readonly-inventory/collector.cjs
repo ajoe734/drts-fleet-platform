@@ -6,6 +6,10 @@ const {
   TOPOLOGY,
   API_SECRETS,
 } = require("../production-release-rail/rail.cjs");
+const {
+  DRIVER_ONBOARDING_SECRETS,
+  driverOnboardingEnabled,
+} = require("../production-release-rail/driver-onboarding.cjs");
 const TARGET = Object.freeze({
   project: "drts-prod-devcc-20260825",
   region: "us-central1",
@@ -112,11 +116,19 @@ function checkRail() {
   for (const [file, expected] of [
     [
       "rail.cjs",
-      "c2717f2985b2e66ebd078cfee4ce52597f812c83628af0e711a1f35d60cfb23f",
+      "c704d63f646ee2e22a94c73e82dc76a0750404cadd1757a20fbf7419e2832679",
     ],
     [
       "run.cjs",
       "0066f0089089aeae8be1f514d35ac5eaab9990b92d8ae2e5419eb882929d142a",
+    ],
+    [
+      "preflight.cjs",
+      "428234d018d6684e599778fa6b0eaf19852c82e3e58bad3e042f2b834b55b173",
+    ],
+    [
+      "driver-onboarding.cjs",
+      "bd639a6631d5937df08cb1ccc29d50285a4fa85718ade6253daa2a0572dcf03e",
     ],
   ]) {
     if (
@@ -548,6 +560,14 @@ function inventory(env) {
       "release-smoke-headers",
     ].map((s) => `${prefix}-${s}`),
   );
+  if (driverOnboardingEnabled(env, () => fail("CONFIG_REJECTED")))
+    for (const [key, suffix] of Object.entries(DRIVER_ONBOARDING_SECRETS)) {
+      const actual =
+        (key.startsWith("TWILIO_") && env[`PROD_${key}_SECRET`]) ||
+        `${prefix}-${suffix}`;
+      if (!SECRET_NAME.test(actual)) fail("CONFIG_REJECTED");
+      secrets.add(actual);
+    }
   for (const key of [
     ...OPTIONAL_SECRETS,
     ...ARTIFACT_SECRETS.filter(

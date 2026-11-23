@@ -135,6 +135,209 @@ describe("driver onboarding normal production release configuration", () => {
     expect(plan.services.slice(1)).toEqual(candidate().plan.services.slice(1));
     expect(api.env).not.toHaveProperty("NOTIFICATION_OUTBOX_TYPE");
   });
+  it.each([undefined, "false", "FALSE", ""])(
+    "stays disabled without external configuration for %s",
+    (enabled) => {
+      const f = fixture();
+      f.vars.PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED = enabled;
+      const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+      expect(plan.services[0].env.DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED).toBe(
+        "false",
+      );
+      expect(plan.services[0].env).not.toHaveProperty(
+        "DRIVER_ONBOARDING_IOS_APP_ID",
+      );
+      expect(plan.services[0].env).not.toHaveProperty(
+        "DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS",
+      );
+      expect(Object.keys(plan.services[0].secrets)).not.toContain(
+        "DRIVER_ONBOARDING_CODE_PEPPER",
+      );
+      expect(
+        f.calls
+          .filter((call: string[]) => call[0] === "read")
+          .flat()
+          .join(" "),
+      ).not.toMatch(/driver-onboarding|twilio|smtp/);
+    },
+  );
+  it.each(["yes", "1", " true "])(
+    "rejects invalid opt-in %s before cloud reads",
+    (enabled) => {
+      const f = fixture();
+      f.vars.PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED = enabled;
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        "PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED",
+      );
+      expect(f.calls).toHaveLength(0);
+    },
+  );
+  it.each([
+    "DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS",
+    "DRIVER_ONBOARDING_IOS_APP_ID",
+    "REMOTE_SMTP_HOST",
+    "REMOTE_SMTP_PORT",
+    "REMOTE_SMTP_FROM_EMAIL",
+    "NOTIFICATION_FROM_EMAIL",
+    "REMOTE_SMTP_USERNAME_SECRET",
+    "REMOTE_SMTP_PASSWORD_SECRET",
+  ])("rejects enabled onboarding missing %s before cloud reads", (key) => {
+    const f = driverOnboardingFixture();
+    delete f.vars[`PROD_${key}`];
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      `PROD_${key}`,
+    );
+    expect(f.calls).toHaveLength(0);
+  });
+  it.each([
+    ["DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS", "AB:CD"],
+    [
+      "DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS",
+      `${Array(32).fill("AB").join(":")},`,
+    ],
+    ["DRIVER_ONBOARDING_IOS_APP_ID", "A1B2C3D4E5.com.other.driver"],
+  ])("rejects invalid association %s=%s", (key, value) => {
+    const f = driverOnboardingFixture();
+    f.vars[`PROD_${key}`] = value;
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      `PROD_${key}`,
+    );
+    expect(f.calls).toHaveLength(0);
+  });
+  it.each([
+    ["driver-onboarding-code-pepper", "short", "DRIVER_ONBOARDING_CODE_PEPPER"],
+    [
+      "driver-onboarding-delivery-key",
+      "g".repeat(64),
+      "DRIVER_ONBOARDING_DELIVERY_KEY",
+    ],
+    ["twilio-account-sid", "invalid", "Twilio SMS"],
+    ["twilio-api-key-sid", "invalid", "Twilio SMS"],
+    ["twilio-api-key-secret", "short", "Twilio SMS"],
+    ["twilio-from-number", "invalid", "Twilio SMS"],
+  ])(
+    "rejects unusable %s via the real runtime validation",
+    (suffix, value, control) => {
+      const f = driverOnboardingFixture();
+      f.values[`drts-prod-${suffix}`] = value;
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        control,
+      );
+    },
+  );
+  it.each(["25", "invalid"])(
+    "rejects unusable remote SMTP port %s via the real factory",
+    (port) => {
+      const f = driverOnboardingFixture();
+      f.vars.PROD_REMOTE_SMTP_PORT = port;
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        "Remote SMTP transport",
+      );
+    },
+  );
+  it("preserves explicit provider references and notification mode, and freezes each resolved version", () => {
+    const f = driverOnboardingFixture();
+    f.vars.PROD_TWILIO_ACCOUNT_SID_SECRET = "operator-selected-twilio-sid";
+    f.values["operator-selected-twilio-sid"] =
+      f.values["drts-prod-twilio-account-sid"];
+    f.vars.PROD_NOTIFICATION_OUTBOX_TYPE = "postgres";
+    const readSecret = f.cloud.readSecret;
+    f.cloud.readSecret = (name: string, project: string) => ({
+      ...readSecret(name, project),
+      version: name.endsWith("delivery-key")
+        ? "19"
+        : name.endsWith("code-pepper")
+          ? "11"
+          : "7",
+    });
+    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+    const api = plan.services[0];
+    expect(api.env.NOTIFICATION_OUTBOX_TYPE).toBe("postgres");
+    expect(api.env.REMOTE_SMTP_HOST).toBe(f.vars.PROD_REMOTE_SMTP_HOST);
+    expect(api.secrets.REMOTE_SMTP_USERNAME).toBe("drts-prod-smtp-user:7");
+    expect(api.secrets.TWILIO_ACCOUNT_SID).toBe(
+      "operator-selected-twilio-sid:7",
+    );
+    expect(api.secrets.DRIVER_ONBOARDING_CODE_PEPPER).toBe(
+      "drts-prod-driver-onboarding-code-pepper:11",
+    );
+    expect(api.secrets.DRIVER_ONBOARDING_DELIVERY_KEY).toBe(
+      "drts-prod-driver-onboarding-delivery-key:19",
+    );
+    const serialized = JSON.stringify(plan);
+    for (const value of Object.values(f.values))
+      expect(serialized).not.toContain(value);
+    expect(() =>
+      deployArgs(
+        plan,
+        {
+          ...api,
+          secrets: {
+            ...api.secrets,
+            DRIVER_ONBOARDING_DELIVERY_KEY:
+              "drts-prod-driver-onboarding-delivery-key:latest",
+          },
+        },
+        imagesFor(plan).api,
+      ),
+    ).toThrow("pinned secret DRIVER_ONBOARDING_DELIVERY_KEY");
+  });
+  it.each([
+    "driver-onboarding-code-pepper",
+    "driver-onboarding-delivery-key",
+    "twilio-account-sid",
+  ])("fails on absent or unresolved %s without publishing a plan", (suffix) => {
+    for (const mode of ["absent", "disabled-version"]) {
+      const f = driverOnboardingFixture();
+      const readSecret = f.cloud.readSecret;
+      f.cloud.readSecret = (name: string, project: string) => {
+        if (name === `drts-prod-${suffix}`) {
+          if (mode === "absent") throw new Error("Secret Manager unavailable");
+          return { version: "latest", value: "never-published" };
+        }
+        return readSecret(name, project);
+      };
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow();
+    }
+  });
+  it("normalizes multiple signed certificates and feeds the actual association controller", () => {
+    const f = driverOnboardingFixture();
+    const other = Array(32).fill("CD").join(":");
+    const first = f.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS;
+    f.vars.PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED = "TRUE";
+    f.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS = ` ${first.toLowerCase()}, ${other.toLowerCase()} `;
+    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+    const env = plan.services[0].env;
+    const {
+      DriverActivationLinksController,
+    } = require("../../../apps/api/src/modules/auth/driver-activation-links.controller.ts");
+    const previous = { ...process.env };
+    try {
+      Object.assign(process.env, env);
+      const controller = new DriverActivationLinksController();
+      expect(
+        controller.androidAssociation()[0].target.sha256_cert_fingerprints,
+      ).toEqual([first, other]);
+      expect(controller.appleAssociation().applinks.details[0].appIDs).toEqual([
+        f.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID,
+      ]);
+    } finally {
+      process.env = previous;
+    }
+  });
+  it("uses the established secret prefix without adding feature secrets when switched off", () => {
+    const f = driverOnboardingFixture();
+    f.vars.PROD_SECRET_PREFIX = "release-selected";
+    expect(
+      buildPlan(f.vars, SHA, TAG, DEPLOYER).services[0].secrets
+        .DRIVER_ONBOARDING_DELIVERY_KEY,
+    ).toBe("release-selected-driver-onboarding-delivery-key");
+    f.vars.PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED = "false";
+    const api = buildPlan(f.vars, SHA, TAG, DEPLOYER).services[0];
+    expect(api.env.DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED).toBe("false");
+    expect(api.secrets).not.toHaveProperty("DRIVER_ONBOARDING_DELIVERY_KEY");
+    expect(api.secrets).not.toHaveProperty("TWILIO_ACCOUNT_SID");
+  });
 });
 function publicResponse(service: any, pathname: string) {
   if (pathname === "/login")
