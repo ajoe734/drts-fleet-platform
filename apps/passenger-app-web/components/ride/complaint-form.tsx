@@ -1,6 +1,6 @@
 import { t } from "./translations";
 import type { CreatePassengerComplaintResponse } from "@drts/contracts";
-import { useState, useRef } from "react";
+import { useId, useState, useRef } from "react";
 import { CORE_FOREGROUNDS } from "@drts/ui-tokens";
 import { passengerChrome } from "../../lib/passenger-presentation";
 import { requestPassengerRideAction } from "../../lib/ride/passenger-live";
@@ -81,6 +81,7 @@ export function ComplaintForm({
   isOpen?: boolean | undefined;
   onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
+  const lostItemDescriptionId = useId();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = isOpen !== undefined ? isOpen : internalOpen;
   const setOpen = (val: boolean) => {
@@ -267,8 +268,13 @@ export function ComplaintForm({
     );
   }
 
+  const canSubmit =
+    !submitting &&
+    content.trim().length > 0 &&
+    (category !== "lost_item" || lostItemDescription.trim().length > 0);
+
   const submit = async () => {
-    if (!content.trim() || submitting) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       const acknowledgment =
@@ -387,17 +393,21 @@ export function ComplaintForm({
 
         {category === "lost_item" && (
           <div style={{ marginBottom: 16 }}>
-            <div
+            <label
+              htmlFor={lostItemDescriptionId}
               style={{
+                display: "block",
                 fontSize: 13,
                 fontWeight: 700,
                 marginBottom: 8,
                 color: passengerChrome.text,
               }}
             >
-              {t.LostItemDesc}
-            </div>
+              {t.LostItemDesc} {t.RequiredMark}
+            </label>
             <input
+              id={lostItemDescriptionId}
+              required
               type="text"
               placeholder={t.LostItemPlaceholder}
               value={lostItemDescription}
@@ -481,7 +491,7 @@ export function ComplaintForm({
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || !content.trim()}
+          disabled={!canSubmit}
           style={{
             width: "100%",
             minHeight: 46,
@@ -492,8 +502,8 @@ export function ComplaintForm({
             border: "none",
             fontWeight: 700,
             fontSize: 14,
-            cursor: submitting || !content.trim() ? "not-allowed" : "pointer",
-            opacity: submitting || !content.trim() ? 0.6 : 1,
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            opacity: canSubmit ? 1 : 0.6,
           }}
         >
           {submitting ? t.Submitting : t.ConfirmSubmit}
