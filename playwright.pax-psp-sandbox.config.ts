@@ -1,19 +1,33 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
 
 /**
- * PAX-PSP-SANDBOX-EVIDENCE-20261101: real ECPay Stage bind/charge evidence.
+ * PAX-PSP-SANDBOX-EVIDENCE-20261101 & PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123:
+ * real ECPay Stage bind/3DS/product-order/capture/ledger/refund/unbind evidence.
  *
  * Executed only by .github/workflows/psp-sandbox-acceptance.yml on a
  * GitHub-hosted runner. No webServer: the spec starts its own minimal
- * 127.0.0.1 harness page inside the runner and calls the merged adapter
- * in-process. Trace, video and automatic screenshots are disabled because
- * they would capture keystrokes typed into the ECPay card iframe; the spec
- * takes its own masked screenshots instead. No retries: a retry would bind
- * another Stage card for the same run.
+ * 127.0.0.1 harness page and mounted NestJS product controllers inside the
+ * runner against an isolated formal PostgreSQL database and calls the merged
+ * EcpayPaymentProvider in-process. Trace, video and automatic screenshots are
+ * disabled because they would capture keystrokes typed into the ECPay card
+ * iframe; the spec takes its own masked screenshots instead. No retries: a
+ * retry would bind another Stage card for the same run.
  */
 export default defineConfig({
   testDir: "./tests/e2e/pax-psp-sandbox",
   testMatch: /ecpay-stage-sandbox\.spec\.ts/,
+  tsconfig: "./tsconfig.json",
+  build: {
+    babelPlugins: [
+      [
+        path.resolve(
+          __dirname,
+          "tests/e2e/pax-psp-sandbox/legacy-decorators-babel-plugin.cjs",
+        ),
+      ],
+    ],
+  },
   fullyParallel: false,
   workers: 1,
   retries: 0,

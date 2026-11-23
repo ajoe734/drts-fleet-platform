@@ -35,6 +35,7 @@ on:
       - .github/workflows/psp-sandbox-acceptance.yml
       - playwright.pax-psp-sandbox.config.ts
       - tests/e2e/pax-psp-sandbox/**
+      - tests/unit/pax-qa-20261009/payment-postgres-harness.ts
 
 permissions:
   contents: read
@@ -52,12 +53,28 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       CI: true
       PAX_PSP_SANDBOX_CANDIDATE_SHA: ${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
       DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
       PSP_SECRET_PROJECT_ID: drts-dev-devcc-20260825
       PAX_PSP_SANDBOX_EVIDENCE_DIR: .artifacts/pax-psp-sandbox
+      PASSENGER_APP_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - name: Validate immutable candidate and target project
         run: |
@@ -191,7 +208,12 @@ jobs:
               "sandbox_run": env.get("SANDBOX_OUTCOME"),
               "evidence_present": os.path.exists(evidence_path),
               "acceptance": acceptance,
-              "satisfied": bool(acceptance and acceptance.get("satisfied") is True and env.get("SANDBOX_OUTCOME") == "success"),
+              "satisfied": bool(
+                  acceptance
+                  and acceptance.get("satisfied") is True
+                  and acceptance.get("hosted_same_product_order_stage_binding_capture_and_ledger") is True
+                  and env.get("SANDBOX_OUTCOME") == "success"
+              ),
           }
           with open(os.path.join(env["PAX_PSP_SANDBOX_EVIDENCE_DIR"], "run-status.json"), "w", encoding="utf-8") as fh:
               json.dump(status, fh, indent=2)

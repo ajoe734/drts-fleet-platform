@@ -1,20 +1,65 @@
 /**
- * PAX-PSP-SANDBOX-EVIDENCE-20261101 — real ECPay Stage evidence for the merged
- * EcpayPaymentProvider (PAX-PSP-ADAPTER-20261009, acceptance key
- * pax-psp_adapter_sandbox_verified).
+ * PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 — end-to-end ECPay Stage acceptance
+ * through the real product passenger session, binding controller/service,
+ * same product order, trip completion outbox, electronic receipt, and payment
+ * ledger on an isolated GitHub-hosted PostgreSQL database.
  *
- * Runs only in .github/workflows/psp-sandbox-acceptance.yml on a GitHub-hosted
- * runner with the existing drts-dev-psp-* Secret Manager values. It refuses to
- * run without PSP_SANDBOX=true. All ECPay calls go through the merged adapter
- * built by the merged paymentRuntimeFromEnv; this file never builds an ECPay
- * request itself.
+ * Prior run 41964622331 (PAX-PSP-SANDBOX-EVIDENCE-20261101) verified the
+ * EcpayPaymentProvider adapter directly. This suite reuses the same ECPay Stage
+ * merchant and serial concurrency group (`pax-psp-ecpay-stage-sandbox`) while
+ * driving the full product chain:
  *
- * Flow: createBindingSession (GetTokenbyBindingCard) → WEB JS SDK iframe card
- * entry (Stage test card) → getBindCardPayToken → bind (CreateBindCard) → 3D
- * page with Stage OTP → OrderResultURL ResultData → verifyNotification →
- * BindCardID → capture NT$85 (CreatePaymentWithCardID, Need3D=0) → refund()
- * (recorded as-is; Stage is documented not to provide Credit/DoAction) →
- * unbind (DeleteMemberBindCard) always, when a BindCardID was obtained.
+ * 1. Passenger session (`PassengerAccountService`) -> browser calls
+ *    `GET /api/passenger-app/payment-methods?binding_session=1` on the mounted
+ *    `PaymentMethodController` (`GetTokenbyBindingCard`).
+ * 2. Browser mounts ECPay Stage WEB JS SDK, types Stage test card
+ *    `4311-9522-2222-2222` in ECPay's iframe, and clicks `#drts-bind-card-btn`
+ *    (`綁定卡片`), which calls `getBindCardPayToken` and
+ *    `POST /api/passenger-app/payment-methods` (`CreateBindCard`), persisting
+ *    `operation='bind', outcome='action_required'` in
+ *    `passenger.payment_idempotency_keys` and revealing
+ *    `#drts-3ds-verify-link` (`前往付款商安全驗證`).
+ * 3. Browser clicks `#drts-3ds-verify-link` (`前往付款商安全驗證`), completes
+ *    Stage 3DS OTP `1234`, and submits ECPay's `OrderResultURL` form POST.
+ *    Because the runner is not reachable from the public internet at
+ *    `smarttransport.tw`, Playwright intercepts the browser's real encrypted
+ *    `OrderResultURL` form POST and forwards the unmodified body to the mounted
+ *    `POST /api/passenger-app/payment-methods/ecpay/order-result` controller
+ *    (`runner_intercepted_browser_order_result_forwarded_to_mounted_controller`).
+ * 4. `PaymentMethodController.verifyOrderResult` ->
+ *    `PaymentMethodService.verifyNotification` verifies the envelope, calls
+ *    `cancelBindingAuthorization` (`DoAction N`), seals `BindCardID` with
+ *    `PaymentTokenCipher` (AES-256-GCM), and commits the bound card in
+ *    `passenger.psp_tokens` (`last4='2222'`, `card_type='VISA'`,
+ *    `is_default=true`, `status='active'`) and `outcome='completed'` in
+ *    `passenger.payment_idempotency_keys`.
+ * 5. Idempotency replay checks on `/ecpay/order-result`, `/ecpay/callback`
+ *    (`1|OK`), and `/3ds-complete` confirm `passenger.psp_tokens` remains 1 row.
+ * 6. Passenger quotes a fare (`PassengerFareService.quote`) and creates a ride
+ *    via `POST /api/passenger-app/rides` (`PassengerBookingController.createRide`)
+ *    referencing the bound `paymentMethodId` (verifying booking idempotency
+ *    replay and unsettled card removal `409 pending_payment_block`).
+ * 7. Driver task completion for that same `orderId` commits
+ *    `ops.driver_completion_outbox` (`multi_taxi_certificate`) and triggers
+ *    `CertificateSupportService.writeCompletedTrip` +
+ *    `PaymentChargeService.onTripCompleted`, which decrypts `BindCardID` from
+ *    `passenger.psp_tokens`, calls `/Merchant/CreatePaymentWithCardID`
+ *    (`Need3D=0`, NT$85 / `amount_minor=8500`), and commits a single ledger
+ *    entry in both `passenger.payment_charge_records` and
+ *    `billing.multi_taxi_passenger_payments` (`payment_id='pax-payment:'+orderId`,
+ *    `status='captured'`, `attempt_count=1`).
+ * 8. Verifies `GET /api/passenger-app/rides/:orderId` payment projection,
+ *    electronic receipt downloads/HTML (`VISA ••••2222`)/PDF (`%PDF-1.7`), and
+ *    capture idempotency replay (`onTripCompleted` + `processOrder` make 0
+ *    extra ECPay calls).
+ * 9. Calls `POST /api/passenger-app/platform/rides/:orderId/refund` on
+ *    `PaymentRefundController`, preserving Stage's actual `QueryTrade` /
+ *    `DoAction` outcome and DB state while documenting simulated refund scope.
+ * 10. In `finally`, calls `DELETE /api/passenger-app/payment-methods/:id` on
+ *     `PaymentMethodController` (`/Merchant/DeleteMemberBindCard`), verifying
+ *     `passenger.psp_tokens.status='removed'` and `token_envelope=null` while
+ *     preserving order and ledger history (with direct `provider.unbind`
+ *     fallback if needed).
  */
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
@@ -22,12 +67,7 @@ import path from "node:path";
 import {
   ECPAY_STAGE_BASE_URL,
   EcpayPaymentProvider,
-  type VerifiedEcpayNotification,
 } from "../../../apps/api/src/modules/passenger-app/payment/ecpay-payment-provider";
-import type {
-  BindResult,
-  MoneyResult,
-} from "../../../apps/api/src/modules/passenger-app/payment/payment-provider.port";
 import { paymentRuntimeFromEnv } from "../../../apps/api/src/modules/passenger-app/payment/payment-runtime.config";
 import {
   completeStageThreeD,
@@ -43,20 +83,27 @@ import {
   describeCallbackBodyShape,
   diagnoseEnvelopeVerification,
   digest12,
+  extractCallbackBindCardIdAndRegister,
   maskInLog,
   writeEvidence,
   type EcpayCallRecord,
+  type ProductFindingRecord,
   type SandboxEvidence,
   type StepRecord,
 } from "./evidence";
 import {
   acceptedPayToken,
   startHarness,
-  type HarnessPayTokenResult,
+  type HarnessBindFlowResult,
+  type HarnessSessionMountResult,
 } from "./harness";
+import {
+  PLATFORM_BILLING_HEADERS,
+  startProductOrderStageContext,
+} from "./product-order-harness";
 
 const CHARGE_AMOUNT_TWD = 85;
-const SYNTHETIC_EMAIL = "pax-psp-sandbox@example.com";
+const CHARGE_AMOUNT_MINOR = CHARGE_AMOUNT_TWD * 100;
 const ORDER_RESULT_PATH =
   /\/api\/passenger-app\/payment-methods\/ecpay\/order-result(?:[?#]|$)/;
 
@@ -70,7 +117,7 @@ function requiredEnv(name: string): string {
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
-test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", async ({
+test("ECPay Stage: product session, 3DS bind controller, same product order, capture ledger, receipt, refund & unbind", async ({
   page,
 }) => {
   const candidateSha = requiredEnv("PAX_PSP_SANDBOX_CANDIDATE_SHA");
@@ -99,12 +146,12 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
     process.env.GITHUB_RUN_ID
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${runAttempt}`
       : null;
-  // An account-style identifier (never phone/email/operation key), unique per run.
-  const passengerId = `psp-sandbox-acct-${runKey}`;
+  const syntheticEmail = `pax-stage-order-${runKey}@example.invalid`;
 
   const calls: EcpayCallRecord[] = [];
   const steps: StepRecord[] = [];
   const screenshots: string[] = [];
+  const productFindings: ProductFindingRecord[] = [];
   let currentStep = "init";
 
   const runtime = paymentRuntimeFromEnv(
@@ -135,13 +182,21 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
   if (!provider.sandbox || provider.baseUrl !== ECPAY_STAGE_BASE_URL) {
     throw new Error("refusing_non_stage_ecpay_endpoint");
   }
-  const merchantMemberId = provider.deriveMerchantMemberId(passengerId);
+
+  const ctx = await startProductOrderStageContext({
+    runtime,
+    passengerEmail: syntheticEmail,
+  });
+  redactor.add(ctx.accessToken);
+  redactor.add(ctx.refreshToken);
+
+  const merchantMemberId = provider.deriveMerchantMemberId(ctx.passengerId);
   redactor.add(merchantMemberId);
 
   const evidence: SandboxEvidence = {
     schema: EVIDENCE_SCHEMA,
-    taskId: "PAX-PSP-SANDBOX-EVIDENCE-20261101",
-    acceptanceKey: "pax-psp_sandbox_bind_and_charge_evidence",
+    taskId: "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123",
+    acceptanceKey: "hosted_same_product_order_stage_binding_capture_and_ledger",
     candidateSha,
     runUrl,
     runId: process.env.GITHUB_RUN_ID ?? null,
@@ -156,10 +211,17 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
       sdkScriptUrl: provider.sdkScriptUrl,
       runner: process.env.RUNNER_ENVIRONMENT ?? null,
       runnerOs: process.env.RUNNER_OS ?? null,
+      passengerId: ctx.passengerId,
       merchantMemberId_sha12: digest12(merchantMemberId),
       testCard_last4: STAGE_TEST_CARD.last4,
       chargeAmountTwd: CHARGE_AMOUNT_TWD,
+      chargeAmountMinor: CHARGE_AMOUNT_MINOR,
+      isolatedPostgresDatabase: true,
+      sharedDevDemoPreservedOnSim: true,
     },
+    callbackDelivery: {},
+    productOrder: {},
+    productFindings,
     steps,
     calls,
     screenshots,
@@ -216,8 +278,6 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
     await target.screenshot({
       path: path.join(EVIDENCE_DIR, file),
       fullPage: true,
-      // Every input and every iframe is blacked out: typed card data, CVV and
-      // OTP never appear in an image even if a frame cannot be inspected.
       mask: [
         target.locator("input"),
         target.locator("iframe"),
@@ -228,53 +288,111 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
     screenshots.push(file);
   }
 
-  const harness = await startHarness(provider.serverType);
+  const harness = await startHarness(provider.serverType, {
+    apiOrigin: ctx.apiOrigin,
+  });
+
   let bindCardId: string | null = null;
+  let paymentMethodId: string | null = null;
+  let bindOperationKey: string | null = null;
   let threeDPerformed = false;
-  let capture: MoneyResult | null = null;
-  let refund: MoneyResult | null = null;
+  let callbackVerifiedByController = false;
+  let bindingIdempotencyVerified = false;
+  let productOrderId: string | null = null;
+  let productPaymentId: string | null = null;
+  let bookingIdempotencyVerified = false;
+  let unsettledDeleteBlocked409 = false;
+  let captureCompleted = false;
+  let captureIdempotencyVerified = false;
+  let ledgerSingleEntryVerified = false;
+  let receiptVerified = false;
+  let refundRecorded = false;
+  let refundControllerStatus: number | null = null;
+  let refundRecordStatus: string | null = null;
   let unbound: boolean | null = null;
+  let unboundViaController = false;
 
   // Never let the browser reach a real DRTS origin; the OrderResultURL
-  // navigation is captured locally below and fulfilled by the test.
+  // navigation is captured locally below and forwarded unmodified to the
+  // mounted NestJS PaymentMethodController.
   await page.route(/^https:\/\/[^/]*smarttransport\.tw\//, (route) =>
     route.abort("blockedbyclient"),
   );
 
   try {
-    const session = await step("01_create_binding_session", async (outcome) => {
-      const created = await provider.createBindingSession(passengerId, {
-        email: SYNTHETIC_EMAIL,
-        idempotencyKey: `psp-sandbox:bind-session:${runKey}`,
-      });
-      redactor.add(created.merchantToken);
-      outcome.provider = created.provider;
-      outcome.serverType = created.serverType;
-      outcome.sandbox = created.sandbox;
-      outcome.merchantToken_present = created.merchantToken.length > 0;
-      outcome.tokenExpireDate = redactor.text(created.tokenExpireDate, 40);
-      return created;
-    });
+    const sessionMount: HarnessSessionMountResult = await step(
+      "01_create_binding_session",
+      async (outcome) => {
+        await page.goto(harness.origin);
+        await page.waitForFunction(
+          () =>
+            (
+              window as unknown as {
+                __drtsHarness?: { sdkLoaded(): boolean };
+              }
+            ).__drtsHarness?.sdkLoaded() === true,
+          undefined,
+          { timeout: 30_000 },
+        );
+        const mounted = await page.evaluate(
+          (token) =>
+            (
+              window as unknown as {
+                __drtsHarness: {
+                  requestSessionAndMount(
+                    accessToken: string,
+                  ): Promise<HarnessSessionMountResult>;
+                };
+              }
+            ).__drtsHarness.requestSessionAndMount(token),
+          ctx.accessToken,
+        );
+        redactor.add(mounted.merchantToken);
+        outcome.controllerEndpoint =
+          "GET /api/passenger-app/payment-methods?binding_session=1";
+        outcome.httpStatus = mounted.httpStatus;
+        outcome.provider = mounted.provider;
+        outcome.serverType = mounted.serverType;
+        outcome.sandbox = mounted.sandbox;
+        outcome.merchantToken_present =
+          typeof mounted.merchantToken === "string" &&
+          mounted.merchantToken.length > 0;
+        outcome.tokenExpireDate = mounted.tokenExpireDate
+          ? redactor.text(mounted.tokenExpireDate, 40)
+          : null;
+        outcome.rawSnakeCaseMerchantTokenPresent =
+          mounted.rawSnakeCaseMerchantTokenPresent;
+        outcome.rawCamelCaseMerchantTokenPresent =
+          mounted.rawCamelCaseMerchantTokenPresent;
+
+        if (
+          mounted.rawSnakeCaseMerchantTokenPresent &&
+          !mounted.rawCamelCaseMerchantTokenPresent
+        ) {
+          productFindings.push({
+            id: "FINDING-PAX-PAYMENT-CLIENT-BINDING-SESSION-SNAKE-CASE",
+            component:
+              "packages/passenger-client/src/payment/client.ts :: PassengerPaymentClient.getBindingSession",
+            normalUseCase:
+              "Native passenger app or direct API consumer calling GET /api/passenger-app/payment-methods?binding_session=1 against NestJS SnakeCaseInterceptor",
+            symptom:
+              "PassengerPaymentClient.getBindingSession reads data.merchantToken / data.serverType directly without snake_case fallback and throws 502 invalid_payment_response when the API returns merchant_token / server_type",
+            rootCause:
+              "getBindingSession did not use the field(data, 'merchantToken', 'merchant_token') helper used by decodePassengerPaymentMethod and decodeMethodResponse in the same file",
+            recommendedFixScope:
+              "packages/passenger-client/src/payment/client.ts",
+          });
+        }
+
+        expect(mounted.httpStatus).toBe(200);
+        expect(mounted.merchantToken_present).toBe(true);
+        return mounted;
+      },
+    );
 
     await step("02_mount_web_js_sdk", async (outcome) => {
-      await page.goto(harness.origin);
-      await page.waitForFunction(
-        () =>
-          (
-            window as unknown as { __drtsHarness?: { sdkLoaded(): boolean } }
-          ).__drtsHarness?.sdkLoaded() === true,
-        undefined,
-        { timeout: 30_000 },
-      );
-      outcome.mount = await page.evaluate(
-        ([token, serverType]) =>
-          (
-            window as unknown as {
-              __drtsHarness: { mount(t: string, s: string): Promise<string> };
-            }
-          ).__drtsHarness.mount(token, serverType),
-        [session.merchantToken, session.serverType] as const,
-      );
+      outcome.mount = sessionMount.mountResult;
+      expect(sessionMount.mountResult).toBe("ready");
       await screenshot(page, "01-sdk-mounted-empty");
     });
 
@@ -287,18 +405,57 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
       await screenshot(page, "02-card-entered-masked");
     });
 
-    const payToken = await step(
+    let orderResultBody: string | null = null;
+    let orderResultMethod: string | null = null;
+    let orderResultUrlCaptured: string | null = null;
+    await page.route(ORDER_RESULT_PATH, async (route) => {
+      const request = route.request();
+      orderResultMethod = request.method();
+      orderResultUrlCaptured = request.url();
+      orderResultBody =
+        request.postData() ?? new URL(request.url()).search.replace(/^\?/, "");
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        body: "<!doctype html><title>order result captured</title><p id=done>OrderResultURL captured by the hosted-runner harness and forwarded to PaymentMethodController.</p>",
+      });
+    });
+
+    const bindFlow: HarnessBindFlowResult = await step(
       "04_get_bind_card_pay_token",
       async (outcome) => {
-        const result = await page.evaluate(() =>
-          (
-            window as unknown as {
-              __drtsHarness: { getPayToken(): Promise<HarnessPayTokenResult> };
-            }
-          ).__drtsHarness.getPayToken(),
-        );
+        await page.locator("#drts-bind-card-btn").click();
+        const flow = await expect
+          .poll(
+            () =>
+              page.evaluate(() =>
+                (
+                  window as unknown as {
+                    __drtsHarness: {
+                      awaitLastBindFlow(): Promise<HarnessBindFlowResult | null>;
+                    };
+                  }
+                ).__drtsHarness.awaitLastBindFlow(),
+              ),
+            { timeout: 60_000, intervals: [500] },
+          )
+          .toBeTruthy()
+          .then(() =>
+            page.evaluate(() =>
+              (
+                window as unknown as {
+                  __drtsHarness: {
+                    awaitLastBindFlow(): Promise<HarnessBindFlowResult>;
+                  };
+                }
+              ).__drtsHarness.awaitLastBindFlow(),
+            ),
+          );
+
+        const result = flow.payTokenResult;
         redactor.add(result.payToken);
         redactor.add(result.merchantTradeNo);
+        outcome.triggeredByButton = "綁定卡片 (#drts-bind-card-btn)";
         outcome.rtnCode = result.rtnCode;
         outcome.rtnMsg = result.rtnMsg ? redactor.text(result.rtnMsg) : null;
         outcome.sdkError = result.errorMessage
@@ -310,219 +467,741 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
         const accepted = acceptedPayToken(result);
         outcome.accepted = accepted !== null;
         if (!accepted) throw new Error("ecpay_pay_token_not_accepted");
-        return accepted;
+        return flow;
       },
     );
 
-    let orderResultBody: string | null = null;
-    let orderResultMethod: string | null = null;
-    await page.route(ORDER_RESULT_PATH, async (route) => {
-      const request = route.request();
-      orderResultMethod = request.method();
-      orderResultBody =
-        request.postData() ?? new URL(request.url()).search.replace(/^\?/, "");
-      await route.fulfill({
-        status: 200,
-        contentType: "text/html; charset=utf-8",
-        body: "<!doctype html><title>order result captured</title><p id=done>OrderResultURL captured by the hosted-runner harness.</p>",
-      });
-    });
+    await step("05_create_bind_card", async (outcome) => {
+      outcome.controllerEndpoint = "POST /api/passenger-app/payment-methods";
+      outcome.httpStatus = bindFlow.bindHttpStatus;
+      const bindResp = bindFlow.bindResponse;
+      const status = bindResp?.status ?? null;
+      const actionUrl =
+        bindResp?.next_action_url ?? bindResp?.nextActionUrl ?? null;
+      const opKey = bindResp?.operation_key ?? bindResp?.operationKey ?? null;
+      bindOperationKey = opKey;
+      outcome.status = status;
+      outcome.operationKey_present =
+        typeof opKey === "string" && opKey.length > 0;
 
-    const bindResult: BindResult = await step(
-      "05_create_bind_card",
-      async (outcome) => {
-        const result = await provider.bind(
-          payToken,
-          `psp-sandbox:bind:${runKey}`,
-          { passengerId },
-        );
-        outcome.status = result.status;
-        if (result.status === "failed") outcome.error = result.error;
-        if (result.status === "action_required") {
-          redactor.add(result.nextActionUrl);
-          outcome.threeDUrl_host = new URL(result.nextActionUrl).host;
-        }
-        if (result.status === "completed") redactor.add(result.card.token);
-        if (result.status === "failed" || result.status === "pending")
-          throw new Error(`create_bind_card_${result.status}`);
-        return result;
-      },
-    );
-
-    let completedBind: Extract<BindResult, { status: "completed" }>;
-    let bindNotification: VerifiedEcpayNotification | null = null;
-    if (bindResult.status === "action_required") {
-      completedBind = await step("06_three_d_verification", async (outcome) => {
-        await page.goto(bindResult.nextActionUrl, {
-          waitUntil: "domcontentloaded",
-        });
-        await page.waitForLoadState("load").catch(() => undefined);
-        await screenshot(page, "03-three-d-page");
-        const entered = await completeStageThreeD(page, redactor);
-        outcome.otpFrameHost = entered.frameHost;
-        outcome.sentOtpRequest = entered.sentOtpRequest;
-        await expect
-          .poll(() => orderResultBody !== null, {
-            timeout: 120_000,
-            intervals: [1_000],
-          })
-          .toBe(true);
-        await screenshot(page, "04-order-result-captured");
-        outcome.orderResultMethod = orderResultMethod;
-        threeDPerformed = true;
-        // Structural-only (no values) diagnosis of the real ECPay wire
-        // shape, captured before verifyNotification so a decrypt/envelope
-        // failure still leaves this in the evidence artifact.
-        for (const [key, value] of Object.entries(
-          describeCallbackBodyShape(orderResultBody!),
-        ))
-          outcome[key] = value;
-        // Narrows which specific check inside verifyAndUnwrapEcpayEnvelope
-        // rejects the real callback, since the combined function (called
-        // right below via verifyNotification) only ever throws one generic
-        // error regardless of which stage actually failed.
-        for (const [key, value] of Object.entries(
-          diagnoseEnvelopeVerification({
-            raw: orderResultBody!,
-            merchantId,
-            hashKey,
-            hashIv,
-          }),
-        ))
-          outcome[key] = value;
-
-        const notification = provider.verifyNotification(orderResultBody!);
-        outcome.verified = true;
-        outcome.kind = notification.kind;
-        outcome.rtnCode = notification.rtnCode;
-        outcome.rtnMsg = redactor.text(notification.rtnMsg);
-        if (notification.merchantMemberId)
-          outcome.merchantMemberId_sha12 = digest12(
-            notification.merchantMemberId,
-          );
-        outcome.merchantMemberId_matches =
-          notification.merchantMemberId === merchantMemberId;
-        if (notification.tradeNo)
-          outcome.tradeNo_sha12 = digest12(notification.tradeNo);
-        if (notification.merchantTradeNo)
-          outcome.merchantTradeNo_sha12 = digest12(
-            notification.merchantTradeNo,
-          );
-        const result = notification.bindResult;
-        outcome.bindStatus = result?.status ?? null;
-        if (notification.kind !== "bind" || result?.status !== "completed") {
-          throw new Error(
-            `three_d_bind_not_completed:${result?.status ?? "none"}`,
-          );
-        }
-        redactor.add(result.card.token);
-        redactor.add(notification.tradeNo);
-        redactor.add(notification.merchantTradeNo);
-        bindNotification = notification;
-        return result;
-      });
-      // Mirrors PaymentMethodService.verifyNotification after a 3D binding:
-      // void the binding verification authorization. Stage is documented not
-      // to provide Credit/DoAction, so the outcome is recorded, not gated.
-      // Assigned inside the step callback; TS cannot see that assignment.
-      const notification = bindNotification as VerifiedEcpayNotification | null;
-      if (notification) {
-        await step("06b_cancel_binding_authorization", async (outcome) => {
-          const amountMinor = notification.authorizedAmountMinor ?? 0;
-          outcome.authorizedAmountTwd = amountMinor / 100;
-          if (
-            !notification.merchantTradeNo ||
-            !notification.tradeNo ||
-            amountMinor <= 0
-          ) {
-            outcome.attempted = false;
-            outcome.reason = "missing_trade_identifiers_or_amount";
-            return;
-          }
-          outcome.attempted = true;
-          outcome.cancelled = await provider.cancelBindingAuthorization({
-            merchantTradeNo: notification.merchantTradeNo,
-            tradeNo: notification.tradeNo,
-            amountMinor,
+      if (actionUrl) {
+        redactor.add(actionUrl);
+        const threeDHost = new URL(actionUrl).host;
+        const threeDOrigin = new URL(actionUrl).origin;
+        outcome.threeDUrl_host = threeDHost;
+        const originAllowedByDefault =
+          sessionMount.approvedActionOrigins.includes(threeDOrigin);
+        outcome.threeDOrigin_in_default_approvedActionOrigins =
+          originAllowedByDefault;
+        if (!originAllowedByDefault) {
+          productFindings.push({
+            id: "FINDING-ECPAY-3DS-CC-STAGE-ORIGIN-ALLOWLIST",
+            component:
+              "apps/api/src/modules/passenger-app/payment/ecpay-payment-provider.ts & apps/passenger-app-web/components/payment/ecpay-csp.js",
+            normalUseCase:
+              "Passenger clicking '綁定卡片' and '前往付款商安全驗證' on Web/Native when ECPay Stage CreateBindCard returns ThreeDURL on https://cc-stage.ecpay.com.tw",
+            symptom:
+              "approvedPaymentActionUrl rejects https://cc-stage.ecpay.com.tw/... unless NEXT_PUBLIC_PAYMENT_3DS_ORIGINS is explicitly configured to include https://cc-stage.ecpay.com.tw",
+            rootCause:
+              "approvedActionOrigins in EcpayPaymentProvider and ECPAY_ACTION_ORIGINS in ecpay-csp.js list ecpg-stage.ecpay.com.tw and payment-stage.ecpay.com.tw but omit cc-stage.ecpay.com.tw (and cc.ecpay.com.tw)",
+            recommendedFixScope:
+              "apps/api/src/modules/passenger-app/payment/ecpay-payment-provider.ts, apps/passenger-app-web/components/payment/ecpay-csp.js",
           });
-        });
+        }
       }
-    } else {
-      skipped(
-        "06_three_d_verification",
-        "CreateBindCard completed without ThreeDURL",
+
+      const dbAfterCreateBind = await ctx.inspectDatabaseState();
+      const bindJournal = dbAfterCreateBind.idempotencyKeys.find(
+        (row) => row.operation === "bind",
       );
-      completedBind = bindResult;
-    }
+      outcome.db_bind_journal_outcome = bindJournal?.outcome ?? null;
+      outcome.db_psp_tokens_count_before_3ds =
+        dbAfterCreateBind.pspTokens.length;
 
-    bindCardId = completedBind.card.token;
-    redactor.add(bindCardId);
+      expect(bindFlow.bindHttpStatus).toBe(201);
+      expect(status).toBe("action_required");
+      expect(bindJournal?.outcome).toBe("action_required");
+      expect(dbAfterCreateBind.pspTokens).toHaveLength(0);
+      if (!actionUrl) throw new Error("missing_three_d_action_url");
+      return actionUrl;
+    });
+
+    await step("06_three_d_verification", async (outcome) => {
+      const verifyLink = page.locator("#drts-3ds-verify-link");
+      await expect(verifyLink).toBeVisible();
+      outcome.triggeredByLink = "前往付款商安全驗證 (#drts-3ds-verify-link)";
+      await verifyLink.click();
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      await page.waitForLoadState("load").catch(() => undefined);
+      await screenshot(page, "03-three-d-page");
+
+      const entered = await completeStageThreeD(page, redactor);
+      outcome.otpFrameHost = entered.frameHost;
+      outcome.sentOtpRequest = entered.sentOtpRequest;
+      await expect
+        .poll(() => orderResultBody !== null, {
+          timeout: 120_000,
+          intervals: [1_000],
+        })
+        .toBe(true);
+      await screenshot(page, "04-order-result-captured");
+      outcome.orderResultMethod = orderResultMethod;
+      threeDPerformed = true;
+
+      for (const [key, value] of Object.entries(
+        describeCallbackBodyShape(orderResultBody!),
+      ))
+        outcome[key] = value;
+      for (const [key, value] of Object.entries(
+        diagnoseEnvelopeVerification({
+          raw: orderResultBody!,
+          merchantId,
+          hashKey,
+          hashIv,
+        }),
+      ))
+        outcome[key] = value;
+
+      const extracted = extractCallbackBindCardIdAndRegister({
+        raw: orderResultBody!,
+        merchantId,
+        hashKey,
+        hashIv,
+        redactor,
+      });
+      if (extracted.bindCardId) {
+        bindCardId = extracted.bindCardId;
+      }
+      if (extracted.merchantMemberId) {
+        outcome.merchantMemberId_sha12 = digest12(extracted.merchantMemberId);
+        outcome.merchantMemberId_matches =
+          extracted.merchantMemberId === merchantMemberId;
+      }
+      if (extracted.tradeNo) {
+        outcome.tradeNo_sha12 = digest12(extracted.tradeNo);
+      }
+      if (extracted.merchantTradeNo) {
+        outcome.merchantTradeNo_sha12 = digest12(extracted.merchantTradeNo);
+      }
+
+      // Forward the unmodified OrderResultURL form POST from ECPay Stage's 3DS
+      // page to the mounted NestJS PaymentMethodController.
+      const controllerResp = await ctx.requestJson<{
+        data?: {
+          status?: string;
+          operation_key?: string;
+          method?: {
+            payment_method_id?: string;
+            psp_name?: string;
+            last4?: string;
+            card_type?: string;
+            expiry_month?: number;
+            expiry_year?: number;
+            is_default?: boolean;
+            status?: string;
+          };
+        };
+      }>("/api/passenger-app/payment-methods/ecpay/order-result", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+        },
+        body: orderResultBody!,
+      });
+
+      outcome.controllerEndpoint =
+        "POST /api/passenger-app/payment-methods/ecpay/order-result";
+      outcome.controllerHttpStatus = controllerResp.status;
+      const bindData = controllerResp.body?.data;
+      outcome.bindStatus = bindData?.status ?? null;
+      paymentMethodId = bindData?.method?.payment_method_id ?? null;
+      outcome.paymentMethodId = paymentMethodId;
+      outcome.card_last4 = bindData?.method?.last4 ?? null;
+      outcome.cardType = bindData?.method?.card_type ?? null;
+      outcome.isDefault = bindData?.method?.is_default ?? null;
+
+      expect(controllerResp.status).toBe(200);
+      expect(bindData?.status).toBe("completed");
+      expect(paymentMethodId).toBeTruthy();
+      expect(bindData?.method?.last4).toBe(STAGE_TEST_CARD.last4);
+      callbackVerifiedByController = true;
+
+      evidence.callbackDelivery = {
+        mode: "runner_intercepted_browser_order_result_forwarded_to_mounted_controller",
+        explanation:
+          "ECPay Stage 3DS page submitted a real form POST to OrderResultURL (/api/passenger-app/payment-methods/ecpay/order-result). Because the GitHub-hosted runner does not terminates public smarttransport.tw DNS, Playwright intercepted the browser navigation and forwarded the unmodified x-www-form-urlencoded body to the mounted NestJS PaymentMethodController.verifyOrderResult endpoint.",
+        interceptedMethod: orderResultMethod,
+        interceptedPath: orderResultUrlCaptured
+          ? new URL(orderResultUrlCaptured).pathname
+          : null,
+        forwardedControllerEndpoint:
+          "POST /api/passenger-app/payment-methods/ecpay/order-result",
+        forwardedControllerHttpStatus: controllerResp.status,
+        fabricatedCallbackUsed: false,
+      };
+    });
+
+    await step("06b_cancel_binding_authorization", async (outcome) => {
+      // PaymentMethodService.verifyNotification automatically invokes
+      // provider.cancelBindingAuthorization (/Credit/DoAction Action=N) during
+      // step 06_three_d_verification. Inspect the recorded call.
+      const cancelCall = calls.find(
+        (c) =>
+          c.step === "06_three_d_verification" &&
+          c.endpoint.endsWith("/Credit/DoAction"),
+      );
+      outcome.invokedBy = "PaymentMethodService.verifyNotification";
+      outcome.attempted = cancelCall !== undefined;
+      outcome.httpStatus = cancelCall?.httpStatus ?? null;
+      outcome.transCode = cancelCall?.transCode ?? null;
+      outcome.rtnCode = cancelCall?.rtnCode ?? null;
+      outcome.rtnMsg = cancelCall?.rtnMsg ?? null;
+      expect(cancelCall).toBeDefined();
+    });
+
     await step("07_bound_card_masked", async (outcome) => {
-      const card = completedBind.card;
-      outcome.bindCardId_sha12 = digest12(card.token);
-      outcome.card_last4 = card.last4;
-      outcome.cardType = card.cardType;
-      outcome.expiry = `${card.expiryMonth}/${card.expiryYear}`;
-      outcome.last4_matches_test_card = card.last4 === STAGE_TEST_CARD.last4;
-      // Same storage path as PaymentMethodService: AES-GCM via PaymentTokenCipher.
-      const methodId = `psp-sandbox-method-${runKey}`;
-      const sealed = cipher.encrypt(card.token, passengerId, methodId);
-      outcome.cipher_roundtrip =
-        cipher.decrypt(sealed, passengerId, methodId) === card.token;
+      const listResp = await ctx.requestJson<{
+        data?: {
+          methods?: Array<{
+            payment_method_id: string;
+            psp_name: string;
+            last4: string;
+            card_type: string;
+            expiry_month: number;
+            expiry_year: number;
+            is_default: boolean;
+            status: string;
+          }>;
+        };
+      }>("/api/passenger-app/payment-methods", {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          accept: "application/json",
+        },
+      });
+      expect(listResp.status).toBe(200);
+      const methods = listResp.body?.data?.methods ?? [];
+      expect(methods).toHaveLength(1);
+      const listed = methods[0]!;
+      expect(listed.payment_method_id).toBe(paymentMethodId);
+      expect(listed.last4).toBe(STAGE_TEST_CARD.last4);
+      expect(listed.is_default).toBe(true);
+      expect(listed.status).toBe("active");
+
+      const dbState = await ctx.inspectDatabaseState(null, paymentMethodId);
+      expect(dbState.pspTokens).toHaveLength(1);
+      const tokenRow = dbState.pspTokens[0]!;
+      expect(tokenRow.token_envelope).toBeTruthy();
+      expect(tokenRow.token_envelope).not.toContain(bindCardId ?? "MISSING");
+
+      const decryptedBindCardId = cipher.decrypt(
+        tokenRow.token_envelope!,
+        ctx.passengerId,
+        paymentMethodId!,
+      );
+      redactor.add(decryptedBindCardId);
+      if (!bindCardId) bindCardId = decryptedBindCardId;
+
+      outcome.paymentMethodId = paymentMethodId;
+      outcome.bindCardId_sha12 = digest12(decryptedBindCardId);
+      outcome.card_last4 = listed.last4;
+      outcome.cardType = listed.card_type;
+      outcome.expiry = `${listed.expiry_month}/${listed.expiry_year}`;
+      outcome.isDefault = listed.is_default;
+      outcome.last4_matches_test_card = listed.last4 === STAGE_TEST_CARD.last4;
+      outcome.cipher_roundtrip = decryptedBindCardId === bindCardId;
       expect(outcome.cipher_roundtrip).toBe(true);
+
+      // Idempotency checks on binding callback / return endpoints:
+      // 1) Replay POST /api/passenger-app/payment-methods/ecpay/order-result
+      const replayOrderResult = await ctx.requestJson<{
+        data?: {
+          status?: string;
+          method?: { payment_method_id?: string };
+        };
+      }>("/api/passenger-app/payment-methods/ecpay/order-result", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+        },
+        body: orderResultBody!,
+      });
+      expect(replayOrderResult.status).toBe(200);
+      expect(replayOrderResult.body?.data?.status).toBe("completed");
+      expect(replayOrderResult.body?.data?.method?.payment_method_id).toBe(
+        paymentMethodId,
+      );
+
+      // 2) Replay POST /api/passenger-app/payment-methods/ecpay/callback -> "1|OK"
+      const replayServerCallback = await ctx.requestRaw(
+        "/api/passenger-app/payment-methods/ecpay/callback",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: orderResultBody!,
+        },
+      );
+      expect(replayServerCallback.status).toBe(200);
+      expect(replayServerCallback.text).toBe("1|OK");
+
+      // 3) Replay POST /api/passenger-app/payment-methods/3ds-complete with passenger JWT
+      const replay3dsComplete = await ctx.requestJson<{
+        data?: {
+          status?: string;
+          method?: { payment_method_id?: string };
+        };
+      }>("/api/passenger-app/payment-methods/3ds-complete", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          "content-type": "application/json",
+          ...(bindOperationKey ? { "Idempotency-Key": bindOperationKey } : {}),
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          envelope: orderResultBody!,
+          ...(bindOperationKey ? { idempotencyKey: bindOperationKey } : {}),
+        }),
+      });
+      expect(replay3dsComplete.status).toBe(201);
+      expect(replay3dsComplete.body?.data?.method?.payment_method_id).toBe(
+        paymentMethodId,
+      );
+
+      const dbAfterReplay = await ctx.inspectDatabaseState();
+      expect(dbAfterReplay.pspTokens).toHaveLength(1);
+      bindingIdempotencyVerified = true;
+      outcome.bindingCallbackReplayIdempotent = true;
+      outcome.pspTokensRowCountAfterReplay = dbAfterReplay.pspTokens.length;
     });
 
-    capture = await step("08_capture_with_card_id", async (outcome) => {
-      const result = await provider.capture({
-        idempotencyKey: `psp-sandbox:capture:${runKey}`,
-        token: bindCardId!,
-        amountMinor: CHARGE_AMOUNT_TWD * 100,
-        currency: "TWD",
-        passengerId,
+    await step("08_capture_with_card_id", async (outcome) => {
+      // 1. Create a real fare quote and book the product ride with the bound paymentMethodId
+      const quote = await ctx.createQuote();
+      const bookingRequestId = `stage-ride-book:${runKey}`;
+      const bookingPayload = {
+        origin: quote.origin,
+        destination: quote.destination,
+        scheduled_at: quote.scheduledAt,
+        fare_snapshot_id: quote.fareSnapshotId,
+        payment_method_id: paymentMethodId,
+        passenger_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+      };
+      const createRideResp = await ctx.requestJson<{
+        data?: {
+          ride?: {
+            order?: {
+              order_id?: string;
+              payment_method_token_ref?: string;
+            };
+          };
+        };
+      }>("/api/passenger-app/rides", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          "content-type": "application/json",
+          "x-request-id": bookingRequestId,
+          accept: "application/json",
+        },
+        body: JSON.stringify(bookingPayload),
       });
-      outcome.status = result.status;
+      expect(createRideResp.status).toBe(201);
+      const orderId = createRideResp.body?.data?.ride?.order?.order_id ?? null;
+      expect(orderId).toBeTruthy();
+      productOrderId = orderId;
+      outcome.orderId = orderId;
+      outcome.orderPaymentMethodId =
+        createRideResp.body?.data?.ride?.order?.payment_method_token_ref ??
+        null;
+      expect(outcome.orderPaymentMethodId).toBe(paymentMethodId);
+
+      // 2. Booking idempotency replay with the same x-request-id returns the exact same orderId
+      const replayRideResp = await ctx.requestJson<{
+        data?: {
+          ride?: {
+            order?: {
+              order_id?: string;
+            };
+          };
+        };
+      }>("/api/passenger-app/rides", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          "content-type": "application/json",
+          "x-request-id": bookingRequestId,
+          accept: "application/json",
+        },
+        body: JSON.stringify(bookingPayload),
+      });
+      expect(replayRideResp.status).toBe(201);
+      expect(replayRideResp.body?.data?.ride?.order?.order_id).toBe(orderId);
+      const dbAfterBookingReplay = await ctx.inspectDatabaseState(orderId);
+      expect(dbAfterBookingReplay.bookingHistories).toHaveLength(1);
+      bookingIdempotencyVerified = true;
+      outcome.bookingReplayIdempotent = true;
+
+      // 3. Attempting to remove the bound card while the order is active/unsettled is blocked with 409 pending_payment_block
+      const unsettledDeleteResp = await ctx.requestJson<{
+        error?: { code?: string };
+      }>(`/api/passenger-app/payment-methods/${paymentMethodId}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          accept: "application/json",
+        },
+      });
+      expect(unsettledDeleteResp.status).toBe(409);
+      expect(unsettledDeleteResp.body?.error?.code).toBe(
+        "pending_payment_block",
+      );
+      unsettledDeleteBlocked409 = true;
+      outcome.unsettledCardDeleteBlocked409 = true;
+
+      // 4. Complete the driver task for this product order (NT$85 / 8500 minor units).
+      // This writes ops.driver_completion_outbox ('multi_taxi_certificate') and triggers:
+      // - CertificateSupportService.writeCompletedTrip(event)
+      // - PaymentChargeService.onTripCompleted(event) -> EcpayPaymentProvider.capture (/Merchant/CreatePaymentWithCardID)
+      const callsBeforeCapture = calls.length;
+      const completedTrip = await ctx.completeProductOrder(
+        orderId!,
+        CHARGE_AMOUNT_MINOR,
+      );
+      const callsAfterCapture = calls.length;
+      outcome.outboxStatus = completedTrip.outboxStatus;
+      outcome.outboxAttempts = completedTrip.outboxAttempts;
+      expect(completedTrip.outboxStatus).toBe("delivered");
+      expect(callsAfterCapture - callsBeforeCapture).toBe(1);
+
+      // 5. Inspect dual ledger (passenger.payment_charge_records + billing.multi_taxi_passenger_payments)
+      const dbAfterCapture = await ctx.inspectDatabaseState(
+        orderId,
+        paymentMethodId,
+      );
+      expect(dbAfterCapture.chargeRecords).toHaveLength(1);
+      expect(dbAfterCapture.billingPayments).toHaveLength(1);
+      const chargeRow = dbAfterCapture.chargeRecords[0]!;
+      const billingRow = dbAfterCapture.billingPayments[0]!;
+      productPaymentId = chargeRow.payment_id;
+
+      expect(chargeRow.order_id).toBe(orderId);
+      expect(chargeRow.payment_id).toBe(`pax-payment:${orderId}`);
+      expect(chargeRow.drts_passenger_id).toBe(ctx.passengerId);
+      expect(chargeRow.payment_method_id).toBe(paymentMethodId);
+      expect(chargeRow.status).toBe("captured");
+      expect(chargeRow.attempt_count).toBe(1);
+      expect(chargeRow.amount_minor).toBe(CHARGE_AMOUNT_MINOR);
+      expect(chargeRow.currency).toBe("TWD");
+      expect(chargeRow.provider_capture_ref).toBeTruthy();
+
+      expect(billingRow.order_id).toBe(orderId);
+      expect(billingRow.payment_id).toBe(chargeRow.payment_id);
+      expect(billingRow.status).toBe("captured");
+      expect(billingRow.amount_minor).toBe(CHARGE_AMOUNT_MINOR);
+      expect(billingRow.currency).toBe("TWD");
+      expect(billingRow.provider_payment_ref).toBe(
+        chargeRow.provider_capture_ref,
+      );
+
+      const [captureMtn, ...captureTradeRest] = (
+        chargeRow.provider_capture_ref ?? ""
+      ).split(":");
+      const captureTradeNo = captureTradeRest.join(":");
+      redactor.add(captureMtn);
+      redactor.add(captureTradeNo);
+      redactor.add(chargeRow.provider_capture_ref);
+
+      const captureJournal = dbAfterCapture.idempotencyKeys.find(
+        (row) =>
+          row.operation === "capture" &&
+          row.idempotency_key === `pax:capture:${orderId}`,
+      );
+      expect(captureJournal?.outcome).toBe("completed");
+
+      // 6. Capture idempotency: re-running onTripCompleted and processOrder must make 0 extra ECPay calls and keep 1 ledger entry with attempt_count = 1
+      const ecpayCallsBeforeReplay = calls.length;
+      const outboxPayload = await ctx.pg.pool!.query<{
+        payload: {
+          event: Parameters<typeof ctx.pg.chargeService.onTripCompleted>[0];
+        };
+      }>(
+        `SELECT payload FROM ops.driver_completion_outbox
+         WHERE order_id = $1 AND effect_type = 'multi_taxi_certificate'`,
+        [orderId],
+      );
+      await ctx.pg.chargeService.onTripCompleted(
+        outboxPayload.rows[0]!.payload.event,
+      );
+      const replayProcessResult = await ctx.pg.chargeService.processOrder(
+        orderId!,
+      );
+      expect(replayProcessResult?.status).toBe("captured");
+      expect(calls.length).toBe(ecpayCallsBeforeReplay);
+
+      const dbAfterCaptureReplay = await ctx.inspectDatabaseState(
+        orderId,
+        paymentMethodId,
+      );
+      expect(dbAfterCaptureReplay.chargeRecords).toHaveLength(1);
+      expect(dbAfterCaptureReplay.billingPayments).toHaveLength(1);
+      expect(dbAfterCaptureReplay.chargeRecords[0]!.attempt_count).toBe(1);
+      captureIdempotencyVerified = true;
+      ledgerSingleEntryVerified = true;
+      captureCompleted = true;
+
+      // 7. Verify passenger ride detail & electronic receipt via mounted controllers
+      const getRideResp = await ctx.requestJson<{
+        data?: {
+          ride?: {
+            order?: { order_id?: string; status?: string };
+            payment?: {
+              payment_id?: string;
+              order_id?: string;
+              status?: string;
+              amount_minor?: number;
+              currency?: string;
+            };
+          };
+        };
+      }>(`/api/passenger-app/rides/${orderId}`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          accept: "application/json",
+        },
+      });
+      expect(getRideResp.status).toBe(200);
+      expect(getRideResp.body?.data?.ride?.order?.order_id).toBe(orderId);
+      expect(getRideResp.body?.data?.ride?.payment?.payment_id).toBe(
+        productPaymentId,
+      );
+      expect(getRideResp.body?.data?.ride?.payment?.status).toBe("captured");
+      expect(getRideResp.body?.data?.ride?.payment?.amount_minor).toBe(
+        CHARGE_AMOUNT_MINOR,
+      );
+
+      const downloadsResp = await ctx.requestJson<{
+        data?: {
+          order_id?: string;
+          html_download_url?: string;
+          pdf_download_url?: string;
+        };
+      }>(`/api/passenger-app/rides/${orderId}/receipt/downloads`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${ctx.accessToken}`,
+          accept: "application/json",
+        },
+      });
+      expect(downloadsResp.status).toBe(200);
+      expect(downloadsResp.body?.data?.order_id).toBe(orderId);
+
+      const htmlArtifact = await ctx.requestRaw(
+        `/api/passenger-app/rides/${orderId}/receipt/artifacts/html`,
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${ctx.accessToken}`,
+          },
+        },
+      );
+      expect(htmlArtifact.status).toBe(200);
+      expect(htmlArtifact.text).toContain("VISA ••••2222");
+      expect(htmlArtifact.text).toContain("DRTS Stage 測試合作車隊（非正式）");
+
+      const pdfArtifact = await ctx.requestRaw(
+        `/api/passenger-app/rides/${orderId}/receipt/artifacts/pdf`,
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${ctx.accessToken}`,
+          },
+        },
+      );
+      expect(pdfArtifact.status).toBe(200);
+      expect(pdfArtifact.buffer.subarray(0, 8).toString("utf8")).toBe(
+        "%PDF-1.7",
+      );
+      receiptVerified = true;
+
+      outcome.paymentId = productPaymentId;
+      outcome.status = chargeRow.status;
       outcome.amountTwd = CHARGE_AMOUNT_TWD;
+      outcome.amountMinor = CHARGE_AMOUNT_MINOR;
+      outcome.attemptCount = chargeRow.attempt_count;
       outcome.need3D = 0;
-      if (result.status === "completed") {
-        const [mtn, ...rest] = result.providerRef.split(":");
-        const tradeNo = rest.join(":");
-        redactor.add(mtn);
-        redactor.add(tradeNo);
-        outcome.merchantTradeNo_sha12 = digest12(mtn ?? "");
-        outcome.tradeNo_sha12 = digest12(tradeNo);
-      } else if (result.status === "failed") {
-        outcome.error = result.error;
-        outcome.retryable = result.retryable;
-      }
-      if (result.status !== "completed")
-        throw new Error(`capture_${result.status}`);
-      return result;
+      outcome.merchantTradeNo_sha12 = digest12(captureMtn ?? "");
+      outcome.tradeNo_sha12 = digest12(captureTradeNo);
+      outcome.providerCaptureRef_sha12 = digest12(
+        chargeRow.provider_capture_ref!,
+      );
+      outcome.billingLedgerMatchesChargeRecord = true;
+      outcome.captureReplayZeroExtraEcpayCalls = true;
+      outcome.receiptHtmlContainsMaskedCard = true;
+      outcome.receiptPdfHeader = "%PDF-1.7";
+
+      evidence.productOrder = {
+        orderId,
+        paymentId: productPaymentId,
+        paymentMethodId,
+        sameOrderAndPaymentLinked:
+          chargeRow.order_id === orderId &&
+          billingRow.order_id === orderId &&
+          chargeRow.payment_id === `pax-payment:${orderId}` &&
+          billingRow.payment_id === `pax-payment:${orderId}`,
+        chargeRecordStatus: chargeRow.status,
+        chargeRecordAttemptCount: chargeRow.attempt_count,
+        chargeRecordAmountMinor: chargeRow.amount_minor,
+        billingLedgerStatus: billingRow.status,
+        billingLedgerAmountMinor: billingRow.amount_minor,
+        chargeRecordsRowCount: dbAfterCaptureReplay.chargeRecords.length,
+        billingPaymentsRowCount: dbAfterCaptureReplay.billingPayments.length,
+        providerCaptureRef_sha12: digest12(chargeRow.provider_capture_ref!),
+        providerCaptureRefMatchesBillingRef:
+          chargeRow.provider_capture_ref === billingRow.provider_payment_ref,
+        captureIdempotencyKey: `pax:capture:${orderId}`,
+        captureIdempotencyOutcome: captureJournal?.outcome ?? null,
+        captureReplayZeroExtraPspCalls: true,
+        receiptDownloadsHttpStatus: downloadsResp.status,
+        receiptHtmlHttpStatus: htmlArtifact.status,
+        receiptHtmlPaymentMethodDisplay: "VISA ••••2222",
+        receiptPdfHttpStatus: pdfArtifact.status,
+        receiptPdfMagicHeader: "%PDF-1.7",
+      };
     });
 
-    refund = await step("09_refund_attempt", async (outcome) => {
-      const providerRef =
-        capture?.status === "completed" ? capture.providerRef : "";
-      const result = await provider.refund({
-        idempotencyKey: `psp-sandbox:refund:${runKey}`,
-        captureRef: providerRef,
-        amountMinor: CHARGE_AMOUNT_TWD * 100,
-        currency: "TWD",
+    await step("09_refund_attempt", async (outcome) => {
+      const refundResp = await ctx.requestJson<{
+        data?: {
+          order_id?: string;
+          payment_id?: string;
+          status?: string;
+          provider_refund_ref?: string;
+        };
+        error?: {
+          code?: string;
+          message?: string;
+        };
+      }>(`/api/passenger-app/platform/rides/${productOrderId}/refund`, {
+        method: "POST",
+        headers: {
+          ...PLATFORM_BILLING_HEADERS,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          reason: "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 stage refund check",
+        }),
       });
-      outcome.status = result.status;
-      if (result.status === "failed") {
-        outcome.error = result.error;
-        outcome.retryable = result.retryable;
+
+      refundControllerStatus = refundResp.status;
+      outcome.controllerEndpoint =
+        "POST /api/passenger-app/platform/rides/:orderId/refund";
+      outcome.controllerHttpStatus = refundResp.status;
+
+      const dbAfterRefund = await ctx.inspectDatabaseState(
+        productOrderId,
+        paymentMethodId,
+      );
+      const chargeRow = dbAfterRefund.chargeRecords[0]!;
+      const billingRow = dbAfterRefund.billingPayments[0]!;
+      const refundJournal = dbAfterRefund.idempotencyKeys.find(
+        (row) =>
+          row.operation === "refund" &&
+          row.idempotency_key === `pax:refund:${productOrderId}`,
+      );
+      refundRecordStatus = chargeRow.status;
+
+      if (chargeRow.provider_refund_ref) {
+        redactor.add(chargeRow.provider_refund_ref);
+        outcome.providerRefundRef_sha12 = digest12(
+          chargeRow.provider_refund_ref,
+        );
       }
-      // Recorded as observed; a non-completed refund is not a test failure.
-      return result;
+
+      if (refundResp.status === 201) {
+        // If Stage completes the refund (e.g., via void/cancel on an unclosed trade),
+        // also verify refund idempotency replay via the controller.
+        const replayRefund = await ctx.requestJson<{
+          data?: { status?: string };
+        }>(`/api/passenger-app/platform/rides/${productOrderId}/refund`, {
+          method: "POST",
+          headers: {
+            ...PLATFORM_BILLING_HEADERS,
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({
+            reason:
+              "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 stage refund replay",
+          }),
+        });
+        outcome.refundReplayHttpStatus = replayRefund.status;
+      }
+
+      outcome.dbChargeStatusAfterRefund = chargeRow.status;
+      outcome.dbBillingStatusAfterRefund = billingRow.status;
+      outcome.dbRefundJournalOutcome = refundJournal?.outcome ?? null;
+      outcome.errorCode = refundResp.body?.error?.code ?? null;
+      refundRecorded = true;
     });
   } finally {
-    if (bindCardId) {
+    if (paymentMethodId || bindCardId) {
       try {
         await step("10_unbind_stage_card", async (outcome) => {
-          unbound = await provider.unbind(bindCardId!, { passengerId });
+          if (paymentMethodId) {
+            const deleteResp = await ctx.requestJson<{
+              data?: { success?: boolean; removed?: boolean };
+            }>(`/api/passenger-app/payment-methods/${paymentMethodId}`, {
+              method: "DELETE",
+              headers: {
+                authorization: `Bearer ${ctx.accessToken}`,
+                accept: "application/json",
+              },
+            });
+            outcome.controllerEndpoint =
+              "DELETE /api/passenger-app/payment-methods/:id";
+            outcome.controllerHttpStatus = deleteResp.status;
+            const deletedOk =
+              deleteResp.body?.data?.success === true ||
+              deleteResp.body?.data?.removed === true;
+            outcome.controllerRemoved = deletedOk;
+
+            if (deleteResp.status === 200 && deletedOk) {
+              unbound = true;
+              unboundViaController = true;
+              const dbAfterDelete = await ctx.inspectDatabaseState(
+                productOrderId,
+                paymentMethodId,
+              );
+              const removedTokenRow = dbAfterDelete.pspTokens[0];
+              outcome.dbTokenStatus = removedTokenRow?.status ?? null;
+              outcome.dbTokenEnvelopeCleared =
+                removedTokenRow?.token_envelope === null;
+              outcome.orderHistoryPreserved =
+                dbAfterDelete.bookingHistories.length === 1;
+              outcome.ledgerHistoryPreserved =
+                dbAfterDelete.chargeRecords.length === 1 &&
+                dbAfterDelete.billingPayments.length === 1;
+              expect(removedTokenRow?.status).toBe("removed");
+              expect(removedTokenRow?.token_envelope).toBeNull();
+            }
+          }
+
+          if (!unbound && bindCardId) {
+            unbound = await provider.unbind(bindCardId, {
+              passengerId: ctx.passengerId,
+            });
+            outcome.fallbackDirectUnbind = unbound;
+          }
           outcome.unbound = unbound;
-          outcome.bindCardId_sha12 = digest12(bindCardId!);
+          if (bindCardId) outcome.bindCardId_sha12 = digest12(bindCardId);
           if (!unbound)
             throw new Error("delete_member_bind_card_not_confirmed");
         });
@@ -532,48 +1211,86 @@ test("ECPay Stage: bind with 3D, charge NT$85, refund as observed, unbind", asyn
     } else {
       skipped("10_unbind_stage_card", "no BindCardID was issued in this run");
     }
+
     await harness.close();
+    await ctx.close();
 
     const refundCalls = calls.filter((c) => c.step === "09_refund_attempt");
     const doActionCalls = refundCalls.filter((c) =>
       c.endpoint.endsWith("/Credit/DoAction"),
     );
+    const queryTradeCall = refundCalls.find((c) =>
+      c.endpoint.endsWith("/CreditDetail/QueryTrade"),
+    );
     evidence.refund = {
-      adapterResult: refund?.status ?? null,
-      queryTradeHttp:
-        refundCalls.find((c) => c.endpoint.endsWith("/CreditDetail/QueryTrade"))
-          ?.httpStatus ?? null,
-      queryTradeRtnCode:
-        refundCalls.find((c) => c.endpoint.endsWith("/CreditDetail/QueryTrade"))
-          ?.rtnCode ?? null,
+      controllerEndpoint:
+        "POST /api/passenger-app/platform/rides/:orderId/refund",
+      controllerHttpStatus: refundControllerStatus,
+      postRefundDbStatus: refundRecordStatus,
+      queryTradeHttp: queryTradeCall?.httpStatus ?? null,
+      queryTradeRtnCode: queryTradeCall?.rtnCode ?? null,
+      queryTradeCloseStatus:
+        (queryTradeCall?.fields.closeStatus as string | null) ?? null,
+      queryTradeTradeStatus:
+        (queryTradeCall?.fields.tradeStatus as string | null) ?? null,
       doActionAttempted: doActionCalls.length > 0,
       doActionHttp: doActionCalls.at(-1)?.httpStatus ?? null,
       doActionRtnCode: doActionCalls.at(-1)?.rtnCode ?? null,
-      classification:
-        refund === null
-          ? "not_attempted"
-          : refund.status === "completed"
-            ? "stage_refund_succeeded"
-            : "stage_refund_not_supported_or_unconfirmed — refund evidence to be obtained on the production merchant",
+      classification: !refundRecorded
+        ? "not_attempted"
+        : refundRecordStatus === "refunded"
+          ? "stage_refund_succeeded_via_product_controller"
+          : "stage_refund_not_supported_or_unconfirmed_in_stage — actual Stage result preserved; full CloseStatus/DoAction refund branches covered in simulated unit/PG suites",
+      simulatedCoverage:
+        "tests/unit/pax-payment-core-20261009/ecpay-payment-provider.test.ts (QueryTrade CloseStatus -> DoAction R/N -> R+N fallback) & tests/unit/pax-payment-core-20261009/refund-workflow.test.ts + tests/unit/pax-qa-20261009/payment.postgres.test.ts (PaymentRefundService idempotency, unknown readback, and billing.multi_taxi_passenger_payments state transitions)",
     };
-    const satisfied =
+
+    const hostedSameProductOrderSatisfied =
       bindCardId !== null &&
+      paymentMethodId !== null &&
       threeDPerformed &&
-      capture?.status === "completed" &&
-      refund !== null &&
-      unbound === true;
+      callbackVerifiedByController &&
+      bindingIdempotencyVerified &&
+      productOrderId !== null &&
+      productPaymentId === `pax-payment:${productOrderId}` &&
+      bookingIdempotencyVerified &&
+      unsettledDeleteBlocked409 &&
+      captureCompleted &&
+      captureIdempotencyVerified &&
+      ledgerSingleEntryVerified &&
+      receiptVerified &&
+      refundRecorded &&
+      unbound === true &&
+      unboundViaController;
+
     evidence.acceptance = {
-      bind_completed: bindCardId !== null,
+      bind_completed: bindCardId !== null && paymentMethodId !== null,
       three_d_performed: threeDPerformed,
-      capture_completed: capture?.status === "completed",
-      refund_recorded: refund !== null,
+      callback_verified_by_product_controller: callbackVerifiedByController,
+      binding_idempotency_verified: bindingIdempotencyVerified,
+      same_product_order_created: productOrderId !== null,
+      booking_idempotency_verified: bookingIdempotencyVerified,
+      unsettled_card_delete_blocked_409: unsettledDeleteBlocked409,
+      capture_completed: captureCompleted,
+      capture_idempotency_verified: captureIdempotencyVerified,
+      dual_ledger_single_entry_verified: ledgerSingleEntryVerified,
+      electronic_receipt_verified: receiptVerified,
+      refund_recorded: refundRecorded,
       stage_card_unbound: unbound,
-      satisfied,
+      stage_card_unbound_via_product_controller: unboundViaController,
+      hosted_same_product_order_stage_binding_capture_and_ledger:
+        hostedSameProductOrderSatisfied,
+      satisfied: hostedSameProductOrderSatisfied,
     };
     evidence.finishedAt = new Date().toISOString();
     writeEvidence(redactor, evidence);
   }
 
+  expect(
+    evidence.acceptance
+      .hosted_same_product_order_stage_binding_capture_and_ledger,
+    "see evidence.json / summary.md",
+  ).toBe(true);
   expect(evidence.acceptance.satisfied, "see evidence.json / summary.md").toBe(
     true,
   );
