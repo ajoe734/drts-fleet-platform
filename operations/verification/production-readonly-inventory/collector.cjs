@@ -145,6 +145,12 @@ const integer = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 1000000;
 const instanceCount = (v) =>
   Number.isSafeInteger(v) && v >= 0 && v <= 2147483647;
 const numeric = str(/^\d{1,30}$/);
+// Compute encodes uint64 IDs as decimal strings. Never round them through Number.
+const backendId = (v) =>
+  typeof v === "string" &&
+  /^[1-9][0-9]{0,19}$/.test(v) &&
+  BigInt(v) <= 18446744073709551615n;
+const projectNumberType = str(/^[1-9][0-9]{0,18}$/);
 const tokenType = str(/^[a-zA-Z0-9_+/=.-]{0,1024}$/);
 const resourceName = str(
   /^projects\/(?:drts-prod-devcc-20260825|\d+)\/[a-zA-Z0-9_@./%-]{1,300}$/,
@@ -302,6 +308,7 @@ const schemas = {
     items: [
       {
         name: safeName,
+        id: backendId,
         iap: {
           enabled: bool,
           oauth2ClientId: str(
@@ -383,6 +390,24 @@ function validate(value, schema, maxArray = LIMITS.pageSize) {
 function requireFields(value, keys) {
   if (keys.some((k) => value[k] === undefined))
     fail("INSUFFICIENT_OBSERVATION", "MISSING_REQUIRED_FIELDS");
+}
+// Even a blocked image contract may retain an independently checked Run name.
+// A configured name or a 403 alone is never an observed service identity.
+function observedServiceResource(records, id, projectNumber) {
+  const matches = records.filter((r) => r.kind === "service" && r.id === id);
+  if (matches.length !== 1) return undefined;
+  const record = matches[0];
+  try {
+    const actual =
+      record.status === "observed"
+        ? record.data?.name
+        : record.observedResource;
+    const expected = canonicalRunName(record.resource);
+    if (canonicalRunName(actual, projectNumber) === expected) return expected;
+  } catch {
+    // Missing, foreign or unsafe observations cannot anchor a backend audience.
+  }
+  return undefined;
 }
 // A failed image/runtime contract does not authorize storing that value. This
 // projection walks the ORIGINAL schema: unknown keys and all other bad types
@@ -1136,17 +1161,42 @@ async function collect(env, head, transport) {
     const backends =
       rawLists.backends?.filter((b) =>
         b.backends?.some((g) =>
-          negs.some((n) =>
-            g.group.endsWith(`/networkEndpointGroups/${n.name}`),
+          negs.some(
+            (n) =>
+              n.name &&
+              g.group ===
+                `https://www.googleapis.com/compute/v1/projects/${TARGET.project}/regions/${TARGET.region}/networkEndpointGroups/${n.name}`,
           ),
         ),
       ) || [];
     const expected = plan.entries?.[service.id]?.backendService;
+    const backend = backends[0];
+    const neg = negs[0];
+    const serviceResource = observedServiceResource(
+      records,
+      service.id,
+      projectNumber,
+    );
     if (
+      !projectNumberType(projectNumber) ||
+      !serviceResource ||
       !rawLists.negs ||
       !rawLists.backends ||
-      !backends.length ||
-      (expected && !backends.some((b) => b.name === expected))
+      negs.length !== 1 ||
+      backends.length !== 1 ||
+      !neg.name ||
+      !backend.name ||
+      !backendId(backend.id) ||
+      rawLists.negs.filter((n) => n.name === neg.name).length !== 1 ||
+      backend.backends.length !== 1 ||
+      backend.backends[0].group !==
+        `https://www.googleapis.com/compute/v1/projects/${TARGET.project}/regions/${TARGET.region}/networkEndpointGroups/${neg.name}` ||
+      rawLists.backends.filter(
+        (b) => b.id === backend.id || b.name === backend.name,
+      ).length !== 1 ||
+      (expected && backend.name !== expected) ||
+      backend.iap?.enabled === undefined ||
+      !backend.iap.oauth2ClientId
     ) {
       records.push({
         id: `${service.id}-iap`,
@@ -1156,28 +1206,23 @@ async function collect(env, head, transport) {
       });
       continue;
     }
-    for (const backend of backends) {
-      if (backend.iap?.enabled === undefined || !backend.iap.oauth2ClientId) {
-        records.push({
-          id: `${service.id}-iap`,
-          kind: "iap",
-          status: "unverified",
-          code: "INSUFFICIENT_OBSERVATION",
-        });
-        continue;
-      }
-      records.push({
-        id: `${service.id}-iap`,
-        kind: "iap",
-        status: "observed",
-        data: {
-          backend: backend.name,
-          enabled: backend.iap.enabled,
-          clientId: backend.iap.oauth2ClientId,
-          negCount: negs.length,
-        },
-      });
-    }
+    records.push({
+      id: `${service.id}-iap`,
+      kind: "iap",
+      status: "observed",
+      data: {
+        backend: backend.name,
+        backendId: backend.id,
+        projectNumber,
+        audience: `/projects/${projectNumber}/global/backendServices/${backend.id}`,
+        backendGroup: backend.backends[0].group,
+        neg: neg.name,
+        service: serviceResource,
+        enabled: backend.iap.enabled,
+        clientId: backend.iap.oauth2ClientId,
+        negCount: negs.length,
+      },
+    });
   }
   return {
     schema: 1,
@@ -1216,6 +1261,14 @@ const outputSchemas = {
   images: { items: schemas.images.dockerImages, pages: integer },
   iap: {
     backend: safeName,
+    backendId,
+    projectNumber: projectNumberType,
+    audience: str(
+      /^\/projects\/[1-9][0-9]{0,18}\/global\/backendServices\/[1-9][0-9]{0,19}$/,
+    ),
+    backendGroup: groupType,
+    neg: safeName,
+    service: runName,
     enabled: bool,
     clientId: schemas.backends.items[0].iap.oauth2ClientId,
     negCount: integer,
@@ -1345,6 +1398,37 @@ function serialize(report) {
         outputSchemas[record.kind],
         LIMITS.pages * LIMITS.pageSize,
       );
+      if (record.kind === "iap") {
+        requireFields(record.data, Object.keys(outputSchemas.iap));
+        const data = record.data;
+        const serviceId = record.id.replace(/-iap$/, "");
+        if (
+          !TOPOLOGY.some(
+            ([id]) => id === serviceId && id !== "agency-portal-web",
+          ) ||
+          record.id !== `${serviceId}-iap` ||
+          report.records.filter((r) => r.kind === "iap" && r.id === record.id)
+            .length !== 1 ||
+          report.records.filter(
+            (r) =>
+              r.kind === "iap" &&
+              r.status === "observed" &&
+              (r.data?.backendId === data.backendId ||
+                r.data?.backend === data.backend ||
+                r.data?.neg === data.neg ||
+                r.data?.service === data.service),
+          ).length !== 1 ||
+          data.projectNumber !== projectNumber ||
+          data.audience !==
+            `/projects/${projectNumber}/global/backendServices/${data.backendId}` ||
+          data.negCount !== 1 ||
+          data.backendGroup !==
+            `https://www.googleapis.com/compute/v1/projects/${TARGET.project}/regions/${TARGET.region}/networkEndpointGroups/${data.neg}` ||
+          data.service !==
+            observedServiceResource(report.records, serviceId, projectNumber)
+        )
+          fail("INSUFFICIENT_OBSERVATION");
+      }
       if (["service", "job", "revision"].includes(record.kind)) {
         requireFields(record, ["resource"]);
         const expected = canonicalRunName(record.resource);
