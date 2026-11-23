@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports -- executable CommonJS deployment rail */
 // Reuse the opt-in, association and conventional secret-name contracts from
 // operations/deployment/resolve-driver-onboarding-secret-mounts.sh. Values are
 // resolved only by the normal preflight numeric-version freeze, never here.

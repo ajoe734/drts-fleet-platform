@@ -232,6 +232,9 @@ function validateRuntime(plan, values, checks = validators()) {
       if (
         /SECRET$|PEPPER$/.test(key) &&
         key !== "BANK_IAP_JWT_SECRET" &&
+        // The driver proof contract measures trimmed UTF-8 bytes; its own
+        // validator above also applies the existing weak-secret rejection.
+        key !== "DRIVER_ONBOARDING_CODE_PEPPER" &&
         (values[ref].length < 32 || checks.weakSecret(values[ref]))
       )
         reject(`Secret Manager ${ref} minimum length`);

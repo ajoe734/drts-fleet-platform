@@ -30,14 +30,14 @@ describe("protected production inventory actual exported boundaries", () => {
       expect(
         f.plan.operations.some(
           (op: any) =>
-            op.kind === "secret" &&
-            new URL(op.url).pathname.endsWith(`/secrets/${name}`),
+            op.kind === "versions" &&
+            new URL(op.url).pathname.endsWith(`/secrets/${name}/versions`),
         ),
       ).toBe(true);
     expect(
       f.plan.operations.some((op: any) =>
         new URL(op.url).pathname.endsWith(
-          "/secrets/drts-prod-twilio-account-sid",
+          "/secrets/drts-prod-twilio-account-sid/versions",
         ),
       ),
     ).toBe(false);

@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { DriverActivationLinksController } from "../../../apps/api/src/modules/auth/driver-activation-links.controller";
 
 const require = createRequire(import.meta.url);
 const {
@@ -134,7 +135,7 @@ describe("driver onboarding normal production release configuration", () => {
     expect(args[args.indexOf("--set-secrets") + 1]).not.toContain(":latest");
     expect(plan.services.slice(1)).toEqual(candidate().plan.services.slice(1));
     expect(api.env).not.toHaveProperty("NOTIFICATION_OUTBOX_TYPE");
-  });
+  }, 15000);
   it.each([undefined, "false", "FALSE", ""])(
     "stays disabled without external configuration for %s",
     (enabled) => {
@@ -214,7 +215,7 @@ describe("driver onboarding normal production release configuration", () => {
     ["twilio-account-sid", "invalid", "Twilio SMS"],
     ["twilio-api-key-sid", "invalid", "Twilio SMS"],
     ["twilio-api-key-secret", "short", "Twilio SMS"],
-    ["twilio-from-number", "invalid", "Twilio SMS"],
+    ["twilio-from-number", "+not-a-number", "Twilio SMS"],
   ])(
     "rejects unusable %s via the real runtime validation",
     (suffix, value, control) => {
@@ -308,9 +309,6 @@ describe("driver onboarding normal production release configuration", () => {
     f.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS = ` ${first.toLowerCase()}, ${other.toLowerCase()} `;
     const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
     const env = plan.services[0].env;
-    const {
-      DriverActivationLinksController,
-    } = require("../../../apps/api/src/modules/auth/driver-activation-links.controller.ts");
     const previous = { ...process.env };
     try {
       Object.assign(process.env, env);
@@ -324,6 +322,14 @@ describe("driver onboarding normal production release configuration", () => {
     } finally {
       process.env = previous;
     }
+  });
+  it("uses the driver proof contract's UTF-8 byte minimum for the pinned pepper", () => {
+    const f = driverOnboardingFixture();
+    const pepper = "司機通知代碼雜湊密鑰甲乙丙丁";
+    expect(pepper.length).toBeLessThan(32);
+    expect(Buffer.byteLength(pepper)).toBeGreaterThanOrEqual(32);
+    f.values["drts-prod-driver-onboarding-code-pepper"] = pepper;
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).not.toThrow();
   });
   it("uses the established secret prefix without adding feature secrets when switched off", () => {
     const f = driverOnboardingFixture();

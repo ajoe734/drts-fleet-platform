@@ -124,11 +124,11 @@ function checkRail() {
     ],
     [
       "preflight.cjs",
-      "428234d018d6684e599778fa6b0eaf19852c82e3e58bad3e042f2b834b55b173",
+      "ef4de5e235e2b3ebe208990fc022711eb3ac3b6fc2ed636c51ab7bdf6007a65d",
     ],
     [
       "driver-onboarding.cjs",
-      "bd639a6631d5937df08cb1ccc29d50285a4fa85718ade6253daa2a0572dcf03e",
+      "2bbffa8dcc3d561fe71f298f425cb531d7589e4fa2cff618af2d6ebefe8117c2",
     ],
   ]) {
     if (
