@@ -400,6 +400,9 @@ describe("actual parsed workflow protection", () => {
     expect(Object.keys(workflow.jobs)).toEqual(["inventory"]);
     const job = workflow.jobs.inventory;
     expect(job.environment).toBe("production");
+    expect(job.env.PROD_GCP_AGENCY_PORTAL_SERVICE).toBe(
+      "${{ vars.PROD_GCP_AGENCY_PORTAL_SERVICE }}",
+    );
     expect(job.permissions).toEqual({ contents: "read", "id-token": "write" });
     expect(job["timeout-minutes"]).toBe(15);
     const steps = job.steps,
