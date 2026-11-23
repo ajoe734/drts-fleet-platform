@@ -68,12 +68,123 @@ export type PasswordResetDeliveryOutcome = {
 
 const DEFAULT_PASSWORD_RESET_FROM_EMAIL =
   "password-reset@notification.drts.invalid";
+const PASSWORD_RESET_PAGE_PATH = "/reset-password";
+
+function parseTrustedHttpUrl(rawValue: string | undefined): URL | null {
+  const trimmed = rawValue?.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function derivePasswordResetUrlBaseFromPortalConfig(
+  rawPortalUrl: string | undefined,
+): string | null {
+  const parsed = parseTrustedHttpUrl(rawPortalUrl);
+  if (!parsed) return null;
+  return `${parsed.origin}${PASSWORD_RESET_PAGE_PATH}`;
+}
+
+function normalizeLegacyPasswordResetUrlBase(
+  rawResetBaseUrl: string | undefined,
+): string | null {
+  const parsed = parseTrustedHttpUrl(rawResetBaseUrl);
+  if (!parsed) return null;
+  return rawResetBaseUrl!.trim();
+}
+
+/**
+ * Resolves the password-reset link base URL for the requested realm from the
+ * existing trusted per-portal invitation URL configurations
+ * (`TENANT_INVITATION_ACCEPT_URL_BASE`, `AGENCY_INVITATION_ACCEPT_URL_BASE`,
+ * `FLEET_INVITATION_ACCEPT_URL_BASE`) and their `/reset-password` page.
+ *
+ * - Tenant and Enterprise Dispatch share the `tenant` realm and membership
+ *   (`POST /api/auth/tenant/password-reset/confirm`), so `tenant` tokens
+ *   resolve to the trusted tenant portal `/reset-password` URL.
+ * - `agency` and `partner` (Fleet) resolve to their respective portal
+ *   `/reset-password` URLs.
+ * - Legacy environments that only configure the single `PASSWORD_RESET_URL_BASE`
+ *   variable (no per-portal `*_INVITATION_ACCEPT_URL_BASE`) retain the prior
+ *   single-URL fallback across realms; if `TENANT_INVITATION_ACCEPT_URL_BASE`
+ *   alone is unset while `PASSWORD_RESET_URL_BASE` is set to a non-agency,
+ *   non-fleet origin, `tenant` may also use `PASSWORD_RESET_URL_BASE`.
+ * - Missing or invalid realm configuration returns `null` (falling back to
+ *   `Password reset code: <rawToken>`), never reading the incoming request
+ *   host or fabricating a domain.
+ */
+export function resolvePasswordResetBaseUrl(
+  realm: PasswordResetDeliveryRealm,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const tenantResetBase = derivePasswordResetUrlBaseFromPortalConfig(
+    env.TENANT_INVITATION_ACCEPT_URL_BASE,
+  );
+  const agencyResetBase = derivePasswordResetUrlBaseFromPortalConfig(
+    env.AGENCY_INVITATION_ACCEPT_URL_BASE,
+  );
+  const fleetResetBase = derivePasswordResetUrlBaseFromPortalConfig(
+    env.FLEET_INVITATION_ACCEPT_URL_BASE,
+  );
+  const hasAnyRealmPortalConfig = Boolean(
+    tenantResetBase ||
+      agencyResetBase ||
+      fleetResetBase ||
+      env.TENANT_INVITATION_ACCEPT_URL_BASE?.trim() ||
+      env.AGENCY_INVITATION_ACCEPT_URL_BASE?.trim() ||
+      env.FLEET_INVITATION_ACCEPT_URL_BASE?.trim(),
+  );
+  const legacyResetBase = normalizeLegacyPasswordResetUrlBase(
+    env.PASSWORD_RESET_URL_BASE,
+  );
+
+  if (realm === "agency") {
+    if (agencyResetBase) return agencyResetBase;
+    if (!hasAnyRealmPortalConfig) return legacyResetBase;
+    return null;
+  }
+
+  if (realm === "partner") {
+    if (fleetResetBase) return fleetResetBase;
+    if (!hasAnyRealmPortalConfig) return legacyResetBase;
+    return null;
+  }
+
+  if (tenantResetBase) return tenantResetBase;
+  if (env.TENANT_INVITATION_ACCEPT_URL_BASE?.trim()) return null;
+  if (!legacyResetBase) return null;
+  if (!hasAnyRealmPortalConfig) return legacyResetBase;
+
+  const legacyOrigin = parseTrustedHttpUrl(legacyResetBase)?.origin;
+  const agencyOrigin = parseTrustedHttpUrl(agencyResetBase ?? undefined)?.origin;
+  const fleetOrigin = parseTrustedHttpUrl(fleetResetBase ?? undefined)?.origin;
+  if (
+    legacyOrigin &&
+    legacyOrigin !== agencyOrigin &&
+    legacyOrigin !== fleetOrigin
+  ) {
+    return legacyResetBase;
+  }
+  return null;
+}
 
 /** The raw token only ever reaches this body; it is never logged or persisted. */
-function buildPasswordResetEmailBody(
+export function buildPasswordResetEmailBody(
   request: PasswordResetDeliveryRequest,
+  env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const resetBaseUrl = process.env.PASSWORD_RESET_URL_BASE?.trim();
+  const resetBaseUrl = resolvePasswordResetBaseUrl(request.realm, env);
   const link = resetBaseUrl
     ? `${resetBaseUrl}${resetBaseUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(request.rawToken)}`
     : null;
