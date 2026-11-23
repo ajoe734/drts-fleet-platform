@@ -32,13 +32,11 @@ it("connects the checked Android project, Google SDK and RN capability to one st
     `android:name="com.google.android.geo.API_KEY" android:value="@string/${resourceName}"`,
   );
   const queries = manifest.match(/<queries>([\s\S]*?)<\/queries>/)?.[1];
-  const viewIntents = Array.from(
-    queries?.matchAll(/<intent>([\s\S]*?)<\/intent>/g) ?? [],
-  )
-    .map((match) => match[1])
-    .filter((intent) =>
-      intent.includes('android:name="android.intent.action.VIEW"'),
-    );
+  const viewIntents = (
+    queries?.match(/<intent>[\s\S]*?<\/intent>/g) ?? []
+  ).filter((intent) =>
+    intent.includes('android:name="android.intent.action.VIEW"'),
+  );
   for (const scheme of ["https", "google.navigation"]) {
     expect(
       viewIntents.some((intent) =>

@@ -6,6 +6,8 @@ const native = vi.hoisted(() => ({
   platform: { OS: "ios" },
   modules: {} as { DRTSDriverMapConfig?: { googleMapsConfigured: boolean } },
   managers: new Set<string>(),
+  hasNativeModules: true,
+  hasUIManager: true,
 }));
 
 vi.mock("react-native", () => ({
@@ -15,9 +17,13 @@ vi.mock("react-native", () => ({
     openURL: vi.fn(),
   },
   Platform: native.platform,
-  NativeModules: native.modules,
-  UIManager: {
-    hasViewManagerConfig: (name: string) => native.managers.has(name),
+  get NativeModules() {
+    return native.hasNativeModules ? native.modules : undefined;
+  },
+  get UIManager() {
+    return native.hasUIManager
+      ? { hasViewManagerConfig: (name: string) => native.managers.has(name) }
+      : undefined;
   },
   Pressable: ({
     children,
@@ -222,6 +228,8 @@ describe("DriverTripMap", () => {
   const defaultMap = ["AIRMap", "AIRMapMarker"];
   beforeEach(() => {
     vi.clearAllMocks();
+    native.hasNativeModules = true;
+    native.hasUIManager = true;
     native.platform.OS = "ios";
     native.modules.DRTSDriverMapConfig = { googleMapsConfigured: true };
     native.managers.clear();
@@ -337,6 +345,26 @@ describe("DriverTripMap", () => {
     expect(text).toContain("可用下方座標開啟外部導航");
     expect(MapView).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["ios", false, true, "Apple 地圖"],
+    ["ios", true, false, "可用下方座標開啟外部導航"],
+    ["android", false, true, "可用下方座標開啟外部導航"],
+  ] as const)(
+    "selects a usable map on %s when NativeModules=%s and UIManager=%s",
+    (os, modules, manager, label) => {
+      native.platform.OS = os;
+      native.hasNativeModules = modules;
+      native.hasUIManager = manager;
+      const text = renderDriverTripMapText({
+        task: buildTask(),
+        order: buildOrder(),
+        driverLocation: null,
+      });
+      expect(text).toContain(label);
+      expect(MapView).toHaveBeenCalledTimes(label === "Apple 地圖" ? 1 : 0);
+    },
+  );
 
   it.each([
     ["native", DriverTripMap],

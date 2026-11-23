@@ -35,8 +35,14 @@ function hasMapAndMarkers(name: string) {
 }
 
 function getNativeMapProvider(): "google" | "apple" | null {
+  if (
+    (Platform.OS !== "android" && Platform.OS !== "ios") ||
+    typeof UIManager?.hasViewManagerConfig !== "function"
+  ) {
+    return null;
+  }
   const googleConfigured =
-    NativeModules.DRTSDriverMapConfig?.googleMapsConfigured === true;
+    NativeModules?.DRTSDriverMapConfig?.googleMapsConfigured === true;
   if (Platform.OS === "android") {
     return googleConfigured && hasMapAndMarkers("AIRMap") ? "google" : null;
   }
