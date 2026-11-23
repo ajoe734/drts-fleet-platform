@@ -99,6 +99,8 @@ it.skipIf(!aapt || !framework).each([
       <string name="${resourceName}">${value}</string>
     </resources>`,
     );
+    // Each aapt2 step may take several seconds on a cold CI runner, so the test
+    // carries its own 60 s budget instead of vitest's 5 s default.
     const run = (...args: string[]) =>
       execFileSync(aapt!, args, {
         cwd: dir,
@@ -143,4 +145,4 @@ it.skipIf(!aapt || !framework).each([
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, 60_000);
