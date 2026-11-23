@@ -787,4 +787,584 @@ print(json.dumps(out))
       code: "PASSENGER_RATING_ASSIGNMENT_MISSING",
     } satisfies Partial<ApiRequestError>);
   });
+
+  it("R1 regression: resolves canonical completed task_id on cold-cache account and token rating replays (historical assignment_id and new task_id rows) and after another worker completes the task, matching admin tripId", async () => {
+    const sample = SHARED_SAMPLES[0];
+    const order = createSampleOrder(sample);
+
+    for (const storedTripMode of [
+      "historical_assignment_id",
+      "canonical_task_id",
+    ] as const) {
+      const calls: string[] = [];
+      const storedTripId =
+        storedTripMode === "historical_assignment_id"
+          ? sample.assignmentId
+          : sample.tripId;
+      const storedRow = {
+        rating_id: sample.ratingId,
+        order_id: sample.orderId,
+        trip_id: storedTripId,
+        driver_id: sample.driverId,
+        passenger_subject_ref: sample.passengerSubjectRef,
+        score: 5,
+        tags: ["clean_vehicle"],
+        comment: "cold cache replay",
+        status: "active",
+        submitted_at: sample.completedAt,
+        updated_at: sample.completedAt,
+      };
+      const query = vi.fn(async (sql: string) => {
+        const text = sql.replace(/\s+/g, " ").trim();
+        calls.push(text);
+        if (text.includes("FROM ops.passenger_ride_access_tokens")) {
+          return {
+            rows: [
+              {
+                token_id: "review-token",
+                order_id: sample.orderId,
+                passenger_subject_ref: sample.passengerSubjectRef,
+                scopes: ["ride:read", "ride:rate", "receipt:read"],
+                expires_at: "2030-01-01T00:00:00.000Z",
+                revoked_at: null,
+                database_now: "2026-11-23T07:00:00.000Z",
+              },
+            ],
+          };
+        }
+        if (text.startsWith("SELECT o.status, o.record")) {
+          return { rows: [{ status: "completed", record: order }] };
+        }
+        if (text.includes("count(*)::integer AS total_items")) {
+          return { rows: [{ total_items: 1 }] };
+        }
+        if (text.includes("AS comment_excerpt")) {
+          return {
+            rows: [
+              {
+                rating_id: sample.ratingId,
+                order_id: sample.orderId,
+                trip_id: sample.tripId,
+                driver_id: sample.driverId,
+                driver_display_name: sample.driverDisplayName,
+                score: 5,
+                tags: ["clean_vehicle"],
+                comment_excerpt: "cold cache replay",
+                status: "active",
+                submitted_at: sample.completedAt,
+                updated_at: sample.completedAt,
+              },
+            ],
+          };
+        }
+        if (text.includes("AS canonical_trip_id")) {
+          return {
+            rows: [
+              {
+                ...storedRow,
+                canonical_trip_id: sample.tripId,
+                order_no: sample.orderNo,
+                driver_display_name: sample.driverDisplayName,
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM ops.phase1_driver_tasks")) {
+          return {
+            rows: [
+              {
+                completed_at: sample.completedAt,
+                // Simulate replay after 24h rating window has expired
+                database_now: "2026-11-23T07:00:00.000Z",
+                task_id: sample.tripId,
+                assignment_id: sample.assignmentId,
+              },
+            ],
+          };
+        }
+        if (
+          text.startsWith("INSERT INTO ops.driver_rating_summaries") ||
+          text.includes("FROM ops.driver_rating_summaries")
+        ) {
+          return {
+            rows: [
+              {
+                driver_id: sample.driverId,
+                display_state: "rated",
+                average_rating: 5,
+                rating_count: 1,
+                last_rated_at: sample.completedAt,
+                aggregate_version: 1,
+                calculated_at: sample.completedAt,
+              },
+            ],
+          };
+        }
+        if (
+          text.startsWith("INSERT INTO ops.passenger_trip_ratings") ||
+          text.includes("FROM ops.passenger_trip_ratings")
+        ) {
+          return { rows: [storedRow] };
+        }
+        return { rows: [] };
+      });
+
+      const repository = new MultiTaxiRepository({
+        isEnabled: () => true,
+        query,
+        connect: async () => ({ query, release: vi.fn() }),
+      } as never);
+      const owned = {
+        resolvePersistedOrder: async () => order,
+        getDriverTasksForOrder: () => [],
+        resolvePersistedPassengerAssignmentDisclosure: async () => ({
+          assignmentId: sample.assignmentId,
+          driver: { driverId: sample.driverId },
+          routeFare: null,
+        }),
+        resolvePassengerRideTracking: async () => null,
+      } as unknown as OwnedMobilityService;
+
+      // 1. Account rating replay with accountHook on cold cache (expired window still replays)
+      const accountService = new MultiTaxiService(owned, repository);
+      const accountHook = { execute: vi.fn(async () => undefined) };
+      const accountReplay = await accountService.submitTrustedPassengerRating(
+        sample.orderId,
+        { score: 5, tags: ["clean_vehicle"], comment: "cold cache replay" },
+        sample.passengerSubjectRef,
+        accountHook,
+      );
+      expect(accountReplay.tripId).toBe(sample.tripId);
+      expect(
+        calls.filter((s) => s.includes("FROM ops.phase1_driver_tasks")).length,
+      ).toBeGreaterThanOrEqual(1);
+
+      // 2. Account rating replay without accountHook on a fresh cold-cache instance
+      const directAccountService = new MultiTaxiService(owned, repository);
+      const directReplay =
+        await directAccountService.submitTrustedPassengerRating(
+          sample.orderId,
+          { score: 5, tags: ["clean_vehicle"], comment: "cold cache replay" },
+          sample.passengerSubjectRef,
+        );
+      expect(directReplay.tripId).toBe(sample.tripId);
+
+      // 3. Token rating replay on a fresh cold-cache instance
+      const consent = {
+        preparePassengerRideRatingHook: () => ({
+          execute: vi.fn(async () => undefined),
+          afterCommit: vi.fn(async () => undefined),
+        }),
+      };
+      const tokenService = new MultiTaxiService(
+        owned,
+        repository,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        consent as never,
+      );
+      const tokenReplay = await tokenService.submitPassengerRating(
+        "review-access-token",
+        { score: 5, tags: ["clean_vehicle"], comment: "cold cache replay" },
+      );
+      expect(tokenReplay.tripId).toBe(sample.tripId);
+
+      // 4. Compare with admin list & detail tripId
+      const adminList = await tokenService.listPassengerRatingReviews({
+        tripOrOrder: sample.tripId,
+      });
+      const adminDetail = await tokenService.getPassengerRatingReview(
+        sample.ratingId,
+        true,
+      );
+      expect(adminList.items[0]?.tripId).toBe(sample.tripId);
+      expect(adminDetail.rating.tripId).toBe(sample.tripId);
+      expect(accountReplay.tripId).toBe(adminDetail.rating.tripId);
+      expect(tokenReplay.tripId).toBe(adminDetail.rating.tripId);
+    }
+
+    // 5. Another worker completes the task in durable storage while this worker's local task cache is empty:
+    // new account and token submissions still resolve and return canonical completed task_id.
+    let currentPersistedRow: Record<string, unknown> | null = null;
+    const crossWorkerQuery = vi.fn(
+      async (sql: string, values: unknown[] = []) => {
+        const text = sql.replace(/\s+/g, " ").trim();
+        if (text.includes("FROM ops.passenger_ride_access_tokens")) {
+          return {
+            rows: [
+              {
+                token_id: "review-token",
+                order_id: sample.orderId,
+                passenger_subject_ref: sample.passengerSubjectRef,
+                scopes: ["ride:read", "ride:rate", "receipt:read"],
+                expires_at: "2030-01-01T00:00:00.000Z",
+                revoked_at: null,
+                database_now: "2026-11-19T13:00:00.000Z",
+              },
+            ],
+          };
+        }
+        if (text.startsWith("SELECT o.status, o.record")) {
+          return { rows: [{ status: "completed", record: order }] };
+        }
+        if (text.includes("FROM ops.phase1_driver_tasks")) {
+          return {
+            rows: [
+              {
+                completed_at: sample.completedAt,
+                database_now: "2026-11-19T13:00:00.000Z",
+                task_id: sample.tripId,
+                assignment_id: sample.assignmentId,
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM billing.multi_taxi_passenger_payments")) {
+          return {
+            rows: [
+              {
+                payment_id: "pay-1",
+                status: "captured",
+                amount_minor: 32500,
+                currency: "TWD",
+              },
+            ],
+          };
+        }
+        if (text.startsWith("INSERT INTO ops.passenger_trip_ratings")) {
+          if (!currentPersistedRow) {
+            currentPersistedRow = {
+              rating_id: values[0],
+              order_id: values[1],
+              trip_id: values[2],
+              driver_id: values[3],
+              passenger_subject_ref: values[4],
+              score: values[5],
+              tags: JSON.parse(String(values[6])),
+              comment: values[7],
+              status: values[8],
+              submitted_at: values[9],
+              updated_at: values[10],
+            };
+          }
+          return { rows: [currentPersistedRow] };
+        }
+        if (text.startsWith("INSERT INTO ops.driver_rating_summaries")) {
+          return {
+            rows: [
+              {
+                driver_id: sample.driverId,
+                display_state: "rated",
+                average_rating: 5,
+                rating_count: 1,
+                last_rated_at: sample.completedAt,
+                aggregate_version: 1,
+                calculated_at: sample.completedAt,
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM ops.passenger_trip_ratings")) {
+          return { rows: currentPersistedRow ? [currentPersistedRow] : [] };
+        }
+        return { rows: [] };
+      },
+    );
+    const crossWorkerRepo = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query: crossWorkerQuery,
+      connect: async () => ({ query: crossWorkerQuery, release: vi.fn() }),
+    } as never);
+    const coldOwned = {
+      resolvePersistedOrder: async () => order,
+      getDriverTasksForOrder: () => [],
+      resolvePersistedPassengerAssignmentDisclosure: async () => ({
+        assignmentId: sample.assignmentId,
+        driver: { driverId: sample.driverId },
+        routeFare: null,
+      }),
+      resolvePassengerRideTracking: async () => null,
+    } as unknown as OwnedMobilityService;
+
+    const newAccountService = new MultiTaxiService(coldOwned, crossWorkerRepo);
+    const createdAccountRating =
+      await newAccountService.submitTrustedPassengerRating(
+        sample.orderId,
+        { score: 5, tags: [] },
+        sample.passengerSubjectRef,
+        { execute: vi.fn(async () => undefined) },
+      );
+    expect(createdAccountRating.tripId).toBe(sample.tripId);
+    expect(currentPersistedRow?.trip_id).toBe(sample.tripId);
+
+    currentPersistedRow = null;
+    const newTokenService = new MultiTaxiService(
+      coldOwned,
+      crossWorkerRepo,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        preparePassengerRideRatingHook: () => ({
+          execute: vi.fn(async () => undefined),
+          afterCommit: vi.fn(async () => undefined),
+        }),
+      } as never,
+    );
+    const createdTokenRating = await newTokenService.submitPassengerRating(
+      "review-access-token",
+      { score: 5, tags: [] },
+    );
+    expect(createdTokenRating.tripId).toBe(sample.tripId);
+  });
+
+  it("R2 regression: preserves or resolves original rating trip identity after reassignment (different driver and same driver/different assignment) with cold local tasks without borrowing replacement task", async () => {
+    const sample = SHARED_SAMPLES[0];
+    const order = createSampleOrder(sample);
+
+    // Case 1: Reassigned to a different driver; original task untraceable (or DB only returns replacement task)
+    const historicalDifferentDriverRow = {
+      rating_id: sample.ratingId,
+      order_id: sample.orderId,
+      trip_id: "original-completed-assignment",
+      driver_id: "original-driver",
+      passenger_subject_ref: sample.passengerSubjectRef,
+      score: 5,
+      tags: [],
+      comment: null,
+      status: "active",
+      submitted_at: sample.completedAt,
+      updated_at: sample.completedAt,
+    };
+    const untraceableDifferentDriverQuery = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM ops.passenger_trip_ratings")) {
+        return { rows: [historicalDifferentDriverRow] };
+      }
+      if (sql.includes("FROM ops.phase1_driver_tasks")) {
+        return {
+          rows: [
+            {
+              completed_at: sample.completedAt,
+              database_now: "2026-11-19T13:00:00.000Z",
+              task_id: "replacement-task",
+              assignment_id: "replacement-assignment",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const serviceDifferentDriverUntraceable = new MultiTaxiService(
+      {
+        resolvePersistedOrder: async () => order,
+        getDriverTasksForOrder: () => [],
+        resolvePersistedPassengerAssignmentDisclosure: async () => ({
+          assignmentId: "replacement-assignment",
+          driver: { driverId: "replacement-driver" },
+          routeFare: null,
+        }),
+        resolvePassengerRideTracking: async () => null,
+      } as unknown as OwnedMobilityService,
+      new MultiTaxiRepository({
+        isEnabled: () => true,
+        query: untraceableDifferentDriverQuery,
+      } as never),
+    );
+    const viewDifferentDriverUntraceable =
+      await serviceDifferentDriverUntraceable.getPassengerRideById(
+        sample.orderId,
+        sample.passengerSubjectRef,
+      );
+    expect(viewDifferentDriverUntraceable.rating?.driverId).toBe(
+      "original-driver",
+    );
+    expect(viewDifferentDriverUntraceable.rating?.tripId).toBe(
+      "original-completed-assignment",
+    );
+
+    // Case 2: Reassigned to a different driver; original completed task IS traceable in durable storage
+    const traceableDifferentDriverQuery = vi.fn(
+      async (sql: string, values: unknown[] = []) => {
+        if (sql.includes("FROM ops.passenger_trip_ratings")) {
+          return { rows: [historicalDifferentDriverRow] };
+        }
+        if (sql.includes("FROM ops.phase1_driver_tasks")) {
+          const queriedAssignment = values[1];
+          const queriedDriver = values[2];
+          if (
+            queriedAssignment === "original-completed-assignment" &&
+            queriedDriver === "original-driver"
+          ) {
+            return {
+              rows: [
+                {
+                  completed_at: sample.completedAt,
+                  database_now: "2026-11-19T13:00:00.000Z",
+                  task_id: "original-completed-task",
+                  assignment_id: "original-completed-assignment",
+                },
+              ],
+            };
+          }
+          return {
+            rows: [
+              {
+                completed_at: sample.completedAt,
+                database_now: "2026-11-19T13:00:00.000Z",
+                task_id: "replacement-task",
+                assignment_id: "replacement-assignment",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+    );
+    const serviceDifferentDriverTraceable = new MultiTaxiService(
+      {
+        resolvePersistedOrder: async () => order,
+        getDriverTasksForOrder: () => [],
+        resolvePersistedPassengerAssignmentDisclosure: async () => ({
+          assignmentId: "replacement-assignment",
+          driver: { driverId: "replacement-driver" },
+          routeFare: null,
+        }),
+        resolvePassengerRideTracking: async () => null,
+      } as unknown as OwnedMobilityService,
+      new MultiTaxiRepository({
+        isEnabled: () => true,
+        query: traceableDifferentDriverQuery,
+      } as never),
+    );
+    const viewDifferentDriverTraceable =
+      await serviceDifferentDriverTraceable.getPassengerRideById(
+        sample.orderId,
+        sample.passengerSubjectRef,
+      );
+    expect(viewDifferentDriverTraceable.rating?.driverId).toBe(
+      "original-driver",
+    );
+    expect(viewDifferentDriverTraceable.rating?.tripId).toBe(
+      "original-completed-task",
+    );
+
+    // Case 3: Reassigned to the SAME driver with a DIFFERENT assignment; untraceable vs traceable original task
+    const historicalSameDriverRow = {
+      ...historicalDifferentDriverRow,
+      trip_id: "original-assignment-1",
+      driver_id: "same-driver",
+    };
+    const sameDriverUntraceableQuery = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM ops.passenger_trip_ratings")) {
+        return { rows: [historicalSameDriverRow] };
+      }
+      if (sql.includes("FROM ops.phase1_driver_tasks")) {
+        return {
+          rows: [
+            {
+              completed_at: sample.completedAt,
+              database_now: "2026-11-19T13:00:00.000Z",
+              task_id: "replacement-task-2",
+              assignment_id: "replacement-assignment-2",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const serviceSameDriverUntraceable = new MultiTaxiService(
+      {
+        resolvePersistedOrder: async () => order,
+        getDriverTasksForOrder: () => [],
+        resolvePersistedPassengerAssignmentDisclosure: async () => ({
+          assignmentId: "replacement-assignment-2",
+          driver: { driverId: "same-driver" },
+          routeFare: null,
+        }),
+        resolvePassengerRideTracking: async () => null,
+      } as unknown as OwnedMobilityService,
+      new MultiTaxiRepository({
+        isEnabled: () => true,
+        query: sameDriverUntraceableQuery,
+      } as never),
+    );
+    const viewSameDriverUntraceable =
+      await serviceSameDriverUntraceable.getPassengerRideById(
+        sample.orderId,
+        sample.passengerSubjectRef,
+      );
+    expect(viewSameDriverUntraceable.rating?.driverId).toBe("same-driver");
+    expect(viewSameDriverUntraceable.rating?.tripId).toBe(
+      "original-assignment-1",
+    );
+
+    const sameDriverTraceableQuery = vi.fn(
+      async (sql: string, values: unknown[] = []) => {
+        if (sql.includes("FROM ops.passenger_trip_ratings")) {
+          return { rows: [historicalSameDriverRow] };
+        }
+        if (sql.includes("FROM ops.phase1_driver_tasks")) {
+          if (values[1] === "original-assignment-1") {
+            return {
+              rows: [
+                {
+                  completed_at: sample.completedAt,
+                  database_now: "2026-11-19T13:00:00.000Z",
+                  task_id: "original-task-1",
+                  assignment_id: "original-assignment-1",
+                },
+              ],
+            };
+          }
+          return {
+            rows: [
+              {
+                completed_at: sample.completedAt,
+                database_now: "2026-11-19T13:00:00.000Z",
+                task_id: "replacement-task-2",
+                assignment_id: "replacement-assignment-2",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+    );
+    const serviceSameDriverTraceable = new MultiTaxiService(
+      {
+        resolvePersistedOrder: async () => order,
+        getDriverTasksForOrder: () => [],
+        resolvePersistedPassengerAssignmentDisclosure: async () => ({
+          assignmentId: "replacement-assignment-2",
+          driver: { driverId: "same-driver" },
+          routeFare: null,
+        }),
+        resolvePassengerRideTracking: async () => null,
+      } as unknown as OwnedMobilityService,
+      new MultiTaxiRepository({
+        isEnabled: () => true,
+        query: sameDriverTraceableQuery,
+      } as never),
+    );
+    const viewSameDriverTraceable =
+      await serviceSameDriverTraceable.getPassengerRideById(
+        sample.orderId,
+        sample.passengerSubjectRef,
+      );
+    expect(viewSameDriverTraceable.rating?.driverId).toBe("same-driver");
+    expect(viewSameDriverTraceable.rating?.tripId).toBe("original-task-1");
+  });
 });

@@ -179,11 +179,11 @@ export class MultiTaxiService implements OnModuleInit {
   >();
   private readonly ratingTripAliasesByOrder = new Map<
     string,
-    {
+    Array<{
       canonicalTripId: string;
-      assignmentId: string | null;
-      driverId: string | null;
-    }
+      assignmentId: string;
+      driverId: string;
+    }>
   >();
   /**
    * Highest passenger SSE sequence already emitted per order. Kept separately
@@ -758,15 +758,37 @@ export class MultiTaxiService implements OnModuleInit {
         orderId: order.orderId,
         assignmentId: assignment.assignmentId,
         driverId: assignment.driver.driverId,
-        windowTaskId: ratingWindow?.taskId ?? null,
+        ratingWindow,
         receipt,
       });
     }
+    const ratingMatchesCurrentAssignment =
+      Boolean(rating && assignment) &&
+      rating!.driverId === assignment!.driver.driverId &&
+      (rating!.tripId === assignment!.assignmentId ||
+        (Boolean(ratingWindow?.taskId) &&
+          rating!.tripId === ratingWindow!.taskId) ||
+        (Boolean(ratingWindow?.assignmentId) &&
+          rating!.tripId === ratingWindow!.assignmentId));
+    const ratingResolutionWindow =
+      rating &&
+      !ratingMatchesCurrentAssignment &&
+      rating.tripId !== order.orderId &&
+      this.repository?.isEnabled() &&
+      typeof this.repository.findPassengerRatingWindow === "function"
+        ? await this.repository.findPassengerRatingWindow(
+            order.orderId,
+            rating.tripId,
+            rating.driverId,
+          )
+        : ratingMatchesCurrentAssignment
+          ? ratingWindow
+          : null;
     const canonicalRating = rating
       ? this.canonicalizePassengerRating(rating, {
-          assignment,
-          windowTaskId: ratingWindow?.taskId ?? null,
-          receipt,
+          assignment: ratingMatchesCurrentAssignment ? assignment : null,
+          ratingWindow: ratingResolutionWindow,
+          receipt: ratingMatchesCurrentAssignment ? receipt : null,
         })
       : null;
     if (canonicalRating) {
@@ -894,13 +916,38 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       passengerSubjectRef,
     );
-    let windowTaskId: string | null = null;
+    let ratingWindow: {
+      taskId?: string;
+      assignmentId?: string;
+      driverId?: string;
+    } | null = null;
     if (existing) {
+      if (
+        !accountHook &&
+        existing.tripId !== order.orderId &&
+        this.repository?.isEnabled() &&
+        typeof this.repository.findPassengerRatingWindow === "function"
+      ) {
+        ratingWindow = await this.repository.findPassengerRatingWindow(
+          order.orderId,
+          existing.tripId,
+          existing.driverId,
+        );
+      }
       const canonicalExisting = this.canonicalizePassengerRating(existing, {
-        assignment,
+        assignment:
+          existing.driverId === assignment.driver.driverId ? assignment : null,
+        ratingWindow,
       });
       this.assertIdempotentRating(canonicalExisting, score, tags, comment);
-      if (!accountHook) return canonicalExisting;
+      if (!accountHook) {
+        this.ratingsByPassengerOrder.set(
+          this.ratingKey(order.orderId, passengerSubjectRef),
+          canonicalExisting,
+        );
+        this.ratingsById.set(canonicalExisting.ratingId, canonicalExisting);
+        return canonicalExisting;
+      }
     }
     if (!existing && this.repository?.isEnabled()) {
       const window = await this.repository.findPassengerRatingWindow(
@@ -914,7 +961,7 @@ export class MultiTaxiService implements OnModuleInit {
           "PASSENGER_RATING_WINDOW_CLOSED",
           "Ratings require an actual completion within 24 hours.",
         );
-      windowTaskId = window.taskId ?? null;
+      ratingWindow = window;
       const payment = await this.repository.findPassengerPayment(order.orderId);
       if (payment?.status !== "captured")
         throw new ApiRequestError(
@@ -928,8 +975,11 @@ export class MultiTaxiService implements OnModuleInit {
       orderId: order.orderId,
       assignmentId: assignment.assignmentId,
       driverId: assignment.driver.driverId,
-      windowTaskId,
-      existingTripId: existing?.tripId ?? null,
+      ratingWindow,
+      existingTripId:
+        existing && existing.driverId === assignment.driver.driverId
+          ? existing.tripId
+          : null,
     });
     const now = new Date().toISOString();
     const rating: PassengerTripRatingRecord = {
@@ -949,11 +999,24 @@ export class MultiTaxiService implements OnModuleInit {
       rating,
       accountHook,
     )) ?? { rating, summary: null };
+    if (
+      persisted.rating.driverId === assignment.driver.driverId &&
+      persisted.rating.tripId !== assignment.assignmentId
+    ) {
+      this.recordRatingTripAlias(order.orderId, {
+        canonicalTripId: persisted.rating.tripId,
+        assignmentId: assignment.assignmentId,
+        driverId: persisted.rating.driverId,
+      });
+    }
     const canonicalPersistedRating = this.canonicalizePassengerRating(
       persisted.rating,
       {
-        assignment,
-        windowTaskId,
+        assignment:
+          persisted.rating.driverId === assignment.driver.driverId
+            ? assignment
+            : null,
+        ratingWindow,
       },
     );
     this.assertIdempotentRating(canonicalPersistedRating, score, tags, comment);
@@ -1103,10 +1166,26 @@ export class MultiTaxiService implements OnModuleInit {
         receipt,
       });
     }
+    const ratingMatchesCurrentAssignment =
+      Boolean(rating && assignment) &&
+      rating!.driverId === assignment!.driver.driverId &&
+      rating!.tripId === assignment!.assignmentId;
+    const ratingWindow =
+      rating &&
+      rating.tripId !== order.orderId &&
+      this.repository?.isEnabled() &&
+      typeof this.repository.findPassengerRatingWindow === "function"
+        ? await this.repository.findPassengerRatingWindow(
+            order.orderId,
+            rating.tripId,
+            rating.driverId,
+          )
+        : null;
     const canonicalRating = rating
       ? this.canonicalizePassengerRating(rating, {
-          assignment,
-          receipt,
+          assignment: ratingMatchesCurrentAssignment ? assignment : null,
+          ratingWindow,
+          receipt: ratingMatchesCurrentAssignment ? receipt : null,
         })
       : null;
     if (canonicalRating) {
@@ -1289,10 +1368,23 @@ export class MultiTaxiService implements OnModuleInit {
       rating,
       summary: null,
     };
+    if (
+      persisted.rating.driverId === assignment.driver.driverId &&
+      persisted.rating.tripId !== assignment.assignmentId
+    ) {
+      this.recordRatingTripAlias(order.orderId, {
+        canonicalTripId: persisted.rating.tripId,
+        assignmentId: assignment.assignmentId,
+        driverId: persisted.rating.driverId,
+      });
+    }
     const canonicalPersistedRating = this.canonicalizePassengerRating(
       persisted.rating,
       {
-        assignment,
+        assignment:
+          persisted.rating.driverId === assignment.driver.driverId
+            ? assignment
+            : null,
       },
     );
     this.assertIdempotentRating(canonicalPersistedRating, score, tags, comment);
@@ -3184,11 +3276,80 @@ export class MultiTaxiService implements OnModuleInit {
     return tripId;
   }
 
+  private recordRatingTripAlias(
+    orderId: string,
+    alias: {
+      canonicalTripId: string;
+      assignmentId: string | null;
+      driverId: string | null;
+    },
+  ) {
+    const canonicalTripId = alias.canonicalTripId.trim();
+    const assignmentId = alias.assignmentId?.trim() || null;
+    const driverId = alias.driverId?.trim() || null;
+    if (
+      !canonicalTripId ||
+      !assignmentId ||
+      !driverId ||
+      canonicalTripId === assignmentId
+    ) {
+      return;
+    }
+    const existing = this.ratingTripAliasesByOrder.get(orderId) ?? [];
+    const filtered = existing.filter(
+      (item) =>
+        !(
+          item.driverId === driverId &&
+          (item.assignmentId === assignmentId ||
+            item.canonicalTripId === canonicalTripId)
+        ),
+    );
+    filtered.unshift({
+      canonicalTripId,
+      assignmentId,
+      driverId,
+    });
+    this.ratingTripAliasesByOrder.set(orderId, filtered);
+  }
+
+  private findRatingTripAlias(
+    orderId: string,
+    assignmentOrTripId?: string | null,
+    driverId?: string | null,
+  ) {
+    const targetId =
+      typeof assignmentOrTripId === "string" && assignmentOrTripId.trim()
+        ? assignmentOrTripId.trim()
+        : null;
+    const targetDriverId =
+      typeof driverId === "string" && driverId.trim() ? driverId.trim() : null;
+    if (!targetId) {
+      return null;
+    }
+    const aliases = this.ratingTripAliasesByOrder.get(orderId);
+    if (!aliases) {
+      return null;
+    }
+    return (
+      aliases.find(
+        (alias) =>
+          (!targetDriverId || alias.driverId === targetDriverId) &&
+          (alias.assignmentId === targetId ||
+            alias.canonicalTripId === targetId),
+      ) ?? null
+    );
+  }
+
   private resolveCanonicalCompletedTripId(input: {
     orderId: string;
     assignmentId?: string | null;
     driverId?: string | null;
     windowTaskId?: string | null;
+    ratingWindow?: {
+      taskId?: string;
+      assignmentId?: string;
+      driverId?: string;
+    } | null;
     receipt?: MultiTaxiElectronicReceipt | null;
     existingTripId?: string | null;
   }): string {
@@ -3219,9 +3380,34 @@ export class MultiTaxiService implements OnModuleInit {
             driverId: normalizedDriverId,
           })
         : null);
-    const windowTaskId =
-      typeof input.windowTaskId === "string" && input.windowTaskId.trim()
+    const rawWindowTaskId =
+      (typeof input.ratingWindow?.taskId === "string" &&
+      input.ratingWindow.taskId.trim()
+        ? input.ratingWindow.taskId.trim()
+        : null) ??
+      (typeof input.windowTaskId === "string" && input.windowTaskId.trim()
         ? input.windowTaskId.trim()
+        : null);
+    const windowAssignmentId =
+      typeof input.ratingWindow?.assignmentId === "string" &&
+      input.ratingWindow.assignmentId.trim()
+        ? input.ratingWindow.assignmentId.trim()
+        : normalizedAssignmentId;
+    const windowDriverId =
+      typeof input.ratingWindow?.driverId === "string" &&
+      input.ratingWindow.driverId.trim()
+        ? input.ratingWindow.driverId.trim()
+        : normalizedDriverId;
+    const windowTaskId =
+      rawWindowTaskId &&
+      (!normalizedDriverId ||
+        !windowDriverId ||
+        windowDriverId === normalizedDriverId) &&
+      (!normalizedAssignmentId ||
+        !windowAssignmentId ||
+        windowAssignmentId === normalizedAssignmentId ||
+        rawWindowTaskId === normalizedAssignmentId)
+        ? rawWindowTaskId
         : null;
     const inMemoryOperationalRecord =
       this.repository?.findInMemoryTripOperationalRecordByOrder?.(
@@ -3239,18 +3425,13 @@ export class MultiTaxiService implements OnModuleInit {
       normalizedAssignmentId,
       normalizedDriverId,
     );
-    const cachedAlias = this.ratingTripAliasesByOrder.get(input.orderId);
-    const cachedCanonicalTripId =
-      cachedAlias &&
-      (!normalizedDriverId ||
-        !cachedAlias.driverId ||
-        cachedAlias.driverId === normalizedDriverId) &&
-      (!normalizedAssignmentId ||
-        !cachedAlias.assignmentId ||
-        cachedAlias.assignmentId === normalizedAssignmentId ||
-        cachedAlias.canonicalTripId === normalizedAssignmentId)
-        ? cachedAlias.canonicalTripId
-        : null;
+    const targetLookupId = normalizedAssignmentId ?? normalizedExistingTripId;
+    const cachedAlias = this.findRatingTripAlias(
+      input.orderId,
+      targetLookupId,
+      normalizedDriverId,
+    );
+    const cachedCanonicalTripId = cachedAlias?.canonicalTripId ?? null;
 
     const canonicalTripId =
       completedTask?.taskId?.trim() ||
@@ -3269,22 +3450,26 @@ export class MultiTaxiService implements OnModuleInit {
 
     const resolvedAssignmentId =
       completedTask?.assignmentId?.trim() ||
+      windowAssignmentId ||
       inMemoryOperationalRecord?.assignmentId?.trim() ||
       normalizedAssignmentId ||
-      cachedAlias?.assignmentId ||
+      null;
+    const resolvedDriverId =
+      completedTask?.driverId?.trim() ||
+      windowDriverId ||
+      normalizedDriverId ||
       null;
     if (
       canonicalTripId &&
-      (resolvedAssignmentId || completedTask || windowTaskId || receiptTripId)
+      resolvedAssignmentId &&
+      resolvedDriverId &&
+      canonicalTripId !== resolvedAssignmentId &&
+      (completedTask || windowTaskId || operationalTripId || receiptTripId)
     ) {
-      this.ratingTripAliasesByOrder.set(input.orderId, {
+      this.recordRatingTripAlias(input.orderId, {
         canonicalTripId,
         assignmentId: resolvedAssignmentId,
-        driverId:
-          completedTask?.driverId?.trim() ||
-          normalizedDriverId ||
-          cachedAlias?.driverId ||
-          null,
+        driverId: resolvedDriverId,
       });
     }
     return canonicalTripId;
@@ -3298,6 +3483,11 @@ export class MultiTaxiService implements OnModuleInit {
         driver?: { driverId: string };
       } | null;
       windowTaskId?: string | null;
+      ratingWindow?: {
+        taskId?: string;
+        assignmentId?: string;
+        driverId?: string;
+      } | null;
       receipt?: MultiTaxiElectronicReceipt | null;
     },
   ): {
@@ -3305,11 +3495,13 @@ export class MultiTaxiService implements OnModuleInit {
     assignmentId: string | null;
     searchableTripIds: string[];
   } {
+    const contextAssignmentDriverMatches =
+      Boolean(context?.assignment) &&
+      (!context!.assignment!.driver?.driverId ||
+        context!.assignment!.driver.driverId === rating.driverId);
     const contextAssignmentId =
-      context?.assignment &&
-      (!context.assignment.driver?.driverId ||
-        context.assignment.driver.driverId === rating.driverId)
-        ? context.assignment.assignmentId
+      contextAssignmentDriverMatches && context?.assignment?.assignmentId
+        ? context.assignment.assignmentId.trim()
         : null;
     const completedTask = this.findMatchingCompletedDriverTask({
       orderId: rating.orderId,
@@ -3322,35 +3514,74 @@ export class MultiTaxiService implements OnModuleInit {
         rating.tripId,
         rating.driverId,
       ) ?? null;
-    const cachedAlias = this.ratingTripAliasesByOrder.get(rating.orderId);
-    const aliasMatches =
-      cachedAlias &&
-      (!cachedAlias.driverId || cachedAlias.driverId === rating.driverId) &&
-      (cachedAlias.canonicalTripId === rating.tripId ||
-        cachedAlias.assignmentId === rating.tripId);
+    const cachedAlias = this.findRatingTripAlias(
+      rating.orderId,
+      rating.tripId,
+      rating.driverId,
+    );
+    const aliasMatches = Boolean(cachedAlias);
+    const rawWindowTaskId =
+      (typeof context?.ratingWindow?.taskId === "string" &&
+      context.ratingWindow.taskId.trim()
+        ? context.ratingWindow.taskId.trim()
+        : null) ??
+      (typeof context?.windowTaskId === "string" && context.windowTaskId.trim()
+        ? context.windowTaskId.trim()
+        : null);
+    const windowDriverId =
+      (typeof context?.ratingWindow?.driverId === "string" &&
+      context.ratingWindow.driverId.trim()
+        ? context.ratingWindow.driverId.trim()
+        : null) ??
+      (typeof context?.assignment?.driver?.driverId === "string" &&
+      context.assignment.driver.driverId.trim()
+        ? context.assignment.driver.driverId.trim()
+        : null);
+    const windowAssignmentId =
+      (typeof context?.ratingWindow?.assignmentId === "string" &&
+      context.ratingWindow.assignmentId.trim()
+        ? context.ratingWindow.assignmentId.trim()
+        : null) ?? contextAssignmentId;
+    const validWindowTaskId =
+      rawWindowTaskId &&
+      (!windowDriverId || windowDriverId === rating.driverId) &&
+      (windowAssignmentId === rating.tripId ||
+        rawWindowTaskId === rating.tripId)
+        ? rawWindowTaskId
+        : null;
     const assignmentId =
       completedTask?.assignmentId?.trim() ||
+      (validWindowTaskId ? windowAssignmentId : null) ||
       inMemoryOperationalRecord?.assignmentId?.trim() ||
       (aliasMatches ? cachedAlias?.assignmentId : null) ||
       (contextAssignmentId &&
-      (contextAssignmentId === rating.tripId || completedTask)
+      (contextAssignmentId === rating.tripId || Boolean(completedTask))
         ? contextAssignmentId
         : null) ||
       null;
-    const canonicalTripId =
-      completedTask?.taskId?.trim() ||
-      (typeof context?.windowTaskId === "string" && context.windowTaskId.trim()
-        ? context.windowTaskId.trim()
-        : null) ||
-      (typeof inMemoryOperationalRecord?.tripId === "string" &&
+    const operationalTripId =
+      typeof inMemoryOperationalRecord?.tripId === "string" &&
       inMemoryOperationalRecord.tripId.trim()
         ? inMemoryOperationalRecord.tripId.trim()
-        : null) ||
-      this.extractReceiptTripId(
-        context?.receipt,
-        assignmentId ?? contextAssignmentId ?? rating.tripId,
-        rating.driverId,
-      ) ||
+        : null;
+    const receiptAllowedForRating =
+      Boolean(context?.receipt) &&
+      (!context?.assignment ||
+        (contextAssignmentDriverMatches &&
+          (contextAssignmentId === rating.tripId ||
+            contextAssignmentId === assignmentId)));
+    const receiptTripId = receiptAllowedForRating
+      ? this.extractReceiptTripId(
+          context?.receipt,
+          assignmentId ?? rating.tripId,
+          rating.driverId,
+        )
+      : null;
+    const canonicalTripId =
+      completedTask?.taskId?.trim() ||
+      validWindowTaskId ||
+      operationalTripId ||
+      receiptTripId ||
       (aliasMatches ? cachedAlias?.canonicalTripId : null) ||
       rating.tripId;
 
@@ -3358,7 +3589,7 @@ export class MultiTaxiService implements OnModuleInit {
       canonicalTripId &&
       (assignmentId || canonicalTripId !== rating.tripId)
     ) {
-      this.ratingTripAliasesByOrder.set(rating.orderId, {
+      this.recordRatingTripAlias(rating.orderId, {
         canonicalTripId,
         assignmentId:
           assignmentId ??
@@ -3389,6 +3620,11 @@ export class MultiTaxiService implements OnModuleInit {
         driver?: { driverId: string };
       } | null;
       windowTaskId?: string | null;
+      ratingWindow?: {
+        taskId?: string;
+        assignmentId?: string;
+        driverId?: string;
+      } | null;
       receipt?: MultiTaxiElectronicReceipt | null;
     },
   ): PassengerTripRatingRecord {

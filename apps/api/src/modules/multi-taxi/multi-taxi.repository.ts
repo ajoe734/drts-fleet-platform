@@ -1910,7 +1910,6 @@ export class MultiTaxiRepository {
           AND (
             mtr.assignment_id = ${ratingAlias}.trip_id
             OR mtr.trip_id = ${ratingAlias}.trip_id
-            OR mtr.assignment_id IS NULL
           )
           AND (
             NULLIF(mtr.record->>'driverId', '') IS NULL
@@ -1956,7 +1955,6 @@ export class MultiTaxiRepository {
             AND (
               mtr.assignment_id = ${ratingAlias}.trip_id
               OR mtr.trip_id = ${ratingAlias}.trip_id
-              OR mtr.assignment_id IS NULL
             )
             AND (
               NULLIF(mtr.record->>'driverId', '') IS NULL
@@ -2357,11 +2355,7 @@ export class MultiTaxiRepository {
           rating.tripId !== expectedAssignmentId
             ? rating.tripId
             : null;
-        if (
-          !isNew &&
-          !storedTripMatchesExpected &&
-          storedRating.driverId === rating.driverId
-        ) {
+        if (!isNew && storedRating.driverId === rating.driverId) {
           const replayTask = await client.query<{
             completed_at: string | null;
             database_now: Date | string;
@@ -2387,14 +2381,18 @@ export class MultiTaxiRepository {
           if (
             matchedTask &&
             (storedRating.tripId === matchedTaskId ||
-              storedRating.tripId === matchedAssignmentId)
+              storedRating.tripId === matchedAssignmentId ||
+              (!matchedTaskId &&
+                !matchedAssignmentId &&
+                storedTripMatchesExpected))
           ) {
             storedTripMatchesExpected = true;
-            canonicalReplayTripId = matchedTaskId ?? rating.tripId;
+            canonicalReplayTripId =
+              matchedTaskId ?? canonicalReplayTripId ?? rating.tripId;
           }
         }
         if (
-          rideContext &&
+          (accountHook || rideContext) &&
           (!storedTripMatchesExpected ||
             storedRating.driverId !== rating.driverId)
         )
@@ -2679,22 +2677,57 @@ export class MultiTaxiRepository {
     }
   }
 
-  private passengerRatingWindow(row?: {
-    completed_at: string | null;
-    database_now: Date | string;
-    task_id?: string | null;
-    assignment_id?: string | null;
-  }) {
+  private passengerRatingWindow(
+    row?: {
+      completed_at: string | null;
+      database_now: Date | string;
+      task_id?: string | null;
+      assignment_id?: string | null;
+      driver_id?: string | null;
+    },
+    expected?: {
+      assignmentId?: string | null;
+      driverId?: string | null;
+    },
+  ) {
     const completedAt = Date.parse(row?.completed_at ?? "");
     const databaseNow = new Date(row?.database_now ?? NaN).getTime();
-    const taskId =
+    const rawTaskId =
       typeof row?.task_id === "string" && row.task_id.trim()
         ? row.task_id.trim()
         : undefined;
-    const assignmentId =
+    const rawAssignmentId =
       typeof row?.assignment_id === "string" && row.assignment_id.trim()
         ? row.assignment_id.trim()
         : undefined;
+    const rawDriverId =
+      typeof row?.driver_id === "string" && row.driver_id.trim()
+        ? row.driver_id.trim()
+        : undefined;
+    const expectedAssignmentId =
+      typeof expected?.assignmentId === "string" && expected.assignmentId.trim()
+        ? expected.assignmentId.trim()
+        : undefined;
+    const expectedDriverId =
+      typeof expected?.driverId === "string" && expected.driverId.trim()
+        ? expected.driverId.trim()
+        : undefined;
+    const matchesExpectedAssignment =
+      !expectedAssignmentId ||
+      (!rawAssignmentId && !rawTaskId) ||
+      rawAssignmentId === expectedAssignmentId ||
+      rawTaskId === expectedAssignmentId;
+    const matchesExpectedDriver =
+      !expectedDriverId || !rawDriverId || rawDriverId === expectedDriverId;
+    const identityMatches =
+      matchesExpectedAssignment && matchesExpectedDriver;
+    const taskId = identityMatches ? rawTaskId : undefined;
+    const assignmentId = identityMatches
+      ? (rawAssignmentId ?? expectedAssignmentId)
+      : undefined;
+    const driverId = identityMatches
+      ? (rawDriverId ?? expectedDriverId)
+      : undefined;
     return {
       completedAt: Number.isFinite(completedAt)
         ? new Date(completedAt).toISOString()
@@ -2706,6 +2739,7 @@ export class MultiTaxiRepository {
         databaseNow - completedAt <= 24 * 60 * 60 * 1000,
       ...(taskId ? { taskId } : {}),
       ...(assignmentId ? { assignmentId } : {}),
+      ...(driverId ? { driverId } : {}),
     };
   }
 
@@ -2720,13 +2754,17 @@ export class MultiTaxiRepository {
       database_now: Date | string;
       task_id?: string | null;
       assignment_id?: string | null;
+      driver_id?: string | null;
     }>(
       `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now, task_id, assignment_id
        FROM ops.phase1_driver_tasks WHERE order_id = $1 AND (assignment_id = $2 OR task_id = $2)
          AND status = 'completed' AND record->>'driverId' = $3`,
       [orderId, assignmentId, driverId],
     );
-    return this.passengerRatingWindow(result.rows[0]);
+    return this.passengerRatingWindow(result.rows[0], {
+      assignmentId,
+      driverId,
+    });
   }
 
   async findBookedPassengerQuote(
@@ -3566,7 +3604,6 @@ export class MultiTaxiRepository {
       const normalizedTarget = assignmentOrTripId.trim();
       if (
         normalizedTarget &&
-        candidate.assignmentId &&
         candidate.assignmentId !== normalizedTarget &&
         candidate.tripId !== normalizedTarget
       ) {
