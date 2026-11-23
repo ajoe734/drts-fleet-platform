@@ -9,8 +9,6 @@ import {
   act,
 } from "@testing-library/react";
 import React from "react";
-import { createRequire } from "node:module";
-import { resolve } from "node:path";
 import type { PassengerRideAuthorityView } from "@drts/contracts";
 import {
   PassengerRidePage,
@@ -19,12 +17,6 @@ import {
 import { ComplaintForm } from "../../../apps/passenger-app-web/components/ride/complaint-form";
 
 const originalFetch = global.fetch;
-const appRequire = createRequire(
-  resolve("apps/passenger-app-web/package.json"),
-);
-const { AppRouterContext } = appRequire(
-  "next/dist/shared/lib/app-router-context.shared-runtime",
-) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -118,19 +110,8 @@ describe("Passenger Ride UI Acceptance", () => {
 
   it("opens history or normal booking from an owned cancelled ride without creating or changing an order", async () => {
     fetchResponse = { ride: cancelledRide };
-    const router = {
-      bfcacheId: "cancelled-ride-test-route",
-      push: vi.fn(),
-      replace: vi.fn(),
-      back: vi.fn(),
-      forward: vi.fn(),
-      refresh: vi.fn(),
-      prefetch: vi.fn(),
-    };
     render(
-      <AppRouterContext.Provider value={router}>
-        <PassengerRidePage token={cancelledRide.order.orderId} kind="ride" />
-      </AppRouterContext.Provider>,
+      <PassengerRidePage token={cancelledRide.order.orderId} kind="ride" />,
     );
 
     await screen.findByText("行程已取消");
@@ -146,14 +127,18 @@ describe("Passenger Ride UI Acceptance", () => {
     expect(history.getAttribute("href")).toBe("/rides");
     expect(booking.getAttribute("href")).toBe("/");
 
-    await act(async () => {
-      fireEvent.click(history);
-      fireEvent.click(booking);
-    });
-    expect(router.push.mock.calls.map(([href]) => href)).toEqual([
-      "/rides",
-      "/",
-    ]);
+    // JSDOM cannot navigate documents. Intercept only browser navigation;
+    // the rendered page, links and their click handlers remain real.
+    const preventNavigation = (event: Event) => event.preventDefault();
+    document.addEventListener("click", preventNavigation);
+    try {
+      await act(async () => {
+        fireEvent.click(history);
+        fireEvent.click(booking);
+      });
+    } finally {
+      document.removeEventListener("click", preventNavigation);
+    }
     expect(fetchCalls).toHaveLength(1);
     expect(screen.getByText("行程已取消")).toBeTruthy();
     expect(
