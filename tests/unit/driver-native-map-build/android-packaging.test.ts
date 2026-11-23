@@ -99,13 +99,13 @@ it.skipIf(!aapt || !framework).each([
       <string name="${resourceName}">${value}</string>
     </resources>`,
     );
-    // Each aapt2 step may take several seconds on a cold CI runner, so the test
-    // carries its own 60 s budget instead of vitest's 5 s default.
+    // aapt2 steps on a busy CI runner (parallel vitest workers) have exceeded
+    // 15 s each, so every step gets 60 s and the test its own 180 s budget.
     const run = (...args: string[]) =>
       execFileSync(aapt!, args, {
         cwd: dir,
         encoding: "utf8",
-        timeout: 15_000,
+        timeout: 60_000,
       });
     run("compile", "--dir", "res", "-o", "res.zip");
     run(
@@ -145,4 +145,4 @@ it.skipIf(!aapt || !framework).each([
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}, 60_000);
+}, 180_000);
