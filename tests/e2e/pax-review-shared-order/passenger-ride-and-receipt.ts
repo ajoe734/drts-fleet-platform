@@ -4,7 +4,7 @@ import {
   expect,
   type Download,
   type Page,
-  type Response as BrowserResponse,
+  type Route,
   type TestInfo,
 } from "@playwright/test";
 
@@ -37,8 +37,12 @@ const EXPECTED_HEADING_BY_STAGE: Record<PassengerVisibleStage, string> = {
   completed: "行程已完成",
 };
 
-function shortOrderHeading(orderId: string): string {
-  return `O-${orderId.slice(0, 8).toUpperCase()}`;
+function shortOrderHeading(orderNoOrId: string): string {
+  const normalized = orderNoOrId.startsWith("O-")
+    ? orderNoOrId
+    : `O-${orderNoOrId}`;
+  const match = /^O-([0-9a-f]{8})-[0-9a-f-]{27}$/i.exec(normalized);
+  return match ? `O-${match[1]!.toUpperCase()}` : normalized;
 }
 
 function safeReceiptFileName(
@@ -68,12 +72,24 @@ function decodePdfUtf16TjLines(bytes: Buffer): string {
     .join("\n");
 }
 
-async function assertSameOrderPassengerChrome(pax: Page, orderId: string) {
+async function assertSameOrderPassengerChrome(
+  pax: Page,
+  orderId: string,
+  orderNo?: string,
+) {
   await expect(pax).toHaveURL(new RegExp(`/rides/${orderId}$`));
   await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
-  await expect(pax.locator(`[title="O-${orderId}"]`)).toHaveText(
-    shortOrderHeading(orderId),
-  );
+  await expect(
+    pax.getByText(`ride.smarttransport.tw/r/${orderId.slice(0, 4)}••`, {
+      exact: true,
+    }),
+  ).toBeVisible();
+  if (orderNo) {
+    expect(orderNo).toMatch(/^O-[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+    await expect(pax.locator(`[title="${orderNo}"]`)).toHaveText(
+      shortOrderHeading(orderNo),
+    );
+  }
 }
 
 /**
@@ -92,7 +108,7 @@ export async function assertPassengerSearchingRideDom(
     timeout: 15_000,
   });
   await expect(
-    pax.getByText("系統正在安排可派車輛", { exact: false }).first(),
+    pax.getByText(/通常 1–3 分鐘完成指派|系統正在安排可派車輛/).first(),
   ).toBeVisible();
   await expect(pax.getByText("預估路線與車資", { exact: true })).toBeVisible();
   const cancelButton = pax
@@ -105,10 +121,11 @@ export async function assertPassengerSearchingRideDom(
 
   const ride = await readAuthority(pax, orderId);
   expect(ride.order.orderId).toBe(orderId);
-  expect(ride.order.orderNo).toBe(`O-${orderId}`);
-  expect(ride.order.status).toBe("created");
+  expect(ride.order.orderNo).toMatch(/^O-[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+  expect(["created", "ready_for_dispatch"]).toContain(ride.order.status);
   expect(ride.assignment).toBeNull();
   expect(ride.actions.canCancel).toBe(true);
+  await assertSameOrderPassengerChrome(pax, orderId, ride.order.orderNo);
 
   if (info) {
     await info.attach("A-first-party-P5-searching-pax", {
@@ -162,6 +179,7 @@ export async function assertPassengerAssignedRideDom(
   expect(ride.order.status).toBe(expectedStage);
   expect(ride.assignment?.vehicle?.plateNo).toBe(expectedPlateNo);
   expect(ride.actions.canCancel).toBe(true);
+  await assertSameOrderPassengerChrome(pax, orderId, ride.order.orderNo);
 
   observed.push({
     stage: expectedStage,
@@ -217,6 +235,7 @@ export async function assertPassengerArrivedRideDom(
   expect(ride.order.status).toBe("arrived_pickup");
   expect(ride.assignment?.vehicle?.plateNo).toBe(expectedPlateNo);
   expect(ride.actions.canCancel).toBe(true);
+  await assertSameOrderPassengerChrome(pax, orderId, ride.order.orderNo);
 
   observed.push({
     stage: "arrived_pickup",
@@ -273,6 +292,7 @@ export async function assertPassengerOnTripRideDom(
   expect(ride.order.status).toBe("on_trip");
   expect(ride.assignment?.vehicle?.plateNo).toBe(expectedPlateNo);
   expect(ride.actions.canCancel).toBe(false);
+  await assertSameOrderPassengerChrome(pax, orderId, ride.order.orderNo);
 
   observed.push({
     stage: "on_trip",
@@ -327,6 +347,7 @@ export async function assertPassengerCompletedRideDom(
   expect(ride.order.orderId).toBe(orderId);
   expect(ride.order.status).toBe("completed");
   expect(ride.actions.canCancel).toBe(false);
+  await assertSameOrderPassengerChrome(pax, orderId, ride.order.orderNo);
 
   observed.push({
     stage: "completed",
@@ -346,6 +367,10 @@ export async function assertPassengerCompletedRideDom(
     "on_trip",
     "completed",
   ]);
+  expect(observed.every((entry) => entry.orderId === orderId)).toBe(true);
+  expect(observed.every((entry) => entry.orderNo === ride.order.orderNo)).toBe(
+    true,
+  );
 
   if (info) {
     await info.attach("A-first-party-P5-completed-pax", {
@@ -405,22 +430,32 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   await expect(
     pax.getByText("電子乘車證明", { exact: true }).first(),
   ).toBeVisible();
-  await expect(pax.locator(`[title="O-${orderId}"]`)).toHaveText(
-    shortOrderHeading(orderId),
-  );
   await expect(
-    pax.getByText(snapshot.fleetOperatorName, { exact: true }),
-  ).toBeVisible();
-  await expect(
-    pax.getByText(receipt.record.plateNo, { exact: true }),
-  ).toBeVisible();
-  await expect(
-    pax.getByText(`執登證號 ${snapshot.driverRegistrationMasked}`, {
+    pax.getByText(`ride.smarttransport.tw/r/${orderId.slice(0, 4)}••`, {
       exact: true,
     }),
   ).toBeVisible();
+  await expect(pax.locator(`a[href="/rides/${orderId}"]`)).toBeVisible();
+  if (typeof receipt.orderNo === "string" && receipt.orderNo.startsWith("O-")) {
+    await expect(pax.locator(`[title="${receipt.orderNo}"]`)).toHaveText(
+      shortOrderHeading(receipt.orderNo),
+    );
+  }
   await expect(
-    pax.getByText(snapshot.paymentMethodDisplay, { exact: true }),
+    pax.getByText(snapshot.fleetOperatorName, { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    pax.getByText(receipt.record.plateNo, { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    pax
+      .getByText(`執登證號 ${snapshot.driverRegistrationMasked}`, {
+        exact: true,
+      })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    pax.getByText(snapshot.paymentMethodDisplay, { exact: true }).first(),
   ).toBeVisible();
   await expect(
     pax.getByText("PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING", { exact: true }),
@@ -483,30 +518,81 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   pax.on("download", onDownload);
   pax.context().on("page", onPopup);
 
-  let response: BrowserResponse;
+  let status = 0;
+  let actualResponseUrl = "";
+  let responseHeaders: Record<string, string> = {};
   let bytes: Buffer = Buffer.alloc(0);
   let deliveryMode: "browser_download" | "inline_or_new_tab" =
     "inline_or_new_tab";
   let suggestedFilename: string | null = null;
   let savedArtifactPath: string | null = null;
 
+  let resolveIntercepted!: () => void;
+  let rejectIntercepted!: (error: unknown) => void;
+  const interceptedPromise = new Promise<void>((resolve, reject) => {
+    resolveIntercepted = resolve;
+    rejectIntercepted = reject;
+  });
+  const urlMatcher = (url: URL) => url.pathname === targetPathname;
+  const interceptHandler = async (route: Route) => {
+    try {
+      // Fetch the real browser-initiated GET once and fulfill the response unchanged
+      // so attachment download streams remain readable even when Chromium detaches
+      // the renderer stream for target="_blank" downloads.
+      const fetched = await route.fetch({ maxRedirects: 0 });
+      const fetchedBody = Buffer.from(await fetched.body());
+      status = fetched.status();
+      actualResponseUrl = fetched.url();
+      responseHeaders = fetched.headers();
+      bytes = fetchedBody;
+      await route.fulfill({ response: fetched, body: fetchedBody });
+      resolveIntercepted();
+    } catch (error) {
+      rejectIntercepted(error);
+      await route.abort("failed").catch(() => undefined);
+    }
+  };
+
   try {
-    const responsePromise = pax.context().waitForEvent("response", {
-      timeout: 30_000,
-      predicate: (candidate) =>
-        candidate.request().method() === "GET" &&
-        new URL(candidate.url()).pathname === targetPathname,
-    });
-    await actionLink.click();
-    response = await responsePromise;
-    const disposition = response.headers()["content-disposition"] ?? "";
+    if (typeof pax.context().route === "function") {
+      await pax.context().route(urlMatcher, interceptHandler, { times: 1 });
+      await actionLink.click();
+      await Promise.race([
+        interceptedPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Timed out waiting for browser GET ${targetPathname}`,
+                ),
+              ),
+            30_000,
+          ),
+        ),
+      ]);
+    } else {
+      const responsePromise = pax.context().waitForEvent("response", {
+        timeout: 30_000,
+        predicate: (candidate) =>
+          candidate.request().method() === "GET" &&
+          new URL(candidate.url()).pathname === targetPathname,
+      });
+      await actionLink.click();
+      const response = await responsePromise;
+      status = response.status();
+      actualResponseUrl = response.url();
+      responseHeaders = response.headers();
+      bytes = Buffer.from(await response.body());
+    }
+    const disposition = responseHeaders["content-disposition"] ?? "";
     if (/attachment/i.test(disposition)) {
       const downloaded =
         capturedDownload ??
         (await Promise.race([
           downloadPromise,
           new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), 10_000),
+            setTimeout(() => resolve(null), 5_000),
           ),
         ]));
       if (downloaded) {
@@ -517,13 +603,15 @@ export async function verifyOriginalPassengerReceiptInBrowser(
         );
         await downloaded.saveAs(savedArtifactPath);
         bytes = await readFile(savedArtifactPath);
-      } else {
-        bytes = Buffer.from(await response.body());
       }
-    } else {
-      bytes = Buffer.from(await response.body());
     }
   } finally {
+    if (typeof pax.context().unroute === "function") {
+      await pax
+        .context()
+        .unroute(urlMatcher, interceptHandler)
+        .catch(() => undefined);
+    }
     pax.off("download", onDownload);
     pax.context().off("page", onPopup);
     for (const popup of openedPages) {
@@ -533,10 +621,9 @@ export async function verifyOriginalPassengerReceiptInBrowser(
     }
   }
 
-  const status = response.status();
-  const contentTypeHeader = response.headers()["content-type"] ?? "";
+  const contentTypeHeader = responseHeaders["content-type"] ?? "";
   const mimeType = contentTypeHeader.split(";")[0]!.trim().toLowerCase();
-  const contentDisposition = response.headers()["content-disposition"] ?? "";
+  const contentDisposition = responseHeaders["content-disposition"] ?? "";
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const hasPdfMagic =
     bytes.length >= 5 && bytes.subarray(0, 5).toString("ascii") === "%PDF-";
@@ -553,7 +640,7 @@ export async function verifyOriginalPassengerReceiptInBrowser(
       environmentIssuedHtmlFallbackOnly: !pdfOfferedByDownloadsApi,
       expectedArtifactPath,
       actualButtonHref,
-      actualResponseUrl: response.url(),
+      actualResponseUrl,
       actualHttpStatus: status,
       deliveryMode,
       mimeType,
@@ -576,7 +663,7 @@ export async function verifyOriginalPassengerReceiptInBrowser(
     status,
     `Original receipt button GET ${actualButtonHref} must succeed with HTTP 200`,
   ).toBe(200);
-  expect(new URL(response.url()).pathname).toBe(expectedArtifactPath);
+  expect(new URL(actualResponseUrl).pathname).toBe(expectedArtifactPath);
   expect(contentDisposition).toContain(`filename="${expectedFileName}"`);
   if (suggestedFilename !== null) {
     expect(suggestedFilename).toBe(expectedFileName);

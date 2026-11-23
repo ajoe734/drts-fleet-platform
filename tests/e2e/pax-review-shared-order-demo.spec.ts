@@ -1350,7 +1350,7 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
     pax,
     PAX,
     orderId,
-    ride.receipt,
+    { ...ride.receipt, orderNo: ride.order.orderNo },
     metadata,
     info,
   );
