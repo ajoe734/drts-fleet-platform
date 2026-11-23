@@ -2481,7 +2481,8 @@ export class OwnedMobilityRepository {
             outbox.orderId,
             executor,
           );
-        // Non-partner orders have no sequence row and keep their payload.
+        // Orders with neither a partner nor a first-party notification route
+        // have no sequence and keep their payload.
         if (eventSequence !== null) {
           await executor.query(
             `
