@@ -310,6 +310,118 @@ async function fixture(complete = true, fromProducer = false) {
 }
 
 describe("captured E04 downstream mapping and authorized downloads (SQL fixtures, not acceptance)", () => {
+  it.each([true, false])(
+    "projects an already persisted account ride receipt without rewriting it (full E04: %s)",
+    async (complete) => {
+      const f = await fixture(complete);
+      f.booking.state.order!.status = "completed";
+      const stored = structuredClone(f.row());
+      const persisted = await new MultiTaxiRepository(
+        f.booking.database,
+      ).findElectronicReceipt(f.orderId);
+      const expected = {
+        ...persisted,
+        record: {
+          ...persisted!.record,
+          htmlUrl: `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/html`,
+          pdfUrl: `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/pdf`,
+        },
+      };
+      const before = f.queries.length;
+      const ride = (await f.booking.controller.getRide(identity, f.orderId))
+        .data.ride;
+      expect(ride.order).toMatchObject({
+        orderId: f.orderId,
+        status: "completed",
+      });
+      expect(ride.receipt).toEqual(expected);
+      expect(await f.multi.getPassengerRideById(f.orderId, OWNER)).toEqual(
+        ride,
+      );
+      expect(
+        await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER),
+      ).toEqual(expected);
+      expect(
+        (await f.booking.controller.getReceipt(identity, f.orderId)).data
+          .receiptUrl,
+      ).toBe(expected.record.htmlUrl);
+      if (complete) {
+        expect(
+          (await f.account.downloads(identity, f.orderId, f.response)).data,
+        ).toMatchObject({
+          certificateId: expected.receiptId,
+          orderId: f.orderId,
+          htmlUrl: expected.record.htmlUrl,
+          pdfUrl: expected.record.pdfUrl,
+        });
+      } else {
+        await expect(
+          f.account.downloads(identity, f.orderId, f.response),
+        ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+      }
+      expect(f.row()).toEqual(stored);
+      expect(
+        f.queries
+          .slice(before)
+          .filter((query) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(query.sql)),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(["persisted on reconnect", "becomes ready"])(
+    "projects the account receipt in real SSE readback when %s",
+    async (scenario) => {
+      const f = await fixture();
+      f.booking.state.order!.status = "completed";
+      const stored = structuredClone(f.row());
+      if (scenario === "becomes ready") f.transport.row = undefined;
+      const received: unknown[] = [];
+      const subscription = f.booking.controller
+        .getRideEvents(identity, f.orderId)
+        .subscribe((event) => received.push(event.data));
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        if (scenario === "becomes ready") {
+          expect(received).toMatchObject([
+            { eventType: "trip_completed", data: { receipt: null } },
+          ]);
+          f.transport.row = stored;
+          await vi.advanceTimersByTimeAsync(3_000);
+        }
+        expect(received).toHaveLength(scenario === "becomes ready" ? 2 : 1);
+        expect(received.at(-1)).toMatchObject({
+          eventType: "receipt_ready",
+          orderId: f.orderId,
+          data: {
+            receipt: await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER),
+          },
+        });
+        expect(
+          (received.at(-1) as { data: { receipt: { record: unknown } } }).data
+            .receipt.record,
+        ).toMatchObject({
+          htmlUrl: `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/html`,
+          pdfUrl: `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/pdf`,
+        });
+        expect(f.row()).toEqual(stored);
+      } finally {
+        subscription.unsubscribe();
+      }
+    },
+  );
+
+  it("keeps an ungenerated account ride receipt null and single receipt read not ready", async () => {
+    const f = await fixture();
+    f.transport.row = undefined;
+    expect(
+      (await f.booking.controller.getRide(identity, f.orderId)).data.ride
+        .receipt,
+    ).toBeNull();
+    await expect(
+      f.multi.getTrustedPassengerReceipt(f.orderId, OWNER),
+    ).rejects.toMatchObject({ code: "PASSENGER_RECEIPT_NOT_READY" });
+  });
+
   it("retains completion snapshots through the real regeneration repository and current read", async () => {
     const f = await fixture(false, true);
     const before = structuredClone(f.row().record);
@@ -685,6 +797,27 @@ describe("captured E04 downstream mapping and authorized downloads (SQL fixtures
         scenario === "foreign"
           ? ({ ...identity, drtsPassengerId: OTHER } as RequestIdentity)
           : identity;
+      await expect(
+        f.booking.controller.getRide(actor, id),
+      ).rejects.toMatchObject({ code: "PASSENGER_RIDE_NOT_FOUND" });
+      await expect(
+        f.booking.controller.getReceipt(actor, id),
+      ).rejects.toMatchObject({ code: "PASSENGER_RIDE_NOT_FOUND" });
+      const received: unknown[] = [];
+      const errors: unknown[] = [];
+      const subscription = f.booking.controller
+        .getRideEvents(actor, id)
+        .subscribe({
+          next: (event) => received.push(event),
+          error: (error) => errors.push(error),
+        });
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(received).toEqual([]);
+        expect(errors).toMatchObject([{ code: "PASSENGER_RIDE_NOT_FOUND" }]);
+      } finally {
+        subscription.unsubscribe();
+      }
       for (const format of ["html", "pdf"] as const)
         await expect(
           f.account[format](actor, id, f.response),
