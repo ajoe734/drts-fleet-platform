@@ -148,6 +148,7 @@ import type {
   FleetPartnerPortalTripRecord,
   FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
+  DriverOnboardingDeliverySummary,
   DriverSupplyDraft,
   FleetPartnerStatementRecord,
   ConfirmFleetPartnerStatementCommand,
@@ -2713,6 +2714,7 @@ export class ApiClient {
       driverDraft: DriverSupplyDraft | null;
       vehicleDraft: VehicleSupplyDraft | null;
       documents: SupplyDocumentRecord[];
+      onboardingNotifications?: DriverOnboardingDeliverySummary[];
     } & SupplySubmissionRecord
   > {
     return this.get(

@@ -19,6 +19,18 @@ export function resolveAuthoritativeAdminShellEnv(
 }
 
 const supplyReviewEn = {
+  "supplyReview.onboarding.title": "Driver registration notifications",
+  "supplyReview.onboarding.email": "Email",
+  "supplyReview.onboarding.sms": "SMS",
+  "supplyReview.onboarding.queued": "Queued",
+  "supplyReview.onboarding.sending": "Sending",
+  "supplyReview.onboarding.accepted": "Accepted by provider",
+  "supplyReview.onboarding.delivered": "Delivered",
+  "supplyReview.onboarding.failed": "Failed",
+  "supplyReview.onboarding.uncertain": "Delivery unconfirmed",
+  "supplyReview.onboarding.skipped": "Skipped",
+  "supplyReview.onboarding.expired": "Expired",
+
   // ── Supply Review Queue & Detail (S1F-ADM-001) ──
   "supplyReview.status.draft": "Draft",
   "supplyReview.status.submitted": "Submitted",
@@ -281,6 +293,18 @@ const supplyReviewEn = {
 };
 
 const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
+  "supplyReview.onboarding.title": "司機註冊通知",
+  "supplyReview.onboarding.email": "Email",
+  "supplyReview.onboarding.sms": "簡訊",
+  "supplyReview.onboarding.queued": "等待傳送",
+  "supplyReview.onboarding.sending": "傳送中",
+  "supplyReview.onboarding.accepted": "供應商已受理",
+  "supplyReview.onboarding.delivered": "已送達",
+  "supplyReview.onboarding.failed": "傳送失敗",
+  "supplyReview.onboarding.uncertain": "待確認是否送出",
+  "supplyReview.onboarding.skipped": "未發送",
+  "supplyReview.onboarding.expired": "已到期",
+
   "supplyReview.status.draft": "草稿",
   "supplyReview.status.submitted": "待受理",
   "supplyReview.status.in_review": "審核中",

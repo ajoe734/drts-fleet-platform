@@ -68,11 +68,38 @@ export type R08Command = {
   headers: Record<string, string>;
   bodySha256: string;
 };
+export type R08UiRefreshObservation = {
+  reloadedUrl: string;
+  reloadedStatus: number;
+  reloadedRuntimeSha: string;
+  reselectedCallId: string;
+  selectedCardText: string;
+  complaintHref: string;
+  orderHref: string;
+  transferDisabled: boolean;
+  transferText: string;
+};
+export type R08UiRefreshReadback = {
+  status: "verified";
+  reloadedPath: "/callcenter";
+  reselectedCallId: string;
+  caseNo: string;
+  orderId: string;
+  recordingId: string;
+  callbackTaskId: string;
+  complaintHref: string;
+  complaintLinked: true;
+  transferDisabled: true;
+  phoneCaseCount: 1;
+  caseStatus: "new";
+  caseAssigned: false;
+};
 export type R08Custody = R08Owned & {
   caseNo?: string;
   command?: R08Command;
   transfer: "not-captured" | "ack-unknown" | "acknowledged";
   replay: "not-attempted" | "ack-unknown" | "verified";
+  uiRefresh?: R08UiRefreshReadback;
   cleanup: "not-attempted" | "unknown" | "verified";
   unresolved: string[];
   recording: "synthetic-index-only";
@@ -171,6 +198,8 @@ export class R08Callcenter {
   private captureStarted = false;
   private replayEligible = false;
   private replayStarted = false;
+  private refreshStarted = false;
+  private refreshInvalidated = false;
   private cleanupStarted = false;
 
   constructor(
@@ -420,8 +449,8 @@ export class R08Callcenter {
         object(item).relatedCallId === this.state.callId,
     );
     requireFact(phone.length === 1, "r08-exactly-one-phone-case-for-call");
-    this.assertCase(phone[0]);
-    this.assertCase(
+    const listCase = this.assertCase(phone[0]);
+    const detailCase = this.assertCase(
       this.checked(
         await this.ports.get(
           `${prefix}/complaints/${encodeURIComponent(this.state.caseNo!)}`,
@@ -429,6 +458,88 @@ export class R08Callcenter {
       ),
     );
     await this.guard();
+    return { listCase, detailCase };
+  }
+
+  invalidateUiRefresh() {
+    this.refreshInvalidated = true;
+    delete this.state.uiRefresh;
+    if (!this.state.unresolved.includes("operator-ui-refresh-unverified"))
+      this.state.unresolved.push("operator-ui-refresh-unverified");
+  }
+
+  async verifyUiRefresh(
+    observation: R08UiRefreshObservation,
+  ): Promise<R08UiRefreshReadback> {
+    requireFact(
+      !this.refreshStarted &&
+        this.state.transfer === "acknowledged" &&
+        this.state.replay === "verified" &&
+        !!this.state.caseNo &&
+        !!this.state.command,
+      "r08-ui-refresh-after-verified-replay-once",
+    );
+    this.refreshStarted = true;
+    try {
+      requireFact(!this.refreshInvalidated, "r08-no-unowned-ui-post");
+      await this.guard();
+      requireFact(
+        observation.reloadedStatus === 200 &&
+          observation.reloadedUrl ===
+            `${this.expected.proof.origin}/callcenter` &&
+          observation.reloadedRuntimeSha === this.expected.proof.runtimeSha,
+        "r08-actual-reloaded-callcenter-page-runtime",
+      );
+      const expectedComplaintHref = `/complaints/${encodeURIComponent(this.state.caseNo!)}`;
+      const expectedOrderHref = `/dispatch/${encodeURIComponent(this.state.orderId)}`;
+      requireFact(
+        observation.reselectedCallId === this.state.callId &&
+          observation.selectedCardText.includes(this.state.callId) &&
+          observation.complaintHref === expectedComplaintHref &&
+          observation.orderHref === expectedOrderHref &&
+          observation.transferDisabled === true &&
+          /already linked to a complaint|已連結客訴/i.test(
+            observation.transferText,
+          ),
+        "r08-reloaded-ui-same-call-case-link",
+      );
+      const { listCase, detailCase } = await this.readTuple();
+      requireFact(
+        listCase.status === "new" &&
+          detailCase.status === "new" &&
+          (listCase.assigneeId ?? null) === null &&
+          (detailCase.assigneeId ?? null) === null &&
+          (listCase.relatedIncidentId ?? null) === null &&
+          (detailCase.relatedIncidentId ?? null) === null,
+        "r08-refresh-no-case-create-or-assign",
+      );
+      requireFact(!this.refreshInvalidated, "r08-no-unowned-ui-post");
+      const readback: R08UiRefreshReadback = {
+        status: "verified",
+        reloadedPath: "/callcenter",
+        reselectedCallId: this.state.callId,
+        caseNo: this.state.caseNo!,
+        orderId: this.state.orderId,
+        recordingId: this.state.recordingId,
+        callbackTaskId: this.state.callbackTaskId,
+        complaintHref: expectedComplaintHref,
+        complaintLinked: true,
+        transferDisabled: true,
+        phoneCaseCount: 1,
+        caseStatus: "new",
+        caseAssigned: false,
+      };
+      this.state.uiRefresh = readback;
+      this.state.unresolved = this.state.unresolved.filter(
+        (item) => item !== "operator-ui-refresh-unverified",
+      );
+      await this.checkpoint();
+      return copy(readback);
+    } catch (error) {
+      delete this.state.uiRefresh;
+      await this.unknown("operator-ui-refresh-unverified");
+      throw error;
+    }
   }
 
   async replay() {
@@ -585,6 +696,7 @@ export type R08RunCustody = {
     ack: "ack-unknown" | "acknowledged";
   }[];
   transfer?: R08Custody;
+  uiRefresh?: R08UiRefreshReadback;
   result: "in-progress" | "failed" | "verified";
   cleanup: "not-attempted" | "unknown" | "verified";
 };
@@ -600,6 +712,17 @@ export class R08ExistingFull {
   private expectedCanonical?: R08Canonical;
   private cleanupStarted = false;
   private closed = false;
+  private reloading = false;
+  private routeError: unknown;
+  private reloadedSessions:
+    | {
+        status: number;
+        headers: Headers;
+        bytes: Buffer;
+        url: string;
+        expectedUrl: string;
+      }
+    | undefined;
   private pending:
     | {
         started: boolean;
@@ -643,8 +766,16 @@ export class R08ExistingFull {
         dedupeKey: `finalize_recording:call:${this.state.callId}`,
         status: "unobserved-retained",
       };
-    if (this.helper) this.state.transfer = this.helper.snapshot();
+    if (this.helper) {
+      this.state.transfer = this.helper.snapshot();
+      if (this.state.transfer.uiRefresh)
+        this.state.uiRefresh = copy(this.state.transfer.uiRefresh);
+      else delete this.state.uiRefresh;
+    }
     await this.ports.finalizer.checkpointOwned("r08-own-call-custody");
+  }
+  private assertNoRouteError() {
+    if (this.routeError) throw this.routeError;
   }
   private checked(
     status: number,
@@ -760,6 +891,7 @@ export class R08ExistingFull {
         if (request.method() === "POST") {
           requireFact(
             !this.closed &&
+              !this.reloading &&
               pending &&
               !pending.started &&
               url.pathname === pending.path,
@@ -871,6 +1003,10 @@ export class R08ExistingFull {
           pending.resolve();
           return;
         }
+        requireFact(
+          ["GET", "HEAD"].includes(request.method()),
+          "r08-no-unowned-ui-post",
+        );
         const response = await route.fetch({
           headers: {
             ...request.headers(),
@@ -881,6 +1017,24 @@ export class R08ExistingFull {
           maxRetries: 0,
         });
         try {
+          if (
+            this.reloading &&
+            request.method() === "GET" &&
+            url.pathname === this.path
+          ) {
+            const bytes = await response.body();
+            assertOpen();
+            requireFact(!this.closed, "r08-ui-command-closed");
+            this.reloadedSessions = {
+              status: response.status(),
+              headers: new Headers(response.headers()),
+              bytes,
+              url: response.url(),
+              expectedUrl: request.url(),
+            };
+            await route.fulfill({ response, body: bytes });
+            return;
+          }
           // Never require static assets to carry the API envelope; the actual
           // Callcenter navigation and BFF observations are checked separately.
           assertOpen();
@@ -891,6 +1045,11 @@ export class R08ExistingFull {
         }
       });
     } catch (error) {
+      this.routeError ??= error;
+      if (this.reloading || this.helper?.snapshot().replay === "verified") {
+        delete this.state.uiRefresh;
+        this.helper?.invalidateUiRefresh();
+      }
       const pending = this.pending;
       this.pending = undefined;
       await route.abort("failed").catch(() => undefined);
@@ -903,6 +1062,7 @@ export class R08ExistingFull {
     action: () => Promise<unknown>,
     accept: (data: ObjectData) => void = () => undefined,
   ) {
+    this.assertNoRouteError();
     requireFact(!this.pending, "r08-single-ui-command-in-flight");
     let resolve!: () => void, reject!: (error: unknown) => void;
     const ack = new Promise<void>((yes, no) => {
@@ -929,6 +1089,7 @@ export class R08ExistingFull {
     } finally {
       clearTimeout(timer);
     }
+    this.assertNoRouteError();
   }
   async run() {
     await this.save();
@@ -1161,10 +1322,160 @@ export class R08ExistingFull {
           transfer.locator('button[type="submit"]').click({ timeout: 15_000 }),
       );
       await this.helper.replay();
+      const callcenterUrl = `${this.ports.origin}/callcenter`;
+      if (page.url() !== callcenterUrl) {
+        const returned = await page.goto(callcenterUrl, { timeout: 15_000 });
+        requireFact(
+          returned?.status() === 200 &&
+            returned.headers()["x-drts-candidate-sha"] ===
+              this.ports.runtimeSha,
+          "r08-actual-served-callcenter-page-runtime",
+        );
+      }
+      this.reloading = true;
+      this.reloadedSessions = undefined;
+      let reloaded = await page.reload({ timeout: 15_000 });
+      this.assertNoRouteError();
+      if (reloaded && reloaded.url() !== callcenterUrl) {
+        const returned = await page.goto(callcenterUrl, { timeout: 15_000 });
+        this.assertNoRouteError();
+        requireFact(
+          returned?.status() === 200 &&
+            returned.headers()["x-drts-candidate-sha"] ===
+              this.ports.runtimeSha,
+          "r08-actual-served-callcenter-page-runtime",
+        );
+        this.reloadedSessions = undefined;
+        reloaded = await page.reload({ timeout: 15_000 });
+        this.assertNoRouteError();
+      }
+      requireFact(
+        reloaded?.status() === 200 &&
+          reloaded.url() === callcenterUrl &&
+          reloaded.headers()["x-drts-candidate-sha"] === this.ports.runtimeSha,
+        "r08-actual-reloaded-callcenter-page-runtime",
+      );
+      const reloadedBrowser = await page.evaluate(async () => {
+        const response = await fetch("/control-plane-proxy/auth/session", {
+          redirect: "error",
+        });
+        return {
+          status: response.status,
+          sha: response.headers.get("x-drts-candidate-sha"),
+          body: await response.text(),
+        };
+      });
+      this.assertNoRouteError();
+      requireFact(
+        reloadedBrowser.status === 200 &&
+          reloadedBrowser.sha === this.ports.runtimeSha &&
+          Buffer.byteLength(reloadedBrowser.body) <= 1024 * 1024,
+        "r08-actual-browser-session-runtime",
+      );
+      const reloadedAuth = object(
+        object(camelWire(JSON.parse(reloadedBrowser.body))).data,
+      );
+      requireFact(
+        reloadedAuth.active === true &&
+          stable(this.identity(reloadedAuth.identity)) ===
+            stable(this.expectedProof.identity),
+        "r08-actual-browser-equals-native-ops-session",
+      );
+      const callId = text(this.state.callId);
+      const callbackTaskId = text(this.state.callbackTaskId);
+      const escape = (value: string) =>
+        value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const reselectButton = page
+        .getByRole("button", {
+          name: new RegExp(
+            `^(?:${escape(callId)}|${escape(callbackTaskId)})(?:\\b|\\s|$)`,
+          ),
+        })
+        .first();
+      await reselectButton.click({ timeout: 15_000 });
+      this.assertNoRouteError();
+      await page
+        .locator('input[type="search"]')
+        .first()
+        .fill(callId, { timeout: 15_000 });
+      this.assertNoRouteError();
+      await reselectButton.click({ timeout: 15_000 });
+      this.assertNoRouteError();
+      const complaintLink = page
+        .getByRole("link", {
+          name: /^(Complaint detail|客訴明細)$/i,
+        })
+        .first();
+      const orderLink = page
+        .getByRole("link", {
+          name: /^(Dispatch workspace|派車工作區)$/i,
+        })
+        .first();
+      const complaintHref =
+        (await complaintLink.getAttribute("href", { timeout: 15_000 })) ?? "";
+      const orderHref =
+        (await orderLink.getAttribute("href", { timeout: 15_000 })) ?? "";
+      const selectedCardText =
+        (await page
+          .locator("section")
+          .filter({ has: complaintLink })
+          .first()
+          .textContent({ timeout: 15_000 })) ?? "";
+      const transferDisabled = await transfer
+        .locator('button[type="submit"]')
+        .isDisabled({ timeout: 15_000 });
+      const transferText =
+        (await transfer.textContent({ timeout: 15_000 })) ?? "";
+      this.reloading = false;
+      this.assertNoRouteError();
+      requireFact(
+        Boolean(this.reloadedSessions),
+        "r08-reloaded-ui-sessions-bff-read-observed",
+      );
+      const reloadedList = object(
+        this.checked(
+          this.reloadedSessions!.status,
+          this.reloadedSessions!.headers,
+          this.reloadedSessions!.bytes,
+          this.reloadedSessions!.url,
+          this.reloadedSessions!.expectedUrl,
+        ).data,
+      );
+      const reloadedOwn = records(reloadedList.items).filter(
+        (item) => item.callId === callId,
+      );
+      requireFact(
+        reloadedOwn.length === 1 &&
+          reloadedOwn[0]!.linkedCaseNo === this.helper.snapshot().caseNo &&
+          reloadedOwn[0]!.linkedOrderId === this.state.orderId &&
+          reloadedOwn[0]!.recordingId === this.state.recordingId &&
+          reloadedOwn[0]!.recordingState === "ready",
+        "r08-reloaded-ui-sessions-bff-tuple",
+      );
+      this.state.uiRefresh = await this.helper.verifyUiRefresh({
+        reloadedUrl: reloaded.url(),
+        reloadedStatus: reloaded.status(),
+        reloadedRuntimeSha: reloaded.headers()["x-drts-candidate-sha"] ?? "",
+        reselectedCallId: callId,
+        selectedCardText,
+        complaintHref,
+        orderHref,
+        transferDisabled,
+        transferText,
+      });
+      this.assertNoRouteError();
+      requireFact(
+        this.state.producers.length === 4,
+        "r08-refresh-no-additional-producer-command",
+      );
       this.state.result = "verified";
       await this.save();
     } catch (error) {
       await this.stop();
+      if (this.helper?.snapshot().replay === "verified") {
+        delete this.state.uiRefresh;
+        this.helper.invalidateUiRefresh();
+      }
       this.state.result = "failed";
       await this.save();
       throw error;

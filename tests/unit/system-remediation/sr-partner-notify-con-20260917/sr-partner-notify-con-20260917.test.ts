@@ -479,6 +479,9 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
           (a: any) => a.version,
         ),
         ...(content.sos_duty_allocations || []).map((a: any) => a.version),
+        ...(content.driver_onboarding_allocations || []).map(
+          (a: any) => a.version,
+        ),
       ];
       expect(new Set(allVersions).size).toBe(allVersions.length);
     });
@@ -502,6 +505,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(allocation.voice_callback_allocations || []),
         ...(allocation.complaint_command_allocations || []),
         ...(allocation.sos_duty_allocations || []),
+        ...(allocation.driver_onboarding_allocations || []),
       ]) {
         expect(
           diskFiles.filter((file) => file.startsWith(`${alloc.version}_`)),
@@ -534,6 +538,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(content.callcenter_ai_assist_allocations || []),
         ...(content.portal_password_login_allocations || []),
         ...(content.audit_log_actor_ref_allocations || []),
+        ...(content.driver_onboarding_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,

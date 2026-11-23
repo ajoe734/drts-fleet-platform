@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DriverDeviceProvisioningSession } from "@drts/contracts";
 
 import {
+  activateDriverDevice,
   clearDriverProvisioning,
   formatDriverError,
+  formatDriverRegistrationError,
   getDriverAuthState,
   getDriverClient,
   getDriverIdentityIssue,
@@ -11,6 +13,7 @@ import {
   initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
+  registerDriverDevice,
   registerProtectedCacheClearHandler,
   sanitizeLogMessage,
 } from "../../lib/api-client";
@@ -36,7 +39,9 @@ vi.mock("expo-constants", () => ({
   },
 }));
 
-function createSampleSession(overrides?: Partial<DriverDeviceProvisioningSession>): DriverDeviceProvisioningSession {
+function createSampleSession(
+  overrides?: Partial<DriverDeviceProvisioningSession>,
+): DriverDeviceProvisioningSession {
   return {
     accessToken: "expired-access-token-001",
     refreshToken: "valid-refresh-token-001",
@@ -68,6 +73,71 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
     vi.clearAllMocks();
     vi.restoreAllMocks();
     await clearDriverProvisioning();
+  });
+
+  describe("approval link and short-code device registration", () => {
+    function mockSuccessfulRegistration() {
+      return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ data: createSampleSession() }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+
+    it("sends the link proof in a POST body and only persists the device session", async () => {
+      const token = "Wnz37BU1-I3JaaQrSBWB0MChBq0Q-PPJgElR8L6b618";
+      const fetchSpy = mockSuccessfulRegistration();
+
+      expect(await activateDriverDevice(token)).toBe("activated");
+
+      const [url, options] = fetchSpy.mock.calls[0];
+      expect(String(url)).toMatch(/\/api\/auth\/driver\/device\/register$/);
+      expect(String(url)).not.toContain(token);
+      expect(options?.method).toBe("POST");
+      expect(JSON.parse(String(options?.body))).toEqual({
+        activationToken: token,
+        deviceId: expect.any(String),
+        deviceLabel: null,
+      });
+      expect(mockStore.get("drts.driver.session")).toContain("drv-test-101");
+      expect([...mockStore.values()].join(" ")).not.toContain(token);
+    });
+
+    it("does not exchange the link proof on an already provisioned device", async () => {
+      const fetchSpy = mockSuccessfulRegistration();
+      mockStore.set(
+        "drts.driver.session",
+        JSON.stringify(createSampleSession()),
+      );
+
+      expect(await activateDriverDevice("server-issued-opaque-proof")).toBe(
+        "already_signed_in",
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(isDriverIdentityProvisioned()).toBe(true);
+    });
+
+    it("preserves leading zeroes and sends a six-digit proof with its mobile scope", async () => {
+      const fetchSpy = mockSuccessfulRegistration();
+
+      await registerDriverDevice("012345", "Test device", "0912345678");
+
+      const [, options] = fetchSpy.mock.calls[0];
+      expect(JSON.parse(String(options?.body))).toEqual({
+        registrationCode: "012345",
+        registrationContact: "0912345678",
+        deviceId: expect.any(String),
+        deviceLabel: "Test device",
+      });
+    });
+
+    it("never displays provider errors that could include the proof", () => {
+      const secret = "server-echoed-proof";
+      expect(formatDriverRegistrationError(new Error(secret))).not.toContain(
+        secret,
+      );
+    });
   });
 
   describe("Single Authority for SecureStore Session Storage & Lifecycle", () => {
@@ -104,68 +174,71 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       await initializeDriverIdentity();
 
       let refreshCallCount = 0;
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-        const url = String(input);
-        const headers = (init?.headers ?? {}) as Record<string, string>;
-        const authHeader = headers["Authorization"] || headers["authorization"];
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input, init) => {
+          const url = String(input);
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          const authHeader =
+            headers["Authorization"] || headers["authorization"];
 
-        if (url.includes("/api/auth/driver/device/refresh")) {
-          refreshCallCount++;
-          // Simulate slight network latency
-          await new Promise((resolve) => setTimeout(resolve, 30));
-          return new Response(
-            JSON.stringify({
-              data: {
-                accessToken: "new-valid-token-rotated",
-                refreshToken: "new-rotated-refresh-token-456",
-                tokenType: "Bearer",
-                expiresIn: 900,
-                refreshExpiresIn: 2592000,
-                driverId: "drv-test-101",
-                deviceId: "dev-test-101",
-                bindingId: "bnd-test-101",
-                issuedAt: new Date().toISOString(),
-                identity: {
-                  actorId: "drv-test-101",
-                  tenantId: "tnt-demo-001",
-                  realm: "driver",
-                },
-              },
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        // For regular API calls (e.g. /api/driver/tasks or /api/orders)
-        if (authHeader === "Bearer expired-token") {
-          return new Response(
-            JSON.stringify({
-              error: {
-                code: "UNAUTHORIZED",
-                message: "Access token has expired.",
-              },
-            }),
-            { status: 401, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        if (authHeader === "Bearer new-valid-token-rotated") {
-          return new Response(
-            JSON.stringify({
-              data: [
-                {
-                  taskId: "task-001",
+          if (url.includes("/api/auth/driver/device/refresh")) {
+            refreshCallCount++;
+            // Simulate slight network latency
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return new Response(
+              JSON.stringify({
+                data: {
+                  accessToken: "new-valid-token-rotated",
+                  refreshToken: "new-rotated-refresh-token-456",
+                  tokenType: "Bearer",
+                  expiresIn: 900,
+                  refreshExpiresIn: 2592000,
                   driverId: "drv-test-101",
-                  status: "on_trip",
+                  deviceId: "dev-test-101",
+                  bindingId: "bnd-test-101",
+                  issuedAt: new Date().toISOString(),
+                  identity: {
+                    actorId: "drv-test-101",
+                    tenantId: "tnt-demo-001",
+                    realm: "driver",
+                  },
                 },
-              ],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
 
-        return new Response("Not Found", { status: 404 });
-      });
+          // For regular API calls (e.g. /api/driver/tasks or /api/orders)
+          if (authHeader === "Bearer expired-token") {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "UNAUTHORIZED",
+                  message: "Access token has expired.",
+                },
+              }),
+              { status: 401, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          if (authHeader === "Bearer new-valid-token-rotated") {
+            return new Response(
+              JSON.stringify({
+                data: [
+                  {
+                    taskId: "task-001",
+                    driverId: "drv-test-101",
+                    status: "on_trip",
+                  },
+                ],
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          return new Response("Not Found", { status: 404 });
+        });
 
       const client = getDriverClient();
       const N = 10;
@@ -189,8 +262,12 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       }
 
       // Assert session has been updated with rotated tokens
-      expect(getProvisionedSession()?.accessToken).toBe("new-valid-token-rotated");
-      expect(getProvisionedSession()?.refreshToken).toBe("new-rotated-refresh-token-456");
+      expect(getProvisionedSession()?.accessToken).toBe(
+        "new-valid-token-rotated",
+      );
+      expect(getProvisionedSession()?.refreshToken).toBe(
+        "new-rotated-refresh-token-456",
+      );
 
       const rawStored = mockStore.get("drts.driver.session");
       expect(rawStored).toBeTruthy();
@@ -211,50 +288,53 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
 
       let persistenceVerifiedBeforeWaiterResumed = false;
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-        const url = String(input);
-        const headers = (init?.headers ?? {}) as Record<string, string>;
-        const authHeader = headers["Authorization"] || headers["authorization"];
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input, init) => {
+          const url = String(input);
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          const authHeader =
+            headers["Authorization"] || headers["authorization"];
 
-        if (url.includes("/api/auth/driver/device/refresh")) {
-          return new Response(
-            JSON.stringify({
-              data: {
-                ...initialSession,
-                accessToken: "new-access-token-999",
-                refreshToken: "new-refresh-token-999",
-              },
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        if (authHeader === "Bearer expired-token") {
-          return new Response(
-            JSON.stringify({
-              error: { code: "UNAUTHORIZED", message: "Token expired." },
-            }),
-            { status: 401, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        if (authHeader === "Bearer new-access-token-999") {
-          // When the waiter resumes and retries, check if the rotated refresh token is ALREADY in SecureStore
-          const storedJson = mockStore.get("drts.driver.session");
-          if (storedJson) {
-            const parsed = JSON.parse(storedJson);
-            if (parsed.refreshToken === "new-refresh-token-999") {
-              persistenceVerifiedBeforeWaiterResumed = true;
-            }
+          if (url.includes("/api/auth/driver/device/refresh")) {
+            return new Response(
+              JSON.stringify({
+                data: {
+                  ...initialSession,
+                  accessToken: "new-access-token-999",
+                  refreshToken: "new-refresh-token-999",
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
           }
-          return new Response(
-            JSON.stringify({ data: { success: true } }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
 
-        return new Response("Not Found", { status: 404 });
-      });
+          if (authHeader === "Bearer expired-token") {
+            return new Response(
+              JSON.stringify({
+                error: { code: "UNAUTHORIZED", message: "Token expired." },
+              }),
+              { status: 401, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          if (authHeader === "Bearer new-access-token-999") {
+            // When the waiter resumes and retries, check if the rotated refresh token is ALREADY in SecureStore
+            const storedJson = mockStore.get("drts.driver.session");
+            if (storedJson) {
+              const parsed = JSON.parse(storedJson);
+              if (parsed.refreshToken === "new-refresh-token-999") {
+                persistenceVerifiedBeforeWaiterResumed = true;
+              }
+            }
+            return new Response(JSON.stringify({ data: { success: true } }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+
+          return new Response("Not Found", { status: 404 });
+        });
 
       const client = getDriverClient();
       const res = await client.get<{ success: boolean }>("/api/test");
@@ -278,34 +358,38 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       let refreshCount = 0;
       let regularCallCount = 0;
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        const url = String(input);
-        if (url.includes("/api/auth/driver/device/refresh")) {
-          refreshCount++;
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input) => {
+          const url = String(input);
+          if (url.includes("/api/auth/driver/device/refresh")) {
+            refreshCount++;
+            return new Response(
+              JSON.stringify({
+                data: {
+                  ...initialSession,
+                  accessToken: "token-that-is-still-rejected-by-server",
+                  refreshToken: "rt-new",
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          // Regular endpoint always returns 401 even after refresh
+          regularCallCount++;
           return new Response(
             JSON.stringify({
-              data: {
-                ...initialSession,
-                accessToken: "token-that-is-still-rejected-by-server",
-                refreshToken: "rt-new",
-              },
+              error: { code: "UNAUTHORIZED", message: "Invalid credentials." },
             }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
+            { status: 401, headers: { "Content-Type": "application/json" } },
           );
-        }
-
-        // Regular endpoint always returns 401 even after refresh
-        regularCallCount++;
-        return new Response(
-          JSON.stringify({
-            error: { code: "UNAUTHORIZED", message: "Invalid credentials." },
-          }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        );
-      });
+        });
 
       const client = getDriverClient();
-      await expect(client.get("/api/protected-resource")).rejects.toThrow("API error 401");
+      await expect(client.get("/api/protected-resource")).rejects.toThrow(
+        "API error 401",
+      );
 
       // Assert 1 initial call + 1 refresh + 1 retry call = 2 regular calls, 1 refresh call
       expect(regularCallCount).toBe(2);
@@ -332,24 +416,28 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       let refreshCount = 0;
       let requestCount = 0;
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        const url = String(input);
-        if (url.includes("/api/auth/driver/device/refresh")) {
-          refreshCount++;
-          return new Response(JSON.stringify({ data: initialSession }), { status: 200 });
-        }
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input) => {
+          const url = String(input);
+          if (url.includes("/api/auth/driver/device/refresh")) {
+            refreshCount++;
+            return new Response(JSON.stringify({ data: initialSession }), {
+              status: 200,
+            });
+          }
 
-        requestCount++;
-        return new Response(
-          JSON.stringify({
-            error: {
-              code: "DRIVER_AUTH_SUSPENDED",
-              message: "Driver is suspended by admin.",
-            },
-          }),
-          { status: 403, headers: { "Content-Type": "application/json" } },
-        );
-      });
+          requestCount++;
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: "DRIVER_AUTH_SUSPENDED",
+                message: "Driver is suspended by admin.",
+              },
+            }),
+            { status: 403, headers: { "Content-Type": "application/json" } },
+          );
+        });
 
       const client = getDriverClient();
       let caughtError: unknown;
@@ -367,7 +455,9 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
 
       // Assert session is NOT cleared and driver is NOT logged out
       expect(isDriverIdentityProvisioned()).toBe(true);
-      expect(getProvisionedSession()?.accessToken).toBe("valid-token-no-permission");
+      expect(getProvisionedSession()?.accessToken).toBe(
+        "valid-token-no-permission",
+      );
       expect(mockStore.has("drts.driver.session")).toBe(true);
       expect(getDriverAuthState()).toBe("provisioned");
 
@@ -391,27 +481,29 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       const cacheClearSpy = vi.fn();
       const unregister = registerProtectedCacheClearHandler(cacheClearSpy);
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        const url = String(input);
-        if (url.includes("/api/auth/driver/device/refresh")) {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input) => {
+          const url = String(input);
+          if (url.includes("/api/auth/driver/device/refresh")) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "DRIVER_DEVICE_REFRESH_INVALID",
+                  message: "Refresh token revoked or invalid.",
+                },
+              }),
+              { status: 401, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
           return new Response(
             JSON.stringify({
-              error: {
-                code: "DRIVER_DEVICE_REFRESH_INVALID",
-                message: "Refresh token revoked or invalid.",
-              },
+              error: { code: "UNAUTHORIZED", message: "Token expired." },
             }),
             { status: 401, headers: { "Content-Type": "application/json" } },
           );
-        }
-
-        return new Response(
-          JSON.stringify({
-            error: { code: "UNAUTHORIZED", message: "Token expired." },
-          }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        );
-      });
+        });
 
       const client = getDriverClient();
       await expect(client.listDriverTasks()).rejects.toThrow();
@@ -467,10 +559,14 @@ describe("DRV-AUTH-001: Driver Token Lifecycle Authority & Single-Flight Refresh
       expect(getDriverAuthState()).toBe("provisioned");
 
       // Simulate network loss: fetch fails with network error
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Network request failed"));
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new TypeError("Network request failed"));
 
       const client = getDriverClient();
-      await expect(client.listDriverTasks()).rejects.toThrow("Network request failed");
+      await expect(client.listDriverTasks()).rejects.toThrow(
+        "Network request failed",
+      );
 
       // Assert network error does NOT clear session or leave half-authenticated state
       expect(isDriverIdentityProvisioned()).toBe(true);

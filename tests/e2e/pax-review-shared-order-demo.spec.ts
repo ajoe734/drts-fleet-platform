@@ -230,7 +230,21 @@ async function registerDriver(
   });
   await step("Driver open onboarding", () => driver.goto(`${base}/onboarding`));
   await step("Driver submit registration code", async () => {
+    await expect(
+      driver.getByLabel("裝置註冊碼", { exact: true }),
+    ).toBeVisible();
+    const legacyMode = driver.getByRole("button", {
+      name: "使用舊版註冊碼",
+      exact: true,
+    });
+    if (await legacyMode.count()) await legacyMode.click();
+    await expect(
+      driver.getByLabel("登記手機號碼", { exact: true }),
+    ).toHaveCount(0);
     await driver.getByLabel("裝置註冊碼", { exact: true }).fill(code);
+    await expect(driver.getByLabel("裝置註冊碼", { exact: true })).toHaveValue(
+      code,
+    );
     const registration = driver.waitForResponse(
       (r) =>
         r.url().endsWith("/auth/driver/device/register") &&

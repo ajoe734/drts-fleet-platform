@@ -682,6 +682,119 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
     expect(h.commands).toEqual([]);
     expect(h.helper.snapshot().cleanup).toBe("unknown");
   });
+
+  it("verifies reloaded operator UI re-selection of original callId, same caseNo and linked complaint without new case or assignment", async () => {
+    const h = harness();
+    await h.helper.capture(h.route);
+    await h.helper.replay();
+    const countBeforeRefresh = h.commands.length;
+    const refreshReadback = await h.helper.verifyUiRefresh({
+      reloadedUrl: `${ORIGIN}/callcenter`,
+      reloadedStatus: 200,
+      reloadedRuntimeSha: SHA,
+      reselectedCallId: "SIM-call",
+      selectedCardText: "SIM-call Ready Complaint detail",
+      complaintHref: "/complaints/SIM-case",
+      orderHref: "/dispatch/SIM-order",
+      transferDisabled: true,
+      transferText:
+        "Transfer to complaint Medium This call work session is already linked to a complaint.",
+    });
+    expect(h.commands).toHaveLength(countBeforeRefresh);
+    expect(refreshReadback).toEqual({
+      status: "verified",
+      reloadedPath: "/callcenter",
+      reselectedCallId: "SIM-call",
+      caseNo: "SIM-case",
+      orderId: "SIM-order",
+      recordingId: "SIM-index",
+      callbackTaskId: "SIM-callback",
+      complaintHref: "/complaints/SIM-case",
+      complaintLinked: true,
+      transferDisabled: true,
+      phoneCaseCount: 1,
+      caseStatus: "new",
+      caseAssigned: false,
+    });
+    expect(h.helper.snapshot()).toMatchObject({
+      uiRefresh: refreshReadback,
+      unresolved: [],
+    });
+    expect(JSON.stringify(refreshReadback)).not.toMatch(
+      /0900000000|SIM-SECRET|SIM-COOKIE/,
+    );
+    await expect(
+      h.helper.verifyUiRefresh({
+        reloadedUrl: `${ORIGIN}/callcenter`,
+        reloadedStatus: 200,
+        reloadedRuntimeSha: SHA,
+        reselectedCallId: "SIM-call",
+        selectedCardText: "SIM-call Ready",
+        complaintHref: "/complaints/SIM-case",
+        orderHref: "/dispatch/SIM-order",
+        transferDisabled: true,
+        transferText:
+          "This call work session is already linked to a complaint.",
+      }),
+    ).rejects.toThrow("r08-ui-refresh-after-verified-replay-once");
+  });
+
+  it.each([
+    "reloaded status",
+    "reloaded URL",
+    "reloaded SHA",
+    "reselected callId",
+    "card callId",
+    "complaint href",
+    "order href",
+    "transfer enabled",
+    "missing linked reason",
+    "duplicate phone case",
+    "case assigned",
+    "case status mutated",
+  ])(
+    "rejects operator UI refresh %s drift without new commands",
+    async (fault) => {
+      const h = harness();
+      await h.helper.capture(h.route);
+      await h.helper.replay();
+      if (fault === "duplicate phone case")
+        h.cases.push({ ...h.complaint, caseNo: "SIM-dup-refresh" });
+      if (fault === "case assigned") h.complaint.assigneeId = "AGENT-OPS-002";
+      if (fault === "case status mutated") h.complaint.status = "assigned";
+      await expect(
+        h.helper.verifyUiRefresh({
+          reloadedUrl:
+            fault === "reloaded URL"
+              ? `${ORIGIN}/complaints?caseNo=SIM-case`
+              : `${ORIGIN}/callcenter`,
+          reloadedStatus: fault === "reloaded status" ? 500 : 200,
+          reloadedRuntimeSha: fault === "reloaded SHA" ? "7".repeat(40) : SHA,
+          reselectedCallId:
+            fault === "reselected callId" ? "SIM-other-call" : "SIM-call",
+          selectedCardText:
+            fault === "card callId" ? "SIM-other-call Ready" : "SIM-call Ready",
+          complaintHref:
+            fault === "complaint href"
+              ? "/complaints/SIM-other-case"
+              : "/complaints/SIM-case",
+          orderHref:
+            fault === "order href"
+              ? "/dispatch/SIM-other-order"
+              : "/dispatch/SIM-order",
+          transferDisabled: fault !== "transfer enabled",
+          transferText:
+            fault === "missing linked reason"
+              ? "Transfer to complaint Medium"
+              : "This call work session is already linked to a complaint.",
+        }),
+      ).rejects.toThrow();
+      expect(h.commands).toHaveLength(1);
+      expect(h.helper.snapshot().unresolved).toContain(
+        "operator-ui-refresh-unverified",
+      );
+    },
+  );
 });
 
 // Playwright boundary only is simulated. R08ExistingFull, R08Callcenter,
@@ -707,6 +820,15 @@ async function fullHarness(fault = "") {
   let note = "";
   let selectedOrder = "";
   let complete = false;
+  let currentUrl = `${ORIGIN}/callcenter`;
+  let reloadCount = 0;
+  let searchQuery = "";
+  let loadedSessions: ObjectData[] = [];
+  let selectedSession: ObjectData | undefined;
+  const abortedRequests: { method: string; url: string; reason?: string }[] =
+    [];
+  let unownedForwarded = 0;
+  let unownedFulfilled = 0;
   const identity = h.proof.identity;
   const session = h.session;
   const callback = h.callback;
@@ -779,6 +901,7 @@ async function fullHarness(fault = "") {
         Object.assign(complaint, body);
         session.linkedCaseNo = complaint.caseNo;
         callback.linkedCaseNo = complaint.caseNo;
+        currentUrl = `${ORIGIN}/complaints?caseNo=${String(complaint.caseNo)}`;
       } else if (path.endsWith("/cancel")) callback.status = "cancelled";
       else if (path === `${BASE}/complaints/SIM-case/close`)
         complaint.status = "closed";
@@ -818,7 +941,22 @@ async function fullHarness(fault = "") {
         items: liveCall
           ? fault === "ambiguous open ACK lost"
             ? [session, { ...session, callId: "SIM-ambiguous" }]
-            : [session]
+            : fault === "reload session missing case" && reloadCount > 0
+              ? [{ ...session, linkedCaseNo: null }]
+              : [
+                  {
+                    callId: "SIM-other-active",
+                    callType: "booking",
+                    callerPhone: "0911111111",
+                    agentId: "SIM-other-ops",
+                    status: "active",
+                    recordingId: "SIM-other-rec",
+                    recordingState: "ready",
+                    linkedOrderId: "SIM-other-order",
+                    linkedCaseNo: "SIM-other-case",
+                  },
+                  session,
+                ]
           : [],
       });
     if (path === PATH) return response(url, session);
@@ -887,6 +1025,8 @@ async function fullHarness(fault = "") {
     ) {}
     filter(options: { has: Locator }) {
       const key = options.has.selector;
+      if (this.selector === "section")
+        return new Locator("section", "active-card");
       const form = key.includes("checkbox")
         ? "intake"
         : key.includes("datetime-local")
@@ -908,6 +1048,10 @@ async function fullHarness(fault = "") {
       return this;
     }
     async fill(value: string) {
+      if (this.selector === 'input[type="search"]') {
+        searchQuery = value.trim().toLowerCase();
+        return;
+      }
       if (this.form === "intake" && this.index === 1) actorId = value;
       if (this.form === "recording") recordingId = value;
       if (this.form === "link") selectedOrder = value;
@@ -916,6 +1060,51 @@ async function fullHarness(fault = "") {
       if (this.form === "callback" && this.selector === "textarea")
         note = value;
       if (this.form === "transfer") description = value;
+    }
+    async getAttribute(name: string) {
+      if (name !== "href" || !selectedSession) return null;
+      if (this.selector.includes("Complaint detail")) {
+        const linkedCase =
+          fault === "reloaded UI wrong case link"
+            ? "SIM-wrong-case"
+            : selectedSession.linkedCaseNo;
+        return linkedCase
+          ? `/complaints/${encodeURIComponent(String(linkedCase))}`
+          : null;
+      }
+      if (this.selector.includes("Dispatch workspace")) {
+        return selectedSession.linkedOrderId
+          ? `/dispatch/${encodeURIComponent(String(selectedSession.linkedOrderId))}`
+          : null;
+      }
+      return null;
+    }
+    async textContent() {
+      if (this.form === "active-card") {
+        if (!selectedSession) return "";
+        const shownCallId =
+          fault === "reloaded UI wrong card call"
+            ? "SIM-wrong-call"
+            : String(selectedSession.callId);
+        return `${shownCallId} ${String(selectedSession.recordingState)}`;
+      }
+      if (this.form === "transfer") {
+        if (
+          selectedSession?.linkedCaseNo &&
+          fault !== "reloaded UI transfer enabled"
+        )
+          return "Transfer to complaint Medium This call work session is already linked to a complaint.";
+        return "Transfer to complaint Medium";
+      }
+      return "";
+    }
+    async isDisabled() {
+      if (this.form === "transfer" && this.selector === 'button[type="submit"]')
+        return (
+          Boolean(selectedSession?.linkedCaseNo) &&
+          fault !== "reloaded UI transfer enabled"
+        );
+      return false;
     }
     async selectOption(value: string) {
       if (this.form === "transfer" && fault === "before transfer capture")
@@ -926,6 +1115,55 @@ async function fullHarness(fault = "") {
       /* external DOM checkbox */
     }
     async click() {
+      if (
+        !this.form &&
+        (this.selector.includes("SIM-call") ||
+          this.selector.includes("SIM-callback"))
+      ) {
+        const filtered = loadedSessions.filter((item) =>
+          !searchQuery
+            ? true
+            : [
+                item.callId,
+                item.callerPhone,
+                item.linkedOrderId,
+                item.linkedCaseNo,
+              ]
+                .join(" ")
+                .toLowerCase()
+                .includes(searchQuery),
+        );
+        selectedSession = filtered.find((item) => item.callId === "SIM-call");
+        if (fault === "reloaded UI unowned post") {
+          await routeHandler({
+            request: () => ({
+              url: () => `${ORIGIN}${PATH}/transfer-to-complaint`,
+              method: () => "POST",
+              postData: () => "{}",
+              headers: () => ({ "content-type": "application/json" }),
+            }),
+            fetch: async () => {
+              unownedForwarded++;
+              return serve(
+                `${ORIGIN}${PATH}/transfer-to-complaint`,
+                "POST",
+                "{}",
+              );
+            },
+            fulfill: async () => {
+              unownedFulfilled++;
+            },
+            abort: async (reason?: string) => {
+              abortedRequests.push({
+                method: "POST",
+                url: `${ORIGIN}${PATH}/transfer-to-complaint`,
+                ...(reason ? { reason } : {}),
+              });
+            },
+          });
+        }
+        return;
+      }
       if (!this.form) return;
       let path = `${BASE}/callcenter/sessions`,
         body: unknown;
@@ -986,10 +1224,90 @@ async function fullHarness(fault = "") {
   }
   const page = {
     on: () => undefined,
+    url: () => currentUrl,
     route: async (_matcher: string, handler: typeof routeHandler) => {
       routeHandler = handler;
     },
-    goto: async (url: string) => serve(url),
+    goto: async (url: string) => {
+      currentUrl = url;
+      return serve(url);
+    },
+    reload: async () => {
+      reloadCount++;
+      searchQuery = "";
+      if (fault === "case assigned on reload")
+        complaint.assigneeId = "AGENT-OPS-002";
+      const doc = await serve(currentUrl, "GET");
+      if (fault === "reloaded page SHA")
+        doc.headers = () => ({
+          "x-drts-candidate-sha": "7".repeat(40),
+          "content-type": "text/html",
+        });
+      if (fault === "reload unowned post") {
+        await routeHandler({
+          request: () => ({
+            url: () => `${ORIGIN}${BASE}/callcenter/sessions`,
+            method: () => "POST",
+            postData: () => "{}",
+            headers: () => ({ "content-type": "application/json" }),
+          }),
+          fetch: async () => {
+            unownedForwarded++;
+            return serve(`${ORIGIN}${BASE}/callcenter/sessions`, "POST", "{}");
+          },
+          fulfill: async () => {
+            unownedFulfilled++;
+          },
+          abort: async (reason?: string) => {
+            abortedRequests.push({
+              method: "POST",
+              url: `${ORIGIN}${BASE}/callcenter/sessions`,
+              ...(reason ? { reason } : {}),
+            });
+          },
+        });
+      }
+      await routeHandler({
+        request: () => ({
+          url: () => `${ORIGIN}${BASE}/callcenter/sessions`,
+          method: () => "GET",
+          postData: () => null,
+          headers: () => ({}),
+        }),
+        fetch: async (options: { headers: Record<string, string> }) => {
+          expect(options.headers["x-drts-authorization"]).toBe(
+            "Bearer SIM-NORMAL-OPS-TOKEN",
+          );
+          return serve(`${ORIGIN}${BASE}/callcenter/sessions`, "GET");
+        },
+        fulfill: async (options: {
+          response: { body: () => Promise<Buffer> };
+          body?: Buffer;
+        }) => {
+          const rawBytes = options.body ?? (await options.response.body());
+          const parsed = object(JSON.parse(rawBytes.toString("utf8")));
+          const data = object(parsed.data);
+          loadedSessions = Array.isArray(data.items)
+            ? data.items.map((item) => ({
+                callId: object(item).call_id,
+                callType: object(item).call_type,
+                callerPhone: object(item).caller_phone,
+                agentId: object(item).agent_id,
+                status: object(item).status,
+                recordingId: object(item).recording_id,
+                recordingState: object(item).recording_state,
+                linkedOrderId: object(item).linked_order_id,
+                linkedCaseNo: object(item).linked_case_no,
+              }))
+            : [];
+          // Simulate another active session initially auto-selected on reload,
+          // so explicit operator re-selection of SIM-call is required.
+          selectedSession = loadedSessions[0];
+        },
+        abort: async () => undefined,
+      });
+      return doc;
+    },
     evaluate: async (_fn: unknown, value?: string) =>
       value
         ? new Date(value).toISOString()
@@ -1059,6 +1377,9 @@ async function fullHarness(fault = "") {
     writes,
     disk,
     h,
+    abortedRequests,
+    unownedForwarded: () => unownedForwarded,
+    unownedFulfilled: () => unownedFulfilled,
     isStopped: () => stopped,
     route: () => routeHandler,
     finish: async (reason: "completed" | "runner-interrupted") => {
@@ -1088,7 +1409,35 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     expect(f.run.snapshot()).toMatchObject({
       result: "verified",
       cleanup: "verified",
-      transfer: { replay: "verified", cleanup: "verified" },
+      uiRefresh: {
+        status: "verified",
+        reloadedPath: "/callcenter",
+        reselectedCallId: "SIM-call",
+        caseNo: "SIM-case",
+        orderId: "SIM-order",
+        recordingId: "SIM-full-SYNTHETIC-INDEX-ONLY",
+        callbackTaskId: "SIM-callback",
+        complaintHref: "/complaints/SIM-case",
+        complaintLinked: true,
+        transferDisabled: true,
+        phoneCaseCount: 1,
+        caseStatus: "new",
+        caseAssigned: false,
+      },
+      transfer: {
+        replay: "verified",
+        cleanup: "verified",
+        uiRefresh: {
+          status: "verified",
+          reselectedCallId: "SIM-call",
+          caseNo: "SIM-case",
+          complaintLinked: true,
+          transferDisabled: true,
+          phoneCaseCount: 1,
+          caseStatus: "new",
+          caseAssigned: false,
+        },
+      },
     });
     expect(result.steps.map((s) => s.stage)).toEqual([
       "own-R08-callcenter-normal-terminalization",
@@ -1292,4 +1641,74 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     await f.finalizer.run("completed");
     expect(f.writes).toHaveLength(count);
   });
+  it.each([
+    "reloaded page SHA",
+    "reload session missing case",
+    "reloaded UI wrong case link",
+    "reloaded UI wrong card call",
+    "reloaded UI transfer enabled",
+    "reload unowned post",
+    "reloaded UI unowned post",
+    "case assigned on reload",
+  ])(
+    "fails %s during post-replay operator UI reload while preserving FULL cleanup",
+    async (fault) => {
+      const f = await fullHarness(fault);
+      await expect(f.run.run()).rejects.toThrow();
+      expect(f.writes).toHaveLength(6);
+      expect(f.run.snapshot().producers).toHaveLength(4);
+      expect(f.run.snapshot().result).toBe("failed");
+      expect(f.run.snapshot().uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.unresolved).toContain(
+        "operator-ui-refresh-unverified",
+      );
+      const result = await f.finish("runner-interrupted");
+      expect(result.wholeRunPassed).toBe(false);
+      expect(result.unresolved).toContain(
+        "r08-required-original-ui-replay-unverified",
+      );
+      expect(result.unresolved).toContain("r08-operator-ui-refresh-unverified");
+      expect(f.run.snapshot().cleanup).toBe("verified");
+      expect(f.writes.slice(6).map((w) => w.path)).toEqual([
+        `${BASE}/callcenter/callbacks/SIM-callback/cancel`,
+        `${BASE}/complaints/SIM-case/close`,
+        `${PATH}/close`,
+      ]);
+    },
+  );
+  it.each(["reload unowned post", "reloaded UI unowned post"])(
+    "aborts %s without pending submit or mock click throw, marks wholeRunPassed=false even on completed finalizer, and completes FULL cleanup",
+    async (fault) => {
+      const f = await fullHarness(fault);
+      await expect(f.run.run()).rejects.toThrow("r08-no-unowned-ui-post");
+      expect(f.abortedRequests).toHaveLength(1);
+      expect(f.abortedRequests[0]?.reason).toBe("failed");
+      expect(f.unownedForwarded()).toBe(0);
+      expect(f.unownedFulfilled()).toBe(0);
+      expect(f.writes).toHaveLength(6);
+      expect(f.run.snapshot().producers).toHaveLength(4);
+      expect(f.run.snapshot().result).toBe("failed");
+      expect(f.run.snapshot().uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.uiRefresh).toBeUndefined();
+      expect(f.run.snapshot().transfer?.unresolved).toContain(
+        "operator-ui-refresh-unverified",
+      );
+      const summary = await f.finish("completed");
+      expect(summary.wholeRunPassed).toBe(false);
+      expect(summary.unresolved).toContain(
+        "r08-required-original-ui-replay-unverified",
+      );
+      expect(summary.unresolved).toContain(
+        "r08-operator-ui-refresh-unverified",
+      );
+      expect(f.run.snapshot().cleanup).toBe("verified");
+      expect(f.writes).toHaveLength(9);
+      expect(f.writes.slice(6).map((w) => w.path)).toEqual([
+        `${BASE}/callcenter/callbacks/SIM-callback/cancel`,
+        `${BASE}/complaints/SIM-case/close`,
+        `${PATH}/close`,
+      ]);
+    },
+  );
 });

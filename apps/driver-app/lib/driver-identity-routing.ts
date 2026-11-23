@@ -5,7 +5,7 @@ export type DriverOnboardingRouter = {
   push?: (href: string) => void;
 };
 
-export const PUBLIC_DRIVER_ROUTES = ["onboarding"] as const;
+export const PUBLIC_DRIVER_ROUTES = ["onboarding", "driver-activate"] as const;
 
 export const PROTECTED_DRIVER_ROUTES = [
   "index",
@@ -28,7 +28,7 @@ export type ProtectedDriverRoute = (typeof PROTECTED_DRIVER_ROUTES)[number];
 export function allowUnprovisionedDriverRoute(segments: string[]): boolean {
   const topLevelRoute = segments[0]?.replace(/^\//, "");
 
-  return topLevelRoute === "onboarding";
+  return PUBLIC_DRIVER_ROUTES.some((route) => route === topLevelRoute);
 }
 
 export function isProtectedDriverRoute(route: string | string[]): boolean {
