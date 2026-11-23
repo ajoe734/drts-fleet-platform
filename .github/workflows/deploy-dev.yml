@@ -1359,16 +1359,19 @@ jobs:
           elif [[ "${{ steps.passenger_secrets.outputs.payment_mounts_complete }}" == "true" && ",${{ steps.passenger_secrets.outputs.api }}," == *",PSP_HASH_KEY="* && ",${{ steps.passenger_secrets.outputs.api }}," == *",PSP_HASH_IV="* ]]; then
             env_vars="${env_vars}@PSP_PROVIDER=ecpay@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}"
           fi
+          tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+          tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
-            tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
-            tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
             dispatch_login_origin="${{ needs.prepare.outputs.enterprise_dispatch_origin }}"
             dispatch_login_origin="${dispatch_login_origin:-$enterprise_dispatch_cloud_run_origin}"
             if [[ -z "$tenant_login_origin" || -z "$dispatch_login_origin" ]]; then
               echo "::error::Google OIDC needs both tenant and dispatch HTTPS origins before it can be enabled."
               exit 1
             fi
-            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false"
+          fi
+          if [[ -n "$tenant_login_origin" ]]; then
+            env_vars="${env_vars}@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/invite"
           fi
           agency_login_origin="${agency_portal_configured_origin:-$agency_portal_cloud_run_origin}"
           if [[ -n "$agency_login_origin" ]]; then
