@@ -68,8 +68,21 @@ describe.skipIf(!databaseUrl)(
         /CREATE TABLE IF NOT EXISTS ops\.consumer_notification_outbox \([\s\S]*?\n\);/,
       )?.[0];
       if (!outboxDdl) throw new Error("outbox migration DDL missing");
+      // V0143 also alters V0108 delivery contexts, which this case does not
+      // create; apply only its first-party counter table.
+      const firstPartySequenceDdl = (
+        await readFile(
+          "infra/migrations/V0143__first_party_passenger_notification_delivery.sql",
+          "utf8",
+        )
+      ).match(
+        /CREATE TABLE IF NOT EXISTS mobility\.phase1_first_party_notification_sequences \([\s\S]*?\n\);/,
+      )?.[0];
+      if (!firstPartySequenceDdl)
+        throw new Error("first-party sequence migration DDL missing");
       await pool.query(routeMigration);
       await pool.query(firstPartyMigration);
+      await pool.query(firstPartySequenceDdl);
       await pool.query(outboxDdl);
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries VALUES ('entry-seq')",
@@ -107,7 +120,7 @@ describe.skipIf(!databaseUrl)(
     beforeEach(async () => {
       vi.restoreAllMocks();
       await pool.query(
-        "TRUNCATE ops.consumer_notification_outbox, mobility.phase1_partner_notification_sequences, mobility.phase1_order_partner_notification_routes",
+        "TRUNCATE ops.consumer_notification_outbox, mobility.phase1_partner_notification_sequences, mobility.phase1_order_partner_notification_routes, mobility.phase1_first_party_notification_sequences, mobility.phase1_order_first_party_notification_routes",
       );
       for (const orderId of ["order-a", "order-b"]) {
         await allocator.writeOrderPartnerNotificationRoute({
@@ -311,6 +324,33 @@ describe.skipIf(!databaseUrl)(
       expect(stored.status).toBe("pending");
       expect(stored.attempt_count).toBe(0);
       expect(await nextSequence()).toBe(1);
+    });
+
+    it("gives an order with only a first-party route its own durable sequence", async () => {
+      await pool.query(
+        `INSERT INTO mobility.phase1_order_first_party_notification_routes
+           (order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
+            app_id, consent_version, ride_ref)
+         VALUES ('order-first-party', 'tenant-seq', 'passenger-seq',
+            'subject-seq', 'app-seq', 'v1', 'ride-order-first-party')`,
+      );
+      await repository.persistChanges({
+        consumerNotificationOutbox: [
+          event("first-party-1", "order-first-party"),
+          event("first-party-2", "order-first-party"),
+        ],
+      });
+      const stored = (await rows()).filter(
+        (row) => row.order_id === "order-first-party",
+      );
+      expect(stored.map((row) => row.payload.eventSequence)).toEqual([1, 2]);
+      const counter = await pool.query(
+        "SELECT next_sequence FROM mobility.phase1_first_party_notification_sequences WHERE order_id = $1",
+        ["order-first-party"],
+      );
+      expect(Number(counter.rows[0].next_sequence)).toBe(3);
+      expect(await nextSequence("order-a")).toBe(1);
+      expect(await nextSequence("order-b")).toBe(1);
     });
   },
 );
