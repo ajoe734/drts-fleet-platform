@@ -1295,42 +1295,45 @@ export class MultiTaxiRepository {
     orderId: string,
     executor: Pick<DatabaseService, "query">,
   ): Promise<number | null> {
-    // One atomic statement for both channels. A partner route owns its V0104
-    // counter row from route creation. A first-party route (V0143) gets its
-    // counter row on its first allocation; the FK admits only orders that have
-    // a first-party route, and the NOT EXISTS guard keeps an order that also
-    // has a partner counter on the partner sequence alone.
-    const result = await executor.query<{
+    const partner = await executor.query<{
       event_sequence: string | number;
     }>(
       `
-        WITH partner AS (
-          UPDATE mobility.phase1_partner_notification_sequences
-          SET next_sequence = next_sequence + 1
-          WHERE order_id = $1
-          RETURNING next_sequence - 1 AS event_sequence
-        ), first_party AS (
-          INSERT INTO mobility.phase1_first_party_notification_sequences AS s (
-            order_id, next_sequence
-          )
-          SELECT r.order_id, 2
-          FROM mobility.phase1_order_first_party_notification_routes r
-          WHERE r.order_id = $1
-            AND NOT EXISTS (
-              SELECT 1 FROM mobility.phase1_partner_notification_sequences p
-              WHERE p.order_id = $1
-            )
-          ON CONFLICT (order_id)
-            DO UPDATE SET next_sequence = s.next_sequence + 1
-          RETURNING next_sequence - 1 AS event_sequence
-        )
-        SELECT event_sequence FROM partner
-        UNION ALL
-        SELECT event_sequence FROM first_party
+        UPDATE mobility.phase1_partner_notification_sequences
+        SET next_sequence = next_sequence + 1
+        WHERE order_id = $1
+        RETURNING next_sequence - 1 AS event_sequence
       `,
       [orderId],
     );
-    const row = result.rows[0];
+    const partnerRow = partner.rows[0];
+    if (partnerRow) return Number(partnerRow.event_sequence);
+    // V0143: V0104's counter has an FK to partner routes only, so a direct
+    // booking's first-party route keeps its own counter. The row is created on
+    // the first allocation (returning 1) and incremented after; the FK admits
+    // only orders with a first-party route, and an order that holds a partner
+    // counter never allocates here.
+    const firstParty = await executor.query<{
+      event_sequence: string | number;
+    }>(
+      `
+        INSERT INTO mobility.phase1_first_party_notification_sequences AS s (
+          order_id, next_sequence
+        )
+        SELECT r.order_id, 2
+        FROM mobility.phase1_order_first_party_notification_routes r
+        WHERE r.order_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM mobility.phase1_partner_notification_sequences p
+            WHERE p.order_id = $1
+          )
+        ON CONFLICT (order_id)
+          DO UPDATE SET next_sequence = s.next_sequence + 1
+        RETURNING next_sequence - 1 AS event_sequence
+      `,
+      [orderId],
+    );
+    const row = firstParty.rows[0];
     return row ? Number(row.event_sequence) : null;
   }
 
