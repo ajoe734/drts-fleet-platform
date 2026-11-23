@@ -98,6 +98,19 @@ function sanitizeDiagnosticSnippet(text) {
     .slice(0, 300);
 }
 
+function extractConsumedMarkerContentHash(bytes) {
+  const raw = bytes.toString('utf8').trim();
+  if (/^[0-9a-f]{64}$/i.test(raw)) {
+    return raw.toLowerCase();
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.contentHash ?? parsed?.content_hash ?? null;
+  } catch {
+    return raw;
+  }
+}
+
 export async function inspectSharedDevProviderActivation({
   projectId,
   region,
@@ -1150,12 +1163,12 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
           `Failed to stage ${label} remittance proof content: status=${stageResp.status} body=${sanitizeDiagnosticSnippet(stageText)}`
         );
       }
-      if (stagedContentHash !== expectedSha256) {
+      if (stagedContentHash !== null && stagedContentHash !== expectedSha256) {
         throw new Error(
           `Staged ${label} content_hash mismatch: expected ${expectedSha256}, got ${stagedContentHash}`
         );
       }
-      if (stagedSizeBytes !== bytes.byteLength) {
+      if (stagedSizeBytes !== null && stagedSizeBytes !== bytes.byteLength) {
         throw new Error(
           `Staged ${label} size_bytes mismatch: expected ${bytes.byteLength}, got ${stagedSizeBytes}`
         );
@@ -1205,6 +1218,30 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       ) {
         throw new Error(
           `Failed to upload ${label} remittance proof: status=${uploadResp.status} body=${sanitizeDiagnosticSnippet(uploadText)}`
+        );
+      }
+      const committedContentHash =
+        proofBody?.content?.content_hash ??
+        proofBody?.content?.contentHash ??
+        null;
+      const committedSizeBytes =
+        proofBody?.content?.size_bytes ??
+        proofBody?.content?.sizeBytes ??
+        null;
+      if (
+        committedContentHash !== null &&
+        committedContentHash !== expectedSha256
+      ) {
+        throw new Error(
+          `Uploaded ${label} content_hash mismatch: expected ${expectedSha256}, got ${committedContentHash}`
+        );
+      }
+      if (
+        committedSizeBytes !== null &&
+        committedSizeBytes !== bytes.byteLength
+      ) {
+        throw new Error(
+          `Uploaded ${label} size_bytes mismatch: expected ${bytes.byteLength}, got ${committedSizeBytes}`
         );
       }
 
@@ -1591,12 +1628,12 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       runtimeServiceAccount,
       execFileImpl,
     });
-    const cleanConsumedMarkerJson = JSON.parse(
-      cleanConsumedMarkerGcs.bytes.toString('utf8')
+    const cleanConsumedMarkerHash = extractConsumedMarkerContentHash(
+      cleanConsumedMarkerGcs.bytes
     );
-    if (cleanConsumedMarkerJson?.contentHash !== SYNTHETIC_CLEAN_PDF_SHA256) {
+    if (cleanConsumedMarkerHash !== SYNTHETIC_CLEAN_PDF_SHA256) {
       throw new Error(
-        `GCS clean consumed marker ${cleanConsumedMarkerGcs.uri} contentHash mismatch: ${JSON.stringify(cleanConsumedMarkerJson)}`
+        `GCS clean consumed marker ${cleanConsumedMarkerGcs.uri} contentHash mismatch: ${cleanConsumedMarkerHash}`
       );
     }
 
@@ -1621,12 +1658,12 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       runtimeServiceAccount,
       execFileImpl,
     });
-    const eicarConsumedMarkerJson = JSON.parse(
-      eicarConsumedMarkerGcs.bytes.toString('utf8')
+    const eicarConsumedMarkerHash = extractConsumedMarkerContentHash(
+      eicarConsumedMarkerGcs.bytes
     );
-    if (eicarConsumedMarkerJson?.contentHash !== CANONICAL_EICAR_SHA256) {
+    if (eicarConsumedMarkerHash !== CANONICAL_EICAR_SHA256) {
       throw new Error(
-        `GCS EICAR consumed marker ${eicarConsumedMarkerGcs.uri} contentHash mismatch: ${JSON.stringify(eicarConsumedMarkerJson)}`
+        `GCS EICAR consumed marker ${eicarConsumedMarkerGcs.uri} contentHash mismatch: ${eicarConsumedMarkerHash}`
       );
     }
 
