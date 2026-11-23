@@ -130,3 +130,9 @@ timeout 180s env NODE_OPTIONS=--max-old-space-size=6144 \
 timeout 90s pnpm exec eslint \
   apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx --max-warnings=0
 ```
+
+### Migration allocation 修復續作（2026-11-23）
+
+本次 dispatch 已在原 DRV-ONB-013 擴充前述三檔 `write_scopes` 並完成衝突評估；原 owner 沿已發布的 `ed025019e1f6e44797949a0644d402a0d537c76e` 與 PR #3358 續作，不改寫前輪候選與修復歷史。前兩節的 scope 等待描述為當時紀錄，現已解除；規劃 helper 與本產品修復分離，原任務沒有 helper 依賴。
+
+套用既有 `unit-shard-repair/allocation-scope-proposal.patch`：僅追加 `driver_onboarding_allocations` 的 V0140–V0142 及 amendment，兩份 guards 共六處 collectors 納入該群組。核對三份正式 SQL 的 schema、tables、indexes、checks 與 FK；沒有改動 migrations、既有分配、amendments 或任何 assertion。本 checkpoint 尚待正式 guards、影響回歸與靜態檢查，結果會補於本節；不作為已驗證候選。沿用既有 evidence 目錄，只新增本輪 delta，保留舊失敗與已修項。
