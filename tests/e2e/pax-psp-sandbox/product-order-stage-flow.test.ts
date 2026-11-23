@@ -302,8 +302,9 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
               RtnCode: 1,
               RtnMsg: "OK",
               RtnValue: {
-                TradeStatus: "1",
-                CloseStatus: "0",
+                status: "Authorized",
+                amount: 85,
+                close_data: [],
               },
             }),
           ),
@@ -493,6 +494,22 @@ describe("PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 harness & evidence invariants",
       );
       expect(chargeService).toBeDefined();
       expect(refundService).toBeDefined();
+
+      // Exercise the same synthetic QueryTrade fixture used by the hosted PG
+      // preflight. This adapter-only probe is not live Stage acceptance.
+      currentStep = "09_refund";
+      const refundCommand = {
+        idempotencyKey: "pax:refund:unit-stage-order",
+        captureRef: `${captureMtn}:${captureTradeNo}`,
+        amountMinor: 8_500,
+        currency: "TWD" as const,
+      };
+      const refund = await provider.refund(refundCommand);
+      expect(refund.status).toBe("completed");
+      expect(calls.filter((call) => call.step === currentStep)).toHaveLength(2);
+      const callsBeforeRefundReplay = calls.length;
+      expect(await provider.refund(refundCommand)).toEqual(refund);
+      expect(calls).toHaveLength(callsBeforeRefundReplay);
 
       // Unbind decrypts tokenEnvelope, calls DeleteMemberBindCard, and clears method
       currentStep = "10_unbind";
@@ -726,8 +743,9 @@ describe.skipIf(!hostedPaymentEnabled)(
                     RtnCode: 1,
                     RtnMsg: "OK",
                     RtnValue: {
-                      TradeStatus: "1",
-                      CloseStatus: "0",
+                      status: "Authorized",
+                      amount: 85,
+                      close_data: [],
                     },
                   }),
                 ),
@@ -972,6 +990,36 @@ describe.skipIf(!hostedPaymentEnabled)(
           },
         );
         expect(refundResp.status).toBe(201);
+
+        const refunded = await ctx.inspectDatabaseState(
+          orderId,
+          paymentMethodId,
+        );
+        expect(refunded.chargeRecords).toHaveLength(1);
+        expect(refunded.chargeRecords[0]?.status).toBe("refunded");
+        expect(refunded.billingPayments).toHaveLength(1);
+        expect(refunded.billingPayments[0]?.status).toBe("refunded");
+        expect(
+          refunded.idempotencyKeys.find(
+            (row) => row.idempotency_key === `pax:refund:${orderId}`,
+          )?.outcome,
+        ).toBe("completed");
+
+        const callsBeforeRefundReplay = calls.length;
+        const refundReplay = await ctx.requestJson(
+          `/api/passenger-app/platform/rides/${orderId}/refund`,
+          {
+            method: "POST",
+            headers: {
+              ...PLATFORM_BILLING_HEADERS,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ reason: "pg test refund" }),
+          },
+        );
+        expect(refundReplay.status).toBe(201);
+        expect(refundReplay.body).toEqual(refundResp.body);
+        expect(calls).toHaveLength(callsBeforeRefundReplay);
 
         const deleteResp = await ctx.requestJson<{
           data?: { success?: boolean };
