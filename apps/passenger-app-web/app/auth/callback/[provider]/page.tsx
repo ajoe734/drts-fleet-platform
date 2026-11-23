@@ -99,13 +99,13 @@ function OAuthCallbackContent() {
             textAlign: "center",
             padding: "12px 16px",
             borderRadius: 12,
-            background: P5.pri,
+            background: P5.brand,
             color: "#fff",
             fontWeight: 700,
             textDecoration: "none",
           }}
         >
-          返回智行乘客 App
+          {t("returnToPassengerApp")}
         </a>
       </AuthScreen>
     );

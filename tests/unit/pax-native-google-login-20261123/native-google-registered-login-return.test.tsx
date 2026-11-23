@@ -496,6 +496,7 @@ describe("PAX-NATIVE-GOOGLE-REGISTERED-LOGIN-RETURN-20261123: Google web-client 
     const link = screen.getByTestId(
       "native-oauth-return-link",
     ) as HTMLAnchorElement;
+    expect(screen.getByRole("link", { name: "返回智行乘客 App" })).toBe(link);
     expect(link.getAttribute("href")).toBe(expectedNativeUrl);
     // Web BFF must not be called for a native-initiated transaction
     expect(env.bffCalls).toEqual([]);
