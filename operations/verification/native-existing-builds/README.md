@@ -82,3 +82,16 @@ Durable machine-specific evidence (canonical root
 Workflow defaults, build/submit gating and artifact inspection code are unchanged
 by this repair. Repository checks run with timeouts; no dev/preview/browser server
 or Docker infrastructure is started on this VM.
+
+Additional verification on anchor `2f982225391097ad034396dddf392b516a778fe9`:
+all 15 scoped unit tests, strict scoped TypeScript, ESLint, Prettier, Node syntax,
+three workflow-timeout tests and the commit gate pass. The optional full
+`timeout 180s pnpm typecheck:root` first exhausted the default Node heap (exit
+134); a bounded retry with `NODE_OPTIONS=--max-old-space-size=6144` completed
+with exit 2, reporting missing `argon2`, `otplib`, `nodemailer`, workspace type
+resolution and other cross-project diagnostics. This isolated worktree symlinks
+the canonical shared `node_modules`; no dependency installation or changes to
+other tasks were made. Full root typecheck is **not passed**, and no baseline
+comparison is claimed for those diagnostics. Fresh hosted CI with the workflow
+dependency setup remains necessary for the candidate. These attempts and their
+limits are recorded separately in the repair JSON above.
