@@ -100,99 +100,55 @@ export class SimulatedTotpAuthenticatorDevice {
   }
 }
 
-export interface ExtractedInvitationTarget {
-  acceptUrl: string;
-  redactedAcceptUrl: string;
-  rawTokenForNavigationOnly: string;
+function readMailLink(text: string, label: RegExp, expectedUrl: URL) {
+  const match = label.exec(text);
+  if (!match?.[1]) throw new Error("The email contained no link.");
+  const url = new URL(match[1]);
+  const token = url.searchParams.get("token");
+  if (
+    url.origin !== expectedUrl.origin ||
+    url.pathname !== expectedUrl.pathname ||
+    !token
+  ) {
+    throw new Error(
+      "The email link did not reach the expected portal page with a token.",
+    );
+  }
+  return { url, token };
 }
 
 export function extractInvitationLink(
   emailText: string,
-  fallbackInviteBaseUrl?: string,
-): ExtractedInvitationTarget {
-  const linkMatch = /Accept your invitation:\s*(https?:\/\/\S+)/i.exec(
+  expectedInviteUrl: string,
+) {
+  const { url, token } = readMailLink(
     emailText,
+    /Accept your invitation:\s*(https?:\/\/\S+)/i,
+    new URL(expectedInviteUrl),
   );
-  if (linkMatch?.[1]) {
-    const parsed = new URL(linkMatch[1].trim());
-    const rawToken = parsed.searchParams.get("token")?.trim() ?? "";
-    if (!rawToken) {
-      throw new Error("Invitation link in email is missing ?token= parameter.");
-    }
-    const redacted = new URL(parsed.toString());
-    redacted.searchParams.set("token", "[REDACTED_INVITATION_TOKEN]");
-    return {
-      acceptUrl: parsed.toString(),
-      redactedAcceptUrl: redacted.toString(),
-      rawTokenForNavigationOnly: rawToken,
-    };
-  }
-
-  const codeMatch = /Invitation code:\s*([A-Za-z0-9_-]+)/i.exec(emailText);
-  if (codeMatch?.[1] && fallbackInviteBaseUrl) {
-    const rawToken = codeMatch[1].trim();
-    const parsed = new URL(fallbackInviteBaseUrl);
-    parsed.searchParams.set("token", rawToken);
-    const redacted = new URL(fallbackInviteBaseUrl);
-    redacted.searchParams.set("token", "[REDACTED_INVITATION_TOKEN]");
-    return {
-      acceptUrl: parsed.toString(),
-      redactedAcceptUrl: redacted.toString(),
-      rawTokenForNavigationOnly: rawToken,
-    };
-  }
-
-  throw new Error(
-    "Unable to extract invitation link or token from SMTP message.",
-  );
-}
-
-export interface ExtractedPasswordResetTarget {
-  resetUrl: string;
-  redactedResetUrl: string;
-  emailLinkOriginMatchedPortal: boolean;
-  rawTokenForNavigationOnly: string;
+  const redacted = new URL(url);
+  redacted.searchParams.set("token", "[REDACTED_INVITATION_TOKEN]");
+  return {
+    acceptUrl: url.toString(),
+    redactedAcceptUrl: redacted.toString(),
+    rawTokenForNavigationOnly: token,
+  };
 }
 
 export function extractPasswordResetTarget(
   emailText: string,
-  portalOrigin: string,
-): ExtractedPasswordResetTarget {
-  const normalizedOrigin = portalOrigin.replace(/\/+$/, "");
-  const linkMatch = /Reset your password:\s*(https?:\/\/\S+)/i.exec(emailText);
-  if (linkMatch?.[1]) {
-    const parsedEmailLink = new URL(linkMatch[1].trim());
-    const rawToken = parsedEmailLink.searchParams.get("token")?.trim() ?? "";
-    if (!rawToken) {
-      throw new Error(
-        "Password reset link in email is missing ?token= parameter.",
-      );
-    }
-    const emailLinkOriginMatchedPortal =
-      parsedEmailLink.origin === new URL(normalizedOrigin).origin;
-    const portalResetUrl = `${normalizedOrigin}/reset-password?token=${encodeURIComponent(rawToken)}`;
-    return {
-      resetUrl: portalResetUrl,
-      redactedResetUrl: `${normalizedOrigin}/reset-password?token=[REDACTED_RESET_TOKEN]`,
-      emailLinkOriginMatchedPortal,
-      rawTokenForNavigationOnly: rawToken,
-    };
-  }
-
-  const codeMatch = /Password reset code:\s*([A-Za-z0-9_-]+)/i.exec(emailText);
-  if (codeMatch?.[1]) {
-    const rawToken = codeMatch[1].trim();
-    return {
-      resetUrl: `${normalizedOrigin}/reset-password?token=${encodeURIComponent(rawToken)}`,
-      redactedResetUrl: `${normalizedOrigin}/reset-password?token=[REDACTED_RESET_TOKEN]`,
-      emailLinkOriginMatchedPortal: false,
-      rawTokenForNavigationOnly: rawToken,
-    };
-  }
-
-  throw new Error(
-    "Unable to extract password reset link or code from SMTP message.",
+  expectedOrigin: string,
+) {
+  const { url, token } = readMailLink(
+    emailText,
+    /Reset your password:\s*(https?:\/\/\S+)/i,
+    new URL("/reset-password", expectedOrigin),
   );
+  return {
+    resetUrl: url.toString(),
+    redactedResetUrl: `${url.origin}/reset-password?token=[REDACTED_RESET_TOKEN]`,
+    rawTokenForNavigationOnly: token,
+  };
 }
 
 const SENSITIVE_KEY_PATTERN =
@@ -333,6 +289,7 @@ export function buildFourPortalHostedJourneyClassification() {
         realm: "tenant",
         bffPackage: "@drts/tenant-auth",
         sharesTenantMemberWith: "tenant-console-web",
+        passwordResetEmailPortal: "tenant-console-web",
         inventsSeparateInvitationUri: false,
         unauthenticatedLandingGate:
           "EnterpriseGatePage(kind='auth-required') -> /login",

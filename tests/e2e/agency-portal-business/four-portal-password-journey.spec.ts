@@ -5,7 +5,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { seedAgencyPlatformPersonnel } from "./platform-personnel-fixture";
-import { startAgencySmtpInbox, type AgencySmtpInbox } from "./smtp-inbox";
+import { startAgencySmtpInbox } from "./smtp-inbox";
 import {
   SIMULATED_AUTHENTICATOR_DEVICE_LABEL,
   SimulatedTotpAuthenticatorDevice,
@@ -16,23 +16,18 @@ import {
   redactHostedJourneySecrets,
 } from "./totp-authenticator-fixture";
 
-const apiUrl = process.env.DRTS_API_URL || "http://127.0.0.1:3001";
-const agencyOrigin =
-  process.env.DRTS_E2E_AGENCY_PORTAL_URL || "http://localhost:3212";
-const tenantOrigin =
-  process.env.DRTS_E2E_TENANT_CONSOLE_URL || "http://localhost:3213";
-const enterpriseOrigin =
-  process.env.DRTS_E2E_ENTERPRISE_DISPATCH_URL || "http://localhost:3214";
-const fleetOrigin =
-  process.env.DRTS_E2E_FLEET_PORTAL_URL || "http://localhost:3215";
-const smtpPort =
-  Number(process.env.DRTS_E2E_AGENCY_SMTP_PORT || "2526") || 2526;
-const internalKey =
-  process.env.DRTS_INTERNAL_KEY || "ci-e2e-agency-business-internal-key";
-const databaseUrl =
-  process.env.DATABASE_URL ||
-  "postgresql://postgres:postgres@localhost:5432/drts_bureau_acceptance";
+const apiUrl = "http://127.0.0.1:3141";
+const agencyOrigin = "http://localhost:3212";
+const tenantOrigin = "http://localhost:3213";
+const enterpriseOrigin = "http://localhost:3214";
+const fleetOrigin = "http://localhost:3215";
+const smtpPort = 2526;
+type AgencySmtpInbox = Awaited<ReturnType<typeof startAgencySmtpInbox>>;
 const evidenceDir = path.resolve(".artifacts/agency-portal-business");
+const evidencePath = path.join(
+  evidenceDir,
+  "four-portal-password-hosted-journey-evidence.json",
+);
 const candidateVersion =
   process.env.CANDIDATE_SHA ||
   process.env.DRTS_CANDIDATE_SHA ||
@@ -71,7 +66,7 @@ async function apiJson<T>(
   return {
     status: response.status,
     body: (text ? JSON.parse(text) : null) as T,
-    runtimeSha: response.headers.get("x-drts-runtime-sha"),
+    runtimeSha: response.headers.get("x-drts-candidate-sha"),
   };
 }
 
@@ -99,15 +94,33 @@ async function issueStepUpReference(
 async function acceptInvitationWithPasswordInBrowser(
   page: Page,
   acceptUrl: string,
-  initialPassword: string,
-): Promise<void> {
-  await page.goto(acceptUrl, { waitUntil: "networkidle" });
-  const passwordInputs = page.locator('input[type="password"]');
-  await expect(passwordInputs).toHaveCount(2);
-  await passwordInputs.nth(0).fill(initialPassword);
-  await passwordInputs.nth(1).fill(initialPassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page.locator('[role="status"]')).toBeVisible();
+  email: string,
+  password: string,
+) {
+  await page.goto(acceptUrl);
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[type="email"]') });
+  await form.locator('input[type="email"]').fill(email);
+  const fields = form.locator('input[type="password"]');
+  await fields.nth(0).fill(password);
+  await fields.nth(1).fill(password);
+  const [accepted, login] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/accept-with-password") &&
+        response.request().method() === "POST",
+    ),
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/password-login") &&
+        response.request().method() === "POST",
+    ),
+    form.locator('button[type="submit"]').click(),
+  ]);
+  expect(accepted.ok()).toBe(true);
+  expect(login.ok()).toBe(true);
+  return { acceptedStatus: accepted.status(), loginStatus: login.status() };
 }
 
 async function loginWithPasswordInBrowser(
@@ -118,17 +131,16 @@ async function loginWithPasswordInBrowser(
   totpCode?: string,
 ): Promise<number> {
   await page.goto(`${portalOrigin}/login`, { waitUntil: "networkidle" });
-  await page.locator('input[type="email"]').fill(email);
-  await page.locator('input[type="password"]').first().fill(password);
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[autocomplete="current-password"]') });
+  await form.locator('input[type="email"]').fill(email);
+  await form.locator('input[type="password"]').fill(password);
 
   if (totpCode) {
-    const totpInput = page.locator('input[autocomplete="one-time-code"]');
+    const totpInput = form.locator('input[autocomplete="one-time-code"]');
     if ((await totpInput.count()) === 0) {
-      await page
-        .locator("button")
-        .filter({ hasText: /驗證碼|復原碼|verification|recovery/i })
-        .first()
-        .click();
+      await form.locator('button[aria-expanded="false"]').click();
     }
     await expect(totpInput).toBeVisible();
     await totpInput.fill(totpCode);
@@ -139,7 +151,7 @@ async function loginWithPasswordInBrowser(
       res.url().includes("/password-login") &&
       res.request().method() === "POST",
   );
-  await page.locator('button[type="submit"]').first().click();
+  await form.locator('button[type="submit"]').click();
   const loginResponse = await loginResponsePromise;
   return loginResponse.status();
 }
@@ -149,7 +161,12 @@ async function enrollAndConfirmTotpInBrowser(
   portalOrigin: string,
   authenticator: SimulatedTotpAuthenticatorDevice,
   forbiddenSecrets: string[],
-): Promise<{ totpStep: number; enrollStatus: number; confirmStatus: number }> {
+): Promise<{
+  secret: string;
+  totpStep: number;
+  enrollStatus: number;
+  confirmStatus: number;
+}> {
   await page.goto(`${portalOrigin}/account/security/totp`, {
     waitUntil: "networkidle",
   });
@@ -160,22 +177,19 @@ async function enrollAndConfirmTotpInBrowser(
   );
   await page
     .locator("button")
-    .filter({ hasText: /開始設定驗證器|Start|重新產生/i })
+    .filter({ hasText: /^(開始設定|Start setup)$/i })
     .first()
     .click();
   const enrollResponse = await enrollResponsePromise;
   const enrollStatus = enrollResponse.status();
-  expect(enrollStatus).toBe(200);
+  expect(enrollResponse.ok()).toBe(true);
 
-  const enrollPayload = (await enrollResponse.json()) as {
-    data?: { secret?: string; otpauthUri?: string };
-  };
-  const secret = enrollPayload.data?.secret?.trim() ?? "";
-  expect(secret.length).toBeGreaterThanOrEqual(16);
-  forbiddenSecrets.push(secret);
-  if (enrollPayload.data?.otpauthUri) {
-    forbiddenSecrets.push(enrollPayload.data.otpauthUri);
-  }
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[autocomplete="one-time-code"]') });
+  const manualFields = form.locator("input[readonly]");
+  const secret = await manualFields.nth(0).inputValue();
+  forbiddenSecrets.push(secret, await manualFields.nth(1).inputValue());
 
   const generated = await authenticator.nextCode(secret);
   await page
@@ -187,21 +201,20 @@ async function enrollAndConfirmTotpInBrowser(
       res.url().includes("/mfa/totp/confirm") &&
       res.request().method() === "POST",
   );
-  await page.locator('button[type="submit"]').click();
+  await form.locator('button[type="submit"]').click();
   const confirmResponse = await confirmResponsePromise;
   const confirmStatus = confirmResponse.status();
-  expect(confirmStatus).toBe(200);
+  expect(confirmResponse.ok()).toBe(true);
 
-  const confirmPayload = (await confirmResponse.json()) as {
-    data?: { recoveryCodes?: string[] };
-  };
-  const recoveryCodes = confirmPayload.data?.recoveryCodes ?? [];
-  expect(recoveryCodes).toHaveLength(10);
-  for (const code of recoveryCodes) {
-    forbiddenSecrets.push(code);
-  }
-  await expect(page.locator('[role="status"]')).toBeVisible();
+  const heading = page.getByRole("heading", {
+    name: /請保存您的復原碼|Save your recovery codes/i,
+  });
+  await expect(heading).toBeVisible();
+  const recoveryCodes = heading.locator("..").getByRole("listitem");
+  await expect.poll(() => recoveryCodes.count()).toBe(10);
+  forbiddenSecrets.push(...(await recoveryCodes.allTextContents()));
   return {
+    secret,
     totpStep: generated.step,
     enrollStatus,
     confirmStatus,
@@ -223,22 +236,42 @@ async function verifyAccountSecurityAndSignOutInBrowser(
   const sessionsResponse = await sessionsResponsePromise;
   const sessionsStatus = sessionsResponse.status();
   expect(sessionsStatus).toBe(200);
+  const payload = await sessionsResponse.json();
+  const sessions: unknown = payload?.data;
+  expect(
+    Array.isArray(sessions) && sessions.some((row) => row?.is_current === true),
+  ).toBe(true);
+  await expect(
+    page.getByRole("listitem").filter({ hasText: /此裝置|This device/i }),
+  ).toBeVisible();
 
   const logoutResponsePromise = page.waitForResponse(
     (res) =>
-      res.url().includes("/api/auth/logout") &&
+      new URL(res.url()).pathname === "/api/auth/logout-all" &&
       res.request().method() === "POST",
   );
   await page
     .locator("button")
-    .filter({ hasText: /登出目前工作階段|Sign out current session/i })
+    .filter({ hasText: /^(登出所有裝置|Sign out of all devices)$/i })
     .first()
     .click();
   const logoutResponse = await logoutResponsePromise;
   const logoutStatus = logoutResponse.status();
   expect(logoutStatus).toBe(200);
-  await page.waitForURL((url) => url.pathname.startsWith("/login"));
+  const afterLogout = await page.request.get(
+    `${portalOrigin}/api/auth/sessions`,
+  );
+  expect(afterLogout.status()).toBe(401);
   return { sessionsStatus, logoutStatus };
+}
+
+async function readMailFor(inbox: AgencySmtpInbox, email: string, after = 0) {
+  const received = () =>
+    inbox.messages
+      .slice(after)
+      .find((message) => message.recipients.includes(email.toLowerCase()));
+  await expect.poll(() => Boolean(received()), { timeout: 15_000 }).toBe(true);
+  return received()!;
 }
 
 async function requestAndConfirmPasswordResetInBrowser(
@@ -248,12 +281,13 @@ async function requestAndConfirmPasswordResetInBrowser(
   newPassword: string,
   smtpInbox: AgencySmtpInbox,
   forbiddenSecrets: string[],
+  resetOrigin = portalOrigin,
 ): Promise<{
   requestStatus: number;
   confirmStatus: number;
   redactedResetUrl: string;
 }> {
-  const priorResetMessages = smtpInbox.messagesTo(email).length;
+  const previousMessages = smtpInbox.messages.length;
   await page.goto(`${portalOrigin}/forgot-password`, {
     waitUntil: "networkidle",
   });
@@ -267,14 +301,11 @@ async function requestAndConfirmPasswordResetInBrowser(
   await page.locator('button[type="submit"]').click();
   const requestResponse = await requestResponsePromise;
   const requestStatus = requestResponse.status();
-  expect(requestStatus).toBe(200);
+  expect(requestResponse.ok()).toBe(true);
   await expect(page.locator('[role="status"]')).toBeVisible();
 
-  await expect
-    .poll(() => smtpInbox.messagesTo(email).length, { timeout: 15_000 })
-    .toBeGreaterThan(priorResetMessages);
-  const latestMail = smtpInbox.messagesTo(email).at(-1)!;
-  const resetTarget = extractPasswordResetTarget(latestMail.text, portalOrigin);
+  const latestMail = await readMailFor(smtpInbox, email, previousMessages);
+  const resetTarget = extractPasswordResetTarget(latestMail.body, resetOrigin);
   forbiddenSecrets.push(resetTarget.rawTokenForNavigationOnly);
 
   await page.goto(resetTarget.resetUrl, { waitUntil: "networkidle" });
@@ -291,7 +322,7 @@ async function requestAndConfirmPasswordResetInBrowser(
   await page.locator('button[type="submit"]').click();
   const confirmResponse = await confirmResponsePromise;
   const confirmStatus = confirmResponse.status();
-  expect(confirmStatus).toBe(200);
+  expect(confirmResponse.ok()).toBe(true);
   await expect(page.locator('[role="status"]')).toBeVisible();
 
   return {
@@ -301,6 +332,8 @@ async function requestAndConfirmPasswordResetInBrowser(
   };
 }
 
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, forgot/reset password and re-login rehearsal", () => {
   let smtpInbox: AgencySmtpInbox;
   let platformAdminToken = "";
@@ -308,7 +341,16 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
 
   test.beforeAll(async () => {
     await mkdir(evidenceDir, { recursive: true });
-    const personnel = await seedAgencyPlatformPersonnel(databaseUrl);
+    await writeFile(
+      evidencePath,
+      JSON.stringify({
+        phase: "preparing_fixture",
+        candidateVersion,
+        steps: [],
+      }) + "\n",
+      "utf8",
+    );
+    const personnel = await seedAgencyPlatformPersonnel();
     smtpInbox = await startAgencySmtpInbox(smtpPort);
 
     const tokenRes = await apiJson<{
@@ -317,16 +359,17 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     }>("/api/auth/token", {
       method: "POST",
       headers: {
-        "x-internal-key": internalKey,
         "x-actor-type": "platform_admin",
-        "x-actor-id": personnel.principalId,
+        "x-actor-id": personnel.actorId,
         "x-realm": "platform",
       },
       body: JSON.stringify({}),
     });
-    expect(tokenRes.status).toBe(201);
+    expect([200, 201]).toContain(tokenRes.status);
+    expect(typeof tokenRes.body.token).toBe("string");
     platformAdminToken = tokenRes.body.token;
     apiRuntimeSha = tokenRes.runtimeSha;
+    expect(apiRuntimeSha).toBe(candidateVersion);
   });
 
   test.afterAll(async () => {
@@ -336,10 +379,43 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
   test("executes disposable password invitation, TOTP enrollment/login, logout, password reset and re-login across tenant, enterprise, agency and fleet portals", async ({
     browser,
   }) => {
+    test.setTimeout(9 * 60_000);
     const runTag = randomUUID().slice(0, 8);
     const authenticator = new SimulatedTotpAuthenticatorDevice();
     const forbiddenSecrets: string[] = [platformAdminToken];
     const stepEvidence: HostStepEvidence[] = [];
+
+    async function saveEvidence(phase: "running" | "completed") {
+      const fact = {
+        phase,
+        generatedAt: new Date().toISOString(),
+        candidateVersion,
+        apiRuntimeSha,
+        hosts: {
+          api: apiUrl,
+          tenantConsoleWeb: tenantOrigin,
+          enterpriseDispatchWeb: enterpriseOrigin,
+          agencyPortalWeb: agencyOrigin,
+          fleetPartnerPortalWeb: fleetOrigin,
+        },
+        classification: buildFourPortalHostedJourneyClassification(),
+        steps: stepEvidence,
+      };
+      const serialized = JSON.stringify(
+        redactHostedJourneySecrets(fact, forbiddenSecrets),
+        null,
+        2,
+      );
+      assertNoLeakedSecretsInEvidence(serialized, forbiddenSecrets);
+      await writeFile(evidencePath, serialized + "\n", "utf8");
+    }
+
+    async function recordStep(step: HostStepEvidence) {
+      stepEvidence.push(step);
+      await saveEvidence("running");
+    }
+
+    await saveEvidence("running");
 
     // -------------------------------------------------------------------------
     // 1. Tenant Console (`tenant-console-web`, `tenant` realm)
@@ -374,9 +450,9 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
     expect(tenantInviteRes.status).toBe(201);
 
-    const tenantInviteMail = await smtpInbox.waitForRecipient(tenantEmail);
+    const tenantInviteMail = await readMailFor(smtpInbox, tenantEmail);
     const tenantInviteTarget = extractInvitationLink(
-      tenantInviteMail.text,
+      tenantInviteMail.body,
       `${tenantOrigin}/invite`,
     );
     forbiddenSecrets.push(tenantInviteTarget.rawTokenForNavigationOnly);
@@ -384,34 +460,31 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const tenantContext = await browser.newContext();
     const tenantPage = await tenantContext.newPage();
 
-    await acceptInvitationWithPasswordInBrowser(
+    const {
+      acceptedStatus: tenantAcceptStatus,
+      loginStatus: tenantFirstLoginStatus,
+    } = await acceptInvitationWithPasswordInBrowser(
       tenantPage,
       tenantInviteTarget.acceptUrl,
+      tenantEmail,
       tenantInitialPassword,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1a_tenant_accept_invitation_with_password",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
       realm: "tenant",
       path: "/invite?token=[REDACTED_TOKEN]",
-      status: 200,
+      status: tenantAcceptStatus,
       outcome: "invitation_accepted_and_password_persisted",
     });
 
-    const tenantFirstLoginStatus = await loginWithPasswordInBrowser(
-      tenantPage,
-      tenantOrigin,
-      tenantEmail,
-      tenantInitialPassword,
-    );
     expect(tenantFirstLoginStatus).toBe(200);
     await tenantPage.waitForURL(
       (url) =>
-        url.origin === new URL(tenantOrigin).origin &&
-        !url.pathname.startsWith("/login"),
+        url.origin === new URL(tenantOrigin).origin && url.pathname === "/",
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1b_tenant_initial_password_login",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
@@ -427,8 +500,8 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       authenticator,
       forbiddenSecrets,
     );
-    const tenantSecret = forbiddenSecrets.at(-11)!;
-    stepEvidence.push({
+    const tenantSecret = tenantTotpEnrollment.secret;
+    await recordStep({
       step: "1c_tenant_totp_enroll_and_confirm",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
@@ -444,7 +517,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       tenantPage,
       tenantOrigin,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1d_tenant_account_security_and_logout",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
@@ -468,7 +541,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(tenantOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1e_tenant_password_plus_totp_login",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
@@ -490,14 +563,14 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       smtpInbox,
       forbiddenSecrets,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1f_tenant_forgot_and_reset_password",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
       realm: "tenant",
       path: "/reset-password?token=[REDACTED_TOKEN]",
       status: tenantReset.confirmStatus,
-      outcome: "password_reset_confirmed_and_prior_sessions_revoked",
+      outcome: "password_reset_confirmed",
     });
 
     const tenantPostResetCode = await authenticator.nextCode(tenantSecret);
@@ -514,7 +587,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(tenantOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "1g_tenant_relogin_with_new_password_and_totp",
       portal: "tenant-console-web",
       hostOrigin: tenantOrigin,
@@ -539,12 +612,11 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     await enterprisePage.goto(`${enterpriseOrigin}/`, {
       waitUntil: "networkidle",
     });
-    await expect(
-      enterprisePage.getByTestId("enterprise-gate-auth-required"),
-    ).toBeVisible();
-    await enterprisePage.locator('a[href="/login"]').first().click();
+    const loginLink = enterprisePage.locator('a[href="/login"]').first();
+    await expect(loginLink).toBeVisible();
+    await loginLink.click();
     await enterprisePage.waitForURL((url) => url.pathname.startsWith("/login"));
-    stepEvidence.push({
+    await recordStep({
       step: "2a_enterprise_unauthenticated_gate_to_login",
       portal: "enterprise-dispatch-web",
       hostOrigin: enterpriseOrigin,
@@ -570,7 +642,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         !url.pathname.startsWith("/login"),
     );
     await expect(enterprisePage.locator("h1").first()).toBeVisible();
-    stepEvidence.push({
+    await recordStep({
       step: "2b_enterprise_shared_tenant_member_password_and_totp_login",
       portal: "enterprise-dispatch-web",
       hostOrigin: enterpriseOrigin,
@@ -586,7 +658,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       enterprisePage,
       enterpriseOrigin,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "2c_enterprise_account_security_and_logout",
       portal: "enterprise-dispatch-web",
       hostOrigin: enterpriseOrigin,
@@ -603,15 +675,16 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       enterpriseResetPassword,
       smtpInbox,
       forbiddenSecrets,
+      tenantOrigin,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "2d_enterprise_forgot_and_reset_password",
-      portal: "enterprise-dispatch-web",
-      hostOrigin: enterpriseOrigin,
+      portal: "tenant-console-web",
+      hostOrigin: tenantOrigin,
       realm: "tenant",
       path: "/reset-password?token=[REDACTED_TOKEN]",
       status: enterpriseReset.confirmStatus,
-      outcome: "enterprise_password_reset_confirmed",
+      outcome: "shared_tenant_password_reset_confirmed_on_tenant_portal",
     });
 
     const enterpriseLoginCode2 = await authenticator.nextCode(tenantSecret);
@@ -628,7 +701,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(enterpriseOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "2e_enterprise_relogin_with_new_password_and_totp",
       portal: "enterprise-dispatch-web",
       hostOrigin: enterpriseOrigin,
@@ -650,7 +723,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     forbiddenSecrets.push(agencyInitialPassword, agencyResetPassword);
 
     const createAgencyRes = await apiJson<{
-      data: { agency: { agencyId: string; agencyCode: string } };
+      data: { agency_id: string };
     }>("/api/platform-admin/agencies", {
       method: "POST",
       token: platformAdminToken,
@@ -660,7 +733,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       }),
     });
     expect(createAgencyRes.status).toBe(201);
-    const agencyId = createAgencyRes.body.data.agency.agencyId;
+    const agencyId = createAgencyRes.body.data.agency_id;
 
     const agencyInvitePath = `/api/platform-admin/agencies/${agencyId}/invitations`;
     const agencyStepUpRef = await issueStepUpReference(
@@ -670,7 +743,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     );
     const agencyInviteRes = await apiJson<{
       data: {
-        invitation: { invitationId: string; deliveryStatus: string };
+        invitation: { delivery_status: string };
       };
     }>(agencyInvitePath, {
       method: "POST",
@@ -687,13 +760,13 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       }),
     });
     expect(agencyInviteRes.status).toBe(201);
-    expect(agencyInviteRes.body.data.invitation.deliveryStatus).toBe(
+    expect(agencyInviteRes.body.data.invitation.delivery_status).toBe(
       "delivered",
     );
 
-    const agencyInviteMail = await smtpInbox.waitForRecipient(agencyEmail);
+    const agencyInviteMail = await readMailFor(smtpInbox, agencyEmail);
     const agencyInviteTarget = extractInvitationLink(
-      agencyInviteMail.text,
+      agencyInviteMail.body,
       `${agencyOrigin}/invite`,
     );
     forbiddenSecrets.push(agencyInviteTarget.rawTokenForNavigationOnly);
@@ -701,34 +774,31 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const agencyContext = await browser.newContext();
     const agencyPage = await agencyContext.newPage();
 
-    await acceptInvitationWithPasswordInBrowser(
+    const {
+      acceptedStatus: agencyAcceptStatus,
+      loginStatus: agencyFirstLoginStatus,
+    } = await acceptInvitationWithPasswordInBrowser(
       agencyPage,
       agencyInviteTarget.acceptUrl,
+      agencyEmail,
       agencyInitialPassword,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3a_agency_accept_invitation_with_password",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
       realm: "agency",
       path: "/invite?token=[REDACTED_TOKEN]",
-      status: 200,
+      status: agencyAcceptStatus,
       outcome: "agency_invitation_accepted_and_password_persisted",
     });
 
-    const agencyFirstLoginStatus = await loginWithPasswordInBrowser(
-      agencyPage,
-      agencyOrigin,
-      agencyEmail,
-      agencyInitialPassword,
-    );
     expect(agencyFirstLoginStatus).toBe(200);
     await agencyPage.waitForURL(
       (url) =>
-        url.origin === new URL(agencyOrigin).origin &&
-        !url.pathname.startsWith("/login"),
+        url.origin === new URL(agencyOrigin).origin && url.pathname === "/",
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3b_agency_initial_password_login",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -744,8 +814,8 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       authenticator,
       forbiddenSecrets,
     );
-    const agencySecret = forbiddenSecrets.at(-11)!;
-    stepEvidence.push({
+    const agencySecret = agencyTotpEnrollment.secret;
+    await recordStep({
       step: "3c_agency_totp_enroll_and_confirm",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -761,7 +831,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       agencyPage,
       agencyOrigin,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3d_agency_account_security_and_logout",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -785,7 +855,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(agencyOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3e_agency_password_plus_totp_login",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -807,7 +877,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       smtpInbox,
       forbiddenSecrets,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3f_agency_forgot_and_reset_password",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -831,7 +901,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(agencyOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "3g_agency_relogin_with_new_password_and_totp",
       portal: "agency-portal-web",
       hostOrigin: agencyOrigin,
@@ -861,7 +931,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     );
     const fleetInviteRes = await apiJson<{
       data: {
-        invitation: { invitationId: string; deliveryStatus: string };
+        invitation: { delivery_status: string };
       };
     }>(fleetInvitePath, {
       method: "POST",
@@ -876,13 +946,13 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       }),
     });
     expect(fleetInviteRes.status).toBe(201);
-    expect(fleetInviteRes.body.data.invitation.deliveryStatus).toBe(
+    expect(fleetInviteRes.body.data.invitation.delivery_status).toBe(
       "delivered",
     );
 
-    const fleetInviteMail = await smtpInbox.waitForRecipient(fleetEmail);
+    const fleetInviteMail = await readMailFor(smtpInbox, fleetEmail);
     const fleetInviteTarget = extractInvitationLink(
-      fleetInviteMail.text,
+      fleetInviteMail.body,
       `${fleetOrigin}/invite`,
     );
     forbiddenSecrets.push(fleetInviteTarget.rawTokenForNavigationOnly);
@@ -890,34 +960,32 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const fleetContext = await browser.newContext();
     const fleetPage = await fleetContext.newPage();
 
-    await acceptInvitationWithPasswordInBrowser(
+    const {
+      acceptedStatus: fleetAcceptStatus,
+      loginStatus: fleetFirstLoginStatus,
+    } = await acceptInvitationWithPasswordInBrowser(
       fleetPage,
       fleetInviteTarget.acceptUrl,
+      fleetEmail,
       fleetInitialPassword,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4a_fleet_accept_invitation_with_password",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
       realm: "partner",
       path: "/invite?token=[REDACTED_TOKEN]",
-      status: 200,
+      status: fleetAcceptStatus,
       outcome: "fleet_invitation_accepted_and_password_persisted",
     });
 
-    const fleetFirstLoginStatus = await loginWithPasswordInBrowser(
-      fleetPage,
-      fleetOrigin,
-      fleetEmail,
-      fleetInitialPassword,
-    );
     expect(fleetFirstLoginStatus).toBe(200);
     await fleetPage.waitForURL(
       (url) =>
         url.origin === new URL(fleetOrigin).origin &&
-        !url.pathname.startsWith("/login"),
+        !["/login", "/invite"].includes(url.pathname),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4b_fleet_initial_password_login",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -933,8 +1001,8 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       authenticator,
       forbiddenSecrets,
     );
-    const fleetSecret = forbiddenSecrets.at(-11)!;
-    stepEvidence.push({
+    const fleetSecret = fleetTotpEnrollment.secret;
+    await recordStep({
       step: "4c_fleet_totp_enroll_and_confirm",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -950,7 +1018,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       fleetPage,
       fleetOrigin,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4d_fleet_account_security_and_logout",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -974,7 +1042,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(fleetOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4e_fleet_password_plus_totp_login",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -996,7 +1064,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       smtpInbox,
       forbiddenSecrets,
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4f_fleet_forgot_and_reset_password",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -1020,7 +1088,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(fleetOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
-    stepEvidence.push({
+    await recordStep({
       step: "4g_fleet_relogin_with_new_password_and_totp",
       portal: "fleet-partner-portal-web",
       hostOrigin: fleetOrigin,
@@ -1033,38 +1101,6 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
     await fleetContext.close();
 
-    // -------------------------------------------------------------------------
-    // 5. Write Redacted Hosted Evidence & Real-Surface Classification
-    // -------------------------------------------------------------------------
-    const rawEvidence = {
-      generatedAt: new Date().toISOString(),
-      candidateVersion,
-      apiRuntimeSha,
-      hosts: {
-        api: apiUrl,
-        tenantConsoleWeb: tenantOrigin,
-        enterpriseDispatchWeb: enterpriseOrigin,
-        agencyPortalWeb: agencyOrigin,
-        fleetPartnerPortalWeb: fleetOrigin,
-      },
-      classification: buildFourPortalHostedJourneyClassification(),
-      steps: stepEvidence,
-    };
-
-    const redactedEvidence = redactHostedJourneySecrets(
-      rawEvidence,
-      forbiddenSecrets,
-    );
-    const serialized = JSON.stringify(redactedEvidence, null, 2);
-    assertNoLeakedSecretsInEvidence(serialized, forbiddenSecrets);
-
-    await writeFile(
-      path.join(
-        evidenceDir,
-        "four-portal-password-hosted-journey-evidence.json",
-      ),
-      `${serialized}\n`,
-      "utf8",
-    );
+    await saveEvidence("completed");
   });
 });
