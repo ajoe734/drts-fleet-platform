@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { BindPaymentMethodCommand } from "@drts/contracts";
-import type {
-  PassengerPaymentFieldsAvailability,
-  PassengerPaymentFieldsPort,
+import {
+  decodePassengerPaymentBindingSession,
+  type PassengerPaymentBindingSession,
+  type PassengerPaymentFieldsAvailability,
+  type PassengerPaymentFieldsPort,
 } from "@drts/passenger-client";
 import { passengerFetch } from "../../lib/runtime-fetch";
 import { P5 } from "../auth/ui";
@@ -20,6 +22,8 @@ export interface EcpayBindingSession {
   token: string;
   tokenExpireDate: string;
   serverType: "Stage" | "Prod";
+  sandbox?: boolean;
+  sdkScriptUrl?: string;
   approvedActionOrigins?: readonly string[];
 }
 
@@ -137,38 +141,120 @@ export async function fetchEcpayBindingSession(
   if (!response.ok) {
     throw new Error(`ecpay_binding_session_http_${response.status}`);
   }
-  const body = (await response.json()) as {
-    data?: EcpayBindingSession;
-  } & Partial<EcpayBindingSession>;
-  const session = body?.data ?? body;
-  const resolvedToken =
-    typeof session?.merchantToken === "string" && session.merchantToken.trim()
-      ? session.merchantToken.trim()
-      : typeof session?.token === "string" && session.token.trim()
-        ? session.token.trim()
-        : "";
-  if (
-    !session ||
-    (session.provider !== undefined && session.provider !== "ecpay") ||
-    !resolvedToken ||
-    (session.serverType !== "Stage" && session.serverType !== "Prod")
-  ) {
+  let decoded: PassengerPaymentBindingSession;
+  try {
+    const body: unknown = await response.json();
+    // Delegate to the shared payment decoder; keep an inline fallback for
+    // single-function AST extraction probes that strip module imports.
+    decoded =
+      typeof decodePassengerPaymentBindingSession === "function"
+        ? decodePassengerPaymentBindingSession(body)
+        : (() => {
+            if (!body || typeof body !== "object" || Array.isArray(body)) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            const raw = body as Record<string, unknown>;
+            const candidate =
+              "data" in raw && raw.data !== undefined ? raw.data : raw;
+            if (
+              !candidate ||
+              typeof candidate !== "object" ||
+              Array.isArray(candidate)
+            ) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            const session = candidate as Record<string, unknown>;
+            const pick = (camel: string, snake: string): unknown => {
+              const a = session[camel];
+              const b = session[snake];
+              if (a !== undefined && b !== undefined && a !== b) {
+                throw new Error("ecpay_binding_session_invalid");
+              }
+              return a ?? b;
+            };
+            const rawMerchantToken = pick("merchantToken", "merchant_token");
+            if (
+              rawMerchantToken !== undefined &&
+              typeof rawMerchantToken !== "string"
+            ) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            if (
+              session.token !== undefined &&
+              typeof session.token !== "string"
+            ) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            const primaryToken =
+              typeof rawMerchantToken === "string"
+                ? rawMerchantToken.trim()
+                : "";
+            const aliasToken =
+              typeof session.token === "string" ? session.token.trim() : "";
+            if (primaryToken && aliasToken && primaryToken !== aliasToken) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            const merchantToken = primaryToken || aliasToken;
+            const serverType = pick("serverType", "server_type");
+            const tokenExpireDate = pick(
+              "tokenExpireDate",
+              "token_expire_date",
+            );
+            const sdkScriptUrl = pick("sdkScriptUrl", "sdk_script_url");
+            const approvedOrigins = pick(
+              "approvedActionOrigins",
+              "approved_action_origins",
+            );
+            if (
+              (session.provider !== undefined &&
+                session.provider !== "ecpay") ||
+              !merchantToken ||
+              (serverType !== "Stage" && serverType !== "Prod")
+            ) {
+              throw new Error("ecpay_binding_session_invalid");
+            }
+            return {
+              provider: "ecpay",
+              merchantToken,
+              tokenExpireDate: String(tokenExpireDate ?? ""),
+              serverType,
+              ...(typeof session.sandbox === "boolean"
+                ? { sandbox: session.sandbox }
+                : {}),
+              ...(typeof sdkScriptUrl === "string" &&
+              sdkScriptUrl.trim().length > 0
+                ? { sdkScriptUrl: sdkScriptUrl.trim() }
+                : {}),
+              ...(Array.isArray(approvedOrigins)
+                ? {
+                    approvedActionOrigins: approvedOrigins
+                      .filter(
+                        (origin): origin is string =>
+                          typeof origin === "string" &&
+                          origin.trim().length > 0,
+                      )
+                      .map((origin) => origin.trim()),
+                  }
+                : {}),
+            };
+          })();
+  } catch {
     throw new Error("ecpay_binding_session_invalid");
   }
   const approvedActionOrigins =
-    Array.isArray(session.approvedActionOrigins) &&
-    session.approvedActionOrigins.length > 0
-      ? session.approvedActionOrigins.filter(
-          (origin): origin is string =>
-            typeof origin === "string" && origin.trim().length > 0,
-        )
+    decoded.approvedActionOrigins && decoded.approvedActionOrigins.length > 0
+      ? decoded.approvedActionOrigins
       : ECPAY_ACTION_ORIGINS;
   return {
     provider: "ecpay",
-    merchantToken: resolvedToken,
-    token: resolvedToken,
-    tokenExpireDate: String(session.tokenExpireDate ?? ""),
-    serverType: session.serverType,
+    merchantToken: decoded.merchantToken,
+    token: decoded.merchantToken,
+    tokenExpireDate: decoded.tokenExpireDate,
+    serverType: decoded.serverType,
+    ...(decoded.sandbox !== undefined ? { sandbox: decoded.sandbox } : {}),
+    ...(decoded.sdkScriptUrl !== undefined
+      ? { sdkScriptUrl: decoded.sdkScriptUrl }
+      : {}),
     approvedActionOrigins,
   };
 }
@@ -235,7 +321,7 @@ export function EcpayHostedFields({
         if (!token) {
           const session = await fetchSession();
           if (!active) return;
-          token = session.token;
+          token = (session.merchantToken ?? session.token ?? "").trim();
           serverType = session.serverType;
           onSessionLoadedRef.current?.(session);
         }

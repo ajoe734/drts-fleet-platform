@@ -110,6 +110,10 @@ import {
 } from "./r04-current-month-governance";
 import { runR09OwnComplaintLifecycle } from "./r09-own-complaint-lifecycle";
 import {
+  runR10OperationsDownloads,
+  type R10OperationsDownloadsEvidence,
+} from "./r10-operations-downloads";
+import {
   RunFinalizer,
   cancellationCleanupNeeded,
   cancellationCleanupPhase,
@@ -481,6 +485,7 @@ test(journeyName, async ({ browser, request }) => {
   let recoveryResolved = false;
   let displayObservations: DisplayObservations | undefined;
   let dailyReportDownloads: DailyReportDownloadsEvidence | undefined;
+  let sixMonthOperationsDownloads: R10OperationsDownloadsEvidence | undefined;
   let retainedRecovery: Readonly<{
     originalRun: number;
     orderId: string;
@@ -4400,6 +4405,59 @@ test(journeyName, async ({ browser, request }) => {
             caseNo: lifecycle.serviceCaseNo,
             result: "observed",
           });
+          if (typeof runR10OperationsDownloads === "function") {
+            await finalizer.checkpoint(
+              "r10-existing-six-month-operations-downloads",
+            );
+            sixMonthOperationsDownloads = await runR10OperationsDownloads({
+              context,
+              page: opsPage,
+              opsOrigin: origins.ops,
+              opsHeaders: (url) => tx.headers("ops", url),
+              role: opsRole,
+              order: completedOrderForReport,
+              entrySlug: ENTRY,
+              cases: ownCases,
+              serviceCaseNo: lifecycle.serviceCaseNo,
+              closureMonth: lifecycle.closureMonth,
+              r09From: lifecycle.from,
+              r09To: lifecycle.to,
+              readCase: async (caseNo) =>
+                (await readOps(
+                  `/complaints/${encodeURIComponent(caseNo)}`,
+                )) as unknown as Awaited<
+                  ReturnType<
+                    Parameters<typeof runR10OperationsDownloads>[0]["readCase"]
+                  >
+                >,
+              readOrder: (ownOrderId) =>
+                readOps(`/orders/${encodeURIComponent(ownOrderId)}`),
+              readTimeline: async (caseNo) =>
+                records(
+                  (
+                    await readOps(
+                      `/complaints/${encodeURIComponent(caseNo)}/timeline`,
+                    )
+                  ).items,
+                ) as unknown as Awaited<
+                  ReturnType<
+                    Parameters<
+                      typeof runR10OperationsDownloads
+                    >[0]["readTimeline"]
+                  >
+                >,
+              definitionSha: definition,
+              runtimeSha: runtime,
+              recoveryOnly: RECOVERY_ONLY,
+              evidence,
+            });
+            evidence.record({
+              stage: "r10-six-month-operations-ui-exports-verified",
+              orderId: completedOrderId,
+              caseNo: lifecycle.serviceCaseNo,
+              result: "observed",
+            });
+          }
         } finally {
           await opsPage.close();
         }
@@ -4981,6 +5039,7 @@ test(journeyName, async ({ browser, request }) => {
         : cancellations,
       displayObservations: displayObservations ?? null,
       dailyReportDownloads: dailyReportDownloads ?? null,
+      sixMonthOperationsDownloads: sixMonthOperationsDownloads ?? null,
       ...(!RECOVERY_ONLY
         ? {
             supplementalDailyReportCustody: {

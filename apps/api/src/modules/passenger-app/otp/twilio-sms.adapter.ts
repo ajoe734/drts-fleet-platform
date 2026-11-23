@@ -360,6 +360,25 @@ export class TwilioSmsAdapter implements SmsPort {
     code: string,
     expiresAt: string,
   ): Promise<SmsSendResult> {
+    return this.sendMessage(
+      target,
+      () => formatTaiwanOtpBody(code, expiresAt, this.now()),
+      true,
+    );
+  }
+
+  async sendDriverOnboarding(
+    target: string,
+    body: string,
+  ): Promise<SmsSendResult> {
+    return this.sendMessage(target, () => body, false);
+  }
+
+  private async sendMessage(
+    target: string,
+    buildBody: () => string,
+    includeStatusCallback: boolean,
+  ): Promise<SmsSendResult> {
     if (!this.config) {
       return { status: "not_configured" };
     }
@@ -376,7 +395,7 @@ export class TwilioSmsAdapter implements SmsPort {
 
     let bodyText: string;
     try {
-      bodyText = formatTaiwanOtpBody(code, expiresAt, this.now());
+      bodyText = buildBody();
     } catch {
       return {
         status: "failed",
@@ -391,7 +410,7 @@ export class TwilioSmsAdapter implements SmsPort {
       From: this.config.from,
       Body: bodyText,
     });
-    if (this.config.statusCallbackUrl) {
+    if (includeStatusCallback && this.config.statusCallbackUrl) {
       params.set("StatusCallback", this.config.statusCallbackUrl);
     }
 
@@ -405,6 +424,7 @@ export class TwilioSmsAdapter implements SmsPort {
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
     let response: TwilioHttpResponse;
+    let parsed: Record<string, unknown> | null = null;
     try {
       response = await this.transport(endpoint, {
         method: "POST",
@@ -416,6 +436,15 @@ export class TwilioSmsAdapter implements SmsPort {
         body: params.toString(),
         signal: controller.signal,
       });
+      try {
+        const raw = await response.text();
+        const json: unknown = raw ? JSON.parse(raw) : null;
+        if (json && typeof json === "object" && !Array.isArray(json)) {
+          parsed = json as Record<string, unknown>;
+        }
+      } catch {
+        parsed = null;
+      }
     } catch {
       // Timeout, AbortError, DNS or socket failure -> temporary_failure.
       // Never echo underlying error text, headers, or OTP payload.
@@ -427,17 +456,6 @@ export class TwilioSmsAdapter implements SmsPort {
       };
     } finally {
       clearTimeout(timer);
-    }
-
-    let parsed: Record<string, unknown> | null = null;
-    try {
-      const raw = await response.text();
-      const json: unknown = raw ? JSON.parse(raw) : null;
-      if (json && typeof json === "object" && !Array.isArray(json)) {
-        parsed = json as Record<string, unknown>;
-      }
-    } catch {
-      parsed = null;
     }
 
     const rawCode = parsed?.code ?? parsed?.error_code;

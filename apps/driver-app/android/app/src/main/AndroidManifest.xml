@@ -34,6 +34,12 @@
         <data android:scheme="drts-driver"/>
         <data android:scheme="exp+drts-driver-app"/>
       </intent-filter>
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="api.smarttransport.tw" android:path="/driver-activate"/>
+      </intent-filter>
     </activity>
   </application>
 </manifest>

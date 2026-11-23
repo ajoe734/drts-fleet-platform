@@ -25,7 +25,7 @@ function createService() {
     auditNotificationService,
   );
 
-  return { service, repository };
+  return { service, repository, auditNotificationService };
 }
 
 describe("SupplySubmissionService", () => {
@@ -54,6 +54,161 @@ describe("SupplySubmissionService", () => {
     expect(created.submission.revisionNo).toBe(1);
     expect(created.driverDraft?.name).toBe("Test Driver");
     expect(created.driverDraft?.mobile).toBe("+886900111222");
+  });
+
+  it("retains the driver's normalized contact details on older-client edits without auditing raw contact data", async () => {
+    const { service, repository, auditNotificationService } = createService();
+    const fleetPartnerId = "fleet-demo-001";
+    const actorId = "fleet-test-user";
+    const fields = {
+      name: "Simulated Driver",
+      mobile: "0900 000-001",
+      professionalDriverLicenseNo: "UAT-CONTACT-LICENSE",
+      professionalDriverLicenseExpiry: "2027-12-31",
+      taxiDriverRegistrationNo: "UAT-CONTACT-REGISTRATION",
+      taxiDriverRegistrationArea: "TPE",
+      taxiDriverRegistrationExpiry: "2027-12-31",
+      supportedServiceProductCodes: ["taxi_realtime"],
+      preferredVehicleSubmissionId: null,
+    };
+    const created = await service.createDriverDraft(fleetPartnerId, actorId, {
+      ...fields,
+      email: "  Driver+uat@EXAMPLE.TEST  ",
+    });
+    const { submissionId, revisionNo } = created.submission;
+    const updated = await service.updateDriverDraft(
+      fleetPartnerId,
+      submissionId,
+      actorId,
+      {
+        ...fields,
+        name: "Updated Simulated Driver",
+        expectedRevisionNo: revisionNo,
+      },
+    );
+    expect(updated.driverDraft).toMatchObject({
+      name: "Updated Simulated Driver",
+      mobile: "+886900000001",
+      email: "Driver+uat@example.test",
+    });
+    expect(
+      (await repository.loadSubmissionState(submissionId)).driverDrafts[0],
+    ).toMatchObject({
+      mobile: "+886900000001",
+      email: "Driver+uat@example.test",
+    });
+    const audit = JSON.stringify(
+      auditNotificationService.getAuditLogsSnapshot(),
+    );
+    expect(audit).not.toContain("Driver+uat@example.test");
+    expect(audit).not.toContain("+886900000001");
+  });
+
+  it("requires both onboarding destinations before creating a new submitted revision", async () => {
+    const { service, repository } = createService();
+    const fleetPartnerId = "fleet-demo-001";
+    const actorId = "fleet-test-user";
+    const fields = {
+      name: "Simulated Driver",
+      mobile: "02-0000-0000",
+      professionalDriverLicenseNo: "UAT-NOTIFY-LICENSE",
+      professionalDriverLicenseExpiry: "2027-12-31",
+      taxiDriverRegistrationNo: "UAT-NOTIFY-REGISTRATION",
+      taxiDriverRegistrationArea: "TPE",
+      taxiDriverRegistrationExpiry: "2027-12-31",
+      supportedServiceProductCodes: ["taxi_realtime"],
+      preferredVehicleSubmissionId: null,
+    };
+    vi.stubEnv("DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED", "true");
+    try {
+      const created = await service.createDriverDraft(
+        fleetPartnerId,
+        actorId,
+        fields,
+      );
+      const { submissionId } = created.submission;
+      await expect(
+        service.submitSupplySubmission(fleetPartnerId, submissionId, actorId, {
+          expectedRevisionNo: 1,
+        }),
+      ).rejects.toMatchObject({ code: "DRIVER_ONBOARDING_EMAIL_INVALID" });
+      await expect(
+        service.updateDriverDraft(fleetPartnerId, submissionId, actorId, {
+          ...fields,
+          email: "wrong@@example.test",
+          expectedRevisionNo: 1,
+        }),
+      ).rejects.toMatchObject({ code: "DRIVER_ONBOARDING_EMAIL_INVALID" });
+      await service.updateDriverDraft(fleetPartnerId, submissionId, actorId, {
+        ...fields,
+        email: "driver@example.test",
+        expectedRevisionNo: 1,
+      });
+      await expect(
+        service.submitSupplySubmission(fleetPartnerId, submissionId, actorId, {
+          expectedRevisionNo: 2,
+        }),
+      ).rejects.toMatchObject({ code: "DRIVER_ONBOARDING_MOBILE_INVALID" });
+      await service.updateDriverDraft(fleetPartnerId, submissionId, actorId, {
+        ...fields,
+        mobile: "+886 900 000 001",
+        expectedRevisionNo: 2,
+      });
+      const requiredDocumentTypes = [
+        "professional_driver_license",
+        "taxi_driver_registration",
+      ] as const;
+      await repository.persistChanges({
+        documents: requiredDocumentTypes.map((documentType) => ({
+          documentId: randomUUID(),
+          fleetPartnerId,
+          submissionId,
+          documentType,
+          fileObjectKey: `unit-test/${submissionId}/${documentType}`,
+          originalFileName: `${documentType}.pdf`,
+          contentType: "application/pdf",
+          fileSize: 1,
+          checksumSha256: "a".repeat(64),
+          effectiveFrom: null,
+          effectiveUntil: null,
+          reviewStatus: "pending",
+          reviewComment: null,
+          uploadedBy: actorId,
+          uploadedAt: "2026-11-22T13:00:00.000Z",
+        })),
+      });
+      const submitted = await service.submitSupplySubmission(
+        fleetPartnerId,
+        submissionId,
+        actorId,
+        {
+          expectedRevisionNo: 3,
+        },
+      );
+      expect(submitted.submission.status).toBe("submitted");
+      expect(submitted.driverDraft).toMatchObject({
+        mobile: "+886900000001",
+        email: "driver@example.test",
+      });
+      await expect(
+        repository.persistChanges({
+          expectedSubmission: {
+            ...submitted.submission,
+            revisionNo: 3,
+            status: "draft",
+          },
+          driverDrafts: [
+            { ...submitted.driverDraft!, email: "stale@example.test" },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: "SUBMISSION_REVISION_CONFLICT" });
+      expect(
+        (await repository.loadSubmissionState(submissionId)).driverDrafts[0]
+          ?.email,
+      ).toBe("driver@example.test");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("prevents creating a driver draft with duplicate driver identity", async () => {
