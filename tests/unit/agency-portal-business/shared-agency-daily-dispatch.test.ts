@@ -11,20 +11,59 @@ import type {
   DispatchDailyRecord,
   MultiTaxiTripOperationalAdminView,
 } from "@drts/contracts";
-import {
+// The hosted probes run as standalone JavaScript. Use typed dynamic imports at
+// this boundary so the root TS project need not enable allowJs for E2E scripts.
+type Locale = "en" | "zh";
+type WireTripDetail = ReturnType<typeof toWireTripDetail>;
+type LocaleDetailProbe = (
+  page: unknown,
+  cfg: unknown,
+  row: WireTripDetail,
+  locale: Locale,
+  expectImpl: unknown,
+) => Promise<Record<string, unknown>>;
+const localeProbePath =
+  "../../e2e/agency-portal-business/shared-dev-locale.mjs";
+const tripProbePath =
+  "../../e2e/agency-portal-business/shared-dev-trip-record.mjs";
+const {
   COPY,
   formatMinorLocale,
   nullZeroAndTime,
   resolveNullZeroSubcase,
   verifyLocaleDetail,
-} from "../../e2e/agency-portal-business/shared-dev-locale.mjs";
-import {
-  check,
-  parseFixtureInput,
-  selfTest,
-  taipeiTime,
-  validateFixture,
-} from "../../e2e/agency-portal-business/shared-dev-trip-record.mjs";
+} = (await import(localeProbePath)) as {
+  COPY: Record<
+    Locale,
+    Record<"lang" | "collected" | "toll" | "reserved", string>
+  >;
+  formatMinorLocale: (
+    value: number | null,
+    currency: string,
+    locale: Locale,
+  ) => string;
+  nullZeroAndTime: LocaleDetailProbe;
+  verifyLocaleDetail: LocaleDetailProbe;
+  resolveNullZeroSubcase: (
+    page: unknown,
+    cfg: unknown,
+    primaryRow: WireTripDetail,
+    secondRow: WireTripDetail | null,
+    locale: Locale,
+    expectImpl: unknown,
+  ) => Promise<Record<string, unknown>>;
+};
+const { check, parseFixtureInput, selfTest, taipeiTime, validateFixture } =
+  (await import(tripProbePath)) as {
+    check: (condition: unknown, code: string) => void;
+    parseFixtureInput: (raw: string) => {
+      fixture: typeof SHARED_A_FIXTURE;
+      secondFixture: typeof SHARED_A_FIXTURE | null;
+    };
+    selfTest: () => Promise<void>;
+    taipeiTime: (value: string | null, locale: Locale) => string;
+    validateFixture: (raw: string) => typeof SHARED_A_FIXTURE;
+  };
 
 const AGENCY_ID = "agency_1f1710fc6d5041e785f9ed529d2fcdd0";
 const SERVICE_DATE = "2026-11-20";
@@ -52,12 +91,16 @@ function buildTripAdminRecord(
     recordId: SHARED_A_FIXTURE.recordId,
     orderId: SHARED_A_FIXTURE.orderId,
     tripId: SHARED_A_FIXTURE.tripId,
+    assignmentId: "assignment_fixture",
+    vehicleId: "veh_demo_001",
     orderNo: "ORD-20261120-A00117",
     plateNo: "TDA-2208",
     reservedAt: "2026-11-19T21:01:00.000Z",
     pickupAt: "2026-11-19T21:01:33.223Z",
     dropoffAt: "2026-11-19T21:03:21.281Z",
     route: {
+      encodedPolyline: null,
+      pointCount: 2,
       routeSummary: "Taipei Main Station -> Songshan Airport",
       source: "driver_gps",
       distanceMeters: 4820,
@@ -76,8 +119,8 @@ function buildTripAdminRecord(
     retainUntil: "2028-11-19T21:03:22.000Z",
     legalHold: {
       state: "none",
-      subjectType: "order",
-      subjectId: SHARED_A_FIXTURE.orderId,
+      family: "proof_bundle",
+      subjectId: SHARED_A_FIXTURE.tripId,
       activeHoldCount: 0,
       activeHolds: [],
     },
@@ -327,7 +370,9 @@ function createLocaleDetailPageStub(
     const seg = decodeURIComponent(
       currentUrl.pathname.split("/").filter(Boolean).at(-1) ?? "",
     );
-    return recordsById[seg] ?? Object.values(recordsById)[0];
+    const row = recordsById[seg];
+    if (!row) throw new Error("locale-detail-record-not-found");
+    return row;
   };
 
   const detailValueFor = (label: string) => {
