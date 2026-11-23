@@ -1556,8 +1556,13 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
       );
     }
 
+    const resolvedPlacardDownloadPath = placardDownloadPath.startsWith(
+      '/downloads/'
+    )
+      ? `/api${placardDownloadPath}`
+      : placardDownloadPath;
     const placardDownloadUrl = new URL(
-      placardDownloadPath,
+      resolvedPlacardDownloadPath,
       apiOrigin
     ).toString();
     const placardDownloadResp = await fetchImpl(placardDownloadUrl, {
@@ -1569,7 +1574,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     });
     assertObservedRuntimeHeader(
       placardDownloadResp,
-      placardDownloadPath,
+      resolvedPlacardDownloadPath,
       observedRuntimeSha
     );
     const { rawBuffer: placardBytes, text: placardDownloadText } =

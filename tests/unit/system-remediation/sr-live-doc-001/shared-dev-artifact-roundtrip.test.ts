@@ -572,8 +572,10 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     ) {
       return jsonResponse(201, {
         placard_version_id: currentPlacardVersionId,
-        download_url: `/api/downloads/placard/${currentPlacardVersionId}?expires=1893456000&signature=sig-placard`,
+        artifact_download_url: `/downloads/placard/${currentPlacardVersionId}?expires=1893456000&signature=sig-placard`,
+        artifact_manifest_hash: PLACARD_MANIFEST_HASH,
         download_metadata: {
+          download_url: `/downloads/placard/${currentPlacardVersionId}?expires=1893456000&signature=sig-placard`,
           manifest_hash: PLACARD_MANIFEST_HASH,
         },
       });
