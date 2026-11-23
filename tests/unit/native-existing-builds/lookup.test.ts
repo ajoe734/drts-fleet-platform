@@ -688,7 +688,7 @@ describe("NATIVE-EXISTING-EAS-HOSTED-BUILD-LOOKUP-20261123", () => {
     // Tamper with 1 byte in the APK zip payload and confirm v2 digest rejection
     const tamperedApkPath = path.join(suiteTempDir, "tampered.apk");
     const tamperedBytes = Buffer.from(fs.readFileSync(sharedSignedApk));
-    tamperedBytes[12] ^= 0xff;
+    tamperedBytes.writeUInt8((tamperedBytes[12] ?? 0) ^ 0xff, 12);
     fs.writeFileSync(tamperedApkPath, tamperedBytes);
     expect(() =>
       execFileSync("python3", [INSPECT_SCRIPT, "ANDROID", tamperedApkPath], {
