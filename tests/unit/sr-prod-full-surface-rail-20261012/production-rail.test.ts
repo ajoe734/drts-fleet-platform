@@ -73,6 +73,69 @@ function candidate() {
   const f = fixture();
   return { ...f, plan: preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud) };
 }
+function driverOnboardingFixture() {
+  const f = fixture();
+  Object.assign(f.vars, {
+    PROD_DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED: "true",
+    PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS: Array(32)
+      .fill("AB")
+      .join(":"),
+    PROD_DRIVER_ONBOARDING_IOS_APP_ID:
+      "A1B2C3D4E5.com.cctechsupport.drts.driver",
+    PROD_REMOTE_SMTP_HOST: "smtp.drts.invalid",
+    PROD_REMOTE_SMTP_PORT: "587",
+    PROD_REMOTE_SMTP_FROM_EMAIL: "drivers@drts.invalid",
+    PROD_NOTIFICATION_FROM_EMAIL: "drivers@drts.invalid",
+    PROD_REMOTE_SMTP_USERNAME_SECRET: "drts-prod-smtp-user",
+    PROD_REMOTE_SMTP_PASSWORD_SECRET: "drts-prod-smtp-password",
+  });
+  Object.assign(f.values, {
+    "drts-prod-twilio-account-sid": `AC${"a".repeat(32)}`,
+    "drts-prod-twilio-api-key-sid": `SK${"b".repeat(32)}`,
+    "drts-prod-twilio-from-number": "+15005550006",
+  });
+  return f;
+}
+describe("driver onboarding normal production release configuration", () => {
+  it("projects explicit opt-in through the actual buildPlan, preflight and deployArgs", () => {
+    const f = driverOnboardingFixture();
+    const built = buildPlan(f.vars, SHA, TAG, DEPLOYER);
+    const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+    const api = plan.services[0];
+    expect(api.env).toMatchObject({
+      DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED: "true",
+      DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS:
+        f.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS,
+      DRIVER_ONBOARDING_IOS_APP_ID: f.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID,
+    });
+    for (const [key, suffix] of [
+      ["DRIVER_ONBOARDING_CODE_PEPPER", "driver-onboarding-code-pepper"],
+      ["DRIVER_ONBOARDING_DELIVERY_KEY", "driver-onboarding-delivery-key"],
+      ["TWILIO_ACCOUNT_SID", "twilio-account-sid"],
+      ["TWILIO_API_KEY_SID", "twilio-api-key-sid"],
+      ["TWILIO_API_KEY_SECRET", "twilio-api-key-secret"],
+      ["TWILIO_FROM_NUMBER", "twilio-from-number"],
+    ]) {
+      expect(built.services[0].secrets[key]).toBe(`drts-prod-${suffix}`);
+      expect(api.secrets[key]).toBe(`drts-prod-${suffix}:7`);
+    }
+    const args = deployArgs(plan, api, imagesFor(plan).api);
+    const envArg = args[args.indexOf("--set-env-vars") + 1];
+    expect(envArg).toContain("DRIVER_ONBOARDING_NOTIFICATIONS_ENABLED=true");
+    expect(envArg).toContain(
+      `DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS=${f.vars.PROD_DRIVER_ONBOARDING_ANDROID_CERT_FINGERPRINTS}`,
+    );
+    expect(envArg).toContain(
+      `DRIVER_ONBOARDING_IOS_APP_ID=${f.vars.PROD_DRIVER_ONBOARDING_IOS_APP_ID}`,
+    );
+    expect(args[args.indexOf("--set-secrets") + 1]).toContain(
+      "DRIVER_ONBOARDING_DELIVERY_KEY=drts-prod-driver-onboarding-delivery-key:7",
+    );
+    expect(args[args.indexOf("--set-secrets") + 1]).not.toContain(":latest");
+    expect(plan.services.slice(1)).toEqual(candidate().plan.services.slice(1));
+    expect(api.env).not.toHaveProperty("NOTIFICATION_OUTBOX_TYPE");
+  });
+});
 function publicResponse(service: any, pathname: string) {
   if (pathname === "/login")
     return { status: 200, body: "<html>登入智行叫車</html>" };
