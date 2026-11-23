@@ -67,7 +67,8 @@ interface MockHarnessOptions {
   gcsCleanGeneration?: string;
   gcsPlacardBytes?: Buffer;
   publicInfoItems?: Array<{ publicInfoVersionId: string; status: string }>;
-  responseCandidateShaHeader?: string;
+  responseCandidateShaHeader?: string | null;
+  perPathCandidateShaHeader?: Record<string, string | null>;
   feePlanItems?: MockFeePlanItem[];
   feePlanReadbackSequence?: MockFeePlanItem[][];
   placardCreateStatus?: number;
@@ -232,18 +233,39 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
     throw new Error(`Unexpected gcloud invocation: ${args.join(' ')}`);
   };
 
+  function resolveCandidateShaHeaderForPath(pathname?: string): string | null {
+    if (
+      pathname &&
+      options.perPathCandidateShaHeader &&
+      Object.prototype.hasOwnProperty.call(
+        options.perPathCandidateShaHeader,
+        pathname
+      )
+    ) {
+      return options.perPathCandidateShaHeader[pathname] ?? null;
+    }
+    if (options.responseCandidateShaHeader !== undefined) {
+      return options.responseCandidateShaHeader;
+    }
+    return OBSERVED_RUNTIME_SHA;
+  }
+
   function jsonResponse(
     status: number,
     payload: unknown,
-    extraHeaders: Record<string, string> = {}
+    extraHeaders: Record<string, string> = {},
+    pathname?: string
   ) {
     const bodyBytes = Buffer.from(JSON.stringify(payload), 'utf8');
-    const headers = new Headers({
+    const resolvedShaHeader = resolveCandidateShaHeaderForPath(pathname);
+    const headersInit: Record<string, string> = {
       'content-type': 'application/json',
-      'x-drts-candidate-sha':
-        options.responseCandidateShaHeader ?? OBSERVED_RUNTIME_SHA,
       ...extraHeaders,
-    });
+    };
+    if (resolvedShaHeader !== null) {
+      headersInit['x-drts-candidate-sha'] = resolvedShaHeader;
+    }
+    const headers = new Headers(headersInit);
     return {
       status,
       headers,
@@ -258,13 +280,17 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
   function binaryResponse(
     status: number,
     bytes: Buffer,
-    contentType = 'application/pdf'
+    contentType = 'application/pdf',
+    pathname?: string
   ) {
-    const headers = new Headers({
+    const resolvedShaHeader = resolveCandidateShaHeaderForPath(pathname);
+    const headersInit: Record<string, string> = {
       'content-type': contentType,
-      'x-drts-candidate-sha':
-        options.responseCandidateShaHeader ?? OBSERVED_RUNTIME_SHA,
-    });
+    };
+    if (resolvedShaHeader !== null) {
+      headersInit['x-drts-candidate-sha'] = resolvedShaHeader;
+    }
+    const headers = new Headers(headersInit);
     return {
       status,
       headers,
@@ -394,11 +420,86 @@ function createMockSharedDevHarness(options: MockHarnessOptions = {}) {
       const sequenceItems =
         options.feePlanReadbackSequence?.[feePlanGetCount];
       feePlanGetCount += 1;
-      return jsonResponse(200, {
-        items: sequenceItems ?? options.feePlanItems ?? [
-          APPROVED_FIXTURE_FEE_PLAN,
-        ],
-      });
+      return jsonResponse(
+        200,
+        {
+          items: sequenceItems ?? options.feePlanItems ?? [
+            APPROVED_FIXTURE_FEE_PLAN,
+          ],
+        },
+        {},
+        parsedUrl.pathname
+      );
+    }
+
+    if (
+      parsedUrl.origin === API_ORIGIN &&
+      parsedUrl.pathname === '/api/driver-statements' &&
+      method === 'GET'
+    ) {
+      return jsonResponse(
+        200,
+        {
+          items: [
+            {
+              statement_id: 'stmt-drv-demo-001-2026-03',
+              driver_id: 'drv-demo-001',
+              period_month: '2026-03',
+              fee_plan_version: 'v1',
+              status: 'generated',
+            },
+          ],
+        },
+        {},
+        parsedUrl.pathname
+      );
+    }
+
+    if (
+      parsedUrl.origin === API_ORIGIN &&
+      parsedUrl.pathname === '/api/reimbursements' &&
+      method === 'GET'
+    ) {
+      return jsonResponse(
+        200,
+        {
+          items: [
+            {
+              batch_id: 'reimb-drv-demo-001-2026-03',
+              driver_id: 'drv-demo-001',
+              period_month: '2026-03',
+              statement_id: 'stmt-drv-demo-001-2026-03',
+              status: 'pending',
+              workflow_state: 'pending_approval',
+            },
+          ],
+        },
+        {},
+        parsedUrl.pathname
+      );
+    }
+
+    if (
+      parsedUrl.origin === API_ORIGIN &&
+      parsedUrl.pathname === '/api/audit' &&
+      method === 'GET'
+    ) {
+      return jsonResponse(
+        200,
+        {
+          items: [
+            {
+              audit_id: 'audit-fee-plan-001',
+              action_name: 'publish_driver_fee_plan',
+              resource_type: 'driver_fee_plan',
+              resource_id: 'fee-plan-fixture-001',
+              actor_type: 'platform_admin',
+            },
+          ],
+        },
+        {},
+        parsedUrl.pathname
+      );
     }
 
     if (
@@ -1256,5 +1357,195 @@ describe('SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4 shared-dev artifact roundtr
         call.url.endsWith('/api/driver-fee-plans/publish')
       )
     ).toHaveLength(0);
+  });
+
+  it('R3: requires non-empty exact observed runtime SHA header on every API/readback and audit response, preserving candidate_sha vs observed_runtime_sha separation and failure teardown', async () => {
+    // 1. Matching observed runtime SHA (distinct from candidate definition SHA) with audit reads enabled
+    const matchingEvidencePath = makeTempEvidencePath();
+    const matchingHarness = createMockSharedDevHarness();
+
+    const matchingResult = await runSharedDevArtifactRoundtrip({
+      evidencePath: matchingEvidencePath,
+      candidateSha: CANDIDATE_SHA,
+      includeFeePlanImpactAudit: true,
+      apiOrigin: API_ORIGIN,
+      platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+      projectId: PROJECT_ID,
+      region: REGION,
+      apiIdToken: 'wif-id-token-api',
+      platformIdToken: 'wif-id-token-platform',
+      fetchImpl: matchingHarness.fetchImpl,
+      execFileImpl: matchingHarness.execFileImpl,
+      scanPollIntervalMs: 1,
+    });
+
+    expect(matchingResult.status).toBe('passed');
+    expect(matchingResult.candidate_sha).toBe(CANDIDATE_SHA);
+    expect(matchingResult.observed_runtime_sha).toBe(OBSERVED_RUNTIME_SHA);
+    expect(matchingResult.candidate_sha).not.toBe(
+      matchingResult.observed_runtime_sha
+    );
+    expect(
+      matchingResult.fee_plan_readback_audit?.driver_statements
+    ).toHaveLength(1);
+    expect(
+      matchingResult.fee_plan_readback_audit?.reimbursement_batches
+    ).toHaveLength(1);
+    expect(
+      matchingResult.fee_plan_readback_audit?.fee_plan_audit_events
+    ).toHaveLength(1);
+
+    // 2. Missing x-drts-candidate-sha header rejected at first Ops introspection before progressing
+    const missingEvidencePath = makeTempEvidencePath();
+    const missingHarness = createMockSharedDevHarness({
+      responseCandidateShaHeader: null,
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: missingEvidencePath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: missingHarness.fetchImpl,
+        execFileImpl: missingHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Missing or blank x-drts-candidate-sha header on \/api\/auth\/session \(ops\)/
+    );
+
+    expect(
+      missingHarness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-fee-plans')
+      )
+    ).toHaveLength(0);
+    expect(
+      missingHarness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-statements/generate')
+      )
+    ).toHaveLength(0);
+    const missingPersisted = JSON.parse(
+      readFileSync(missingEvidencePath, 'utf8')
+    );
+    expect(missingPersisted.status).toBe('failed');
+    expect(missingPersisted.candidate_sha).toBe(CANDIDATE_SHA);
+    expect(missingPersisted.observed_runtime_sha).toBe(OBSERVED_RUNTIME_SHA);
+    expect(missingPersisted.teardown.ops_session_revoked).toBe(true);
+
+    // 3. Blank / whitespace x-drts-candidate-sha header rejected at first Ops introspection
+    const blankEvidencePath = makeTempEvidencePath();
+    const blankHarness = createMockSharedDevHarness({
+      responseCandidateShaHeader: '   ',
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: blankEvidencePath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: blankHarness.fetchImpl,
+        execFileImpl: blankHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Missing or blank x-drts-candidate-sha header on \/api\/auth\/session \(ops\)/
+    );
+
+    expect(
+      blankHarness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-statements/generate')
+      )
+    ).toHaveLength(0);
+    const blankPersisted = JSON.parse(readFileSync(blankEvidencePath, 'utf8'));
+    expect(blankPersisted.status).toBe('failed');
+    expect(blankPersisted.teardown.ops_session_revoked).toBe(true);
+
+    // 4. Mismatched x-drts-candidate-sha header (e.g., definition SHA instead of observed runtime SHA) rejected at first Ops introspection
+    const mismatchEvidencePath = makeTempEvidencePath();
+    const mismatchHarness = createMockSharedDevHarness({
+      responseCandidateShaHeader: CANDIDATE_SHA,
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: mismatchEvidencePath,
+        candidateSha: CANDIDATE_SHA,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: mismatchHarness.fetchImpl,
+        execFileImpl: mismatchHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      new RegExp(
+        `Runtime SHA drift on /api/auth/session \\(ops\\): x-drts-candidate-sha="${CANDIDATE_SHA}" != expected="${OBSERVED_RUNTIME_SHA}"`
+      )
+    );
+
+    expect(
+      mismatchHarness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-statements/generate')
+      )
+    ).toHaveLength(0);
+    const mismatchPersisted = JSON.parse(
+      readFileSync(mismatchEvidencePath, 'utf8')
+    );
+    expect(mismatchPersisted.status).toBe('failed');
+    expect(mismatchPersisted.teardown.ops_session_revoked).toBe(true);
+
+    // 5. Missing or drifted x-drts-candidate-sha header on fee-plan audit read (/api/driver-statements) rejected before statement generation
+    const auditDriftEvidencePath = makeTempEvidencePath();
+    const auditDriftHarness = createMockSharedDevHarness({
+      perPathCandidateShaHeader: {
+        '/api/driver-statements': null,
+      },
+    });
+
+    await expect(
+      runSharedDevArtifactRoundtrip({
+        evidencePath: auditDriftEvidencePath,
+        candidateSha: CANDIDATE_SHA,
+        includeFeePlanImpactAudit: true,
+        apiOrigin: API_ORIGIN,
+        platformAdminOrigin: PLATFORM_ADMIN_ORIGIN,
+        projectId: PROJECT_ID,
+        region: REGION,
+        apiIdToken: 'wif-id-token-api',
+        platformIdToken: 'wif-id-token-platform',
+        fetchImpl: auditDriftHarness.fetchImpl,
+        execFileImpl: auditDriftHarness.execFileImpl,
+        scanPollIntervalMs: 1,
+      })
+    ).rejects.toThrow(
+      /Missing or blank x-drts-candidate-sha header on \/api\/driver-statements/
+    );
+
+    expect(
+      auditDriftHarness.calls.fetch.filter((call) =>
+        call.url.endsWith('/api/driver-statements/generate')
+      )
+    ).toHaveLength(0);
+    const auditDriftPersisted = JSON.parse(
+      readFileSync(auditDriftEvidencePath, 'utf8')
+    );
+    expect(auditDriftPersisted.status).toBe('failed');
+    expect(auditDriftPersisted.teardown).toEqual({
+      driver_invitation_revoked: true,
+      ops_session_revoked: true,
+    });
   });
 });

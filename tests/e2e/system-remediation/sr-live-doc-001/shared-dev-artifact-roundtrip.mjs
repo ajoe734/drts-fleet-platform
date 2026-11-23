@@ -432,16 +432,26 @@ async function readResponseJsonOrText(response) {
 }
 
 function assertObservedRuntimeHeader(response, url, expectedRuntimeSha) {
-  if (!expectedRuntimeSha) {
-    return null;
-  }
-  const headerSha = response.headers?.get?.('x-drts-candidate-sha')?.trim();
-  if (headerSha && headerSha !== expectedRuntimeSha) {
+  const expectedSha =
+    typeof expectedRuntimeSha === 'string' ? expectedRuntimeSha.trim() : '';
+  if (!expectedSha) {
     throw new Error(
-      `Runtime SHA drift on ${url}: x-drts-candidate-sha="${headerSha}" != expected="${expectedRuntimeSha}"`
+      `Missing expected observed runtime SHA when verifying response from ${url}`
     );
   }
-  return headerSha || null;
+  const rawHeader = response?.headers?.get?.('x-drts-candidate-sha');
+  const headerSha = typeof rawHeader === 'string' ? rawHeader.trim() : '';
+  if (!headerSha) {
+    throw new Error(
+      `Missing or blank x-drts-candidate-sha header on ${url}: expected="${expectedSha}"`
+    );
+  }
+  if (headerSha !== expectedSha) {
+    throw new Error(
+      `Runtime SHA drift on ${url}: x-drts-candidate-sha="${headerSha}" != expected="${expectedSha}"`
+    );
+  }
+  return headerSha;
 }
 
 export async function runSharedDevArtifactRoundtrip(options = {}) {
@@ -905,7 +915,7 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         );
         if (createDriverResp.status === 409) {
           // Force prepareDriverAuthority on the instance to reconcile in-memory seed against Postgres
-          await fetchImpl(
+          const workStateResp = await fetchImpl(
             `${apiOrigin}/api/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
             {
               method: 'POST',
@@ -916,6 +926,11 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
               }),
               body: JSON.stringify({ workState: 'available' }),
             }
+          );
+          assertObservedRuntimeHeader(
+            workStateResp,
+            `/api/regulatory-registry/drivers/${driverId}/work-state`,
+            observedRuntimeSha
           );
           createDriverResp = await fetchImpl(
             `${apiOrigin}/api/regulatory-registry/drivers`,
@@ -1071,114 +1086,128 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
     };
 
     if (includeFeePlanImpactAudit) {
-      try {
-        const statementsResp = await fetchImpl(
-          `${apiOrigin}/api/driver-statements`,
-          {
-            method: 'GET',
-            headers: buildApiHeaders({
-              apiIdToken,
-              appSessionToken: opsToken,
-            }),
-          }
+      const statementsResp = await fetchImpl(
+        `${apiOrigin}/api/driver-statements`,
+        {
+          method: 'GET',
+          headers: buildApiHeaders({
+            apiIdToken,
+            appSessionToken: opsToken,
+          }),
+        }
+      );
+      assertObservedRuntimeHeader(
+        statementsResp,
+        '/api/driver-statements',
+        observedRuntimeSha
+      );
+      const { json: statementsRaw, text: statementsText } =
+        await readResponseJsonOrText(statementsResp);
+      const statementsData = unwrapEnvelope(statementsRaw);
+      if (
+        statementsResp.status !== 200 ||
+        !Array.isArray(statementsData?.items)
+      ) {
+        throw new Error(
+          `Failed to list driver statements for fee-plan audit: status=${statementsResp.status} body=${sanitizeText(statementsText)}`
         );
-        const { json: statementsRaw } =
-          await readResponseJsonOrText(statementsResp);
-        const statementsData = unwrapEnvelope(statementsRaw);
-        if (
-          statementsResp.status === 200 &&
-          Array.isArray(statementsData?.items)
-        ) {
-          evidence.fee_plan_readback_audit.driver_statements =
-            statementsData.items.map((stmt) => ({
-              statement_id: stmt?.statement_id ?? stmt?.statementId ?? null,
-              driver_id: stmt?.driver_id ?? stmt?.driverId ?? null,
-              period_month: stmt?.period_month ?? stmt?.periodMonth ?? null,
-              fee_plan_version:
-                stmt?.fee_plan_version ?? stmt?.feePlanVersion ?? null,
-              status: stmt?.status ?? null,
-              totals: stmt?.totals ?? null,
-              created_at: stmt?.created_at ?? stmt?.createdAt ?? null,
-              updated_at: stmt?.updated_at ?? stmt?.updatedAt ?? null,
-            }));
-        }
-      } catch {
-        // Optional read-only audit enrichment
       }
+      evidence.fee_plan_readback_audit.driver_statements =
+        statementsData.items.map((stmt) => ({
+          statement_id: stmt?.statement_id ?? stmt?.statementId ?? null,
+          driver_id: stmt?.driver_id ?? stmt?.driverId ?? null,
+          period_month: stmt?.period_month ?? stmt?.periodMonth ?? null,
+          fee_plan_version:
+            stmt?.fee_plan_version ?? stmt?.feePlanVersion ?? null,
+          status: stmt?.status ?? null,
+          totals: stmt?.totals ?? null,
+          created_at: stmt?.created_at ?? stmt?.createdAt ?? null,
+          updated_at: stmt?.updated_at ?? stmt?.updatedAt ?? null,
+        }));
 
-      try {
-        const batchesResp = await fetchImpl(`${apiOrigin}/api/reimbursements`, {
-          method: 'GET',
-          headers: buildApiHeaders({
-            apiIdToken,
-            appSessionToken: opsToken,
-          }),
-        });
-        const { json: batchesRaw } = await readResponseJsonOrText(batchesResp);
-        const batchesData = unwrapEnvelope(batchesRaw);
-        if (batchesResp.status === 200 && Array.isArray(batchesData?.items)) {
-          evidence.fee_plan_readback_audit.reimbursement_batches =
-            batchesData.items.map((batch) => ({
-              batch_id: batch?.batch_id ?? batch?.batchId ?? null,
-              driver_id: batch?.driver_id ?? batch?.driverId ?? null,
-              period_month: batch?.period_month ?? batch?.periodMonth ?? null,
-              statement_id: batch?.statement_id ?? batch?.statementId ?? null,
-              status: batch?.status ?? null,
-              workflow_state:
-                batch?.workflow_state ?? batch?.workflowState ?? null,
-              total_amount: batch?.total_amount ?? batch?.totalAmount ?? null,
-            }));
-        }
-      } catch {
-        // Optional read-only audit enrichment
+      const batchesResp = await fetchImpl(`${apiOrigin}/api/reimbursements`, {
+        method: 'GET',
+        headers: buildApiHeaders({
+          apiIdToken,
+          appSessionToken: opsToken,
+        }),
+      });
+      assertObservedRuntimeHeader(
+        batchesResp,
+        '/api/reimbursements',
+        observedRuntimeSha
+      );
+      const { json: batchesRaw, text: batchesText } =
+        await readResponseJsonOrText(batchesResp);
+      const batchesData = unwrapEnvelope(batchesRaw);
+      if (batchesResp.status !== 200 || !Array.isArray(batchesData?.items)) {
+        throw new Error(
+          `Failed to list reimbursement batches for fee-plan audit: status=${batchesResp.status} body=${sanitizeText(batchesText)}`
+        );
       }
+      evidence.fee_plan_readback_audit.reimbursement_batches =
+        batchesData.items.map((batch) => ({
+          batch_id: batch?.batch_id ?? batch?.batchId ?? null,
+          driver_id: batch?.driver_id ?? batch?.driverId ?? null,
+          period_month: batch?.period_month ?? batch?.periodMonth ?? null,
+          statement_id: batch?.statement_id ?? batch?.statementId ?? null,
+          status: batch?.status ?? null,
+          workflow_state:
+            batch?.workflow_state ?? batch?.workflowState ?? null,
+          total_amount: batch?.total_amount ?? batch?.totalAmount ?? null,
+        }));
 
-      try {
-        const auditResp = await fetchImpl(`${apiOrigin}/api/audit`, {
-          method: 'GET',
-          headers: buildApiHeaders({
-            apiIdToken,
-            appSessionToken: opsToken,
-          }),
-        });
-        const { json: auditRaw } = await readResponseJsonOrText(auditResp);
-        const auditData = unwrapEnvelope(auditRaw);
-        if (auditResp.status === 200 && Array.isArray(auditData?.items)) {
-          evidence.fee_plan_readback_audit.fee_plan_audit_events =
-            auditData.items
-              .filter((evt) => {
-                const resType =
-                  evt?.resource_type ?? evt?.resourceType ?? '';
-                const actName = evt?.action_name ?? evt?.actionName ?? '';
-                return (
-                  resType === 'driver_fee_plan' ||
-                  resType === 'driver_statement' ||
-                  resType === 'driver_reimbursement_batch' ||
-                  actName === 'publish_driver_fee_plan' ||
-                  actName === 'generate_driver_statement' ||
-                  actName === 'generate_reimbursement_batch'
-                );
-              })
-              .map((evt) => ({
-                audit_id: evt?.audit_id ?? evt?.auditId ?? null,
-                action_name: evt?.action_name ?? evt?.actionName ?? null,
-                resource_type: evt?.resource_type ?? evt?.resourceType ?? null,
-                resource_id: evt?.resource_id ?? evt?.resourceId ?? null,
-                actor_id: evt?.actor_id ?? evt?.actorId ?? null,
-                actor_type: evt?.actor_type ?? evt?.actorType ?? null,
-                created_at:
-                  evt?.created_at ??
-                  evt?.createdAt ??
-                  evt?.occurred_at ??
-                  evt?.occurredAt ??
-                  null,
-                new_values_summary:
-                  evt?.new_values_summary ?? evt?.newValuesSummary ?? null,
-              }));
-        }
-      } catch {
-        // Optional read-only audit enrichment
+      const auditResp = await fetchImpl(`${apiOrigin}/api/audit`, {
+        method: 'GET',
+        headers: buildApiHeaders({
+          apiIdToken,
+          appSessionToken: opsToken,
+        }),
+      });
+      assertObservedRuntimeHeader(
+        auditResp,
+        '/api/audit',
+        observedRuntimeSha
+      );
+      const { json: auditRaw, text: auditText } =
+        await readResponseJsonOrText(auditResp);
+      const auditData = unwrapEnvelope(auditRaw);
+      if (auditResp.status !== 200 || !Array.isArray(auditData?.items)) {
+        throw new Error(
+          `Failed to list audit events for fee-plan audit: status=${auditResp.status} body=${sanitizeText(auditText)}`
+        );
       }
+      evidence.fee_plan_readback_audit.fee_plan_audit_events =
+        auditData.items
+          .filter((evt) => {
+            const resType =
+              evt?.resource_type ?? evt?.resourceType ?? '';
+            const actName = evt?.action_name ?? evt?.actionName ?? '';
+            return (
+              resType === 'driver_fee_plan' ||
+              resType === 'driver_statement' ||
+              resType === 'driver_reimbursement_batch' ||
+              actName === 'publish_driver_fee_plan' ||
+              actName === 'generate_driver_statement' ||
+              actName === 'generate_reimbursement_batch'
+            );
+          })
+          .map((evt) => ({
+            audit_id: evt?.audit_id ?? evt?.auditId ?? null,
+            action_name: evt?.action_name ?? evt?.actionName ?? null,
+            resource_type: evt?.resource_type ?? evt?.resourceType ?? null,
+            resource_id: evt?.resource_id ?? evt?.resourceId ?? null,
+            actor_id: evt?.actor_id ?? evt?.actorId ?? null,
+            actor_type: evt?.actor_type ?? evt?.actorType ?? null,
+            created_at:
+              evt?.created_at ??
+              evt?.createdAt ??
+              evt?.occurred_at ??
+              evt?.occurredAt ??
+              null,
+            new_values_summary:
+              evt?.new_values_summary ?? evt?.newValuesSummary ?? null,
+          }));
     }
 
     const isActivePlanOurs = isApprovedFixtureFeePlanIdentity(activePlan);

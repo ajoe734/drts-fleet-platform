@@ -106,7 +106,6 @@ jobs:
       SR_LIVE_DOC_RUNNER_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/evidence-runner-record.json
       SR_LIVE_DOC_SHARED_DEV_ROUNDTRIP_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/shared-dev-artifact-roundtrip.json
       SR_LIVE_DOC_EXECUTION_LOG_PATH: ${{ github.workspace }}/.artifacts/live-document-acceptance/execution-log.txt
-      SR_LIVE_DOC_READBACK_FEE_PLAN_AUDIT: "true"
       SR_LIVE_DOC_LIVE_TARGET_ORIGIN: ${{ github.event.inputs.live_target_origin }}
       SR_LIVE_DOC_LIVE_API_ORIGIN: ${{ github.event.inputs.live_api_origin }}
       SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN: ${{ github.event.inputs.live_tenant_console_origin }}
@@ -321,6 +320,8 @@ jobs:
       - name: Run shared-dev artifact roundtrip acceptance (SR-GCP-ARTIFACT-ACTIVATION-20261004 item 4)
         id: shared_dev_roundtrip
         if: ${{ (github.event.inputs.live_api_origin || vars.DEV_CONTROL_PLANE_API_ORIGIN) != '' }}
+        env:
+          SR_LIVE_DOC_READBACK_FEE_PLAN_AUDIT: "true"
         run: |
           set -o pipefail
           node tests/e2e/system-remediation/sr-live-doc-001/shared-dev-artifact-roundtrip.mjs \
