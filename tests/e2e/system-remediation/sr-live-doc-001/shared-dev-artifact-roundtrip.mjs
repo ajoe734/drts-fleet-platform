@@ -720,9 +720,8 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
 
       // Note: /api/auth/driver/device/register is @OpenRoute(); never pass Google ID token in Authorization.
       const deviceId = `sr-live-doc-roundtrip-${randomUUID().slice(0, 8)}`;
-      const registerResp = await fetchImpl(
-        `${apiOrigin}/api/auth/driver/device/register`,
-        {
+      const attemptDriverDeviceRegister = async () =>
+        fetchImpl(`${apiOrigin}/api/auth/driver/device/register`, {
           method: 'POST',
           headers: buildApiHeaders({
             apiIdToken,
@@ -733,15 +732,88 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
             registrationCode: issuedDriverRegistrationCode,
             deviceId,
           }),
-        }
-      );
+        });
+
+      let registerResp = await attemptDriverDeviceRegister();
       assertObservedRuntimeHeader(
         registerResp,
         '/api/auth/driver/device/register',
         observedRuntimeSha
       );
-      const { json: registerBodyRaw, text: registerText } =
+      let { json: registerBodyRaw, text: registerText } =
         await readResponseJsonOrText(registerResp);
+
+      if (
+        registerResp.status === 404 &&
+        registerBodyRaw?.error?.code === 'DRIVER_NOT_FOUND'
+      ) {
+        // Ensure canonical synthetic driver master record drv-demo-001 is persisted in regulatory-registry
+        const driverSeedPayload = {
+          driverId,
+          name: 'Driver Demo One',
+          supportedServiceBuckets: ['standard_taxi', 'business_dispatch'],
+          licensesValid: true,
+          licenseExpiry: '2027-12-31T23:59:59.000Z',
+          professionalDriverLicenseExpiry: '2027-12-31T23:59:59.000Z',
+          taxiDriverRegistrationExpiry: '2027-12-31T23:59:59.000Z',
+          lifecycleStatus: 'active',
+        };
+        let createDriverResp = await fetchImpl(
+          `${apiOrigin}/api/regulatory-registry/drivers`,
+          {
+            method: 'POST',
+            headers: buildApiHeaders({
+              apiIdToken,
+              appSessionToken: opsToken,
+              extraHeaders: { 'Content-Type': 'application/json' },
+            }),
+            body: JSON.stringify(driverSeedPayload),
+          }
+        );
+        if (createDriverResp.status === 409) {
+          // Force prepareDriverAuthority on the instance to reconcile in-memory seed against Postgres
+          await fetchImpl(
+            `${apiOrigin}/api/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
+            {
+              method: 'POST',
+              headers: buildApiHeaders({
+                apiIdToken,
+                appSessionToken: opsToken,
+                extraHeaders: { 'Content-Type': 'application/json' },
+              }),
+              body: JSON.stringify({ workState: 'available' }),
+            }
+          );
+          createDriverResp = await fetchImpl(
+            `${apiOrigin}/api/regulatory-registry/drivers`,
+            {
+              method: 'POST',
+              headers: buildApiHeaders({
+                apiIdToken,
+                appSessionToken: opsToken,
+                extraHeaders: { 'Content-Type': 'application/json' },
+              }),
+              body: JSON.stringify(driverSeedPayload),
+            }
+          );
+        }
+        assertObservedRuntimeHeader(
+          createDriverResp,
+          '/api/regulatory-registry/drivers',
+          observedRuntimeSha
+        );
+
+        registerResp = await attemptDriverDeviceRegister();
+        assertObservedRuntimeHeader(
+          registerResp,
+          '/api/auth/driver/device/register (retry)',
+          observedRuntimeSha
+        );
+        const retryParsed = await readResponseJsonOrText(registerResp);
+        registerBodyRaw = retryParsed.json;
+        registerText = retryParsed.text;
+      }
+
       const registerBody = unwrapEnvelope(registerBodyRaw);
       const mintedDriverToken =
         registerBody?.accessToken ??
@@ -832,15 +904,15 @@ export async function runSharedDevArtifactRoundtrip(options = {}) {
         `Failed to list driver fee plans: status=${feePlansResp.status} body=${sanitizeDiagnosticSnippet(feePlansText)}`
       );
     }
-    const fixturePlanExists = feePlansData.items.some(
-      (item) =>
-        item &&
-        item.status === 'published' &&
-        (item.planName === 'fixture-platform-funded-reimbursement' ||
-          item.planCode === 'fixture-platform-funded-reimbursement' ||
-          item.reimbursementMode === 'platform_funded')
+    const activeTopPlan = feePlansData.items[0] ?? null;
+    const fixturePlanIsTopActive = Boolean(
+      activeTopPlan &&
+        activeTopPlan.status === 'published' &&
+        (activeTopPlan.reimbursementMode === 'platform_funded' ||
+          activeTopPlan.planCode === 'fixture-platform-funded-reimbursement' ||
+          activeTopPlan.planName === 'fixture-platform-funded-reimbursement')
     );
-    if (!fixturePlanExists) {
+    if (!fixturePlanIsTopActive) {
       const publishPlanResp = await fetchImpl(
         `${apiOrigin}/api/driver-fee-plans/publish`,
         {
