@@ -302,6 +302,10 @@ function getOwnedFulfillmentItems(
         row("groupSize", count(details?.groupSize)),
         row("meetingPoint", text(details?.meetingPoint)),
         row("itineraryLink", text(details?.itineraryLink)),
+        row("guideName", text(order.onsiteContact?.name)),
+        row("guidePhone", text(order.onsiteContact?.phone)),
+        row("plannedStops", text((details?.viaStops ?? []).join(" → "))),
+        row("signage", text(details?.signage)),
         row(
           "rosterPassengers",
           text((details?.rosterPassengers ?? []).join("、")),

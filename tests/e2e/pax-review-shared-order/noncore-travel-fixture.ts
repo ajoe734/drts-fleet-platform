@@ -5,12 +5,23 @@ import type {
   PartnerChannelEntryRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressHandoffSession,
+  BookingRecord,
+  TenantBookingsPageRecord,
   ServiceAreaAdminMutationResponse,
   ServiceAreaBoundaryRecord,
 } from "@drts/contracts";
 import { PartnerFixture } from "../system-remediation/sr-partner-notify-qa-20260917/partner-fixture";
 
 type Data = Record<string, any>;
+export type FleetSupplyPhase = {
+  operation: string;
+  status?: number;
+  code?: string;
+};
+type FleetSupplyControl = {
+  check: () => void;
+  phase: (phase: FleetSupplyPhase) => void;
+};
 export const PARTNER_ORIGIN = "http://127.0.0.1:3007";
 export const NONCORE_API = "http://127.0.0.1:3001";
 export function required(name: string) {
@@ -41,9 +52,13 @@ export class NoncoreTravelFixture {
     keyId: string | null;
   }[] = [];
   private readonly airportAreas: ServiceAreaBoundaryRecord[] = [];
-  readonly platform = required("DRTS_UAT_TOKEN_PLATFORM");
+  get platform() {
+    return required("DRTS_UAT_TOKEN_PLATFORM");
+  }
   readonly tenantId = required("DRTS_UAT_TENANT_A");
-  readonly tenantToken = required("DRTS_UAT_TOKEN_A");
+  get tenantToken() {
+    return required("DRTS_UAT_TOKEN_A");
+  }
 
   async entry(
     partnerType:
@@ -52,7 +67,9 @@ export class NoncoreTravelFixture {
       | "insurance_company"
       | "bank_partner",
     fleetPartnerId?: string,
+    beforeRequest?: () => void,
   ) {
+    beforeRequest?.();
     const slug = `travel-completion-${randomUUID()}`;
     const entry = await this.fixture.call<PartnerChannelEntryRecord>(
       "platform-admin/partner-entries",
@@ -93,6 +110,7 @@ export class NoncoreTravelFixture {
     );
     const owned = { entry, keyId: null as string | null };
     this.scopes.push(owned);
+    beforeRequest?.();
     const issued = await this.fixture.call<PartnerIngressCredentialIssued>(
       `platform-admin/partner-entries/${encodeURIComponent(slug)}/credentials/issue`,
       this.platform,
@@ -113,6 +131,7 @@ export class NoncoreTravelFixture {
     );
     expect(issued.plaintextKey).toBeTruthy();
     owned.keyId = issued.credential.keyId;
+    beforeRequest?.();
     expect(entry.tenantId).toBe(this.tenantId);
     return { entry, apiKey: issued.plaintextKey };
   }
@@ -122,24 +141,43 @@ export class NoncoreTravelFixture {
       | "travel_agency_transfer"
       | "insurance_replacement_vehicle"
       | "credit_card_airport_transfer" = "travel_agency_transfer",
+    control?: FleetSupplyControl,
   ) {
-    const fleet = await this.fixture.call<FleetPartnerRecord>(
+    const operation = async <T>(name: string, run: () => Promise<T>) => {
+      control?.check();
+      control?.phase({ operation: name });
+      const result = await run();
+      control?.check();
+      return result;
+    };
+    const call = <T>(...args: Parameters<PartnerFixture["call"]>) =>
+      operation(`${args[2] ?? "GET"} ${args[0]}`, () =>
+        this.fixture.call<T>(...args),
+      );
+    // Several real allocations may share one tour fixture. Every normal
+    // supply application still needs its own registry identities.
+    const supplyMarker = randomUUID();
+    const supplyMobile = `09${(Number.parseInt(supplyMarker.slice(0, 8), 16) % 100_000_000).toString().padStart(8, "0")}`;
+    const fleet = await call<FleetPartnerRecord>(
       "admin/fleet-partners",
       this.platform,
       "POST",
       {
-        legalName: `SIM synthetic travel fleet ${this.marker}`,
+        legalName: `SIM synthetic travel fleet ${supplyMarker}`,
         displayName: "SIM hosted travel fleet",
-        businessRegistrationNo: `SIM-${this.marker}`,
+        businessRegistrationNo: `SIM-${supplyMarker}`,
         contactName: "SIM Fleet Contact",
         contactPhone: "0900000034",
         active: true,
         partnershipType: "business_dispatch_fleet",
       },
     );
-    const authority = await this.entry("fleet_partner", fleet.fleetPartnerId);
+    const authority = await operation(
+      "Create the normal Fleet entry and credential",
+      () => this.entry("fleet_partner", fleet.fleetPartnerId, control?.check),
+    );
     expect(authority.entry.partnerId).toBe(fleet.fleetPartnerId);
-    const bootstrap = await this.fixture.call<Data>(
+    const bootstrap = await call<Data>(
       "auth/partner/bootstrap-session",
       null,
       "POST",
@@ -152,7 +190,7 @@ export class NoncoreTravelFixture {
     expect(bootstrap.partnerEntry.partnerId).toBe(fleet.fleetPartnerId);
     const token = bootstrap.accessToken as string;
     expect(token).toBeTruthy();
-    const session = await this.fixture.call<Data>("auth/session", token);
+    const session = await call<Data>("auth/session", token);
     expect(session).toMatchObject({
       active: true,
       identity: {
@@ -170,6 +208,9 @@ export class NoncoreTravelFixture {
       method = "GET",
       data?: unknown,
     ) => {
+      control?.check();
+      const name = `${method} fleet API ${apiPath}`;
+      control?.phase({ operation: name });
       const response = await fetch(`${NONCORE_API}/api/${apiPath}`, {
         method,
         headers: { ...headers, "Content-Type": "application/json" },
@@ -177,7 +218,15 @@ export class NoncoreTravelFixture {
         redirect: "error",
         signal: AbortSignal.timeout(20_000),
       });
+      control?.phase({ operation: name, status: response.status });
       const wire = camel(await response.json());
+      control?.phase({
+        operation: name,
+        status: response.status,
+        ...(typeof wire.error?.code === "string"
+          ? { code: wire.error.code }
+          : {}),
+      });
       expect(
         response.status,
         `${method} fleet API ${apiPath}: ${wire.error?.code ?? "response"}`,
@@ -186,6 +235,7 @@ export class NoncoreTravelFixture {
         required("CANDIDATE_SHA"),
       );
       expect(wire.data).toBeDefined();
+      control?.check();
       return wire.data as Data;
     };
     const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -209,12 +259,18 @@ export class NoncoreTravelFixture {
           `%PDF-1.4\n% SIM ${documentType} ${this.marker}\n%%EOF\n`,
         );
         const sha256 = createHash("sha256").update(bytes).digest("hex");
+        control?.check();
+        control?.phase({ operation: `PUT ${base}/documents/${documentType}` });
         const uploaded = await fetch(new URL(grant.uploadUrl, NONCORE_API), {
           method: "PUT",
           headers: { ...headers, "Content-Type": "application/octet-stream" },
           body: new Uint8Array(bytes),
           redirect: "error",
           signal: AbortSignal.timeout(20_000),
+        });
+        control?.phase({
+          operation: `PUT ${base}/documents/${documentType}`,
+          status: uploaded.status,
         });
         expect(uploaded.status).toBe(200);
         expect(camel(await uploaded.json()).data.scanState).toBe("clean");
@@ -229,6 +285,9 @@ export class NoncoreTravelFixture {
           effectiveFrom: from,
           effectiveUntil: until,
         });
+        control?.check();
+        const download = `${base}/documents/${encodeURIComponent(confirmed.documentId)}/download`;
+        control?.phase({ operation: `GET ${download}` });
         const read = await fetch(
           `${NONCORE_API}/api/${base}/documents/${encodeURIComponent(confirmed.documentId)}/download`,
           {
@@ -237,6 +296,7 @@ export class NoncoreTravelFixture {
             signal: AbortSignal.timeout(20_000),
           },
         );
+        control?.phase({ operation: `GET ${download}`, status: read.status });
         expect(read.status).toBe(200);
         expect(
           createHash("sha256")
@@ -250,7 +310,7 @@ export class NoncoreTravelFixture {
       });
       for (const action of ["start", "approve"]) {
         const detail = await fleetCall(base);
-        await this.fixture.call(
+        await call(
           `admin/supply-review/submissions/${encodeURIComponent(submissionId)}/${action}`,
           this.platform,
           "POST",
@@ -277,10 +337,10 @@ export class NoncoreTravelFixture {
       "POST",
       {
         name: "SIM hosted travel driver",
-        mobile: "0900000035",
-        professionalDriverLicenseNo: `SIM-DL-${this.marker}`,
+        mobile: supplyMobile,
+        professionalDriverLicenseNo: `SIM-DL-${supplyMarker}`,
         professionalDriverLicenseExpiry: until,
-        taxiDriverRegistrationNo: `SIM-REG-${this.marker}`,
+        taxiDriverRegistrationNo: `SIM-REG-${supplyMarker}`,
         taxiDriverRegistrationArea: "TPE",
         taxiDriverRegistrationExpiry: until,
         supportedServiceProductCodes,
@@ -293,7 +353,7 @@ export class NoncoreTravelFixture {
     ]);
     // Approval provides canonical registration, not the separate own-Fleet
     // driver affiliation. Establish that existing durable relation normally.
-    await this.fixture.call(
+    await call(
       `admin/drivers/${encodeURIComponent(driver.canonicalDriverId)}/fleet-affiliations`,
       this.platform,
       "POST",
@@ -308,7 +368,7 @@ export class NoncoreTravelFixture {
       "fleet-partner/supply-submissions/vehicles",
       "POST",
       {
-        plateNo: `SIM-${this.marker.slice(0, 8).toUpperCase()}`,
+        plateNo: `SIM-${supplyMarker.slice(0, 8).toUpperCase()}`,
         licenseType: "business_vehicle",
         brand: "SIM",
         model: "synthetic travel vehicle",
@@ -334,24 +394,14 @@ export class NoncoreTravelFixture {
     const vehicleId = vehicle.canonicalVehicleId as string;
     const driverId = driver.canonicalDriverId as string;
     const exclusivity = `regulatory-registry/exclusivities/${encodeURIComponent(vehicleId)}`;
-    await this.fixture.call(
-      `${exclusivity}/submit-review`,
-      this.platform,
-      "POST",
-      {
-        exclusiveProviderName: "SIM synthetic hosted fleet",
-        exclusiveOperatorId: fleet.fleetPartnerId,
-        effectiveStart: `${from}T00:00:00.000Z`,
-        effectiveEnd: `${until}T23:59:59.000Z`,
-      },
-    );
-    await this.fixture.call(
-      `${exclusivity}/approve`,
-      this.platform,
-      "POST",
-      {},
-    );
-    await this.fixture.call(
+    await call(`${exclusivity}/submit-review`, this.platform, "POST", {
+      exclusiveProviderName: "SIM synthetic hosted fleet",
+      exclusiveOperatorId: fleet.fleetPartnerId,
+      effectiveStart: `${from}T00:00:00.000Z`,
+      effectiveEnd: `${until}T23:59:59.000Z`,
+    });
+    await call(`${exclusivity}/approve`, this.platform, "POST", {});
+    await call(
       `regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
       this.platform,
       "POST",
@@ -581,6 +631,73 @@ export class NoncoreTravelFixture {
     expect(booking).toMatchObject({ orderId, bookingId });
     expect(receipt).toMatchObject({ orderId, bookingId });
     return { order, booking, receipt };
+  }
+
+  /** Read the existing scoped history, without manufacturing a group result. */
+  async history(
+    scope: Awaited<ReturnType<NoncoreTravelFixture["entry"]>>,
+    partnerUserRef: string,
+  ) {
+    const session = await this.fixture.call<PartnerIngressHandoffSession>(
+      "partner/ingress/handoff",
+      null,
+      "POST",
+      {
+        entrySlug: scope.entry.entrySlug,
+        apiKey: scope.apiKey,
+        partnerUserRef,
+      },
+    );
+    expect(session.identity).toMatchObject({
+      realm: "partner",
+      actorType: "referral_passenger",
+      tenantId: this.tenantId,
+      partnerId: scope.entry.partnerId,
+      partnerProgramId: scope.entry.programId,
+      partnerEntrySlug: scope.entry.entrySlug,
+    });
+    const readPage = (page: number) =>
+      this.fixture.call<TenantBookingsPageRecord>(
+        `partner/bookings?page=${page}&pageSize=20`,
+        session.accessToken,
+        "GET",
+        undefined,
+        this.tenantId,
+      );
+    const first = await readPage(1);
+    const { totalItems, totalPages } = first.pagination;
+    expect(totalPages).toBe(Math.ceil(totalItems / 20));
+    const items: BookingRecord[] = [];
+    for (let page = 1; page <= Math.max(1, totalPages); page += 1) {
+      const result = page === 1 ? first : await readPage(page);
+      expect(result.pagination).toMatchObject({
+        page,
+        pageSize: 20,
+        totalItems,
+        totalPages,
+      });
+      expect(result.items).toHaveLength(
+        Math.min(20, Math.max(0, totalItems - (page - 1) * 20)),
+      );
+      for (const booking of result.items) {
+        expect(booking).toMatchObject({
+          tenantId: this.tenantId,
+          partnerId: scope.entry.partnerId,
+          partnerProgramId: scope.entry.programId,
+          partnerEntrySlug: scope.entry.entrySlug,
+          businessDispatchSubtype: "travel_agency_transfer",
+        });
+        items.push(booking);
+      }
+    }
+    expect(items).toHaveLength(totalItems);
+    expect(new Set(items.map((booking) => booking.bookingId)).size).toBe(
+      items.length,
+    );
+    expect(new Set(items.map((booking) => booking.orderId)).size).toBe(
+      items.length,
+    );
+    return { items, totalItems, pagesRead: Math.max(1, totalPages) };
   }
 
   async close() {

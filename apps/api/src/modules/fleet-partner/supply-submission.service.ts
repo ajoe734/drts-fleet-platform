@@ -581,6 +581,10 @@ export class SupplySubmissionService implements OnModuleInit {
 
       this.submissions = [submission, ...this.submissions];
       this.driverDrafts = [draft, ...this.driverDrafts];
+      const driverRenewalDetail = this.buildDetail(
+        submissionId,
+        fleetPartnerId,
+      );
       await this.persistChanges(
         { submissions: [submission], driverDrafts: [draft] },
         "create driver renewal draft",
@@ -603,7 +607,7 @@ export class SupplySubmissionService implements OnModuleInit {
         requestId,
       );
 
-      return this.buildDetail(submissionId, fleetPartnerId);
+      return driverRenewalDetail;
     }
 
     const targetVehicleId = command.subjectVehicleId?.trim();
@@ -771,6 +775,10 @@ export class SupplySubmissionService implements OnModuleInit {
 
     this.submissions = [submission, ...this.submissions];
     this.vehicleDrafts = [draft, ...this.vehicleDrafts];
+    const vehicleRenewalDetail = this.buildDetail(
+      submissionId,
+      fleetPartnerId,
+    );
     await this.persistChanges(
       { submissions: [submission], vehicleDrafts: [draft] },
       "create vehicle renewal draft",
@@ -794,7 +802,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return vehicleRenewalDetail;
   }
 
   async updateRenewalDraft(
@@ -1022,6 +1030,7 @@ export class SupplySubmissionService implements OnModuleInit {
 
     this.submissions = [submission, ...this.submissions];
     this.driverDrafts = [draft, ...this.driverDrafts];
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
     await this.persistChanges(
       { submissions: [submission], driverDrafts: [draft] },
       "create driver draft",
@@ -1044,7 +1053,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async updateDriverDraft(
@@ -1160,6 +1169,7 @@ export class SupplySubmissionService implements OnModuleInit {
 
     this.submissions = [submission, ...this.submissions];
     this.vehicleDrafts = [draft, ...this.vehicleDrafts];
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
     await this.persistChanges(
       { submissions: [submission], vehicleDrafts: [draft] },
       "create vehicle draft",
@@ -1182,7 +1192,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async updateVehicleDraft(
@@ -1299,6 +1309,8 @@ export class SupplySubmissionService implements OnModuleInit {
           )
         : undefined;
 
+    const detail = this.buildDetail(submissionId, fleetPartnerId);
+
     await this.persistChanges(
       {
         submissions: [submission],
@@ -1329,7 +1341,7 @@ export class SupplySubmissionService implements OnModuleInit {
       requestId,
     );
 
-    return this.buildDetail(submissionId, fleetPartnerId);
+    return detail;
   }
 
   async withdrawSupplySubmission(

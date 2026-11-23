@@ -94,6 +94,8 @@ export function PartnerBookingRecord({
   principal?: PartnerPrincipalReadback;
 }) {
   const label = (key: string) => t(key, undefined, locale);
+  const tourIncluded =
+    booking.businessDispatchSubtype === "travel_agency_transfer";
   const rows = [
     [label("book.create.bookingId"), booking.bookingId],
     [label("book.create.orderId"), order.orderId],
@@ -208,12 +210,13 @@ export function PartnerBookingRecord({
     };
   }
   const quotation = order.quotedFare;
-  const money = quotation
-    ? new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
-        style: "currency",
-        currency: normalisePlatformCurrency(quotation.currency),
-      }).format(quotation.amountMinor / 100)
-    : label("read.noQuotation");
+  const money =
+    !tourIncluded && quotation
+      ? new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
+          style: "currency",
+          currency: normalisePlatformCurrency(quotation.currency),
+        }).format(quotation.amountMinor / 100)
+      : label("read.noQuotation");
   return (
     <section
       data-testid="partner-persisted-booking"
@@ -297,28 +300,77 @@ export function PartnerBookingRecord({
       {booking.partnerBookingDetails ? (
         <section aria-label={label("read.details")}>
           <h2>{label("read.details")}</h2>
+          {booking.partnerBookingDetails.subtype === "travel_agency_transfer" &&
+          booking.partnerBookingDetails.planSourceKind ? (
+            <aside aria-label={label("book.travel.plan.selection")}>
+              <strong>
+                {label(
+                  "book.travel.plan.source." +
+                    booking.partnerBookingDetails.planSourceKind,
+                )}
+              </strong>
+              <p>{label("book.travel.plan.recordScope")}</p>
+              <p>{label("book.travel.plan.stopsScope")}</p>
+            </aside>
+          ) : null}
           <dl>
             {Object.entries(booking.partnerBookingDetails)
-              .filter(([key]) => key !== "subtype")
+              .filter(
+                ([key]) =>
+                  key !== "subtype" &&
+                  ![
+                    "planSourceId",
+                    "planLegId",
+                    "planBatchId",
+                    "planVehicleId",
+                  ].includes(key),
+              )
               .map(([key, value]) => (
                 <div key={key}>
                   <dt>{label("field." + key)}</dt>
                   <dd>
-                    {Array.isArray(value) ? value.join(" · ") : String(value)}
+                    {key === "planSourceKind"
+                      ? label("book.travel.plan.source." + value)
+                      : key === "planFareBasis"
+                        ? label("book.travel.plan.included")
+                        : key === "routeStops" && Array.isArray(value)
+                          ? value
+                              .map((stop) =>
+                                typeof stop === "object" && stop
+                                  ? stop.address
+                                  : "",
+                              )
+                              .join(" → ")
+                          : Array.isArray(value)
+                            ? value.join(" · ")
+                            : String(value)}
                   </dd>
                 </div>
               ))}
           </dl>
         </section>
       ) : null}
-      <h2>{label("read.quotation")}</h2>
-      <p>{money}</p>
-      {order.quotedFareSource ? (
-        <p>
-          {label("read.quotationSource")}: {order.quotedFareSource}
-        </p>
+      {tourIncluded ? (
+        <aside
+          data-testid="partner-record-tour-fee"
+          aria-label={label("book.travel.fee.title")}
+        >
+          <strong>{label("book.travel.plan.included")}</strong>
+          <p>{label("book.travel.fee.scope")}</p>
+        </aside>
       ) : null}
-      <p>{label("read.notPaidReceipt")}</p>
+      {!tourIncluded ? (
+        <>
+          <h2>{label("read.quotation")}</h2>
+          <p>{money}</p>
+          {order.quotedFareSource ? (
+            <p>
+              {label("read.quotationSource")}: {order.quotedFareSource}
+            </p>
+          ) : null}
+          <p>{label("read.notPaidReceipt")}</p>
+        </>
+      ) : null}
       <nav aria-label={label("read.navigation")}>
         <Link
           href={partnerBookingReadHref(entrySlug, "confirmed", partnerUserRef, {
