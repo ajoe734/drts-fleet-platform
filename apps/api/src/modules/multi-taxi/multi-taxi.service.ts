@@ -47,6 +47,7 @@ import type {
   InvalidatePassengerTripRatingResult,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiOperatingAuthorizationRecord,
+  MultiTaxiElectronicReceipt,
   MultiTaxiTripOperationalAdminView,
   MultiTaxiTripOperationalExportRow,
   MultiTaxiTripOperationalLegalHoldFilter,
@@ -766,7 +767,9 @@ export class MultiTaxiService implements OnModuleInit {
       ...(bookingQuote ? { bookingQuote } : {}),
       rating,
       payment: payment ?? null,
-      receipt: receipt ?? null,
+      receipt: receipt
+        ? this.projectTrustedPassengerReceipt(order.orderId, receipt)
+        : null,
       actions: {
         canCancel: this.isPassengerCancelable(order),
         canRate:
@@ -947,6 +950,13 @@ export class MultiTaxiService implements OnModuleInit {
         { orderId: order.orderId },
       );
     }
+    return this.projectTrustedPassengerReceipt(order.orderId, receipt);
+  }
+
+  private projectTrustedPassengerReceipt(
+    orderId: string,
+    receipt: MultiTaxiElectronicReceipt,
+  ) {
     return {
       ...receipt,
       record: {
