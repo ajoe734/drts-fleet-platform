@@ -877,8 +877,26 @@ describe("Native application composition through production components/SDK and o
       "fixture-quote",
     );
     await press(r, "native-open-lost-item");
-    await enter(r, "app-lost-item", "示意雨傘");
     await enter(r, "app-support-content", "示意申報內容");
+    const submitButton = () =>
+      r.root.findByProps({ testID: "app-support-submit" });
+    expect(
+      r.root.findByProps({ testID: "app-lost-item" }).props.accessibilityLabel,
+    ).toContain("必填");
+    expect(submitButton().props.disabled).toBe(true);
+    await enter(r, "app-lost-item", "   ");
+    await press(r, "app-support-submit");
+    expect(f.calls.some((call) => call.url.endsWith("/complaints"))).toBe(
+      false,
+    );
+    for (const category of ["service", "fare", "other"]) {
+      await press(r, `app-support-category-${category}`);
+      expect(submitButton().props.disabled).toBe(false);
+    }
+    await press(r, "app-support-category-lost_item");
+    expect(submitButton().props.disabled).toBe(true);
+    await enter(r, "app-lost-item", "示意雨傘");
+    expect(submitButton().props.disabled).toBe(false);
     await act(() =>
       r.root
         .findByProps({ testID: "app-support-consent" })

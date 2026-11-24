@@ -10,8 +10,10 @@ import {
   detailCell,
   openContext,
   openRole,
+  pageAlerts,
   probe,
   readDetail,
+  switchLanguage,
   taipeiTime,
   visit,
 } from "./shared-dev-trip-record.mjs";
@@ -70,7 +72,7 @@ export async function language(page, locale, heading, expectImpl) {
       locale === "en"
         ? "切換語言至 English"
         : "Switch language to Traditional Chinese";
-    await page.getByRole("button", { name: label, exact: true }).click();
+    await switchLanguage(page, label, COPY[locale].lang);
   }
   await expect(page.locator("html")).toHaveAttribute("lang", COPY[locale].lang);
   await expect(
@@ -128,7 +130,7 @@ async function publicEntries(browser, cfg, record) {
           const { expect } = await import("@playwright/test");
           await language(page, locale, COPY[locale][title]);
           if (path === "/invite")
-            await expect(page.getByRole("alert")).toHaveText(
+            await expect(pageAlerts(page)).toHaveText(
               COPY[locale].invalidInvite,
             );
           const viewports = [];
@@ -385,7 +387,7 @@ async function rejection(page, cfg, kind, locale) {
       ? "AGENCY_QUERY_INVALID"
       : "AGENCY_REPORT_WINDOW_TOO_LARGE";
   check(envelope.error?.code === code, "report-rejection-code");
-  const alerts = page.getByRole("alert");
+  const alerts = pageAlerts(page);
   await expect(alerts).toHaveCount(2);
   for (const alert of await alerts.all())
     await expect(alert).toHaveText(COPY[locale][kind]);

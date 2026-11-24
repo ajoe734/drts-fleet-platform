@@ -2477,6 +2477,19 @@ function CancelledActions({
 }) {
   return (
     <ActionGroup>
+      {authMode !== "token" ? (
+        <Link
+          href="/"
+          style={{
+            ...buttonStyle("primary"),
+            display: "block",
+            textAlign: "center",
+            textDecoration: "none",
+          }}
+        >
+          {t.BookRide}
+        </Link>
+      ) : null}
       {authMode === "token" ? (
         <a
           href="tel:02-2944-0985"

@@ -897,4 +897,121 @@ describe("NATIVE-EXISTING-EAS-HOSTED-BUILD-LOOKUP-20261123", () => {
     );
     expect(JSON.stringify(receipt)).not.toContain(SENTINEL_TOKEN);
   });
+
+  it("passes EAS_PROJECT_ROOT in defaultEasBuildViewRunner and strips pre-enableJsonOutput() NoVcsClient stdout warning lines before JSON.parse", () => {
+    const projectDir =
+      "/tmp/driver-eas-existing-lookup-test/driver-eas-project";
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOptions: {
+      cwd?: string;
+      env?: Record<string, string | undefined>;
+    } = {};
+
+    const noisyStdout = [
+      "Failed to get Git root path with `git rev-parse --show-toplevel`.",
+      "Error: git exited with non-zero code: 128",
+      JSON.stringify(
+        {
+          id: ANDROID_ID,
+          status: "FINISHED",
+          platform: "ANDROID",
+        },
+        null,
+        2,
+      ),
+    ].join("\n");
+
+    // Demonstrate that raw JSON.parse on the pre-fix combined stdout throws the exact run 45122921302 SyntaxError preimage
+    let rawParseErrorMessage = "";
+    try {
+      JSON.parse(noisyStdout);
+    } catch (err) {
+      rawParseErrorMessage = (err as Error).message;
+    }
+    expect(rawParseErrorMessage).toBe(
+      "Unexpected token 'F', \"Failed to \"... is not valid JSON",
+    );
+    expect(lookup.sha256Hex(rawParseErrorMessage)).toBe(
+      "efdd8f3be5a4bdd66e326d402a43b6f0a50be69c5d12addb1024b3ee08a35f91",
+    );
+
+    const parsed = lookup.defaultEasBuildViewRunner(
+      ANDROID_ID,
+      projectDir,
+      baseEnv(),
+      {
+        execFileSync: (
+          cmd: string,
+          args: string[],
+          opts: { cwd?: string; env?: Record<string, string | undefined> },
+        ) => {
+          capturedCmd = cmd;
+          capturedArgs = args;
+          capturedOptions = opts;
+          return noisyStdout;
+        },
+      },
+    );
+
+    expect(capturedCmd).toBe("npx");
+    expect(capturedArgs).toEqual([
+      "--yes",
+      "eas-cli@21.4.0",
+      "build:view",
+      ANDROID_ID,
+      "--json",
+    ]);
+    expect(capturedOptions.cwd).toBe(projectDir);
+    expect(capturedOptions.env?.EAS_NO_VCS).toBe("1");
+    expect(capturedOptions.env?.EAS_PROJECT_ROOT).toBe(projectDir);
+    expect(parsed).toEqual({
+      id: ANDROID_ID,
+      status: "FINISHED",
+      platform: "ANDROID",
+    });
+  });
+
+  it("classifies early pre-enableJsonOutput() stdout-only EAS authorization errors in memory while preserving stderrSha256 and single-attempt stop", async () => {
+    const viewCalls: string[] = [];
+    const genericStderr = "    Error: build:view command failed.\n";
+    const earlyStdout = `    Entity Not Authorized: AppEntity[${DRIVER_PROJECT_ID}] (action = READ) token=${SENTINEL_TOKEN}\n`;
+
+    const receipt = await lookup.lookupExistingBuilds(baseEnv(), {
+      repoRoot: REPO_ROOT,
+      viewBuild: async (buildId: string) => {
+        viewCalls.push(buildId);
+        const err = new Error(
+          "Command failed: npx eas-cli build:view",
+        ) as Error & {
+          stdout?: string;
+          stderr?: string;
+          status?: number;
+        };
+        err.stdout = earlyStdout;
+        err.stderr = genericStderr;
+        err.status = 1;
+        throw err;
+      },
+    });
+
+    expect(viewCalls).toEqual([ANDROID_ID]);
+    expect(receipt.status).toBe("blocked_unauthorized_awaiting_operator");
+    expect(receipt.awaitingOperatorAction).toBe(true);
+    expect(receipt.builds[0].readbackStatus).toBe("blocked_cli_view_failed");
+    expect(receipt.builds[0].cliFailure).toEqual({
+      exitCode: 1,
+      stderrSha256: lookup.sha256Hex(genericStderr),
+      classification: "UNAUTHORIZED_PROJECT_OR_BUILD_READ",
+      isAuthorizationDenial: true,
+      matchedMarkers: ["ENTITY_NOT_AUTHORIZED"],
+    });
+    expect(receipt.builds[1].readbackStatus).toBe(
+      "skipped_after_authorization_denial",
+    );
+    const serialized = JSON.stringify(receipt);
+    expect(serialized).not.toContain(SENTINEL_TOKEN);
+    expect(serialized).not.toContain("Entity Not Authorized");
+    expect(serialized).not.toContain("build:view command failed");
+  });
 });

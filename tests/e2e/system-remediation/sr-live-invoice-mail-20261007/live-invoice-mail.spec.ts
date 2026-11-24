@@ -1,8 +1,15 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIResponse } from "@playwright/test";
+import { normalizeApiResponse } from "../sr-live-map-001/wire-response";
 import { observeMailbox, type MailboxProbe } from "./invoice-mailbox-adapter";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+
+export function readInvoiceApiResponse(
+  response: Pick<APIResponse, "json">,
+): ReturnType<APIResponse["json"]> {
+  return response.json().then(normalizeApiResponse);
+}
 
 const INVOICE_PROBE: MailboxProbe = {
   flow: "invoice",
@@ -42,7 +49,7 @@ export async function runInvoiceMailPreflight(request: any, config: any, evidenc
     evidenceData.httpCalls.push({ method: "GET", path: `/api/tenant/invoices/${invoiceId}`, status: initialInvoiceResponse.status() });
     expect(initialInvoiceResponse.status()).toBe(200);
 
-    const invoiceData = await initialInvoiceResponse.json();
+    const invoiceData = await readInvoiceApiResponse(initialInvoiceResponse);
     if (invoiceData.data?.tenantId !== tenantId || invoiceData.data?.invoiceId !== invoiceId) {
       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-mismatch");
       throw new Error("Invoice fixture does not belong to authorized dedicated tenant/invoice");
@@ -54,7 +61,7 @@ export async function runInvoiceMailPreflight(request: any, config: any, evidenc
     });
     evidenceData.httpCalls.push({ method: "GET", path: "tenant/billing/profile", status: profileResponse.status() });
     expect(profileResponse.status()).toBe(200);
-    const profileData = await profileResponse.json();
+    const profileData = await readInvoiceApiResponse(profileResponse);
     const rawEmail = profileData.data?.email || "";
     evidenceData.identityEmail = rawEmail ? crypto.createHash("sha256").update(rawEmail).digest("hex") : "";
 
@@ -96,7 +103,7 @@ export async function runInvoiceMailPreflight(request: any, config: any, evidenc
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
     });
     expect(primaryInvoiceListCheck.status()).toBe(200);
-    const primaryInvoiceListData = await primaryInvoiceListCheck.json();
+    const primaryInvoiceListData = await readInvoiceApiResponse(primaryInvoiceListCheck);
     if (primaryInvoiceListData.data?.items?.length !== 1 || primaryInvoiceListData.data?.items[0].invoiceId !== invoiceId) {
        throw new Error("Primary test tenant must have exactly ONE invoice for dedicated fixture verification.");
     }
@@ -109,7 +116,7 @@ export async function runReadOnlyPreflight(request: any, config: any) {
       headers: { authorization: `Bearer ${readOnlyToken}` },
     });
     expect(roSessionCheck.status()).toBe(200);
-    const roSessionData = await roSessionCheck.json();
+    const roSessionData = await readInvoiceApiResponse(roSessionCheck);
     const scopes = roSessionData.data?.identity?.scopes || [];
     expect(scopes).toContain("tenant:billing:read");
     expect(scopes).not.toContain("tenant:billing:write");
@@ -118,7 +125,7 @@ export async function runReadOnlyPreflight(request: any, config: any) {
       headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
     });
     expect(roInvoiceCheck.status()).toBe(200);
-    const roInvoiceData = await roInvoiceCheck.json();
+    const roInvoiceData = await readInvoiceApiResponse(roInvoiceCheck);
     if (roInvoiceData.data?.tenantId !== readOnlyTenantId || roInvoiceData.data?.invoiceId !== readOnlyInvoiceId) {
       throw new Error("Read-only invoice fixture mismatch");
     }
@@ -126,7 +133,7 @@ export async function runReadOnlyPreflight(request: any, config: any) {
       headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
     });
     expect(roProfileCheck.status()).toBe(200);
-    const roProfileData = await roProfileCheck.json();
+    const roProfileData = await readInvoiceApiResponse(roProfileCheck);
     if (roProfileData.data?.tenantId !== readOnlyTenantId || roProfileData.data?.email !== readOnlyRecipient) {
       throw new Error("Read-only recipient mismatch");
     }
@@ -139,7 +146,7 @@ export async function runNonAllowlistPreflight(request: any, config: any, allowe
       headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
     });
     expect(naInvoiceCheck.status()).toBe(200);
-    const naInvoiceData = await naInvoiceCheck.json();
+    const naInvoiceData = await readInvoiceApiResponse(naInvoiceCheck);
     if (naInvoiceData.data?.tenantId !== nonAllowlistTenantId || naInvoiceData.data?.invoiceId !== nonAllowlistInvoiceId) {
       throw new Error("Non-allowlist invoice fixture mismatch");
     }
@@ -148,7 +155,7 @@ export async function runNonAllowlistPreflight(request: any, config: any, allowe
       headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
     });
     expect(naInvoiceListCheck.status()).toBe(200);
-    const naInvoiceListData = await naInvoiceListCheck.json();
+    const naInvoiceListData = await readInvoiceApiResponse(naInvoiceListCheck);
     if (naInvoiceListData.data?.items?.length !== 1 || naInvoiceListData.data?.items[0].invoiceId !== nonAllowlistInvoiceId) {
       throw new Error("Non-allowlist test tenant must have exactly ONE invoice for dedicated fixture verification.");
     }
@@ -157,7 +164,7 @@ export async function runNonAllowlistPreflight(request: any, config: any, allowe
       headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
     });
     expect(naProfileCheck.status()).toBe(200);
-    const naProfileData = await naProfileCheck.json();
+    const naProfileData = await readInvoiceApiResponse(naProfileCheck);
     if (naProfileData.data?.email !== nonAllowlistedRecipient) {
       throw new Error("Non-allowlist fixture email does not match reserved negative recipient");
     }
@@ -282,7 +289,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       const nonAllowlistResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId, "idempotency-key": "na-" + Date.now() },
       });
-      const naData = nonAllowlistResponse.ok() ? await nonAllowlistResponse.json() : null;
+      const naData = nonAllowlistResponse.ok() ? await readInvoiceApiResponse(nonAllowlistResponse) : null;
       evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, scenario: "non_allowlisted", status: nonAllowlistResponse.status(), delivery_id: naData?.data?.deliveryId });
 
       // Check durable failure if accepted, or immediate rejection
@@ -294,7 +301,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
            const check = await request.get(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
               headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
            });
-           const dData = await check.json();
+           const dData = await readInvoiceApiResponse(check);
            const dDel = dData.data?.deliveries?.find((d: any) => d.deliveryId === naDeliveryId);
            const attempt = dDel?.attempts?.find((a: any) => a.outcome === "failed" && a.errorCode === "SMTP_RECIPIENT_NOT_ALLOWLISTED");
            if (dDel?.status === "failed" && attempt && attempt.acceptedAt === null && attempt.retryable === false) {
@@ -328,12 +335,12 @@ test.describe("Live Invoice Mail Acceptance", () => {
     });
 
     // F3: Post expects 201 Created
+    const sendResult = sendResponse.ok() ? await readInvoiceApiResponse(sendResponse) : {};
     evidenceData.httpCalls.push({
       method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "normal_send", status: sendResponse.status(),
-      delivery_id: sendResponse.ok() ? (await sendResponse.json()).data?.deliveryId : null,
+      delivery_id: sendResult.data?.deliveryId || null,
     });
     expect(sendResponse.status()).toBe(201);
-    const sendResult = await sendResponse.json();
     const deliveryId = sendResult.data?.deliveryId;
     expect(deliveryId).toBeTruthy();
     evidenceData.trackedResources.push({ type: "delivery", id: deliveryId });
@@ -343,7 +350,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
     });
     expect(getMailBeforeRetry.status()).toBe(200);
-    const mailBeforeRetry = await getMailBeforeRetry.json();
+    const mailBeforeRetry = await readInvoiceApiResponse(getMailBeforeRetry);
     const initialDelivery = mailBeforeRetry.data?.deliveries?.find((d: any) => d.deliveryId === deliveryId);
     const initialAttemptsCount = initialDelivery?.attempts?.length || 0;
     expect(initialAttemptsCount).toBeGreaterThan(0);
@@ -354,7 +361,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     });
     evidenceData.httpCalls.push({
       method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "idempotent_retry", status: retryResponse.status(),
-      delivery_id: retryResponse.ok() ? (await retryResponse.json()).data?.deliveryId : null,
+      delivery_id: retryResponse.ok() ? (await readInvoiceApiResponse(retryResponse)).data?.deliveryId : null,
     });
     expect(retryResponse.status()).toBe(201);
 
@@ -363,7 +370,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
     });
     expect(getMailAfterRetry.status()).toBe(200);
-    const mailAfterRetry = await getMailAfterRetry.json();
+    const mailAfterRetry = await readInvoiceApiResponse(getMailAfterRetry);
     const retryDelivery = mailAfterRetry.data?.deliveries?.find((d: any) => d.deliveryId === deliveryId);
 
     evidenceData.durableDeliveries.push({
@@ -383,7 +390,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId, "idempotency-key": newIdempotencyKey },
     });
 
-    const resendResult = resendResponse.ok() ? await resendResponse.json() : {};
+    const resendResult = resendResponse.ok() ? await readInvoiceApiResponse(resendResponse) : {};
     evidenceData.httpCalls.push({
       method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "intentional_resend", status: resendResponse.status(),
       delivery_id: resendResult.data?.deliveryId || null,
@@ -394,7 +401,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     const getMailResponse = await request.get(`${apiOrigin}/api/tenant/invoices/${invoiceId}/mail`, {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
     });
-    const mailData = await getMailResponse.json();
+    const mailData = await readInvoiceApiResponse(getMailResponse);
     evidenceData.httpCalls.push({
       method: "GET", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "durable_get", status: getMailResponse.status(),
     });
@@ -523,7 +530,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       maxRedirects: 0
     });
     expect(invalidDownloadResponse.status()).toBe(403);
-    const errorBody = await invalidDownloadResponse.json().catch(() => ({}));
+    const errorBody = await readInvoiceApiResponse(invalidDownloadResponse).catch(() => ({}));
     expect(errorBody.error?.code).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
     evidenceData.httpCalls.push({ method: "GET", path: "bad_sig_api", status: invalidDownloadResponse.status() });
 
@@ -601,7 +608,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const protectedPortalApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${invoiceId}`, portalOrigin).href;
         const wtResponse = await page.request.get(protectedPortalApiUrl);
         expect(wtResponse.status()).toBe(404);
-        const errBody = await wtResponse.json().catch(() => ({}));
+        const errBody = await readInvoiceApiResponse(wtResponse).catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
 
         evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: wrongDownloadObserved || (wrongDownloadLinkCount > 0) });
