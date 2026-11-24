@@ -21,6 +21,8 @@ import { NotificationDeliveryService } from "../../../../apps/api/src/modules/no
 import {
   DeliveryTransportError,
   type MailTransport,
+  type OutgoingMailMessage,
+  type PlatformTransportMessage,
   type ProviderAcknowledgement,
   type TransportMessage,
 } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
@@ -311,6 +313,84 @@ describe("SR-MAIL-001 tenant invitation email delivery", () => {
       expect(transport.send).toHaveBeenCalledTimes(1);
     } finally {
       await appCtx.close();
+    }
+  });
+
+  it("delivers realm-routed password-reset links to the controlled receiver across tenant, agency, and partner origins", async () => {
+    vi.stubEnv(
+      "TENANT_INVITATION_ACCEPT_URL_BASE",
+      "https://tenant.controlled-receiver.test/api/auth/tenant/login",
+    );
+    vi.stubEnv(
+      "AGENCY_INVITATION_ACCEPT_URL_BASE",
+      "https://agency.controlled-receiver.test/invite",
+    );
+    vi.stubEnv(
+      "FLEET_INVITATION_ACCEPT_URL_BASE",
+      "https://fleet.controlled-receiver.test/invite",
+    );
+    vi.stubEnv(
+      "PASSWORD_RESET_URL_BASE",
+      "https://tenant.controlled-receiver.test/reset-password",
+    );
+    try {
+      const sentMessages: OutgoingMailMessage[] = [];
+      const transport: MailTransport = {
+        provider: "controlled-test-receiver",
+        send: vi.fn(async (message: TransportMessage) => {
+          sentMessages.push(message);
+          return acknowledgement(`outbox-${sentMessages.length}`);
+        }),
+        sendPlatform: vi.fn(async (message: PlatformTransportMessage) => {
+          sentMessages.push(message);
+          return acknowledgement(`platform-${sentMessages.length}`);
+        }),
+      };
+      const adapter = new TenantInvitationDeliveryService(
+        deliveryService(transport),
+      );
+
+      const tenantOutcome = await adapter.sendPasswordReset({
+        dedupeKey: "sr-mail-reset-tenant-1",
+        realm: "tenant",
+        tenantId: "tenant-controlled-001",
+        recipientEmail: "tenant-user@controlled-receiver.test",
+        expiresAt: "2026-11-23T05:00:00.000Z",
+        rawToken: "pwr_sr_mail_tenant_token",
+      });
+      const agencyOutcome = await adapter.sendPasswordReset({
+        dedupeKey: "sr-mail-reset-agency-1",
+        realm: "agency",
+        tenantId: null,
+        recipientEmail: "agency-user@controlled-receiver.test",
+        expiresAt: "2026-11-23T05:00:00.000Z",
+        rawToken: "pwr_sr_mail_agency_token",
+      });
+      const partnerOutcome = await adapter.sendPasswordReset({
+        dedupeKey: "sr-mail-reset-partner-1",
+        realm: "partner",
+        tenantId: null,
+        recipientEmail: "partner-user@controlled-receiver.test",
+        expiresAt: "2026-11-23T05:00:00.000Z",
+        rawToken: "pwr_sr_mail_partner_token",
+      });
+
+      expect(tenantOutcome.status).toBe("sent");
+      expect(agencyOutcome.status).toBe("sent");
+      expect(partnerOutcome.status).toBe("sent");
+      expect(sentMessages).toHaveLength(3);
+
+      expect(sentMessages[0]?.body).toContain(
+        "Reset your password: https://tenant.controlled-receiver.test/reset-password?token=pwr_sr_mail_tenant_token",
+      );
+      expect(sentMessages[1]?.body).toContain(
+        "Reset your password: https://agency.controlled-receiver.test/reset-password?token=pwr_sr_mail_agency_token",
+      );
+      expect(sentMessages[2]?.body).toContain(
+        "Reset your password: https://fleet.controlled-receiver.test/reset-password?token=pwr_sr_mail_partner_token",
+      );
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 });

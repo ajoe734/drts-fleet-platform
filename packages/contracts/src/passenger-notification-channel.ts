@@ -345,7 +345,8 @@ export interface FirstPartyPushMessage {
 export interface FirstPartyPushDeliveryContext {
   outboxId: string;
   orderId: string;
-  tenantId: string;
+  /** Matches the frozen route. Direct passenger bookings have no tenant. */
+  tenantId: string | null;
   /** Snapshot of the devices targeted at first-attempt time; a retry only re-sends to still-`active` entries from this list. */
   targetDevices: Array<{ deviceId: string; tokenSha256: string }>;
   wireMessage: FirstPartyPushMessage;

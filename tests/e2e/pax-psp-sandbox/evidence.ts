@@ -1,6 +1,7 @@
 /**
- * PAX-PSP-SANDBOX-EVIDENCE-20261101 — masked evidence recording for the ECPay
- * Stage run on a GitHub-hosted runner.
+ * PAX-PSP-SANDBOX-EVIDENCE-20261101 & PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123 —
+ * masked evidence recording for the ECPay Stage product-order flow on a
+ * GitHub-hosted runner.
  *
  * Rules enforced here (task spec §4):
  * - card numbers keep only the last four digits;
@@ -13,7 +14,8 @@
  * The recording fetch only observes the calls the merged EcpayPaymentProvider
  * makes; request construction, encryption and response handling stay in the
  * adapter. It decrypts responses with the merged ecpay-cipher helper solely to
- * record HTTP status / TransCode / RtnCode per call.
+ * record HTTP status / TransCode / RtnCode per call and register any new
+ * sensitive tokens with Redactor.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -122,6 +124,15 @@ export interface StepRecord {
   error: string | null;
 }
 
+export interface ProductFindingRecord {
+  id: string;
+  component: string;
+  normalUseCase: string;
+  symptom: string;
+  rootCause: string;
+  recommendedFixScope: string;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -134,10 +145,64 @@ function stringField(value: unknown): string | null {
   return null;
 }
 
+/** Registers any secret identifiers found inside a decrypted ECPay payload. */
+export function registerDecryptedSecrets(
+  data: Record<string, unknown>,
+  redactor?: Redactor,
+): {
+  bindCardId: string | null;
+  tradeNo: string | null;
+  merchantTradeNo: string | null;
+  merchantMemberId: string | null;
+} {
+  const scopes = [
+    data,
+    asRecord(data.OrderInfo),
+    asRecord(data.CardInfo),
+    asRecord(data.ConsumerInfo),
+    asRecord(data.RtnValue),
+    asRecord(data.ThreeDInfo),
+  ].filter((scope): scope is Record<string, unknown> => scope !== null);
+  let bindCardId: string | null = null;
+  let tradeNo: string | null = null;
+  let merchantTradeNo: string | null = null;
+  let merchantMemberId: string | null = null;
+
+  for (const scope of scopes) {
+    const bId = stringField(scope.BindCardID);
+    if (bId) {
+      bindCardId = bindCardId ?? bId;
+      redactor?.add(bId);
+    }
+    const tNo = stringField(scope.TradeNo);
+    if (tNo) {
+      tradeNo = tradeNo ?? tNo;
+      redactor?.add(tNo);
+    }
+    const mtn = stringField(scope.MerchantTradeNo);
+    if (mtn) {
+      merchantTradeNo = merchantTradeNo ?? mtn;
+      redactor?.add(mtn);
+    }
+    const mmId = stringField(scope.MerchantMemberID);
+    if (mmId) {
+      merchantMemberId = merchantMemberId ?? mmId;
+      redactor?.add(mmId);
+    }
+    const token = stringField(scope.Token);
+    if (token) redactor?.add(token);
+    const threeDUrl = stringField(scope.ThreeDURL);
+    if (threeDUrl) redactor?.add(threeDUrl);
+  }
+  return { bindCardId, tradeNo, merchantTradeNo, merchantMemberId };
+}
+
 /** Extracts only masked/non-sensitive response facts from a decrypted Data. */
 export function maskedResponseFields(
   data: Record<string, unknown>,
+  redactor?: Redactor,
 ): Record<string, Scalar> {
+  registerDecryptedSecrets(data, redactor);
   const fields: Record<string, Scalar> = {};
   const scopes = [
     data,
@@ -178,12 +243,46 @@ export function maskedResponseFields(
 }
 
 /**
+ * Decrypts a raw OrderResultURL / ReturnURL callback body solely to register
+ * its secrets (`BindCardID`, `TradeNo`, `MerchantTradeNo`, `MerchantMemberID`)
+ * with Redactor and return `bindCardId` for `finally`-block cleanup safety.
+ */
+export function extractCallbackBindCardIdAndRegister(params: {
+  raw: string;
+  merchantId: string;
+  hashKey: string;
+  hashIv: string;
+  redactor: Redactor;
+}): {
+  bindCardId: string | null;
+  tradeNo: string | null;
+  merchantTradeNo: string | null;
+  merchantMemberId: string | null;
+} {
+  try {
+    const unwrapped = verifyAndUnwrapEcpayEnvelope({
+      envelope: params.raw,
+      merchantId: params.merchantId,
+      hashKey: params.hashKey,
+      hashIv: params.hashIv,
+    });
+    return registerDecryptedSecrets(unwrapped.data, params.redactor);
+  } catch {
+    return {
+      bindCardId: null,
+      tradeNo: null,
+      merchantTradeNo: null,
+      merchantMemberId: null,
+    };
+  }
+}
+
+/**
  * Describes the *structure* of a raw OrderResultURL/ReturnURL callback body
  * without reading any field value: only key names, nesting kind, and
  * lengths. Used to diagnose `verifyNotification` failures against the real
- * ECPay Stage wire format (which the merged adapter has never observed
- * outside its own synthetic unit-test fixtures) without risking a PAN,
- * token, or HashKey/HashIV leak into evidence artifacts.
+ * ECPay Stage wire format without risking a PAN, token, or HashKey/HashIV
+ * leak into evidence artifacts.
  */
 export function describeCallbackBodyShape(raw: string): Record<string, Scalar> {
   const trimmed = raw.trim();
@@ -226,12 +325,6 @@ export function describeCallbackBodyShape(raw: string): Record<string, Scalar> {
     callbackFormKeys: formKeys.join(","),
     callbackHasResultData: resultData !== null,
     callbackResultDataKind: resultDataKind,
-    // Confirms/refutes the adapter's assumption that a flat form always
-    // carries RpHeader/RqHeader as an already-structured value: a bare
-    // top-level form field is always a *string*, so if ECPay sends the
-    // header this way (not nested inside a ResultData JSON envelope),
-    // verifyAndUnwrapEcpayEnvelope's `typeof headerRaw !== "object"` check
-    // rejects it even though the envelope is genuine.
     callbackHasFlatHeaderField: rpHeaderRaw !== null,
   };
 }
@@ -242,8 +335,7 @@ export function describeCallbackBodyShape(raw: string): Record<string, Scalar> {
  * (`normalizeEcpayEnvelopeInput`, `decryptEcpayData`) step by step instead of
  * the combined function, which only ever throws one generic error. Records
  * field *names*, booleans, lengths and a clock-skew delta only — never a
- * field value — so a HashKey/HashIV/PAN/token can never leak through this
- * diagnostic even though it has them in scope to attempt the real decrypt.
+ * field value.
  */
 export function diagnoseEnvelopeVerification(params: {
   raw: string;
@@ -387,7 +479,7 @@ export function createRecordingFetch(params: {
             typeof unwrapped.data.RtnMsg === "string"
               ? redactor.text(unwrapped.data.RtnMsg)
               : null;
-          record.fields = maskedResponseFields(unwrapped.data);
+          record.fields = maskedResponseFields(unwrapped.data, redactor);
         } catch {
           record.error = record.error ?? "response_envelope_unverifiable";
         }
@@ -415,8 +507,12 @@ export function createRecordingFetch(params: {
 
 export interface SandboxEvidence {
   schema: typeof EVIDENCE_SCHEMA;
-  taskId: "PAX-PSP-SANDBOX-EVIDENCE-20261101";
-  acceptanceKey: "pax-psp_sandbox_bind_and_charge_evidence";
+  taskId:
+    | "PAX-PSP-SANDBOX-EVIDENCE-20261101"
+    | "PAX-PRODUCT-ORDER-ECPAY-STAGE-20261123";
+  acceptanceKey:
+    | "pax-psp_sandbox_bind_and_charge_evidence"
+    | "hosted_same_product_order_stage_binding_capture_and_ledger";
   candidateSha: string;
   runUrl: string | null;
   runId: string | null;
@@ -424,6 +520,9 @@ export interface SandboxEvidence {
   startedAt: string;
   finishedAt: string | null;
   environment: Record<string, Scalar>;
+  callbackDelivery?: Record<string, Scalar>;
+  productOrder?: Record<string, Scalar>;
+  productFindings?: ProductFindingRecord[];
   steps: StepRecord[];
   calls: EcpayCallRecord[];
   screenshots: string[];
@@ -453,7 +552,7 @@ function cell(value: Scalar | undefined): string {
 
 export function renderSummaryMarkdown(evidence: SandboxEvidence): string {
   const lines: string[] = [];
-  lines.push("# PAX-PSP-SANDBOX-EVIDENCE-20261101 — ECPay Stage evidence");
+  lines.push(`# ${evidence.taskId} — ECPay Stage product-order evidence`);
   lines.push("");
   lines.push(`- candidate SHA: \`${evidence.candidateSha}\``);
   lines.push(`- run: ${evidence.runUrl ?? "(local)"}`);
@@ -462,6 +561,9 @@ export function renderSummaryMarkdown(evidence: SandboxEvidence): string {
   );
   lines.push(
     `- acceptance satisfied: **${cell(evidence.acceptance.satisfied)}**`,
+  );
+  lines.push(
+    `- hosted_same_product_order_stage_binding_capture_and_ledger: **${cell(evidence.acceptance.hosted_same_product_order_stage_binding_capture_and_ledger)}**`,
   );
   lines.push("");
   lines.push("## Steps");
@@ -475,6 +577,20 @@ export function renderSummaryMarkdown(evidence: SandboxEvidence): string {
     lines.push(
       `| ${step.name} | ${step.status} | ${cell(step.finishedAt)} | ${outcome || "—"} | ${cell(step.error)} |`,
     );
+  }
+  if (evidence.callbackDelivery) {
+    lines.push("");
+    lines.push("## Callback Delivery Provenance");
+    lines.push("");
+    for (const [key, value] of Object.entries(evidence.callbackDelivery))
+      lines.push(`- ${key}: ${cell(value)}`);
+  }
+  if (evidence.productOrder) {
+    lines.push("");
+    lines.push("## Same Product Order, Receipt & Dual Payment Ledger");
+    lines.push("");
+    for (const [key, value] of Object.entries(evidence.productOrder))
+      lines.push(`- ${key}: ${cell(value)}`);
   }
   lines.push("");
   lines.push("## ECPay calls (via merged EcpayPaymentProvider)");
@@ -496,6 +612,16 @@ export function renderSummaryMarkdown(evidence: SandboxEvidence): string {
   lines.push("");
   for (const [key, value] of Object.entries(evidence.refund))
     lines.push(`- ${key}: ${cell(value)}`);
+  if (evidence.productFindings && evidence.productFindings.length > 0) {
+    lines.push("");
+    lines.push("## Product-Side Findings (Reported to Maintenance Line)");
+    lines.push("");
+    for (const finding of evidence.productFindings) {
+      lines.push(
+        `- **${finding.id}** (\`${finding.component}\`): ${finding.symptom} — Normal use case: ${finding.normalUseCase}. Root cause: ${finding.rootCause}. Recommended fix scope: \`${finding.recommendedFixScope}\`.`,
+      );
+    }
+  }
   lines.push("");
   lines.push("## Acceptance");
   lines.push("");

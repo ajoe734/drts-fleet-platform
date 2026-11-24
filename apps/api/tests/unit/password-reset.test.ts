@@ -1,12 +1,100 @@
+import { createHmac } from "node:crypto";
 import type {
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
   CanonicalIdentitySessionRecord,
 } from "@drts/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Boundary simulation note (AI_COLLABORATION_GUIDE.md §0.7):
+// 1. This VM's shared node_modules resolves zod@3.25.76 inside packages/contracts
+//    instead of zod@^4.6.6, causing unrelated `packages/contracts/src/unattended-voice.ts`
+//    (`z.string().guid()`) to throw at barrel import time. Stubbing that unrelated
+//    voice-schema barrel leaf lets the real `@drts/contracts` identity/auth contracts,
+//    `AuthController`, `PlatformAdminService`, and `AuditNotificationService` load.
+// 2. This VM's shared node_modules does not have the native `argon2` or `otplib`
+//    packages installed locally. Password-reset delivery, token issuance/consumption,
+//    session revocation, AuthController#requestPasswordReset/#confirmPasswordReset,
+//    and PlatformAdminService#sendUserPasswordReset are exercised with their real
+//    production classes below; only the low-level argon2 digest primitive in
+//    PasswordHashingService (and unused TotpService module import) is shimmed so
+//    AuthController can be imported and executed in this worktree.
+vi.mock("../../../../packages/contracts/src/unattended-voice", () => ({}));
+vi.mock(
+  "../../../../packages/contracts/src/voice-callback-operations",
+  () => ({}),
+);
+
+vi.mock("../../src/common/auth/password-hashing.service", () => {
+  class PasswordPepperNotConfiguredError extends Error {
+    constructor(message = "Password pepper is not configured.") {
+      super(message);
+      this.name = "PasswordPepperNotConfiguredError";
+    }
+  }
+  class PasswordHashingService {
+    async hash(password: string): Promise<{
+      hash: string;
+      algo: "argon2id";
+      pepperVersion: string;
+    }> {
+      const rawJson = process.env.PASSWORD_PEPPER_SECRETS_JSON?.trim();
+      const currentVersion =
+        process.env.PASSWORD_PEPPER_CURRENT_VERSION?.trim() || "v1";
+      if (!rawJson) {
+        throw new PasswordPepperNotConfiguredError();
+      }
+      let secrets: Record<string, string>;
+      try {
+        secrets = JSON.parse(rawJson) as Record<string, string>;
+      } catch {
+        throw new PasswordPepperNotConfiguredError();
+      }
+      const pepper = secrets[currentVersion];
+      if (!pepper) {
+        throw new PasswordPepperNotConfiguredError();
+      }
+      const digest = createHmac("sha256", pepper)
+        .update(password)
+        .digest("hex");
+      return {
+        hash: `argon2id$v=19$m=19456,t=2,p=1$${currentVersion}$${digest}`,
+        algo: "argon2id",
+        pepperVersion: currentVersion,
+      };
+    }
+  }
+  return {
+    PasswordHashingService,
+    PasswordPepperNotConfiguredError,
+  };
+});
+
+vi.mock("../../src/modules/auth/totp.service", () => ({
+  TotpService: class {},
+  TotpCodeInvalidError: class extends Error {},
+  TotpCodeReplayedError: class extends Error {},
+  TotpKeyNotConfiguredError: class extends Error {},
+  TotpNotEnrolledError: class extends Error {},
+}));
+
+vi.mock(
+  "../../src/modules/notification-delivery/remote-smtp-mail.transport",
+  () => ({
+    RemoteSmtpMailTransport: class {},
+  }),
+);
+
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { AuthController } from "../../src/modules/auth/auth.controller";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
-import { TenantInvitationDeliveryService } from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
+import { PlatformAdminService } from "../../src/modules/platform-admin/platform-admin.service";
+import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
+import {
+  TenantInvitationDeliveryService,
+  buildPasswordResetEmailBody,
+  resolvePasswordResetBaseUrl,
+} from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
 import type {
   DeliveryReceipt,
   EnqueueMail,
@@ -457,20 +545,556 @@ describe("TenantInvitationDeliveryService password-reset mail", () => {
   });
 });
 
-// PlatformAdminService.sendUserPasswordReset (the admin "send reset" trigger,
-// SA/SD §6) is deliberately not exercised in this file. Importing
-// PlatformAdminService or AuditNotificationService here pulls in
-// @drts/contracts' runtime barrel, and this worktree's installed zod
-// (3.25.76) does not satisfy packages/contracts/package.json's declared
-// `zod: ^4.6.6`: `z.string().guid()` in packages/contracts/src/unattended-
-// voice.ts throws at import time ("z.string(...).guid is not a function"),
-// independent of anything in this task. This is pre-existing and
-// environment-wide, not specific to password-reset: the already-merged
-// tests/unit/audit-notification.service.test.ts fails identically in this
-// worktree. Confirmed by running it unmodified:
-//   pnpm --filter @drts/api exec vitest run tests/unit/audit-notification.service.test.ts
-// -> TypeError: z.string(...).guid is not a function, same stack.
-// sendUserPasswordReset was verified by code reading against SA/SD §6
-// (reasonCode required, actor required, 404/409 on an inactive/credential-
-// less target, audit record carries no password field) pending this
-// environment defect being fixed; see the task handoff for detail.
+function extractResetLinkFromEmailBody(body: string): URL {
+  const match = /^Reset your password:\s*(\S+)$/m.exec(body);
+  expect(match?.[1]).toBeTruthy();
+  return new URL(match![1]!);
+}
+
+describe("PORTAL-PASSWORD-RESET-EMAIL-ROUTING-20261123: realm-routed reset email links, existing callers, and legacy config compatibility", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("routes tenant, agency, and partner reset links to each realm's trusted portal /reset-password page even when PASSWORD_RESET_URL_BASE points to tenant", async () => {
+    vi.stubEnv(
+      "TENANT_INVITATION_ACCEPT_URL_BASE",
+      "https://tenant.portal.example.test/api/auth/tenant/login",
+    );
+    vi.stubEnv(
+      "AGENCY_INVITATION_ACCEPT_URL_BASE",
+      "https://agency.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "FLEET_INVITATION_ACCEPT_URL_BASE",
+      "https://fleet.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "PASSWORD_RESET_URL_BASE",
+      "https://tenant.portal.example.test/reset-password",
+    );
+
+    const { service, calls } = createFakeNotificationDeliveryService();
+    const delivery = new TenantInvitationDeliveryService(service);
+
+    await delivery.sendPasswordReset({
+      dedupeKey: "routing_tenant:1",
+      realm: "tenant",
+      tenantId: "tenant_demo",
+      recipientEmail: "tenant-member@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_tenant_token_001",
+    });
+    await delivery.sendPasswordReset({
+      dedupeKey: "routing_agency:1",
+      realm: "agency",
+      tenantId: null,
+      recipientEmail: "agency-member@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_agency_token_001",
+    });
+    await delivery.sendPasswordReset({
+      dedupeKey: "routing_partner:1",
+      realm: "partner",
+      tenantId: null,
+      recipientEmail: "fleet-member@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_partner_token_001",
+    });
+
+    const tenantUrl = extractResetLinkFromEmailBody(calls.enqueue[0]!.body);
+    expect(tenantUrl.origin).toBe("https://tenant.portal.example.test");
+    expect(tenantUrl.pathname).toBe("/reset-password");
+    expect(tenantUrl.searchParams.get("token")).toBe("pwr_tenant_token_001");
+
+    const agencyUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[0]!.body,
+    );
+    expect(agencyUrl.origin).toBe("https://agency.portal.example.test");
+    expect(agencyUrl.pathname).toBe("/reset-password");
+    expect(agencyUrl.searchParams.get("token")).toBe("pwr_agency_token_001");
+
+    const partnerUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[1]!.body,
+    );
+    expect(partnerUrl.origin).toBe("https://fleet.portal.example.test");
+    expect(partnerUrl.pathname).toBe("/reset-password");
+    expect(partnerUrl.searchParams.get("token")).toBe("pwr_partner_token_001");
+  });
+
+  it("preserves legacy single-URL PASSWORD_RESET_URL_BASE behavior when no per-portal invitation URL is configured", async () => {
+    vi.stubEnv("TENANT_INVITATION_ACCEPT_URL_BASE", "");
+    vi.stubEnv("AGENCY_INVITATION_ACCEPT_URL_BASE", "");
+    vi.stubEnv("FLEET_INVITATION_ACCEPT_URL_BASE", "");
+    vi.stubEnv(
+      "PASSWORD_RESET_URL_BASE",
+      "https://legacy-single.example.test/reset-password?lang=zh-TW",
+    );
+
+    const { service, calls } = createFakeNotificationDeliveryService();
+    const delivery = new TenantInvitationDeliveryService(service);
+
+    await delivery.sendPasswordReset({
+      dedupeKey: "legacy_tenant:1",
+      realm: "tenant",
+      tenantId: "tenant_demo",
+      recipientEmail: "tenant@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_legacy_tenant",
+    });
+    await delivery.sendPasswordReset({
+      dedupeKey: "legacy_agency:1",
+      realm: "agency",
+      tenantId: null,
+      recipientEmail: "agency@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_legacy_agency",
+    });
+    await delivery.sendPasswordReset({
+      dedupeKey: "legacy_partner:1",
+      realm: "partner",
+      tenantId: null,
+      recipientEmail: "partner@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_legacy_partner",
+    });
+
+    expect(calls.enqueue[0]?.body).toContain(
+      "Reset your password: https://legacy-single.example.test/reset-password?lang=zh-TW&token=pwr_legacy_tenant",
+    );
+    expect(calls.sendPlatformMail[0]?.body).toContain(
+      "Reset your password: https://legacy-single.example.test/reset-password?lang=zh-TW&token=pwr_legacy_agency",
+    );
+    expect(calls.sendPlatformMail[1]?.body).toContain(
+      "Reset your password: https://legacy-single.example.test/reset-password?lang=zh-TW&token=pwr_legacy_partner",
+    );
+  });
+
+  it("falls back to 'Password reset code: <rawToken>' when a realm's portal configuration is missing or invalid without cross-routing to another realm or fabricating a domain", async () => {
+    vi.stubEnv(
+      "TENANT_INVITATION_ACCEPT_URL_BASE",
+      "https://tenant.portal.example.test/invite",
+    );
+    vi.stubEnv("AGENCY_INVITATION_ACCEPT_URL_BASE", "");
+    vi.stubEnv("FLEET_INVITATION_ACCEPT_URL_BASE", "javascript:alert(1)");
+    vi.stubEnv(
+      "PASSWORD_RESET_URL_BASE",
+      "https://tenant.portal.example.test/reset-password",
+    );
+
+    const { service, calls } = createFakeNotificationDeliveryService();
+    const delivery = new TenantInvitationDeliveryService(service);
+
+    await delivery.sendPasswordReset({
+      dedupeKey: "missing_agency:1",
+      realm: "agency",
+      tenantId: null,
+      recipientEmail: "agency-missing@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_agency_code_only",
+    });
+    await delivery.sendPasswordReset({
+      dedupeKey: "invalid_partner:1",
+      realm: "partner",
+      tenantId: null,
+      recipientEmail: "partner-invalid@example.test",
+      expiresAt: "2026-11-23T04:00:00.000Z",
+      rawToken: "pwr_partner_code_only",
+    });
+
+    expect(calls.sendPlatformMail[0]?.body).toContain(
+      "Password reset code: pwr_agency_code_only",
+    );
+    expect(calls.sendPlatformMail[0]?.body).not.toContain(
+      "Reset your password:",
+    );
+    expect(calls.sendPlatformMail[0]?.body).not.toContain("smarttransport.tw");
+
+    expect(calls.sendPlatformMail[1]?.body).toContain(
+      "Password reset code: pwr_partner_code_only",
+    );
+    expect(calls.sendPlatformMail[1]?.body).not.toContain(
+      "Reset your password:",
+    );
+    expect(calls.sendPlatformMail[1]?.body).not.toContain("smarttransport.tw");
+
+    expect(
+      resolvePasswordResetBaseUrl("tenant", {
+        PASSWORD_RESET_URL_BASE:
+          "https://tenant.portal.example.test/reset-password",
+        AGENCY_INVITATION_ACCEPT_URL_BASE:
+          "https://agency.portal.example.test/invite",
+        FLEET_INVITATION_ACCEPT_URL_BASE:
+          "https://fleet.portal.example.test/invite",
+      }),
+    ).toBe("https://tenant.portal.example.test/reset-password");
+    expect(
+      buildPasswordResetEmailBody(
+        {
+          dedupeKey: "direct_unconfigured:1",
+          realm: "tenant",
+          tenantId: "tenant_demo",
+          recipientEmail: "unconfigured@example.test",
+          expiresAt: "2026-11-23T04:00:00.000Z",
+          rawToken: "pwr_direct_unconfigured",
+        },
+        {},
+      ),
+    ).toContain("Password reset code: pwr_direct_unconfigured");
+  });
+
+  it("self-service caller (AuthController.requestPasswordReset -> confirmPasswordReset) delivers realm-specific links to a simulated inbox and confirms each user's own token (including shared tenant/enterprise accounts)", async () => {
+    vi.stubEnv(
+      "TENANT_INVITATION_ACCEPT_URL_BASE",
+      "https://tenant.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "AGENCY_INVITATION_ACCEPT_URL_BASE",
+      "https://agency.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "FLEET_INVITATION_ACCEPT_URL_BASE",
+      "https://fleet.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "PASSWORD_PEPPER_SECRETS_JSON",
+      JSON.stringify({ v1: "test-self-service-pepper-secret-32chars!" }),
+    );
+    vi.stubEnv("PASSWORD_PEPPER_CURRENT_VERSION", "v1");
+
+    const repo = new IdentityRepository();
+    const securityEvents = new SecurityEventsService();
+    const { service: fakeNotificationService, calls } =
+      createFakeNotificationDeliveryService();
+    const deliveryService = new TenantInvitationDeliveryService(
+      fakeNotificationService,
+    );
+
+    const controller = new AuthController(
+      {} as never,
+      {} as never,
+      {} as never,
+      securityEvents,
+      undefined,
+      undefined,
+      repo,
+    );
+    (
+      controller as unknown as {
+        passwordResetDelivery: TenantInvitationDeliveryService;
+      }
+    ).passwordResetDelivery = deliveryService;
+
+    const { principal: tenantPrincipal, membership: tenantMembership } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "shared-tenant-enterprise@example.test" },
+        membership: {
+          realm: "tenant",
+          scopeRef: "tenant:tenant_shared_001",
+          tenantId: "tenant_shared_001",
+        },
+      });
+    const { principal: agencyPrincipal, membership: agencyMembership } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "agency-self@example.test" },
+        membership: {
+          realm: "agency",
+          scopeRef: "agency:agency_001",
+          tenantId: null,
+        },
+      });
+    const { principal: partnerPrincipal, membership: partnerMembership } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "fleet-self@example.test" },
+        membership: {
+          realm: "partner",
+          scopeRef: "partner:fleet_001",
+          tenantId: null,
+          partnerId: "fleet_001",
+        },
+      });
+
+    for (const [principal, membership] of [
+      [tenantPrincipal, tenantMembership],
+      [agencyPrincipal, agencyMembership],
+      [partnerPrincipal, partnerMembership],
+    ] as const) {
+      await repo.setPasswordCredentialForPrincipal(principal.principalId, {
+        passwordHash: "argon2id$initial-hash",
+        passwordAlgo: "argon2id",
+        pepperVersion: "v1",
+      });
+      await repo.createSession(seedSession(principal, membership));
+    }
+
+    const tenantReqRes = await controller.requestPasswordReset(
+      "tenant",
+      { email: "shared-tenant-enterprise@example.test" },
+      "req_self_tenant",
+    );
+    const agencyReqRes = await controller.requestPasswordReset(
+      "agency",
+      { email: "agency-self@example.test" },
+      "req_self_agency",
+    );
+    const partnerReqRes = await controller.requestPasswordReset(
+      "partner",
+      { email: "fleet-self@example.test" },
+      "req_self_partner",
+    );
+
+    expect(tenantReqRes.data).toEqual({ accepted: true });
+    expect(agencyReqRes.data).toEqual({ accepted: true });
+    expect(partnerReqRes.data).toEqual({ accepted: true });
+
+    expect(calls.enqueue).toHaveLength(1);
+    expect(calls.sendPlatformMail).toHaveLength(2);
+
+    const tenantResetUrl = extractResetLinkFromEmailBody(
+      calls.enqueue[0]!.body,
+    );
+    expect(tenantResetUrl.origin).toBe("https://tenant.portal.example.test");
+    expect(tenantResetUrl.pathname).toBe("/reset-password");
+    const tenantToken = tenantResetUrl.searchParams.get("token")!;
+    expect(tenantToken).toMatch(/^pwr_/);
+
+    const agencyResetUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[0]!.body,
+    );
+    expect(agencyResetUrl.origin).toBe("https://agency.portal.example.test");
+    expect(agencyResetUrl.pathname).toBe("/reset-password");
+    const agencyToken = agencyResetUrl.searchParams.get("token")!;
+    expect(agencyToken).toMatch(/^pwr_/);
+
+    const partnerResetUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[1]!.body,
+    );
+    expect(partnerResetUrl.origin).toBe("https://fleet.portal.example.test");
+    expect(partnerResetUrl.pathname).toBe("/reset-password");
+    const partnerToken = partnerResetUrl.searchParams.get("token")!;
+    expect(partnerToken).toMatch(/^pwr_/);
+
+    // Confirm each user's reset token against their realm's confirm endpoint
+    // (tenant-console-web and enterprise-dispatch-web both post to
+    // /api/auth/tenant/password-reset/confirm for the shared tenant account).
+    const tenantConfirm = await controller.confirmPasswordReset(
+      "tenant",
+      { token: tenantToken, password: "NewSharedTenantEnterprisePass!2026" },
+      "req_confirm_tenant",
+    );
+    const agencyConfirm = await controller.confirmPasswordReset(
+      "agency",
+      { token: agencyToken, password: "NewAgencyPortalPassword!2026" },
+      "req_confirm_agency",
+    );
+    const partnerConfirm = await controller.confirmPasswordReset(
+      "partner",
+      { token: partnerToken, password: "NewFleetPartnerPassword!2026" },
+      "req_confirm_partner",
+    );
+
+    expect(tenantConfirm.data).toEqual({
+      passwordReset: true,
+      revokedSessionCount: 1,
+    });
+    expect(agencyConfirm.data).toEqual({
+      passwordReset: true,
+      revokedSessionCount: 1,
+    });
+    expect(partnerConfirm.data).toEqual({
+      passwordReset: true,
+      revokedSessionCount: 1,
+    });
+
+    for (const principal of [
+      tenantPrincipal,
+      agencyPrincipal,
+      partnerPrincipal,
+    ]) {
+      const updatedCred = await repo.findPasswordCredentialByPrincipalId(
+        principal.principalId,
+      );
+      expect(updatedCred?.passwordHash).not.toBe("argon2id$initial-hash");
+      const sessions = await repo.listSessionsByPrincipal(
+        principal.principalId,
+      );
+      expect(sessions[0]?.status).toBe("revoked");
+      expect(sessions[0]?.revokeReason).toBe("password_reset");
+    }
+  });
+
+  it("admin caller (PlatformAdminService.sendUserPasswordReset) delivers realm-specific links for tenant, agency, and partner users and each user's token confirms their password reset", async () => {
+    vi.stubEnv(
+      "TENANT_INVITATION_ACCEPT_URL_BASE",
+      "https://tenant.portal.example.test/api/auth/tenant/login",
+    );
+    vi.stubEnv(
+      "AGENCY_INVITATION_ACCEPT_URL_BASE",
+      "https://agency.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "FLEET_INVITATION_ACCEPT_URL_BASE",
+      "https://fleet.portal.example.test/invite",
+    );
+    vi.stubEnv(
+      "PASSWORD_PEPPER_SECRETS_JSON",
+      JSON.stringify({ v1: "test-admin-caller-pepper-secret-32chars!" }),
+    );
+    vi.stubEnv("PASSWORD_PEPPER_CURRENT_VERSION", "v1");
+
+    const repo = new IdentityRepository();
+    const auditService = new AuditNotificationService();
+    const { service: fakeNotificationService, calls } =
+      createFakeNotificationDeliveryService();
+    const deliveryService = new TenantInvitationDeliveryService(
+      fakeNotificationService,
+    );
+
+    const platformAdminService = new PlatformAdminService(
+      auditService,
+      undefined,
+      repo,
+    );
+    (
+      platformAdminService as unknown as {
+        passwordResetDelivery: TenantInvitationDeliveryService;
+      }
+    ).passwordResetDelivery = deliveryService;
+
+    const controller = new AuthController(
+      {} as never,
+      {} as never,
+      {} as never,
+      new SecurityEventsService(),
+      undefined,
+      undefined,
+      repo,
+    );
+    (
+      controller as unknown as {
+        passwordResetDelivery: TenantInvitationDeliveryService;
+      }
+    ).passwordResetDelivery = deliveryService;
+
+    const { principal: tenantPrincipal } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "admin-target-tenant@example.test" },
+        membership: {
+          realm: "tenant",
+          scopeRef: "tenant:tenant_admin_target",
+          tenantId: "tenant_admin_target",
+        },
+      });
+    const { principal: agencyPrincipal } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "admin-target-agency@example.test" },
+        membership: {
+          realm: "agency",
+          scopeRef: "agency:agency_admin_target",
+          tenantId: null,
+        },
+      });
+    const { principal: partnerPrincipal } =
+      await seedActivePrincipalWithMembership(repo, {
+        principal: { email: "admin-target-partner@example.test" },
+        membership: {
+          realm: "partner",
+          scopeRef: "partner:fleet_admin_target",
+          tenantId: null,
+          partnerId: "fleet_admin_target",
+        },
+      });
+
+    for (const principal of [
+      tenantPrincipal,
+      agencyPrincipal,
+      partnerPrincipal,
+    ]) {
+      await repo.setPasswordCredentialForPrincipal(principal.principalId, {
+        passwordHash: "argon2id$before-admin-reset",
+        passwordAlgo: "argon2id",
+        pepperVersion: "v1",
+      });
+    }
+
+    const tenantSend = await platformAdminService.sendUserPasswordReset(
+      tenantPrincipal.principalId,
+      { reasonCode: "support_ticket_tenant_reset" },
+      "req_admin_tenant",
+      "principal_platform_admin_1",
+    );
+    const agencySend = await platformAdminService.sendUserPasswordReset(
+      agencyPrincipal.principalId,
+      { reasonCode: "support_ticket_agency_reset" },
+      "req_admin_agency",
+      "principal_platform_admin_1",
+    );
+    const partnerSend = await platformAdminService.sendUserPasswordReset(
+      partnerPrincipal.principalId,
+      { reasonCode: "support_ticket_partner_reset" },
+      "req_admin_partner",
+      "principal_platform_admin_1",
+    );
+
+    expect(tenantSend).toEqual({ sent: true });
+    expect(agencySend).toEqual({ sent: true });
+    expect(partnerSend).toEqual({ sent: true });
+
+    const tenantUrl = extractResetLinkFromEmailBody(calls.enqueue[0]!.body);
+    expect(tenantUrl.origin).toBe("https://tenant.portal.example.test");
+    expect(tenantUrl.pathname).toBe("/reset-password");
+    const tenantToken = tenantUrl.searchParams.get("token")!;
+
+    const agencyUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[0]!.body,
+    );
+    expect(agencyUrl.origin).toBe("https://agency.portal.example.test");
+    expect(agencyUrl.pathname).toBe("/reset-password");
+    const agencyToken = agencyUrl.searchParams.get("token")!;
+
+    const partnerUrl = extractResetLinkFromEmailBody(
+      calls.sendPlatformMail[1]!.body,
+    );
+    expect(partnerUrl.origin).toBe("https://fleet.portal.example.test");
+    expect(partnerUrl.pathname).toBe("/reset-password");
+    const partnerToken = partnerUrl.searchParams.get("token")!;
+
+    // Verify audit records never expose raw tokens or password fields.
+    const audits = auditService.listAuditLogs();
+    const resetAudits = audits.filter(
+      (entry) => entry.actionName === "send_user_password_reset",
+    );
+    expect(resetAudits).toHaveLength(3);
+    expect(JSON.stringify(resetAudits)).not.toContain(tenantToken);
+    expect(JSON.stringify(resetAudits)).not.toContain(agencyToken);
+    expect(JSON.stringify(resetAudits)).not.toContain(partnerToken);
+
+    // Each recipient's token issued by admin sendUserPasswordReset is accepted
+    // by their own realm's confirmPasswordReset endpoint.
+    expect(
+      (
+        await controller.confirmPasswordReset("tenant", {
+          token: tenantToken,
+          password: "AdminTriggeredTenantPass!2026",
+        })
+      ).data,
+    ).toEqual({ passwordReset: true, revokedSessionCount: 0 });
+    expect(
+      (
+        await controller.confirmPasswordReset("agency", {
+          token: agencyToken,
+          password: "AdminTriggeredAgencyPass!2026",
+        })
+      ).data,
+    ).toEqual({ passwordReset: true, revokedSessionCount: 0 });
+    expect(
+      (
+        await controller.confirmPasswordReset("partner", {
+          token: partnerToken,
+          password: "AdminTriggeredPartnerPass!2026",
+        })
+      ).data,
+    ).toEqual({ passwordReset: true, revokedSessionCount: 0 });
+  });
+});

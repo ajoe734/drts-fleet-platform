@@ -200,16 +200,25 @@ async function enrollAndConfirmTotp(
   };
 }
 
-/** Advances past the step `confirm()` already consumed, same helper pattern
- * as `tests/unit/identity-session.test.ts`. */
+/** Advances past the step `confirm()` already consumed so the next
+ * generated code lands on a fresh, unused 30s step -- generated with an
+ * explicit `epoch` derived from the real clock (not a faked/advanced system
+ * clock later reverted to real time) so the step always matches what the
+ * real-clock verification inside `passwordLogin` computes, including right
+ * at a 30s window boundary. The previous `vi.useFakeTimers()` +
+ * `advanceTimersByTime(31_000)` version generated the code against a
+ * simulated instant up to 31s ahead of "now", then verified against the
+ * real clock snapped back to the unadvanced "now" by `useRealTimers()`; a
+ * 31s jump can cross either one or two 30s boundaries depending on where in
+ * the current window "now" happened to land, so it intermittently produced
+ * a step more than the server's +/-1 step tolerance away from the
+ * verification step (apps/api/src/modules/auth/totp.service.ts's
+ * `TOTP_WINDOW_STEPS`) -- the PR #3416 hosted-CI flake this task fixes.
+ * Same deterministic approach as
+ * `tests/unit/identity-session.test.ts`'s `freshLoginCode`. */
 async function freshLoginCode(secret: string): Promise<string> {
-  vi.useFakeTimers();
-  try {
-    vi.advanceTimersByTime(31_000);
-    return await generate({ secret });
-  } finally {
-    vi.useRealTimers();
-  }
+  const nextStepEpoch = (Math.floor(Date.now() / 30_000) + 1) * 30;
+  return generate({ secret, epoch: nextStepEpoch });
 }
 
 async function denialMessage(promise: Promise<unknown>): Promise<string> {
