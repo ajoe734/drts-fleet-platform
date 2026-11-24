@@ -72,13 +72,13 @@ function createSampleOrder(sample: SharedTripSample): OwnedOrderRecord {
     },
     pickup: {
       address: "台北車站",
-      latitude: 25.0478,
-      longitude: 121.517,
+      lat: 25.0478,
+      lng: 121.517,
     },
     dropoff: {
       address: "松山機場",
-      latitude: 25.0697,
-      longitude: 121.5525,
+      lat: 25.0697,
+      lng: 121.5525,
     },
     fixedPrice: false,
     quotedFare: {
@@ -90,13 +90,18 @@ function createSampleOrder(sample: SharedTripSample): OwnedOrderRecord {
     updatedAt: sample.completedAt,
     cancelledAt: null,
     cancelableUntil: "2026-11-19T12:05:00.000Z",
-  } as OwnedOrderRecord;
+  } as unknown as OwnedOrderRecord;
 }
 
 describe("PAX-RATING-CANONICAL-TRIP-LOOKUP-20261123 canonical completed trip identity and lookup", () => {
   it("resolves canonical completed task_id for both 11/19 shared samples across historical assignment_id ratings, readback, search, and detail", async () => {
     const audit = new AuditNotificationService();
-    const owned = new OwnedMobilityService(audit);
+    const owned = new OwnedMobilityService(
+      {} as never,
+      audit,
+      {} as never,
+      {} as never,
+    );
     const service = new MultiTaxiService(owned);
 
     const internalOwned = owned as unknown as {
@@ -114,7 +119,7 @@ describe("PAX-RATING-CANONICAL-TRIP-LOOKUP-20261123 canonical completed trip ide
     };
 
     for (const sample of SHARED_SAMPLES) {
-      const created = owned.createMultiTaxiRide(
+      const created = await owned.createMultiTaxiRide(
         {
           timingMode: "on_demand",
           requestedPickupAt: new Date(Date.now() + 60_000).toISOString(),
@@ -125,14 +130,15 @@ describe("PAX-RATING-CANONICAL-TRIP-LOOKUP-20261123 canonical completed trip ide
           },
           pickup: {
             address: "台北車站",
-            latitude: 25.0478,
-            longitude: 121.517,
+            lat: 25.0478,
+            lng: 121.517,
           },
           dropoff: {
             address: "松山機場",
-            latitude: 25.0697,
-            longitude: 121.5525,
+            lat: 25.0697,
+            lng: 121.5525,
           },
+          paymentMethodTokenRef: null,
         },
         {
           authorizationId: "auth-1",
@@ -785,7 +791,7 @@ print(json.dumps(out))
     ).rejects.toMatchObject({
       status: 409,
       code: "PASSENGER_RATING_ASSIGNMENT_MISSING",
-    } satisfies Partial<ApiRequestError>);
+    } satisfies Partial<ApiRequestError> & { status: number });
   });
 
   it("R1 regression: resolves canonical completed task_id on cold-cache account and token rating replays (historical assignment_id and new task_id rows) and after another worker completes the task, matching admin tripId", async () => {
@@ -993,6 +999,9 @@ print(json.dumps(out))
     // 5. Another worker completes the task in durable storage while this worker's local task cache is empty:
     // new account and token submissions still resolve and return canonical completed task_id.
     let currentPersistedRow: Record<string, unknown> | null = null;
+    // The mocked query assigns the row; a direct read would narrow to null.
+    const readPersistedRow = (): Record<string, unknown> | null =>
+      currentPersistedRow;
     const crossWorkerQuery = vi.fn(
       async (sql: string, values: unknown[] = []) => {
         const text = sql.replace(/\s+/g, " ").trim();
@@ -1102,7 +1111,7 @@ print(json.dumps(out))
         { execute: vi.fn(async () => undefined) },
       );
     expect(createdAccountRating.tripId).toBe(sample.tripId);
-    expect(currentPersistedRow?.trip_id).toBe(sample.tripId);
+    expect(readPersistedRow()?.trip_id).toBe(sample.tripId);
 
     currentPersistedRow = null;
     const newTokenService = new MultiTaxiService(
