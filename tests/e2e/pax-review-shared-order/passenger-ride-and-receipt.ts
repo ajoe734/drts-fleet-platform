@@ -416,18 +416,30 @@ export async function verifyOriginalPassengerReceiptInBrowser(
   options: { downloadTimeoutMs?: number } = {},
 ) {
   const snapshot = receipt.record.e04Snapshot;
+  await pax.goto(`${paxOrigin}/rides`);
+  await pax.reload();
+  const orderNo: unknown = receipt.orderNo;
+  if (typeof orderNo !== "string" || !orderNo.trim()) {
+    throw new Error("The ride has no passenger-visible order number.");
+  }
+  const historyRide = pax.getByRole("link").filter({
+    has: pax.getByText(orderNo, { exact: true }),
+  });
+  await expect(historyRide).toHaveCount(1);
+  await expect(historyRide).toBeVisible();
+  await expect(historyRide).toHaveAttribute("href", `/rides/${orderId}`);
+  const historyRowText = await historyRide.innerText();
+  await historyRide.click();
+  await expect(pax).toHaveURL(`${paxOrigin}/rides/${orderId}`);
   const viewReceiptLink = pax.getByRole("link", {
     name: "查看電子乘車證明",
     exact: true,
   });
-  if (
-    new URL(pax.url()).pathname === `/rides/${orderId}` &&
-    (await viewReceiptLink.isVisible())
-  ) {
-    await viewReceiptLink.click();
-  } else {
-    await pax.goto(`${paxOrigin}/rides/${orderId}/receipt`);
-  }
+  await expect(viewReceiptLink).toHaveAttribute(
+    "href",
+    `/rides/${orderId}/receipt`,
+  );
+  await viewReceiptLink.click();
   await expect(pax).toHaveURL(`${paxOrigin}/rides/${orderId}/receipt`);
   await expect(
     pax.getByText("電子乘車證明", { exact: true }).first(),
@@ -727,6 +739,7 @@ export async function verifyOriginalPassengerReceiptInBrowser(
       expectedFormat,
       pdfOfferedByDownloadsApi,
       environmentIssuedHtmlFallbackOnly: !pdfOfferedByDownloadsApi,
+      historyRowText,
       expectedArtifactPath,
       actualButtonHref,
       actualResponseUrl,
