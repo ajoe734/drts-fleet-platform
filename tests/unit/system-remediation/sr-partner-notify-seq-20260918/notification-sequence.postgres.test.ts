@@ -68,8 +68,21 @@ describe.skipIf(!databaseUrl)(
         /CREATE TABLE IF NOT EXISTS ops\.consumer_notification_outbox \([\s\S]*?\n\);/,
       )?.[0];
       if (!outboxDdl) throw new Error("outbox migration DDL missing");
+      // V0143 also alters V0108 delivery contexts, which this case does not
+      // create; apply only its first-party counter table.
+      const firstPartySequenceDdl = (
+        await readFile(
+          "infra/migrations/V0143__first_party_passenger_notification_delivery.sql",
+          "utf8",
+        )
+      ).match(
+        /CREATE TABLE IF NOT EXISTS mobility\.phase1_first_party_notification_sequences \([\s\S]*?\n\);/,
+      )?.[0];
+      if (!firstPartySequenceDdl)
+        throw new Error("first-party sequence migration DDL missing");
       await pool.query(routeMigration);
       await pool.query(firstPartyMigration);
+      await pool.query(firstPartySequenceDdl);
       await pool.query(outboxDdl);
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries VALUES ('entry-seq')",
@@ -107,7 +120,7 @@ describe.skipIf(!databaseUrl)(
     beforeEach(async () => {
       vi.restoreAllMocks();
       await pool.query(
-        "TRUNCATE ops.consumer_notification_outbox, mobility.phase1_partner_notification_sequences, mobility.phase1_order_partner_notification_routes",
+        "TRUNCATE ops.consumer_notification_outbox, mobility.phase1_partner_notification_sequences, mobility.phase1_order_partner_notification_routes, mobility.phase1_first_party_notification_sequences, mobility.phase1_order_first_party_notification_routes",
       );
       for (const orderId of ["order-a", "order-b"]) {
         await allocator.writeOrderPartnerNotificationRoute({

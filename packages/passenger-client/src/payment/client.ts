@@ -39,12 +39,92 @@ function field(
 ): unknown {
   const a = value[camel];
   const b = value[snake];
-  if (a !== undefined && b !== undefined && a !== b) invalidResponse();
+  if (a !== undefined && b !== undefined && a !== b) {
+    if (
+      !Array.isArray(a) ||
+      !Array.isArray(b) ||
+      a.length !== b.length ||
+      a.some((item, index) => item !== b[index])
+    ) {
+      invalidResponse();
+    }
+  }
   return a ?? b;
 }
 function text(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) invalidResponse();
   return value;
+}
+export function decodePassengerPaymentBindingSession(
+  value: unknown,
+): PassengerPaymentBindingSession {
+  const raw = record(value);
+  const data = "data" in raw && raw.data !== undefined ? record(raw.data) : raw;
+  const rawMerchantToken = field(data, "merchantToken", "merchant_token");
+  if (rawMerchantToken !== undefined && typeof rawMerchantToken !== "string")
+    invalidResponse();
+  if (data.token !== undefined && typeof data.token !== "string")
+    invalidResponse();
+  const primaryToken =
+    typeof rawMerchantToken === "string" ? rawMerchantToken.trim() : "";
+  const aliasToken = typeof data.token === "string" ? data.token.trim() : "";
+  if (primaryToken && aliasToken && primaryToken !== aliasToken)
+    invalidResponse();
+  const merchantToken = primaryToken || aliasToken;
+  const serverType = field(data, "serverType", "server_type");
+  const rawTokenExpireDate = field(
+    data,
+    "tokenExpireDate",
+    "token_expire_date",
+  );
+  if (
+    rawTokenExpireDate !== undefined &&
+    rawTokenExpireDate !== null &&
+    typeof rawTokenExpireDate !== "string" &&
+    typeof rawTokenExpireDate !== "number"
+  )
+    invalidResponse();
+  if (data.sandbox !== undefined && typeof data.sandbox !== "boolean")
+    invalidResponse();
+  const rawSdkScriptUrl = field(data, "sdkScriptUrl", "sdk_script_url");
+  if (rawSdkScriptUrl !== undefined && typeof rawSdkScriptUrl !== "string")
+    invalidResponse();
+  const rawApprovedActionOrigins = field(
+    data,
+    "approvedActionOrigins",
+    "approved_action_origins",
+  );
+  if (
+    rawApprovedActionOrigins !== undefined &&
+    !Array.isArray(rawApprovedActionOrigins)
+  )
+    invalidResponse();
+  if (
+    (data.provider !== undefined && data.provider !== "ecpay") ||
+    !merchantToken ||
+    (serverType !== "Stage" && serverType !== "Prod")
+  )
+    return invalidResponse();
+  return {
+    provider: "ecpay",
+    merchantToken,
+    tokenExpireDate: String(rawTokenExpireDate ?? ""),
+    serverType,
+    ...(typeof data.sandbox === "boolean" ? { sandbox: data.sandbox } : {}),
+    ...(typeof rawSdkScriptUrl === "string" && rawSdkScriptUrl.trim().length > 0
+      ? { sdkScriptUrl: rawSdkScriptUrl.trim() }
+      : {}),
+    ...(Array.isArray(rawApprovedActionOrigins)
+      ? {
+          approvedActionOrigins: rawApprovedActionOrigins
+            .filter(
+              (origin): origin is string =>
+                typeof origin === "string" && origin.trim().length > 0,
+            )
+            .map((origin) => origin.trim()),
+        }
+      : {}),
+  };
 }
 export function decodePassengerPaymentMethod(
   value: unknown,
@@ -158,40 +238,9 @@ export class PassengerPaymentClient {
     return envelope.data;
   }
   async getBindingSession(): Promise<PassengerPaymentBindingSession> {
-    const data = record(
+    return decodePassengerPaymentBindingSession(
       await this.request("/payment-methods?binding_session=1", "GET"),
     );
-    // Match the existing Web SDK session normalization, including its token alias.
-    const merchantToken =
-      typeof data.merchantToken === "string" && data.merchantToken.trim()
-        ? data.merchantToken.trim()
-        : typeof data.token === "string" && data.token.trim()
-          ? data.token.trim()
-          : "";
-    if (
-      (data.provider !== undefined && data.provider !== "ecpay") ||
-      !merchantToken ||
-      (data.serverType !== "Stage" && data.serverType !== "Prod")
-    )
-      return invalidResponse();
-    return {
-      provider: "ecpay",
-      merchantToken,
-      tokenExpireDate: String(data.tokenExpireDate ?? ""),
-      serverType: data.serverType,
-      ...(typeof data.sandbox === "boolean" ? { sandbox: data.sandbox } : {}),
-      ...(typeof data.sdkScriptUrl === "string"
-        ? { sdkScriptUrl: data.sdkScriptUrl }
-        : {}),
-      ...(Array.isArray(data.approvedActionOrigins)
-        ? {
-            approvedActionOrigins: data.approvedActionOrigins.filter(
-              (origin): origin is string =>
-                typeof origin === "string" && origin.trim().length > 0,
-            ),
-          }
-        : {}),
-    };
   }
   async getMethods(): Promise<PaymentMethodsResponse> {
     const data = record(await this.request("/payment-methods", "GET"));

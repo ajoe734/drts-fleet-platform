@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- executable CommonJS deployment rail */
 const { publicEntryConfig } = require("./public-entry.cjs");
 const { artifactConfig } = require("./artifact-config.cjs");
+const { driverOnboardingConfig } = require("./driver-onboarding.cjs");
 // This is the configuration/argument builder used by deploy-prod.yml.
 // It performs no cloud calls. Plans contain names and pinned versions, never values.
 const TOPOLOGY = [
@@ -286,6 +287,7 @@ function buildPlan(vars, sha, tag, deployer) {
     apiEnv.PASSWORD_PEPPER_CURRENT_VERSION = need(
       "PROD_PASSWORD_PEPPER_CURRENT_VERSION",
     );
+  driverOnboardingConfig(vars, apiEnv, secretNames, prefix, need, reject);
   artifactConfig(vars, apiEnv, secretNames, need, reject, https);
   const backend = need("PROD_MAP_PROVIDER_BACKEND");
   if (!["mock", "google"].includes(backend))
@@ -593,9 +595,17 @@ function buildPlan(vars, sha, tag, deployer) {
   )
     reject("PROD_AUTH_ALLOWED_ORIGINS (all active browser origins)");
   apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(",");
+  const tenantOrigin = services.find(
+    (service) => service.id === "tenant-console-web",
+  ).origin;
+  const fleetOrigin = services.find(
+    (service) => service.id === "fleet-partner-portal-web",
+  ).origin;
   const agencyOrigin = services.find(
     (service) => service.id === "agency-portal-web",
   ).origin;
+  apiEnv.TENANT_INVITATION_ACCEPT_URL_BASE = `${tenantOrigin}/invite`;
+  apiEnv.FLEET_INVITATION_ACCEPT_URL_BASE = `${fleetOrigin}/invite`;
   apiEnv.AGENCY_INVITATION_ACCEPT_URL_BASE = `${agencyOrigin}/invite`;
   const migrationJob = need("PROD_GCP_MIGRATION_JOB");
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(migrationJob))

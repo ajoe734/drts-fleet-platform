@@ -38,8 +38,10 @@ import {
 import {
   EcpayHostedFields,
   createEcpayHostedFieldsPort,
+  fetchEcpayBindingSession,
   type EcpaySdkGlobal,
 } from "../../../apps/passenger-app-web/components/payment/ecpay-hosted-fields";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
   CARD_LIMIT_MESSAGE,
   MAX_BOUND_CARDS,
@@ -203,6 +205,112 @@ describe("EcpayHostedFields & createEcpayHostedFieldsPort", () => {
       /ecpay_fields_disposed/,
     );
   });
+
+  it.each(["Stage", "Prod"] as const)(
+    "decodes SnakeCaseInterceptor wire payload in fetchEcpayBindingSession and mounts EcpayHostedFields with %s SDK initialization while preserving approvedActionOrigins and legacy formats",
+    async (serverType) => {
+      const domainSession = {
+        provider: "ecpay" as const,
+        merchantToken: `ecpay_wire_session_${serverType}`,
+        tokenExpireDate: "2026/11/23 15:00:00",
+        sandbox: serverType === "Stage",
+        serverType,
+        sdkScriptUrl:
+          serverType === "Stage"
+            ? "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js"
+            : "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+        approvedActionOrigins:
+          serverType === "Stage"
+            ? [
+                "https://ecpg-stage.ecpay.com.tw",
+                "https://payment-stage.ecpay.com.tw",
+                "https://cc-stage.ecpay.com.tw",
+              ]
+            : ["https://ecpg.ecpay.com.tw", "https://payment.ecpay.com.tw"],
+      };
+      const snakeWireBody = deepToSnakeCase({ data: domainSession });
+      const wireFetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify(snakeWireBody), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      const session = await fetchEcpayBindingSession(wireFetch);
+      expect(session).toEqual({
+        provider: "ecpay",
+        merchantToken: domainSession.merchantToken,
+        token: domainSession.merchantToken,
+        tokenExpireDate: domainSession.tokenExpireDate,
+        sandbox: domainSession.sandbox,
+        serverType,
+        sdkScriptUrl: domainSession.sdkScriptUrl,
+        approvedActionOrigins: domainSession.approvedActionOrigins,
+      });
+
+      const mockSdk: EcpaySdkGlobal = {
+        Language: { zhTW: "zh-TW", enUS: "en-US" },
+        initialize: vi.fn((_serverType, _isLoading, cb) => cb()),
+        addBindingCard: vi.fn((_token, _lang, cb) => cb()),
+        getBindCardPayToken: vi.fn(),
+      };
+      let loadedOrigins: readonly string[] = [];
+      let latestAvailability: PassengerPaymentFieldsAvailability = {
+        status: "unavailable",
+      };
+
+      const { unmount } = render(
+        <EcpayHostedFields
+          fetchSession={() => fetchEcpayBindingSession(wireFetch)}
+          sdk={mockSdk}
+          onSessionLoaded={(loaded) => {
+            loadedOrigins = loaded.approvedActionOrigins ?? [];
+          }}
+          onReady={(avail) => {
+            latestAvailability = avail;
+          }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(latestAvailability.status).toBe("ready");
+      });
+      expect(mockSdk.initialize).toHaveBeenCalledWith(
+        serverType,
+        1,
+        expect.any(Function),
+      );
+      expect(mockSdk.addBindingCard).toHaveBeenCalledWith(
+        domainSession.merchantToken,
+        "zh-TW",
+        expect.any(Function),
+      );
+      expect(loadedOrigins).toEqual(domainSession.approvedActionOrigins);
+      unmount();
+
+      // Legacy camelCase, token alias, and flat payload compatibility
+      const flatLegacySession = await fetchEcpayBindingSession(
+        async () =>
+          new Response(
+            JSON.stringify({
+              token: "legacy_flat_alias_token",
+              tokenExpireDate: "2026/12/31 00:00:00",
+              serverType,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+      expect(flatLegacySession).toEqual({
+        provider: "ecpay",
+        merchantToken: "legacy_flat_alias_token",
+        token: "legacy_flat_alias_token",
+        tokenExpireDate: "2026/12/31 00:00:00",
+        serverType,
+        approvedActionOrigins: ECPAY_ACTION_ORIGINS,
+      });
+    },
+  );
 });
 
 describe("PaymentMethodsScreen 5-card limit & ECPay Hosted Fields flow", () => {
@@ -273,15 +381,24 @@ describe("PaymentMethodsScreen 5-card limit & ECPay Hosted Fields flow", () => {
           url.endsWith("/api/passenger-app/payment-methods?binding_session=1")
         ) {
           return new Response(
-            JSON.stringify({
-              data: {
-                provider: "ecpay",
-                merchantToken: "ecpay_page_session_token_001",
-                tokenExpireDate: "2026/10/24 12:30:00",
-                sandbox: true,
-                serverType: "Stage",
-              },
-            }),
+            JSON.stringify(
+              deepToSnakeCase({
+                data: {
+                  provider: "ecpay",
+                  merchantToken: "ecpay_page_session_token_001",
+                  tokenExpireDate: "2026/10/24 12:30:00",
+                  sandbox: true,
+                  serverType: "Stage",
+                  sdkScriptUrl:
+                    "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+                  approvedActionOrigins: [
+                    "https://ecpg-stage.ecpay.com.tw",
+                    "https://payment-stage.ecpay.com.tw",
+                    "https://cc-stage.ecpay.com.tw",
+                  ],
+                },
+              }),
+            ),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }

@@ -207,6 +207,13 @@ export class ReferralSqlPort {
       row.next_sequence = sequence + 1;
       return result([{ event_sequence: sequence }]);
     }
+    if (
+      sql.startsWith(
+        "INSERT INTO mobility.phase1_first_party_notification_sequences",
+      )
+    )
+      // Referral orders hold partner routes; there is no first-party route here.
+      return result();
     if (sql.includes("FROM core.phase1_tenant_quota_ledger"))
       return result(
         [...this.table("core.phase1_tenant_quota_ledger").values()]

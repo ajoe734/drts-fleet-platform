@@ -21,6 +21,15 @@ export default defineConfig({
     /pax-bureau-acceptance\/reliability\.spec\.ts$/,
     /pax-bureau-acceptance\/matching-timeout\.spec\.ts$/,
   ],
+  // The genuine trial chooses a random synthetic account. Run it after the
+  // serial OTP cases that require a never-consented account in this database.
+  projects: [
+    {},
+    {
+      name: "public-trial",
+      testMatch: /pax-bureau-acceptance\/public-trial-booking\.spec\.ts$/,
+    },
+  ],
   timeout: 5 * 60_000,
   outputDir: ".artifacts/pax-bureau-acceptance/results",
   reporter: [

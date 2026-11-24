@@ -146,6 +146,45 @@ describe("driver navigation model", () => {
     );
   });
 
+  it.each([
+    ["android", "google.navigation:q=25.0697,121.5525&mode=d"],
+    ["ios", "comgooglemaps://?daddr=25.0697,121.5525&directionsmode=driving"],
+  ] as const)(
+    "opens the installed Google Maps app on %s and falls back with the same coordinates",
+    async (platform, nativeUrl) => {
+      const { stops } = buildDriverTripNavigationModel({
+        task: buildTask(),
+        order: buildOrder(),
+      });
+      const canOpenURL = vi
+        .fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      const openURL = vi.fn().mockResolvedValue(undefined);
+      const options = {
+        stop: stops.dropoff,
+        provider: "google" as const,
+        platform,
+        linking: { canOpenURL, openURL },
+      };
+      const webUrl =
+        "https://www.google.com/maps/dir/?api=1&destination=25.0697%2C121.5525&travelmode=driving";
+
+      await expect(openDriverNavigation(options)).resolves.toMatchObject({
+        status: "opened",
+        url: nativeUrl,
+        fallback: false,
+      });
+      await expect(openDriverNavigation(options)).resolves.toMatchObject({
+        status: "opened",
+        url: webUrl,
+        fallback: true,
+      });
+      expect(canOpenURL.mock.calls).toEqual([[nativeUrl], [nativeUrl]]);
+      expect(openURL.mock.calls).toEqual([[nativeUrl], [webUrl]]);
+    },
+  );
+
   it("opens Android system navigation with the requested dropoff coordinates", async () => {
     const model = buildDriverTripNavigationModel({
       task: buildTask(),

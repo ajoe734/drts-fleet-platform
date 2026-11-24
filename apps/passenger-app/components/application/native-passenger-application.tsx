@@ -117,8 +117,11 @@ function SupportForm({
   const [error, setError] = useState("");
   const [caseId, setCaseId] = useState("");
   const [requestId] = useState(() => runtime.options.newRequestId());
+  const canSubmit =
+    content.trim().length > 0 &&
+    (selectedCategory !== "lost_item" || description.trim().length > 0);
   async function submit() {
-    if (busy || caseId || !content.trim()) return;
+    if (busy || caseId || !canSubmit) return;
     setBusy(true);
     setError("");
     try {
@@ -129,7 +132,7 @@ function SupportForm({
           category: selectedCategory,
           content: content.trim(),
           contactConsent: consent,
-          ...(selectedCategory === "lost_item" && description.trim()
+          ...(selectedCategory === "lost_item"
             ? { lostItemDescription: description.trim() }
             : {}),
         },
@@ -181,13 +184,16 @@ function SupportForm({
             </Pressable>
           ))}
           {selectedCategory === "lost_item" && (
-            <TextInput
-              testID="app-lost-item"
-              accessibilityLabel="遺失物描述"
-              value={description}
-              editable={!busy}
-              onChangeText={setDescription}
-            />
+            <>
+              <Text>遺失物描述（必填）</Text>
+              <TextInput
+                testID="app-lost-item"
+                accessibilityLabel="遺失物描述（必填）"
+                value={description}
+                editable={!busy}
+                onChangeText={setDescription}
+              />
+            </>
           )}
           <TextInput
             testID="app-support-content"
@@ -213,7 +219,7 @@ function SupportForm({
           <Action
             id="app-support-submit"
             label="送出申報"
-            disabled={busy || !content.trim()}
+            disabled={busy || !canSubmit}
             onPress={submit}
           />
         </>

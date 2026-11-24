@@ -761,13 +761,13 @@ with:
 
 ### Acceptance criteria
 
-This command succeeds for a controlled dry run:
+Run the offline production rail check for a dry run:
 
 ```bash
-gh workflow run deploy-prod.yml -f tag=prod/vYYYY.MM.DD.N
+bash tests/e2e/E2E-009-prod-rail-dry-run.sh
 ```
 
-Production environment must require manual reviewer approval.
+For a live deployment, use the [production deployment and rollback runbook](../03-runbooks/prod-deploy-rollback-runbook-20260519.md#select-the-production-workflow-branch) and obtain the required `production` environment review.
 
 ---
 

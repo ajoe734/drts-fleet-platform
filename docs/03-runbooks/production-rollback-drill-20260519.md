@@ -41,20 +41,22 @@ Do not run a schema down-migration from GitHub Actions unless:
 List the latest two production tags:
 
 ```bash
-git ls-remote --tags origin 'refs/tags/prod/v*' | awk '{print $2}' | sort -V | tail -2
+git ls-remote --refs --tags origin 'refs/tags/prod/v*' | awk '{print $2}' | sort -V | tail -2
 ```
 
 Record:
 
 - failed or candidate-current tag
-- previous known-good tag
+- previous known-good tag (`ROLLBACK_TAG`)
+- compatible reviewed `release/*` branch (`PROD_WORKFLOW_REF`), checked using the
+  [workflow branch selection](prod-deploy-rollback-runbook-20260519.md#select-the-production-workflow-branch) for the rollback target
 
 ### B. Dry-run operator review
 
-Confirm that rollback will use:
+Print the proposed dispatch command for the operator review.
 
 ```bash
-gh workflow run deploy-prod.yml -f tag=<previous-prod-tag> -f skip_migration=true
+printf 'gh workflow run deploy-prod.yml --ref %q -f tag=%q -f skip_migration=true\n' "${PROD_WORKFLOW_REF:?}" "${ROLLBACK_TAG:?}"
 ```
 
 Reviewers must verify:
@@ -68,7 +70,7 @@ Reviewers must verify:
 For a real rollback, dispatch:
 
 ```bash
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0 -f skip_migration=true
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${ROLLBACK_TAG:?}" -f skip_migration=true
 ```
 
 ### D. Verify the restored version
