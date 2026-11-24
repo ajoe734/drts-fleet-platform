@@ -9,14 +9,17 @@ export function redirectSystemPath({
   path: string;
   initial: boolean;
 }): string {
-  const callbackUri =
-    process.env.EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI?.trim();
-  if (initial || process.env.EXPO_PUBLIC_PASSENGER_MODE !== "configured")
-    return path;
+  if (process.env.EXPO_PUBLIC_PASSENGER_MODE !== "configured") return path;
 
   const returnedPath = path.split(/[?#]/, 1)[0];
-  if (returnedPath === NATIVE_PASSENGER_PAYMENT_RETURN_URI) return "";
-  if (!callbackUri) return path;
+  // The OS may have ended the app during the card check, so the link can also
+  // start it. There is no such page in the app; open it normally.
+  if (returnedPath === NATIVE_PASSENGER_PAYMENT_RETURN_URI)
+    return initial ? "/" : "";
+
+  const callbackUri =
+    process.env.EXPO_PUBLIC_PASSENGER_OAUTH_CALLBACK_URI?.trim();
+  if (initial || !callbackUri) return path;
 
   const callbackPath = callbackUri.split(/[?#]/, 1)[0];
   return returnedPath === callbackPath ? "" : path;

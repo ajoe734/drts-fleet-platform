@@ -7,6 +7,7 @@ import {
   cleanup,
   act,
 } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
@@ -295,8 +296,15 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
       ).toBe("");
       expect(
         redirectSystemPath({ path: paymentReturnUrl, initial: true }),
-      ).toBe(paymentReturnUrl);
+      ).toBe("/");
     }
+    // Only the exact payment link is rewritten when the link starts the app.
+    for (const path of [
+      "drtspassenger://payment-methods/return-other",
+      `${OAUTH_CALLBACK_URI}?code=oauth-code&state=oauth-state`,
+      "drtspassenger://other/path",
+    ])
+      expect(redirectSystemPath({ path, initial: true })).toBe(path);
     expect(
       redirectSystemPath({
         path: `${OAUTH_CALLBACK_URI}?code=oauth-code&state=oauth-state`,
@@ -715,5 +723,69 @@ describe("PAX-NATIVE-3DS-RETURN-TO-PAYMENT-METHODS-20261123: verified ECPay Orde
         .getAttribute("href"),
     ).toBe("drtspassenger://payment-methods/return?ecpay_3ds=failed");
     view5.unmount();
+  });
+
+  it("renders no return notice before hydration, because the server cannot see the query", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/account/payment-methods?ecpay_3ds=failed",
+    );
+    const html = renderToString(
+      <AppRouterContext.Provider value={navigation}>
+        <PaymentMethodsScreen />
+      </AppRouterContext.Provider>,
+    );
+    expect(html).toContain("<h1");
+    expect(html).not.toContain("payment-native-app-return");
+    expect(html).not.toContain("綁定失敗或發卡行拒絕");
+  });
+
+  it("drops the earlier return notice once the passenger starts another card operation", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/account/payment-methods?ecpay_3ds=failed",
+    );
+    let defaultId = "pm_first";
+    const card = (paymentMethodId: string, last4: string) => ({
+      ...OWNER_CARD,
+      paymentMethodId,
+      last4,
+      isDefault: paymentMethodId === defaultId,
+    });
+    const client = {
+      getMethods: async () => ({
+        methods: [card("pm_first", "1111"), card("pm_second", "2222")],
+      }),
+      setDefault: async (paymentMethodId: string) => {
+        defaultId = paymentMethodId;
+        return { status: "completed" };
+      },
+    };
+    const accountClient = {
+      getAccount: async () => ({
+        status: "active",
+        drtsPassengerId: OWNER_ACCOUNT_ID,
+      }),
+    };
+    renderWeb(
+      <PaymentMethodsScreen
+        client={client as never}
+        accountClient={accountClient as never}
+      />,
+    );
+    await screen.findByText("VISA •••• 2222");
+    expect(
+      screen.getByText("綁定失敗或發卡行拒絕，請改用其他卡片。"),
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "設為預設" }));
+    });
+    expect(
+      screen.queryByText("綁定失敗或發卡行拒絕，請改用其他卡片。"),
+    ).toBeNull();
+    expect(screen.queryByTestId("payment-native-app-return")).toBeNull();
   });
 });

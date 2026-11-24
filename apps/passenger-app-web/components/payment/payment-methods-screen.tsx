@@ -91,10 +91,16 @@ export function PaymentMethodsScreen({
   ecpay3dsReturn,
   nativeReturnUri,
 }: PaymentMethodsScreenProps) {
-  const ecpayReturnStatus =
+  const readReturnStatus = () =>
     ecpay3dsReturn !== undefined
       ? parseEcpay3dsReturnStatus(ecpay3dsReturn)
       : readWindowEcpay3dsReturnStatus();
+  // The server cannot see the query, so the first client render must match it.
+  const [ecpayReturnStatus, setEcpayReturnStatus] =
+    useState<Ecpay3dsReturnStatus | null>(null);
+  useEffect(() => {
+    setEcpayReturnStatus(readReturnStatus());
+  }, [ecpay3dsReturn]);
   const nativeAppReturnHref = buildNativePassengerPaymentReturnHref(
     ecpayReturnStatus,
     nativeReturnUri ?? NATIVE_PASSENGER_PAYMENT_RETURN_URI,
@@ -180,7 +186,7 @@ export function PaymentMethodsScreen({
     ) {
       const hadActor = actor.current !== undefined;
       identityFence({
-        suppressLoginRedirect: ecpayReturnStatus !== null && !hadActor,
+        suppressLoginRedirect: readReturnStatus() !== null && !hadActor,
       });
       throw new Error("payment_account_changed");
     }
@@ -201,7 +207,7 @@ export function PaymentMethodsScreen({
     if (reason instanceof PassengerApiError && reason.status === 401) {
       const hadActor = actor.current !== undefined;
       identityFence({
-        suppressLoginRedirect: ecpayReturnStatus !== null && !hadActor,
+        suppressLoginRedirect: readReturnStatus() !== null && !hadActor,
       });
     }
     setError(message);
@@ -245,6 +251,8 @@ export function PaymentMethodsScreen({
     lock.current = true;
     setBusy(true);
     setError("");
+    // The earlier return describes the previous attempt, not this one.
+    setEcpayReturnStatus(null);
     let sent = false;
     const port = fields.port;
     const revision = fieldsRevision.current;
@@ -320,6 +328,7 @@ export function PaymentMethodsScreen({
     lock.current = true;
     setBusy(true);
     setError("");
+    setEcpayReturnStatus(null);
     try {
       await account();
       if (kind === "delete") {
