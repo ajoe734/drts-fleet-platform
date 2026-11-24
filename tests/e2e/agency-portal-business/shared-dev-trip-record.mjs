@@ -293,15 +293,27 @@ export async function openContext(browser, cfg) {
         return route.continue();
       // Forward the real response without following redirects in the credentialed
       // transport. The browser follows Location as a new, separately scoped hop.
-      const response = await route.fetch({
-        maxRedirects: 0,
-        timeout: 60000,
-        headers: {
-          ...route.request().headers(),
-          "X-Serverless-Authorization": `Bearer ${process.env.AGENCY_ID_TOKEN}`,
-        },
-      });
-      await route.fulfill({ response });
+      let response;
+      try {
+        response = await route.fetch({
+          maxRedirects: 0,
+          timeout: 60000,
+          headers: {
+            ...route.request().headers(),
+            "X-Serverless-Authorization": `Bearer ${process.env.AGENCY_ID_TOKEN}`,
+          },
+        });
+      } catch {
+        // A background asset (e.g. a Next chunk) can still be in flight when a
+        // check closes its context; route.fetch then rejects with
+        // TargetClosedError inside this callback, which Node treats as an
+        // unhandled rejection and kills the probe before it saves results
+        // (shared_agency run 45317005708). Abort that request instead; a fetch
+        // failure while the page is alive still surfaces as a failed check.
+        await route.abort().catch(() => {});
+        return;
+      }
+      await route.fulfill({ response }).catch(() => {});
     });
   context.setDefaultTimeout(30000);
   context.setDefaultNavigationTimeout(60000);
