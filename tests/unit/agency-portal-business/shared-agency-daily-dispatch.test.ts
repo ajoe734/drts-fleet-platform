@@ -247,6 +247,7 @@ function bindProbeDailyDispatch() {
     "visit",
     "api",
     "check",
+    "pageAlerts",
     `return (${fnSource.replace(importLine, "")})`,
   );
 }
@@ -351,7 +352,13 @@ async function exerciseDailyDispatch({
       };
     },
   };
-  const bound = bindProbeDailyDispatch()(expectStub, visitStub, apiStub, check);
+  const bound = bindProbeDailyDispatch()(
+    expectStub,
+    visitStub,
+    apiStub,
+    check,
+    (page: { getByRole: (role: string) => unknown }) => page.getByRole("alert"),
+  );
   const result = await bound(
     pageStub,
     { fixture: { serviceDate: SERVICE_DATE } },

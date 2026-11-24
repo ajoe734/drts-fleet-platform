@@ -153,6 +153,30 @@ describe("first-party production transport", () => {
     await transport.send(request(2));
     expect(devices.resolveActiveDevices).toHaveBeenCalledOnce();
   });
+  it("reuses the frozen ride reference of an existing tenantless route and refuses a changed owner on retry", async () => {
+    stored = null;
+    const directRoute = {
+      ...route,
+      tenantId: null,
+      rideRef: "existing-opaque-ride",
+    };
+    repo.findOrderFirstPartyNotificationRoute.mockResolvedValue(directRoute);
+    const receipt = await transport.send(request());
+    expect(receipt.deliveryContext).toMatchObject({
+      tenantId: null,
+      routeSnapshot: directRoute,
+      wireMessage: { data: { ride_ref: directRoute.rideRef } },
+    });
+    repo.findOrderFirstPartyNotificationRoute.mockResolvedValue({
+      ...directRoute,
+      drtsPassengerId: "another-account",
+    });
+    await expect(transport.send(request(2))).rejects.toMatchObject({
+      failure: { failureReason: "owner_changed" },
+    });
+    expect(provider.send).toHaveBeenCalledTimes(1);
+  });
+
   it("records accepted plus invalid results and invalidates captured token only", async () => {
     provider.send.mockResolvedValueOnce({
       kind: "invalid",

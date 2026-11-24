@@ -11,6 +11,7 @@ import { PassengerPushController } from "../../../apps/api/src/modules/passenger
 import { PassengerAccountService } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.service";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { PassengerBookingRepository } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.repository";
+import type { PassengerPushTransportRequest } from "../../../apps/api/src/modules/multi-taxi/passenger-push.adapter";
 import { FirstPartyNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
 import { AUTH_ALLOWED_REALMS_KEY } from "../../../apps/api/src/common/auth/auth.constants";
 import { resolveRouteAuthPolicy } from "../../../apps/api/src/common/auth/auth.policy";
@@ -577,7 +578,8 @@ function transport(tenantId: string | null) {
     devices as never,
     provider as never,
   );
-  const request = {
+  const request: PassengerPushTransportRequest = {
+    providerName: "first_party_app",
     message: {
       outboxId: "fixture-outbox",
       orderId,
@@ -588,26 +590,43 @@ function transport(tenantId: string | null) {
       payload: { eventSequence: 1 },
       createdAt: new Date().toISOString(),
     },
-    context: { fenceToken: "fixture-existing-fence" },
-  } as never;
+    context: { fenceToken: 1 },
+  };
   return { instance, repository, devices, provider, request };
 }
-describe("Stored tenantless route remains separate from existing nonnull delivery capability", () => {
-  it("returns existing configuration_blocked for tenantless route before context/device/provider work", async () => {
-    vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", "true");
-    const f = transport(null);
-    await expect(f.instance.send(f.request)).rejects.toMatchObject({
-      failure: {
-        failureReason: "configuration_blocked",
-        retryDisposition: "configuration_blocked",
-      },
-    });
-    expect(
-      f.repository.prepareFirstPartyNotificationContext,
-    ).not.toHaveBeenCalled();
-    expect(f.devices.resolveActiveDevices).not.toHaveBeenCalled();
-    expect(f.provider.send).not.toHaveBeenCalled();
-  });
+describe("First-party notification delivery for direct and tenant bookings", () => {
+  it.each(["assignment_replaced", "eta_changed"] as const)(
+    "sends %s using the same route that the ordinary booking writes",
+    async (eventType) => {
+      vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", "true");
+      const bookingCase = booking();
+      await bookingCase.service.createRide(
+        owner,
+        bookingCase.command,
+        "fixture-request",
+      );
+      const [bookedRoute] = bookingCase.write.mock.calls[0]!;
+      const f = transport(null);
+      f.repository.findOrderFirstPartyNotificationRoute.mockResolvedValue({
+        ...bookedRoute,
+        notificationPolicyVersion: "first_party_notification_v1",
+        createdAt: new Date().toISOString(),
+      });
+      f.repository.findPartnerNotificationRelevance.mockResolvedValue({
+        status: "active",
+        assignmentVersion: 1,
+      });
+      const result = await f.instance.send({
+        ...f.request,
+        message: { ...f.request.message, eventType },
+      });
+      expect(result.deliveryContext.tenantId).toBeNull();
+      expect(f.provider.send).toHaveBeenCalledTimes(1);
+      expect(f.provider.send.mock.calls[0]![0]).toMatchObject({
+        data: { ride_ref: orderId, event: `passenger.${eventType}.v1` },
+      });
+    },
+  );
   it("retains actual nonnull context and captured-provider callback behavior", async () => {
     vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", "true");
     const f = transport("fixture-existing-tenant");
