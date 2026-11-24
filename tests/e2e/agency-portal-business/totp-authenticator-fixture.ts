@@ -325,32 +325,6 @@ export function buildFourPortalHostedJourneyClassification() {
         resetPasswordUri: "/reset-password?token=[REDACTED_TOKEN]",
       },
     },
-    sharedDevExistingPasswordLoginEvidence: {
-      status: "verified_on_shared_dev_for_agency_portal_password_login",
-      readmePath: ".local/agency-password-login-20261117/README.md",
-      exporterEvidencePath:
-        ".local/agency-password-login-20261117/exporter-evidence.json",
-      fullEvidencePath:
-        ".local/agency-password-login-20261117/full-evidence-84679358.json",
-      viewerRoutesPath:
-        ".local/agency-password-login-20261117/viewer-routes.json",
-      viewerDenialsPath:
-        ".local/agency-password-login-20261117/viewer-denials.json",
-      serviceOrigin:
-        "https://drts-dev-agency-portal-web-r6ykdme3wa-uc.a.run.app",
-      headSha: "134df5cc4a436dce36fd2359f089217665d10b80",
-      runtimeShasObserved: [
-        "b18c521b2cbe0278c94d5e6bf0e8206f9b1c1171",
-        "97e22851ce0f270a0ed7bc55c09556043de19db9",
-      ],
-      deployDevRuns: ["44019618638", "44476190461", "44610538859"],
-      verifiedCapabilities: [
-        "real password-login agency_viewer and agency_exporter session issuance on shared dev",
-        "viewer 20 locale/route SSR checks (zh-TW and en) and 403 AUTH_SCOPE_DENIED on export preview/create/download",
-        "exporter preview/create/status/signed CSV download (830 bytes, sha256 5fb73541f64932ce484b7315cd234d20a2b41267bfdc0ba19d3cc85c654280c2)",
-        "cross-agency export job isolation (404 MULTI_TAXI_EXPORT_JOB_NOT_FOUND)",
-      ],
-    },
     separateExternalAndSharedDevFormalAcceptance: {
       classification:
         "hosted_rehearsal_uses_smtp_sim_and_simulated_totp_fixture__real_smtp_and_physical_authenticator_shared_dev_formal_acceptance_tracked_separately",

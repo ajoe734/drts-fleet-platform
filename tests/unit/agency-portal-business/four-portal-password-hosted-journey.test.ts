@@ -199,11 +199,9 @@ describe("FOUR-PORTAL-PASSWORD-HOSTED-JOURNEY-20261123: fixture authenticator, e
       classification.fourPortalScopes.enterpriseDispatchWeb
         .inventsSeparateInvitationUri,
     ).toBe(false);
-    expect(
-      classification.sharedDevExistingPasswordLoginEvidence.deployDevRuns,
-    ).toEqual(["44019618638", "44476190461", "44610538859"]);
-    expect(classification.sharedDevExistingPasswordLoginEvidence.headSha).toBe(
-      "134df5cc4a436dce36fd2359f089217665d10b80",
+    // This run publishes only what it observed itself.
+    expect(JSON.stringify(classification)).not.toMatch(
+      /run\.app|\.local\/agency|verified_on_shared_dev|[0-9a-f]{40}/,
     );
     expect(
       classification.separateExternalAndSharedDevFormalAcceptance.trackedItems.map(

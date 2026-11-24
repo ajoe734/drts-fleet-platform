@@ -97,7 +97,7 @@ async function acceptInvitationWithPasswordInBrowser(
   email: string,
   password: string,
 ) {
-  await page.goto(acceptUrl);
+  await page.goto(acceptUrl, { waitUntil: "networkidle" });
   const form = page
     .locator("form")
     .filter({ has: page.locator('input[type="email"]') });
@@ -224,6 +224,7 @@ async function enrollAndConfirmTotpInBrowser(
 async function verifyAccountSecurityAndSignOutInBrowser(
   page: Page,
   portalOrigin: string,
+  secondFactor: "used" | "not_used",
 ): Promise<{ sessionsStatus: number; logoutStatus: number }> {
   const sessionsResponsePromise = page.waitForResponse(
     (res) =>
@@ -238,12 +239,25 @@ async function verifyAccountSecurityAndSignOutInBrowser(
   expect(sessionsStatus).toBe(200);
   const payload = await sessionsResponse.json();
   const sessions: unknown = payload?.data;
-  expect(
-    Array.isArray(sessions) && sessions.some((row) => row?.is_current === true),
-  ).toBe(true);
+  const current = (Array.isArray(sessions) ? sessions : []).find(
+    (row) => row?.is_current === true,
+  );
+  expect(Boolean(current)).toBe(true);
+  // The server's own record of how this session signed in.
+  expect(current.auth_methods.includes("otp")).toBe(secondFactor === "used");
   await expect(
     page.getByRole("listitem").filter({ hasText: /此裝置|This device/i }),
   ).toBeVisible();
+
+  // Keep the signed-in cookies elsewhere: after sign-out the page's own cookies
+  // are cleared, which says nothing about the session on the server.
+  const replay = await page
+    .context()
+    .browser()!
+    .newContext({ storageState: await page.context().storageState() });
+  const replayedSessions = () =>
+    replay.request.get(`${portalOrigin}/api/auth/sessions`);
+  expect((await replayedSessions()).status()).toBe(200);
 
   const logoutResponsePromise = page.waitForResponse(
     (res) =>
@@ -262,6 +276,8 @@ async function verifyAccountSecurityAndSignOutInBrowser(
     `${portalOrigin}/api/auth/sessions`,
   );
   expect(afterLogout.status()).toBe(401);
+  expect((await replayedSessions()).ok()).toBe(false);
+  await replay.close();
   return { sessionsStatus, logoutStatus };
 }
 
@@ -516,6 +532,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const tenantSignOut1 = await verifyAccountSecurityAndSignOutInBrowser(
       tenantPage,
       tenantOrigin,
+      "not_used",
     );
     await recordStep({
       step: "1d_tenant_account_security_and_logout",
@@ -525,6 +542,23 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       path: "/account/security",
       status: tenantSignOut1.logoutStatus,
       outcome: "session_inventory_verified_and_signed_out",
+    });
+
+    const tenantWithoutCode = await loginWithPasswordInBrowser(
+      tenantPage,
+      tenantOrigin,
+      tenantEmail,
+      tenantInitialPassword,
+    );
+    expect(tenantWithoutCode).toBe(401);
+    await recordStep({
+      step: "1d2_tenant_password_without_code_denied",
+      portal: "tenant-console-web",
+      hostOrigin: tenantOrigin,
+      realm: "tenant",
+      path: "/login",
+      status: tenantWithoutCode,
+      outcome: "enrolled_second_factor_is_required",
     });
 
     const tenantMfaLoginCode = await authenticator.nextCode(tenantSecret);
@@ -553,7 +587,11 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       totpStep: tenantMfaLoginCode.step,
     });
 
-    await verifyAccountSecurityAndSignOutInBrowser(tenantPage, tenantOrigin);
+    await verifyAccountSecurityAndSignOutInBrowser(
+      tenantPage,
+      tenantOrigin,
+      "used",
+    );
 
     const tenantReset = await requestAndConfirmPasswordResetInBrowser(
       tenantPage,
@@ -574,6 +612,25 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
 
     const tenantPostResetCode = await authenticator.nextCode(tenantSecret);
+    // The same code signs in with the new password below, so only the replaced
+    // password can be the reason for this denial.
+    const tenantOldPassword = await loginWithPasswordInBrowser(
+      tenantPage,
+      tenantOrigin,
+      tenantEmail,
+      tenantInitialPassword,
+      tenantPostResetCode.code,
+    );
+    expect(tenantOldPassword).toBe(401);
+    await recordStep({
+      step: "1f2_tenant_replaced_password_denied",
+      portal: "tenant-console-web",
+      hostOrigin: tenantOrigin,
+      realm: "tenant",
+      path: "/login",
+      status: tenantOldPassword,
+      outcome: "replaced_password_rejected_with_a_valid_code",
+    });
     const tenantPostResetLoginStatus = await loginWithPasswordInBrowser(
       tenantPage,
       tenantOrigin,
@@ -609,7 +666,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const enterpriseContext = await browser.newContext();
     const enterprisePage = await enterpriseContext.newPage();
 
-    await enterprisePage.goto(`${enterpriseOrigin}/`, {
+    const enterpriseGate = await enterprisePage.goto(`${enterpriseOrigin}/`, {
       waitUntil: "networkidle",
     });
     const loginLink = enterprisePage.locator('a[href="/login"]').first();
@@ -622,7 +679,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       hostOrigin: enterpriseOrigin,
       realm: "tenant",
       path: "/ -> /login",
-      status: 200,
+      status: enterpriseGate?.status() ?? null,
       outcome:
         "existing_enterprise_auth_required_gate_navigated_to_login_without_separate_invite_uri",
     });
@@ -657,6 +714,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const enterpriseSignOut = await verifyAccountSecurityAndSignOutInBrowser(
       enterprisePage,
       enterpriseOrigin,
+      "used",
     );
     await recordStep({
       step: "2c_enterprise_account_security_and_logout",
@@ -688,6 +746,25 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
 
     const enterpriseLoginCode2 = await authenticator.nextCode(tenantSecret);
+    // The same code signs in with the new password below, so only the replaced
+    // password can be the reason for this denial.
+    const enterpriseOldPassword = await loginWithPasswordInBrowser(
+      enterprisePage,
+      enterpriseOrigin,
+      tenantEmail,
+      tenantResetPassword,
+      enterpriseLoginCode2.code,
+    );
+    expect(enterpriseOldPassword).toBe(401);
+    await recordStep({
+      step: "2d2_enterprise_replaced_password_denied",
+      portal: "enterprise-dispatch-web",
+      hostOrigin: enterpriseOrigin,
+      realm: "tenant",
+      path: "/login",
+      status: enterpriseOldPassword,
+      outcome: "replaced_password_rejected_with_a_valid_code",
+    });
     const enterpriseLoginStatus2 = await loginWithPasswordInBrowser(
       enterprisePage,
       enterpriseOrigin,
@@ -830,6 +907,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const agencySignOut = await verifyAccountSecurityAndSignOutInBrowser(
       agencyPage,
       agencyOrigin,
+      "not_used",
     );
     await recordStep({
       step: "3d_agency_account_security_and_logout",
@@ -839,6 +917,23 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       path: "/account/security",
       status: agencySignOut.logoutStatus,
       outcome: "agency_session_inventory_verified_and_signed_out",
+    });
+
+    const agencyWithoutCode = await loginWithPasswordInBrowser(
+      agencyPage,
+      agencyOrigin,
+      agencyEmail,
+      agencyInitialPassword,
+    );
+    expect(agencyWithoutCode).toBe(401);
+    await recordStep({
+      step: "3d2_agency_password_without_code_denied",
+      portal: "agency-portal-web",
+      hostOrigin: agencyOrigin,
+      realm: "agency",
+      path: "/login",
+      status: agencyWithoutCode,
+      outcome: "enrolled_second_factor_is_required",
     });
 
     const agencyMfaCode1 = await authenticator.nextCode(agencySecret);
@@ -867,7 +962,11 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       totpStep: agencyMfaCode1.step,
     });
 
-    await verifyAccountSecurityAndSignOutInBrowser(agencyPage, agencyOrigin);
+    await verifyAccountSecurityAndSignOutInBrowser(
+      agencyPage,
+      agencyOrigin,
+      "used",
+    );
 
     const agencyReset = await requestAndConfirmPasswordResetInBrowser(
       agencyPage,
@@ -888,6 +987,25 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
 
     const agencyMfaCode2 = await authenticator.nextCode(agencySecret);
+    // The same code signs in with the new password below, so only the replaced
+    // password can be the reason for this denial.
+    const agencyOldPassword = await loginWithPasswordInBrowser(
+      agencyPage,
+      agencyOrigin,
+      agencyEmail,
+      agencyInitialPassword,
+      agencyMfaCode2.code,
+    );
+    expect(agencyOldPassword).toBe(401);
+    await recordStep({
+      step: "3f2_agency_replaced_password_denied",
+      portal: "agency-portal-web",
+      hostOrigin: agencyOrigin,
+      realm: "agency",
+      path: "/login",
+      status: agencyOldPassword,
+      outcome: "replaced_password_rejected_with_a_valid_code",
+    });
     const agencyPostResetLoginStatus = await loginWithPasswordInBrowser(
       agencyPage,
       agencyOrigin,
@@ -1017,6 +1135,7 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     const fleetSignOut = await verifyAccountSecurityAndSignOutInBrowser(
       fleetPage,
       fleetOrigin,
+      "not_used",
     );
     await recordStep({
       step: "4d_fleet_account_security_and_logout",
@@ -1026,6 +1145,23 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       path: "/account/security",
       status: fleetSignOut.logoutStatus,
       outcome: "fleet_session_inventory_verified_and_signed_out",
+    });
+
+    const fleetWithoutCode = await loginWithPasswordInBrowser(
+      fleetPage,
+      fleetOrigin,
+      fleetEmail,
+      fleetInitialPassword,
+    );
+    expect(fleetWithoutCode).toBe(401);
+    await recordStep({
+      step: "4d2_fleet_password_without_code_denied",
+      portal: "fleet-partner-portal-web",
+      hostOrigin: fleetOrigin,
+      realm: "partner",
+      path: "/login",
+      status: fleetWithoutCode,
+      outcome: "enrolled_second_factor_is_required",
     });
 
     const fleetMfaCode1 = await authenticator.nextCode(fleetSecret);
@@ -1054,7 +1190,11 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       totpStep: fleetMfaCode1.step,
     });
 
-    await verifyAccountSecurityAndSignOutInBrowser(fleetPage, fleetOrigin);
+    await verifyAccountSecurityAndSignOutInBrowser(
+      fleetPage,
+      fleetOrigin,
+      "used",
+    );
 
     const fleetReset = await requestAndConfirmPasswordResetInBrowser(
       fleetPage,
@@ -1075,6 +1215,25 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
     });
 
     const fleetMfaCode2 = await authenticator.nextCode(fleetSecret);
+    // The same code signs in with the new password below, so only the replaced
+    // password can be the reason for this denial.
+    const fleetOldPassword = await loginWithPasswordInBrowser(
+      fleetPage,
+      fleetOrigin,
+      fleetEmail,
+      fleetInitialPassword,
+      fleetMfaCode2.code,
+    );
+    expect(fleetOldPassword).toBe(401);
+    await recordStep({
+      step: "4f2_fleet_replaced_password_denied",
+      portal: "fleet-partner-portal-web",
+      hostOrigin: fleetOrigin,
+      realm: "partner",
+      path: "/login",
+      status: fleetOldPassword,
+      outcome: "replaced_password_rejected_with_a_valid_code",
+    });
     const fleetPostResetLoginStatus = await loginWithPasswordInBrowser(
       fleetPage,
       fleetOrigin,
