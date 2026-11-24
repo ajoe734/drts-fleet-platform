@@ -105,6 +105,27 @@ jobs:
         with:
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
 
+      # Register every mailbox value as a mask from this shell step, at the
+      # start of a line, before any later step can print it. The observer used
+      # to emit its own masks from inside the Playwright run, where the
+      # reporter's cursor escape codes prefix each line; Actions does not parse
+      # such a line as a command, so it logged the raw values instead.
+      - name: Register mailbox secret masks before any test output
+        env:
+          PROJECT: ${{ vars.DEV_GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          for name in drts-dev-smtp-username drts-dev-smtp-password drts-dev-smtp-from-email; do
+            value="$(gcloud secrets versions access latest --secret="$name" --project="$PROJECT")"
+            printf '::add-mask::%s\n' "${value//%/%25}"
+            if [ "$name" = drts-dev-smtp-username ] && [[ "$value" == *@* ]]; then
+              for flow in invite approve; do
+                alias="${value%@*}+${flow}@${value#*@}"
+                printf '::add-mask::%s\n' "${alias//%/%25}"
+              done
+            fi
+          done
+
       - name: Record configured provider metadata and alias revision freshness
         id: resources
         run: python3 tests/e2e/system-remediation/sr-live-mail-001/provider-metadata.py

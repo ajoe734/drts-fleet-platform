@@ -9,7 +9,7 @@ import type {
   Page,
   Route,
 } from "@playwright/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ComplaintCaseRecord,
   ComplaintTimelineEntry,
@@ -1528,6 +1528,18 @@ function createSimulatedR10BrowserHarness(options?: {
 }
 
 describe("runR10OperationsDownloads full UI orchestration", () => {
+  // The simulated job artifacts expire at 2026-11-24T02:10:2xZ, and the
+  // artifact check compares that against Date.now(). Pin only Date to the
+  // fixture run time (as the per-artifact tests pin nowMs), so the case does
+  // not start failing once the wall clock passes that fixture expiry.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T02:11:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("expands the already-open Ops reports page to 6 months, reruns fixed source, downloads JSON Blob + CSV/PDF job artifacts, and preserves pre-existing pages", async () => {
     const harness = createSimulatedR10BrowserHarness({
       crossMonthUtcBoundary: true,
