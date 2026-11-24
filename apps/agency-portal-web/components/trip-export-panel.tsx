@@ -22,17 +22,22 @@ async function call<T>(
   path: string,
   init?: { method: "POST"; body: unknown },
 ): Promise<{ ok: boolean; status: number; body: ApiEnvelope<T> | null }> {
-  const response = await fetch(`/api/agency/${path}`, {
-    method: init?.method ?? "GET",
-    credentials: "same-origin",
-    headers: init
-      ? {
-          "Content-Type": "application/json",
-          "x-csrf-token": readCookie("drts_agency_csrf") ?? "",
-        }
-      : {},
-    ...(init ? { body: JSON.stringify(init.body) } : {}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api/agency/${path}`, {
+      method: init?.method ?? "GET",
+      credentials: "same-origin",
+      headers: init
+        ? {
+            "Content-Type": "application/json",
+            "x-csrf-token": readCookie("drts_agency_csrf") ?? "",
+          }
+        : {},
+      ...(init ? { body: JSON.stringify(init.body) } : {}),
+    });
+  } catch {
+    return { ok: false, status: 0, body: null };
+  }
   const body = (await response
     .json()
     .catch(() => null)) as ApiEnvelope<T> | null;
@@ -87,6 +92,16 @@ export function TripExportPanel({
   const statusReqVersionRef = useRef(0);
   const downloadReqVersionRef = useRef(0);
   const activeJobIdRef = useRef<string | null>(null);
+  // The page lists no jobs, so a create that fails must give the last shown
+  // job and its link back.
+  const lastJobRef = useRef<{
+    jobId: string;
+    jobStatus: string | null;
+    downloadUrl: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (jobId) lastJobRef.current = { jobId, jobStatus, downloadUrl };
+  }, [jobId, jobStatus, downloadUrl]);
 
   const resetScopeDerivedState = () => {
     scopeVersionRef.current += 1;
@@ -95,6 +110,7 @@ export function TripExportPanel({
     statusReqVersionRef.current += 1;
     downloadReqVersionRef.current += 1;
     activeJobIdRef.current = null;
+    lastJobRef.current = null;
     setMessage(null);
     setRecordCount(null);
     setJobId(null);
@@ -236,12 +252,16 @@ export function TripExportPanel({
           );
           if (
             requestScopeVersion !== scopeVersionRef.current ||
-            requestJobVersion !== jobVersionRef.current ||
             requestPreviewVersion !== previewReqVersionRef.current
           ) {
             return;
           }
-          if (!result.ok) return fail(result.status, result.body);
+          if (!result.ok) {
+            // A preview error must not read as an error of a newer job.
+            if (requestJobVersion === jobVersionRef.current)
+              fail(result.status, result.body);
+            return;
+          }
           setRecordCount(result.body?.data?.record_count ?? null);
         }}
       >
@@ -265,7 +285,6 @@ export function TripExportPanel({
         onClick={async () => {
           const requestScopeVersion = scopeVersionRef.current;
           const requestJobVersion = ++jobVersionRef.current;
-          previewReqVersionRef.current += 1;
           statusReqVersionRef.current += 1;
           downloadReqVersionRef.current += 1;
           activeJobIdRef.current = null;
@@ -286,7 +305,14 @@ export function TripExportPanel({
           ) {
             return;
           }
-          if (!result.ok) return fail(result.status, result.body);
+          if (!result.ok) {
+            const last = lastJobRef.current;
+            activeJobIdRef.current = last?.jobId ?? null;
+            setJobId(last?.jobId ?? null);
+            setJobStatus(last?.jobStatus ?? null);
+            setDownloadUrl(last?.downloadUrl ?? null);
+            return fail(result.status, result.body);
+          }
           const nextJobId = result.body?.data?.job_id ?? null;
           const nextJobStatus = result.body?.data?.status ?? null;
           activeJobIdRef.current = nextJobId;

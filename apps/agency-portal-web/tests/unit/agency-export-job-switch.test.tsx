@@ -659,4 +659,99 @@ describe("TripExportPanel active job, scope, and download consistency under over
     ).toBe(URL_B);
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it.each([
+    ["the server rejects it", () => Promise.resolve(jsonResponse(503, {}))],
+    ["the network is down", () => Promise.reject(new TypeError("offline"))],
+  ])(
+    "gives the earlier job and its link back, with an error, when creating another job fails because %s",
+    async (_label, secondCreate) => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(200, { data: { job_id: JOB_A, status: "completed" } }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(200, { data: { download: { download_url: URL_A } } }),
+        )
+        .mockImplementationOnce(secondCreate)
+        .mockImplementationOnce(secondCreate)
+        .mockResolvedValueOnce(
+          jsonResponse(200, { data: { status: "completed" } }),
+        );
+      render(
+        React.createElement(TripExportPanel, {
+          initialScope: { orderId: SHARED_ORDER_A },
+          locale: "zh",
+        }),
+      );
+      fireEvent.change(screen.getByLabelText("匯出目的（必填）"), {
+        target: { value: "建立失敗後保留前一份" },
+      });
+      const create = screen.getByRole("button", { name: "建立匯出" });
+      fireEvent.click(create);
+      await screen.findByText(JOB_A);
+      fireEvent.click(screen.getByRole("button", { name: "取得下載連結" }));
+      await screen.findByRole("link", { name: "下載（連結有效期限內）" });
+
+      // Two overlapping failures must not lose the job either.
+      fireEvent.click(create);
+      fireEvent.click(create);
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(screen.getByText(JOB_A)).toBeTruthy();
+      expect(
+        screen
+          .getByRole("link", { name: "下載（連結有效期限內）" })
+          .getAttribute("href"),
+      ).toBe(URL_A);
+
+      // The restored job is live again, not just displayed.
+      fireEvent.click(screen.getByRole("button", { name: "重新查詢狀態" }));
+      expect(await screen.findByText(/狀態：已完成/)).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    },
+  );
+
+  it("shows the preview count that arrives after a job was created for the same scope, but not its error", async () => {
+    const firstPreview = deferredResponse();
+    const secondPreview = deferredResponse();
+    global.fetch = vi
+      .fn()
+      .mockImplementationOnce(() => firstPreview.promise)
+      .mockResolvedValueOnce(
+        jsonResponse(200, { data: { job_id: JOB_A, status: "running" } }),
+      )
+      .mockImplementationOnce(() => secondPreview.promise)
+      .mockResolvedValueOnce(
+        jsonResponse(200, { data: { job_id: JOB_B, status: "running" } }),
+      );
+    render(
+      React.createElement(TripExportPanel, {
+        initialScope: { orderId: SHARED_ORDER_A },
+        locale: "zh",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("匯出目的（必填）"), {
+      target: { value: "預覽後立即建立" },
+    });
+    const preview = screen.getByRole("button", { name: "預覽筆數" });
+    const create = screen.getByRole("button", { name: "建立匯出" });
+
+    fireEvent.click(preview);
+    fireEvent.click(create);
+    await screen.findByText(JOB_A);
+    await React.act(async () => {
+      firstPreview.resolve(200, { data: { record_count: 7 } });
+    });
+    expect(screen.getByText("符合保存期間的筆數：7")).toBeTruthy();
+
+    fireEvent.click(preview);
+    fireEvent.click(create);
+    await screen.findByText(JOB_B);
+    await React.act(async () => {
+      secondPreview.resolve(500, { error: { message: "預覽失敗" } });
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(JOB_B)).toBeTruthy();
+  });
 });
