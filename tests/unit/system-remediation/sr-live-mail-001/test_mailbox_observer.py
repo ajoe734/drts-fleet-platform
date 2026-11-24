@@ -382,7 +382,7 @@ class InvitationConsumptionTest(unittest.TestCase):
                                             {**self.request, 'acceptance': 'denied'}, opener)
         self.assertEqual(result['acceptance_status'], 403)
         self.assertEqual(opener.open.call_args.args[0].full_url,
-                         self.request['api_origin'] + '/api/tenant/invitations/accept')
+                         self.request['api_origin'] + '/api/tenant/invitations/accept-with-password')
         self.assertNotIn(self.token, str(result))
 
     def test_smtp_crlf_actual_acceptance_and_expiry_guards_are_retained(self):
@@ -391,11 +391,25 @@ class InvitationConsumptionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not elapsed'):
             observer.accept_invitation(decoded, self.request, opener)
         opener.open.assert_not_called()
-        opener.open.return_value = self.response(201, {'data': {'accepted': True, 'user': {
-            'user_id': self.request['user_id'], 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}}})
+        opener.open.return_value = self.response(201, {'data': {
+            'user_id': self.request['user_id'], 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}})
         result = observer.accept_invitation(decoded, {**self.request, 'acceptance': 'accepted'}, opener)
         self.assertEqual(result['acceptance'], 'accepted')
         self.assertNotIn(self.token, str(result))
+
+    def test_each_acceptance_uses_the_password_branch_with_a_fresh_password(self):
+        # Google-OIDC dev refuses every token on the token-only route, so a
+        # denial there proves nothing about the token; the password branch must be used.
+        passwords = []
+        for _ in range(2):
+            opener = Mock()
+            opener.open.return_value = self.response(403, {'error': {'code': 'TENANT_INVITATION_ACCEPTANCE_DENIED'}})
+            observer.accept_invitation(self.body(datetime.now(timezone.utc) + timedelta(hours=1)),
+                                       {**self.request, 'acceptance': 'denied'}, opener)
+            call = opener.open.call_args.args[0]
+            self.assertEqual(call.full_url, self.request['api_origin'] + '/api/tenant/invitations/accept-with-password')
+            passwords.append(json.loads(call.data)['password'])
+        self.assertNotEqual(passwords[0], passwords[1])
 
     def test_crlf_duplicate_or_malformed_token_and_expiry_remain_rejected(self):
         body = self.body(datetime.now(timezone.utc) + timedelta(hours=24))
@@ -425,8 +439,11 @@ class InvitationConsumptionTest(unittest.TestCase):
         self.assertEqual(result['acceptance_status'], 403)
         self.assertNotIn(self.token, str(result))
         call = opener.open.call_args.args[0]
-        self.assertEqual(call.full_url, self.request['api_origin'] + '/api/tenant/invitations/accept')
-        self.assertEqual(json.loads(call.data), {'invitationToken': self.token})
+        self.assertEqual(call.full_url, self.request['api_origin'] + '/api/tenant/invitations/accept-with-password')
+        sent = json.loads(call.data)
+        self.assertEqual(sent['invitationToken'], self.token)
+        self.assertGreaterEqual(len(sent['password']), 15)
+        self.assertNotIn(sent['password'], str(result))
 
     def test_link_token_is_parsed_but_link_is_never_followed(self):
         body = 'Accept your invitation: https://untrusted.invalid/accept?token=' + self.token + '\nThis invitation expires at 2026-10-01T01:00:00Z.'
@@ -442,7 +459,7 @@ class InvitationConsumptionTest(unittest.TestCase):
 
     def test_success_must_activate_the_expected_user_in_the_expected_tenant(self):
         opener = Mock()
-        opener.open.return_value = self.response(201, {'data': {'accepted': True, 'user': {'user_id': 'other-user', 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}}})
+        opener.open.return_value = self.response(201, {'data': {'user_id': 'other-user', 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}})
         with self.assertRaisesRegex(ValueError, 'expected user'):
             observer.accept_invitation(self.body(datetime.now(timezone.utc) + timedelta(hours=1)), {**self.request, 'acceptance': 'accepted'}, opener)
 

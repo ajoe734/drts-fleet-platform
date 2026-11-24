@@ -277,7 +277,20 @@ export default function RidesListPage() {
                       alignItems: "center",
                     }}
                   >
-                    <div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: passengerChrome.muted,
+                          marginBottom: 4,
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {t.OrderNumber}{" "}
+                        <span style={{ fontFamily: passengerChrome.monoFont }}>
+                          {ride.order.orderNo}
+                        </span>
+                      </div>
                       <div
                         style={{
                           fontSize: 12,

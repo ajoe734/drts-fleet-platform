@@ -324,6 +324,46 @@ must also have `Ready=True`, matching latest-created/latest-ready revisions,
 100% traffic on that revision, the expected runtime identity, exact built image
 digest, and the source SHA in revision configuration.
 
+## Select the production workflow branch
+
+Set `PROD_WORKFLOW_REF` to the name of an existing, reviewed `release/*`
+branch allowed by the GitHub `production` environment. Set `PROD_TAG` to the
+approved immutable `prod/vYYYY.MM.DD.N` tag. For rollback, set `ROLLBACK_TAG`
+to the previous known-good tag and select the workflow branch for that release.
+
+List candidate branches and check the selected branch name against remote tags.
+Choose a branch with no same-named tag so the dispatch ref is unambiguous.
+
+```bash
+git ls-remote --heads origin 'refs/heads/release/*'
+git ls-remote --tags origin "refs/tags/${PROD_WORKFLOW_REF:?}"
+```
+
+Fetch the explicit branch and product tag into the local checkout and compare
+their workflow file hashes. Peeling each ref to a commit also handles annotated
+production tags.
+
+```bash
+(
+  set -e
+  git fetch --no-tags origin "refs/heads/${PROD_WORKFLOW_REF:?}"
+  workflow_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+  git fetch --no-tags origin "refs/tags/${PROD_TAG:?}"
+  product_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+  git rev-parse "$workflow_commit:.github/workflows/deploy-prod.yml" \
+                "$product_commit:.github/workflows/deploy-prod.yml"
+)
+```
+
+For rollback, use `ROLLBACK_TAG` in place of `PROD_TAG` in this comparison.
+Matching file hashes confirm that the branch will execute the reviewed workflow
+from the tag. If the hashes differ, review the workflow differences against the
+target release before dispatch. If the required definition is missing from the
+allowed branches, the release controller can prepare a `release/*` branch from
+the reviewed release commit through the existing release process. Nightly
+publish creates a `release/v*` **tag** and a `publish/v*` branch. The
+environment policy allows `release/*` **branches**.
+
 ## Deploy and rollback
 
 1. Verify live target variables, fixture ownership and credential validity,
@@ -331,8 +371,13 @@ digest, and the source SHA in revision configuration.
 2. Select a protected `prod/v<YYYY.MM.DD>.<N>` tag produced by hourly-promote
    containing the reviewed rail. The tag is resolved **once** to a full commit
    SHA. Every subsequent helper/build checkout uses that SHA.
-3. Dispatch `gh workflow run deploy-prod.yml -f tag=<approved prod/v tag>` and
-   obtain the required GitHub `production` environment review.
+3. Select the workflow branch as described above, then dispatch the approved
+   product tag and obtain the required GitHub `production` environment review.
+
+   ```bash
+   gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${PROD_TAG:?}"
+   ```
+
 4. Graph: `resolve-tag -> validate-config -> build-push (ten apps + migrate)
 -> migrate once -> deploy all ten -> health-check all ten`. Any validation,
    build or migration failure prevents deployment. `skip_migration=true` is an
@@ -343,7 +388,13 @@ digest, and the source SHA in revision configuration.
    result, source tag/SHA, target, workflow run/attempt and migration disposition.
 
 For rollback, confirm the previous known-good rail tag and schema compatibility
-**before** dispatching it with `-f skip_migration=true`. The same complete graph
+**before** selecting its workflow branch and dispatching the rollback.
+
+```bash
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${ROLLBACK_TAG:?}" -f skip_migration=true
+```
+
+The same complete graph
 and identity/secret preflight apply. Do not down-migrate, delete volumes, reset
 history, or force-push. Escalate incompatible forward migrations to the database
 owner. Partial deployment or any verification failure is an incident, not a

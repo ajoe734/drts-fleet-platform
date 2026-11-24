@@ -1,3 +1,4 @@
+import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@playwright/test", () => ({
@@ -5,7 +6,33 @@ vi.mock("@playwright/test", () => ({
   expect: expect,
 }));
 
-import { runInvoiceMailPreflight } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+import { readInvoiceApiResponse, runInvoiceMailPreflight } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+
+describe("invoice mail API wire responses", () => {
+  it("reads delivery IDs, attempt results and the signed download fields without changing their values", async () => {
+    const signedLink = "/downloads/tenant-invoice/invoice-1?manifest_hash=abc&sig_v=1&sig=a_b";
+    const invoice = {
+      tenantId: "tenant-1",
+      invoiceId: "invoice-1",
+      artifactUrl: signedLink,
+      artifactDownloadMetadata: { manifestHash: "abc" },
+    };
+    const deliveries = [
+      {
+        deliveryId: "first",
+        attempts: [{ acceptedAt: "2026-10-07T10:00:00Z", errorCode: null }],
+      },
+      {
+        deliveryId: "resend",
+        attempts: [{ acceptedAt: null, errorCode: "SMTP_RECIPIENT_NOT_ALLOWLISTED" }],
+      },
+    ];
+    for (const data of [invoice, { deliveryId: "resend", deliveries }]) {
+      const response = { json: async () => deepToSnakeCase({ data }) };
+      expect(await readInvoiceApiResponse(response)).toEqual({ data });
+    }
+  });
+});
 
 describe("F2/F4/F6 spec guards", () => {
   it("throws on invoice fixture mismatch (wrong tenant)", async () => {
@@ -46,18 +73,20 @@ describe("F2/F4/F6 spec guards", () => {
     expect(request.post).not.toHaveBeenCalled(); // zero sends
   });
 
-  it("passes legally positive runInvoiceMailPreflight case", async () => {
+  it.each(["controller", "wire"])("passes runInvoiceMailPreflight with %s JSON", async (shape) => {
+    const jsonBody = (value: unknown) => async () =>
+      shape === "wire" ? deepToSnakeCase(value) : value;
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
         if (url.includes("billing/profile")) {
-          return { status: () => 200, json: async () => ({ data: { email: "test@test.com" } }) };
+          return { status: () => 200, json: jsonBody({ data: { email: "test@test.com" } }) };
         }
         if (!url.includes("invoice") || url.match(/[0-9a-f]{8}-[0-9a-f]{4}/)) { // A basic check for the random UUID generated
-          return { status: () => 404, json: async () => ({}) };
+          return { status: () => 404, json: jsonBody({}) };
         }
-        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant", invoiceId: "invoice", items: [{invoiceId: "invoice"}] } }) };
+        return { status: () => 200, json: jsonBody({ data: { tenantId: "tenant", invoiceId: "invoice", items: [{invoiceId: "invoice"}] } }) };
       }),
-      post: vi.fn().mockResolvedValue({ status: () => 404, json: async () => ({}) })
+      post: vi.fn().mockResolvedValue({ status: () => 404, json: jsonBody({}) })
     };
     const evidenceData = { httpCalls: [], unimplementedLiveSurfaces: [], errors: [] };
     process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED = "true";
@@ -111,12 +140,14 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     expect(request.post).not.toHaveBeenCalled();
   });
 
-  it("passes legally positive runReadOnlyPreflight case", async () => {
+  it.each(["controller", "wire"])("passes runReadOnlyPreflight with %s JSON", async (shape) => {
+    const jsonBody = (value: unknown) => async () =>
+      shape === "wire" ? deepToSnakeCase(value) : value;
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
-        if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
-        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
-        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", invoiceId: "invoice-ro" } }) };
+        if (url.includes("auth/session")) return { status: () => 200, json: jsonBody({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: jsonBody({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
+        return { status: () => 200, json: jsonBody({ data: { tenantId: "tenant-ro", invoiceId: "invoice-ro" } }) };
       }),
       post: vi.fn()
     };
@@ -159,11 +190,13 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     expect(request.post).not.toHaveBeenCalled();
   });
 
-  it("passes legally positive runNonAllowlistPreflight case", async () => {
+  it.each(["controller", "wire"])("passes runNonAllowlistPreflight with %s JSON", async (shape) => {
+    const jsonBody = (value: unknown) => async () =>
+      shape === "wire" ? deepToSnakeCase(value) : value;
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
-        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "na@test.com" } }) };
-        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-na", invoiceId: "invoice-na", items: [{invoiceId: "invoice-na"}] } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: jsonBody({ data: { email: "na@test.com" } }) };
+        return { status: () => 200, json: jsonBody({ data: { tenantId: "tenant-na", invoiceId: "invoice-na", items: [{invoiceId: "invoice-na"}] } }) };
       }),
       post: vi.fn()
     };

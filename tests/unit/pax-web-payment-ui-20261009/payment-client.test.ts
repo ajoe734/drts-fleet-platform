@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { PassengerPaymentClient } from "../../../packages/passenger-client/src/payment/client";
+import {
+  PassengerPaymentClient,
+  decodePassengerPaymentBindingSession,
+} from "../../../packages/passenger-client/src/payment/client";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { approvedPaymentActionUrl } from "../../../apps/passenger-app-web/lib/payment/action-url";
 import { createSyntheticPaymentFields } from "../../../apps/passenger-app-web/lib/payment/synthetic-fields";
 import { paymentFieldsForRuntime } from "../../../apps/passenger-app-web/lib/payment/runtime-fields";
@@ -178,6 +182,108 @@ describe("actual portable Payment client, external HTTP only", () => {
         providerToken: "synthetic_one_use",
       }),
     ).rejects.toMatchObject({ code: "invalid_payment_response" });
+  });
+  it.each(["Stage", "Prod"] as const)(
+    "decodes SnakeCaseInterceptor binding-session wire payload for %s without losing approvedActionOrigins or sdkScriptUrl",
+    async (serverType) => {
+      const apiDomainSession = {
+        provider: "ecpay" as const,
+        merchantToken: `ecpay_wire_merchant_token_${serverType}`,
+        tokenExpireDate: "2026/11/23 12:00:00",
+        sandbox: serverType === "Stage",
+        serverType,
+        sdkScriptUrl:
+          serverType === "Stage"
+            ? "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js"
+            : "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+        approvedActionOrigins:
+          serverType === "Stage"
+            ? [
+                "https://ecpg-stage.ecpay.com.tw",
+                "https://payment-stage.ecpay.com.tw",
+                "https://cc-stage.ecpay.com.tw",
+              ]
+            : ["https://ecpg.ecpay.com.tw", "https://payment.ecpay.com.tw"],
+      };
+      const wireData = deepToSnakeCase(apiDomainSession);
+      const f = fixture(wireData);
+      const decoded = await f.client.getBindingSession();
+      expect(decoded).toEqual(apiDomainSession);
+      expect(onlyCall(f)).toMatchObject({
+        url: "/api/passenger-app/payment-methods?binding_session=1",
+        options: { method: "GET" },
+      });
+    },
+  );
+  it("retains legacy camelCase, token alias, flat or data-wrapped format, and optional fields in decodePassengerPaymentBindingSession", async () => {
+    const f = fixture({
+      provider: "ecpay",
+      merchantToken: "legacy_camel_token_001",
+      tokenExpireDate: "2026/12/31 23:59:59",
+      serverType: "Stage",
+      approvedActionOrigins: ["https://cc-stage.ecpay.com.tw"],
+    });
+    expect(await f.client.getBindingSession()).toEqual({
+      provider: "ecpay",
+      merchantToken: "legacy_camel_token_001",
+      tokenExpireDate: "2026/12/31 23:59:59",
+      serverType: "Stage",
+      approvedActionOrigins: ["https://cc-stage.ecpay.com.tw"],
+    });
+    expect(
+      decodePassengerPaymentBindingSession({
+        token: "legacy_alias_flat_token",
+        serverType: "Prod",
+      }),
+    ).toEqual({
+      provider: "ecpay",
+      merchantToken: "legacy_alias_flat_token",
+      tokenExpireDate: "",
+      serverType: "Prod",
+    });
+    expect(
+      decodePassengerPaymentBindingSession({
+        data: {
+          merchant_token: "wrapped_snake_token",
+          server_type: "Stage",
+          token_expire_date: "2026/11/23 00:00:00",
+        },
+      }),
+    ).toEqual({
+      provider: "ecpay",
+      merchantToken: "wrapped_snake_token",
+      tokenExpireDate: "2026/11/23 00:00:00",
+      serverType: "Stage",
+    });
+  });
+  it.each([
+    null,
+    {},
+    { merchant_token: "", server_type: "Stage" },
+    { merchant_token: "tok_ok", server_type: "Invalid" },
+    { provider: "other", merchant_token: "tok_ok", server_type: "Stage" },
+    {
+      merchantToken: "tok_camel",
+      merchant_token: "tok_snake_conflict",
+      server_type: "Stage",
+    },
+    {
+      merchant_token: "tok_primary",
+      token: "tok_alias_conflict",
+      server_type: "Stage",
+    },
+    {
+      merchant_token: "tok_ok",
+      serverType: "Stage",
+      server_type: "Prod",
+    },
+  ])("rejects malformed or conflicting binding session %j", async (data) => {
+    await expect(
+      fixture(data).client.getBindingSession(),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: "invalid_payment_response",
+    });
   });
 });
 describe("3DS authorization boundary, no browser/provider call", () => {

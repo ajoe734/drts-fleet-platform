@@ -25,11 +25,29 @@ type DriverExpoExtra = {
   driverActorId?: string;
 };
 
+const DEFAULT_PRODUCTION_API_URL = "https://api.smarttransport.tw";
+const LEGACY_DIRECT_API_URL = "https://drts-api-kdhu6wzufa-uc.a.run.app";
+
 const expoExtra = (Constants.expoConfig?.extra ?? {}) as DriverExpoExtra;
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ??
-  expoExtra.apiBaseUrl ??
-  "https://drts-api-kdhu6wzufa-uc.a.run.app";
+
+export function resolveDriverApiBaseUrl(options?: {
+  envApiUrl?: string;
+  manifestApiBaseUrl?: string;
+}): string {
+  const candidates = [
+    options ? options.envApiUrl : process.env.EXPO_PUBLIC_API_URL,
+    options ? options.manifestApiBaseUrl : expoExtra.apiBaseUrl,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim().replace(/\/+$/, "");
+    if (trimmed && trimmed !== LEGACY_DIRECT_API_URL) {
+      return trimmed;
+    }
+  }
+  return DEFAULT_PRODUCTION_API_URL;
+}
+
+const API_URL = resolveDriverApiBaseUrl();
 
 const DEV_DRIVER_ID: string | undefined =
   process.env.EXPO_PUBLIC_DRIVER_ID ??

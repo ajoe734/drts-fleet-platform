@@ -23,6 +23,15 @@ import {
   createDispatchInOrdinaryWorkspace,
   assignInOrdinaryWorkspace,
 } from "./pax-review-shared-order/ordinary-ops-dispatch";
+import {
+  assertPassengerArrivedRideDom,
+  assertPassengerAssignedRideDom,
+  assertPassengerCompletedRideDom,
+  assertPassengerOnTripRideDom,
+  assertPassengerSearchingRideDom,
+  verifyOriginalPassengerReceiptInBrowser,
+  type ObservedPassengerDomState,
+} from "./pax-review-shared-order/passenger-ride-and-receipt";
 
 // Only public codes reachable through the existing Ops prepare call chain may
 // leave the response boundary; validators can put persisted values in messages.
@@ -382,6 +391,16 @@ async function book(
   await expect(page).toHaveURL(new RegExp(`/rides/${id}$`));
   await expect(page.getByTestId("review-order-id")).toHaveText(id);
   return id;
+}
+
+async function bookAndCheckPassengerRide(
+  page: Page,
+  paymentMethodId: string,
+  options: { accessible?: boolean; info?: TestInfo } = {},
+) {
+  const orderId = await book(page, paymentMethodId, false, options.accessible);
+  await assertPassengerSearchingRideDom(page, orderId, authority, options.info);
+  return orderId;
 }
 
 async function opsRead(ops: Page, orderId: string) {
@@ -1063,6 +1082,7 @@ async function finish(
     taskId: string;
     observedAt: number;
   }[] = [];
+  const observedPassengerStates: ObservedPassengerDomState[] = [];
   const ordinaryState = async (status: string) => {
     if (!ordinaryOpsInfo) return;
     // Stay on the original ordinary detail page: no goto, reload, direct
@@ -1082,8 +1102,24 @@ async function finish(
     });
   };
   await step("Driver read assigned trip and accept", async () => {
+    await assertPassengerAssignedRideDom(
+      pax,
+      orderId,
+      "assigned",
+      authority,
+      observedPassengerStates,
+      ordinaryOpsInfo,
+    );
     await readAssignedTripAndAccept(driver, base, orderId, step);
     await ordinaryState("accepted");
+    await assertPassengerAssignedRideDom(
+      pax,
+      orderId,
+      "driver_accepted",
+      authority,
+      observedPassengerStates,
+      ordinaryOpsInfo,
+    );
     if (ordinaryOpsInfo)
       await ordinaryOpsInfo.attach("A-ordinary-Ops-driver-accepted-live-ops", {
         contentType: "image/png",
@@ -1117,6 +1153,32 @@ async function finish(
           start: "on_trip",
         }[action],
       );
+      if (action === "depart") {
+        await assertPassengerAssignedRideDom(
+          pax,
+          orderId,
+          "enroute_pickup",
+          authority,
+          observedPassengerStates,
+          ordinaryOpsInfo,
+        );
+      } else if (action === "arrived_pickup") {
+        await assertPassengerArrivedRideDom(
+          pax,
+          orderId,
+          authority,
+          observedPassengerStates,
+          ordinaryOpsInfo,
+        );
+      } else {
+        await assertPassengerOnTripRideDom(
+          pax,
+          orderId,
+          authority,
+          observedPassengerStates,
+          ordinaryOpsInfo,
+        );
+      }
     });
   }
   await expect
@@ -1217,6 +1279,13 @@ async function finish(
         .poll(async () => (await authority(pax, orderId)).order.status)
         .toBe("completed");
       await ordinaryState("completed");
+      await assertPassengerCompletedRideDom(
+        pax,
+        orderId,
+        authority,
+        observedPassengerStates,
+        ordinaryOpsInfo,
+      );
       if (ordinaryOpsInfo) {
         const taskId = await ops
           .locator('[data-ops-task-status="completed"]')
@@ -1299,13 +1368,14 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
     body: e04Html,
     contentType: "text/html",
   });
-  await pax.goto(`${PAX}/rides/${orderId}/receipt`);
-  await expect(
-    pax.getByText(snapshot.fleetOperatorName, { exact: true }),
-  ).toBeVisible();
-  await expect(
-    pax.getByText("PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING", { exact: true }),
-  ).toHaveCount(0);
+  await verifyOriginalPassengerReceiptInBrowser(
+    pax,
+    PAX,
+    orderId,
+    { ...ride.receipt, orderNo: ride.order.orderNo },
+    metadata,
+    info,
+  );
   await pax.goto(`${PAX}/review/records/${orderId}`);
   const waiting = pax.waitForEvent("download");
   await pax.getByRole("button", { name: "下載演練紀錄 HTML" }).click();
@@ -1559,7 +1629,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     const firstMethod = await step("A bind successful simulated PSP", () =>
       bind(pax, "success"),
     );
-    const normal = await step("A Passenger book", () => book(pax, firstMethod));
+    const normal = await step("A Passenger book", () =>
+      bookAndCheckPassengerRide(pax, firstMethod, { info }),
+    );
     await step("A Ops create dispatch", () =>
       createDispatch(ops, normal, info),
     );
@@ -1633,7 +1705,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     const retryMethod = await step("B bind retry-once simulated PSP", () =>
       bind(pax, "retry_once"),
     );
-    const retry = await step("B Passenger book", () => book(pax, retryMethod));
+    const retry = await step("B Passenger book", () =>
+      bookAndCheckPassengerRide(pax, retryMethod),
+    );
     expect(retry).not.toBe(normal);
     await step("B Ops create dispatch and assign", async () => {
       await createDispatch(ops, retry);
@@ -1721,7 +1795,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
 
     await ops.goto(`${OPS}/review`);
     const cancelled = await step("C Passenger book", () =>
-      book(pax, firstMethod),
+      bookAndCheckPassengerRide(pax, firstMethod),
     );
     expect(new Set([normal, retry, cancelled]).size).toBe(3);
     await step(
@@ -1977,7 +2051,7 @@ test("a wheelchair booking keeps its UUID and requirement through ordinary Ops a
     );
     const orderId = await step(
       "Wheelchair Passenger checks requirement, quotes and confirms the original order",
-      () => book(pax, method, false, true),
+      () => bookAndCheckPassengerRide(pax, method, { accessible: true }),
     );
     const booked = await authority(pax, orderId);
     expect(booked.order).toMatchObject({
