@@ -7502,7 +7502,14 @@ def _approval_is_routine_safe(approval: dict[str, Any]) -> bool:
     command = str(tool_input.get("command") or tool_input.get("cmd") or "").strip()
     if not command:
         return False
-    tokens = shlex.split(command)
+    # A command shlex cannot tokenize (an apostrophe inside a heredoc commit
+    # message, say) used to raise here, inside every tick that re-read the
+    # chair's decision, until the supervisor stopped itself. Nothing that
+    # cannot be read is routine.
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
     if not tokens:
         return False
     normalized = " ".join(tokens)
