@@ -119,6 +119,11 @@ describe("default EAS build:view subprocess streams (no network)", () => {
       true,
     ],
     ["Invalid token", "AUTHENTICATION_REJECTED", true],
+    [
+      "Either log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI",
+      "AUTHENTICATION_REJECTED",
+      true,
+    ],
     ["GraphQL request failed", "GRAPHQL_REQUEST_FAILED", true],
     ["Build not found", "BUILD_NOT_FOUND", false],
     ["Unexpected command error", "EAS_CLI_VIEW_FAILED", false],
