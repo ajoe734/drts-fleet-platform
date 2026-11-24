@@ -298,10 +298,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
     if (this.reportingRepository?.isEnabled()) {
-      let records: DispatchDailyRecord[];
       try {
-        records =
-          await this.reportingRepository.listDailyDispatchRecords(query);
+        await this.reportingRepository.listDailyDispatchRecords(query);
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
@@ -313,14 +311,14 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           "Daily dispatch records could not be loaded.",
         );
       }
-      if (records.length > 0) {
-        return records.map((record) => ({
-          ...record,
-          serviceDate:
-            toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
-            this.normalizeServiceDate(record.serviceDate),
-        }));
-      }
+      // REP-BE-001 has no scheduled builder, so serving the persisted rows
+      // whenever any existed froze a service date at its first read: orders
+      // created or completed afterwards never appeared. On shared dev a
+      // completed 2026-11-20 order was missing from agency R13 while six
+      // earlier cancelled rows for that day were served. The read above still
+      // fails closed on a broken table; every successful read then rebuilds
+      // the queried range, which refreshes the durable rows (upsert keeps the
+      // newest generated_at) and returns the current canonical records.
       return (await this.rebuildDailyDispatchRecords(query)).records.map(
         (record) => ({ ...record }),
       );
@@ -1266,16 +1264,6 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   private resolveServiceDate(order: OwnedOrderRecord) {
     const raw = order.reservationWindowStart ?? order.createdAt;
     return toTaipeiDate(raw) ?? raw.slice(0, 10);
-  }
-
-  private normalizeServiceDate(value: string | Date): string {
-    if (value instanceof Date) {
-      const year = String(value.getFullYear()).padStart(4, "0");
-      const month = String(value.getMonth() + 1).padStart(2, "0");
-      const day = String(value.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    }
-    return String(value).slice(0, 10);
   }
 
   private async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {

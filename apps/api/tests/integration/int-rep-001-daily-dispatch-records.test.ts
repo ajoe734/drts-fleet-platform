@@ -424,12 +424,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
   }
 
   it("enforces V0091 paired dispatch_resource_reservations invariant and awaits async completeDriverTask before snapshotting", async () => {
-    const {
-      ownedMobilityService,
-      complaintService,
-      regulatoryRegistryService,
-      cleanup,
-    } = createHarness();
+    const { ownedMobilityService, cleanup } = createHarness();
     cleanups.push(cleanup);
 
     const serviceDate = "2026-08-19";
@@ -735,7 +730,9 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     ).toBe(true);
     expect(reservationsTable.size).toBe(2);
 
-    // Verify ReportingService.listDailyDispatchRecords normalizes node-postgres DATE (OID 1082) Date instances to YYYY-MM-DD
+    // The service reads the durable table only to fail closed on a broken
+    // table, then rebuilds the range from canonical orders. The repository
+    // read must still accept node-postgres DATE (OID 1082) Date instances.
     const pgDateDb = {
       isEnabled: () => true,
       query: async () => ({
@@ -770,19 +767,14 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
         ],
       }),
     };
-    const pgDateReader = new ReportingService(
-      ownedMobilityService,
-      complaintService,
-      regulatoryRegistryService,
-      undefined,
-      new ReportingRepository(pgDateDb as never),
-    );
-    const pgDateReadback = await pgDateReader.listDailyDispatchRecords({
+    const pgDateRows = await new ReportingRepository(
+      pgDateDb as never,
+    ).listDailyDispatchRecords({
       serviceDate,
       orderId: order.orderId,
     });
-    expect(pgDateReadback).toHaveLength(1);
-    expect(pgDateReadback[0]?.serviceDate).toBe(serviceDate);
+    expect(pgDateRows).toHaveLength(1);
+    expect(pgDateRows[0]?.orderId).toBe(order.orderId);
   });
 
   it("reconciles persisted legacy UTC-day daily_dispatch_records rows through real ReportingRepository and ReportingService with per-order transactional rollback on failure", async () => {

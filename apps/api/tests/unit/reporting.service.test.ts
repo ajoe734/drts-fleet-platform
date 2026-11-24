@@ -336,6 +336,44 @@ describe("ReportingService", () => {
     ).toHaveBeenCalledTimes(1);
   });
 
+  it("rebuilds the queried range on read even when the durable table already holds rows for that day", async () => {
+    // The table was first filled before order-report-001 finished: only an
+    // earlier cancelled order was persisted for 2026-06-20. Serving those
+    // rows as-is froze the day and hid the later completed trip.
+    const { service, reportingRepository } = createService();
+    reportingRepository.listDailyDispatchRecords.mockResolvedValueOnce([
+      {
+        serviceDate: "2026-06-20",
+        orderId: "order-report-earlier-cancelled",
+        orderNo: "O-EARLIER",
+        finalStatus: "cancelled",
+        requestedAt: "2026-06-20T00:30:00.000Z",
+        reservationTime: "2026-06-20T00:30:00.000Z",
+        generatedAt: "2026-06-20T00:45:00.000Z",
+      },
+    ] as never);
+
+    const records = await service.listDailyDispatchRecords({
+      serviceDate: "2026-06-20",
+    });
+
+    expect(records.map((record) => record.orderId)).toContain(
+      "order-report-001",
+    );
+    expect(
+      records.find((record) => record.orderId === "order-report-001"),
+    ).toMatchObject({
+      finalStatus: "completed",
+      tripCompletedAt: "2026-06-20T01:40:00.000Z",
+    });
+    expect(
+      reportingRepository.loadDailyDispatchRecordSource,
+    ).toHaveBeenCalledTimes(1);
+    expect(reportingRepository.upsertDailyDispatchRecords).toHaveBeenCalledWith(
+      [expect.objectContaining({ orderId: "order-report-001" })],
+    );
+  });
+
   it("keeps arrivedPickupAt null when no arrival trace exists even if the task snapshot carries a timestamp", async () => {
     const { service } = createService({
       dispatchTraceLogs: [],
