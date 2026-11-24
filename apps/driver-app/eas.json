@@ -11,7 +11,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app",
+        "EXPO_PUBLIC_API_URL": "https://drts-dev-api-r6ykdme3wa-uc.a.run.app",
         "DRTS_REQUIRE_LIVE_MAP": "true"
       }
     },
@@ -28,14 +28,14 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app",
+        "EXPO_PUBLIC_API_URL": "https://drts-dev-api-r6ykdme3wa-uc.a.run.app",
         "DRTS_REQUIRE_LIVE_MAP": "true"
       }
     },
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app",
+        "EXPO_PUBLIC_API_URL": "https://api.smarttransport.tw",
         "DRTS_REQUIRE_LIVE_MAP": "true"
       }
     }

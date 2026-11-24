@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
   AddressPayload,
@@ -6,13 +6,17 @@ import type {
   DispatchJobRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  OPS_MAP_MAX_ZOOM,
+  OPS_MAP_MIN_ZOOM,
+  OPS_MAP_MOCK_TILE_URL_TEMPLATE,
   buildOpsMapBoardModel,
   buildOpsMapTileViewport,
   getDefaultOpsMapZoom,
   normalizeOpsMapBounds,
+  projectOpsMapPointToViewport,
   resolveOpsMapTileUrlTemplate,
   shiftOpsMapCenter,
 } from "../../../../apps/ops-console-web/app/dispatch/ops-map-board";
@@ -38,6 +42,58 @@ const MOCK_TILES_DIR = resolve(
   __dirname,
   "../../../../apps/ops-console-web/public/mock-map-tiles",
 );
+const OPS_PUBLIC_DIR = resolve(
+  __dirname,
+  "../../../../apps/ops-console-web/public",
+);
+const BUREAU_EXTERNAL_MAP_FIXTURE = resolve(
+  __dirname,
+  "../../../e2e/pax-bureau-acceptance/external-map-port.cjs",
+);
+const BUREAU_MATCHING_SPEC = resolve(
+  __dirname,
+  "../../../e2e/pax-bureau-acceptance/matching-timeout.spec.ts",
+);
+
+type OpsRoutingConfig = {
+  rewrites?: () => Promise<
+    | { source: string; destination: string }[]
+    | {
+        beforeFiles?: { source: string; destination: string }[];
+        afterFiles?: { source: string; destination: string }[];
+        fallback?: { source: string; destination: string }[];
+      }
+  >;
+};
+
+const { unstable_getResponseFromNextConfig, getRewrittenUrl } =
+  await vi.importActual<{
+    unstable_getResponseFromNextConfig: (input: {
+      url: string;
+      nextConfig: OpsRoutingConfig;
+    }) => Promise<Response>;
+    getRewrittenUrl: (response: Response) => string | undefined;
+  }>("next/experimental/testing/server");
+const { default: opsNextConfig } = await vi.importActual<{
+  default: OpsRoutingConfig;
+}>("../../../../apps/ops-console-web/next.config");
+
+function collectMockTileRelativePaths(
+  dir: string,
+  prefix = "/mock-map-tiles",
+): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = resolve(dir, entry.name);
+    const relPath = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      results.push(...collectMockTileRelativePaths(fullPath, relPath));
+    } else if (entry.isFile() && entry.name.endsWith(".svg")) {
+      results.push(relPath);
+    }
+  }
+  return results;
+}
 
 function makeOrder(
   overrides: Partial<Omit<OwnedOrderRecord, "pickup" | "dropoff">> & {
@@ -466,5 +522,193 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
 
   it("returns null bounds when points array is empty", () => {
     expect(normalizeOpsMapBounds([])).toBeNull();
+  });
+});
+
+describe("BUREAU-OPS-MAP-BANQIAO-TILES-20261123: Banqiao Dispatch & Callcenter Zoom/Pan Tile Resolution", () => {
+  it("resolves every Banqiao Station and New Taipei City Hall tile across zooms 3-18 and pan directions via packaged static assets or Next fallback rewrite without duplicating SVGs", async () => {
+    const fixtureSource = readFileSync(BUREAU_EXTERNAL_MAP_FIXTURE, "utf8");
+    const matchingSpecSource = readFileSync(BUREAU_MATCHING_SPEC, "utf8");
+    const banqiaoPoints = [
+      {
+        key: "bureau-banqiao:pickup",
+        kind: "pickup" as const,
+        label: "合成板橋車站",
+        lat: 25.0142,
+        lng: 121.4636,
+      },
+      {
+        key: "bureau-city-hall:dropoff",
+        kind: "dropoff" as const,
+        label: "合成新北市政府",
+        lat: 25.012,
+        lng: 121.4654,
+      },
+    ];
+    for (const point of banqiaoPoints) {
+      expect(fixtureSource).toContain(String(point.lat));
+      expect(fixtureSource).toContain(String(point.lng));
+      expect(matchingSpecSource).toContain(String(point.lat));
+      expect(matchingSpecSource).toContain(String(point.lng));
+    }
+
+    const packagedFiles = new Set(collectMockTileRelativePaths(MOCK_TILES_DIR));
+    expect(packagedFiles.size).toBe(1212);
+    const fallbackAsset = "/mock-map-tiles/0/0/0.svg";
+    expect(packagedFiles.has(fallbackAsset)).toBe(true);
+    const rootSvgContent = readFileSync(
+      resolve(OPS_PUBLIC_DIR, fallbackAsset.slice(1)),
+      "utf8",
+    );
+    const distinctContents = new Set(
+      Array.from(packagedFiles, (rel) =>
+        readFileSync(resolve(OPS_PUBLIC_DIR, rel.slice(1)), "utf8"),
+      ),
+    );
+    expect(distinctContents.size).toBe(1);
+    expect(distinctContents.has(rootSvgContent)).toBe(true);
+
+    const rewrites = await opsNextConfig.rewrites!();
+    expect(Array.isArray(rewrites)).toBe(false);
+    const rewriteGroups = rewrites as {
+      beforeFiles?: { source: string; destination: string }[];
+      afterFiles?: { source: string; destination: string }[];
+      fallback?: { source: string; destination: string }[];
+    };
+    expect(rewriteGroups.afterFiles).toEqual(
+      expect.arrayContaining([
+        {
+          source: "/downloads/:kind/:subjectId",
+          destination: "/control-plane-proxy/downloads/:kind/:subjectId",
+        },
+      ]),
+    );
+    expect(rewriteGroups.fallback).toEqual([
+      {
+        source: "/mock-map-tiles/:z(\\d+)/:x(\\d+)/:y(\\d+).svg",
+        destination: fallbackAsset,
+      },
+    ]);
+
+    const origin = "https://ops.smarttransport.tw";
+    async function resolveRewrittenPathname(relativePath: string) {
+      const response = await unstable_getResponseFromNextConfig({
+        url: `${origin}${relativePath}`,
+        nextConfig: opsNextConfig,
+      });
+      const rewritten = getRewrittenUrl(response);
+      return rewritten ? new URL(rewritten).pathname : null;
+    }
+
+    const bounds = normalizeOpsMapBounds(banqiaoPoints)!;
+    expect(bounds).not.toBeNull();
+    expect(getDefaultOpsMapZoom(bounds, 720, 360, 256)).toBe(8);
+
+    const missingCountsByZoom = new Map<number, number>();
+    const prodMockTemplate = resolveOpsMapTileUrlTemplate({
+      MAP_PROVIDER_MODE: "mock",
+      NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: `${origin}${OPS_MAP_MOCK_TILE_URL_TEMPLATE}`,
+    });
+    expect(prodMockTemplate).toBe(
+      "https://ops.smarttransport.tw/mock-map-tiles/{z}/{x}/{y}.svg",
+    );
+
+    for (let zoom = OPS_MAP_MIN_ZOOM; zoom <= OPS_MAP_MAX_ZOOM; zoom += 1) {
+      const viewport = buildOpsMapTileViewport({
+        bounds,
+        zoom,
+        tileUrlTemplate: OPS_MAP_MOCK_TILE_URL_TEMPLATE,
+      });
+      const missingAtZoom = viewport.tiles.filter(
+        (tile) => !packagedFiles.has(tile.src),
+      );
+      missingCountsByZoom.set(zoom, missingAtZoom.length);
+
+      for (const point of banqiaoPoints) {
+        const projected = projectOpsMapPointToViewport(point, viewport);
+        expect(projected.visible).toBe(true);
+      }
+
+      for (const tile of viewport.tiles) {
+        if (packagedFiles.has(tile.src)) {
+          expect(existsSync(resolve(OPS_PUBLIC_DIR, tile.src.slice(1)))).toBe(
+            true,
+          );
+        } else {
+          const rewrittenPathname = await resolveRewrittenPathname(tile.src);
+          expect(rewrittenPathname).toBe(fallbackAsset);
+          expect(
+            existsSync(resolve(OPS_PUBLIC_DIR, rewrittenPathname!.slice(1))),
+          ).toBe(true);
+        }
+      }
+
+      for (const direction of ["north", "south", "west", "east"] as const) {
+        const shifted = shiftOpsMapCenter(viewport, direction);
+        const pannedViewport = buildOpsMapTileViewport({
+          bounds,
+          centerLat: shifted.lat,
+          centerLng: shifted.lng,
+          zoom,
+          tileUrlTemplate: prodMockTemplate,
+        });
+        for (const tile of pannedViewport.tiles) {
+          const tilePathname = new URL(tile.src).pathname;
+          if (!packagedFiles.has(tilePathname)) {
+            expect(await resolveRewrittenPathname(tilePathname)).toBe(
+              fallbackAsset,
+            );
+          }
+        }
+      }
+
+      for (const point of banqiaoPoints) {
+        const callcenterViewport = buildOpsMapTileViewport({
+          bounds: {
+            minLat: point.lat - 0.01,
+            maxLat: point.lat + 0.01,
+            minLng: point.lng - 0.01,
+            maxLng: point.lng + 0.01,
+            latSpan: 0.02,
+            lngSpan: 0.02,
+          },
+          centerLat: point.lat,
+          centerLng: point.lng,
+          zoom,
+          width: 640,
+          height: 280,
+          tileUrlTemplate: prodMockTemplate,
+        });
+        for (const tile of callcenterViewport.tiles) {
+          const tilePathname = new URL(tile.src).pathname;
+          if (!packagedFiles.has(tilePathname)) {
+            expect(await resolveRewrittenPathname(tilePathname)).toBe(
+              fallbackAsset,
+            );
+          }
+        }
+      }
+    }
+
+    expect(missingCountsByZoom.get(15)).toBe(2);
+    expect(missingCountsByZoom.get(16)).toBe(6);
+    expect(missingCountsByZoom.get(17)).toBe(6);
+    expect(missingCountsByZoom.get(18)).toBe(8);
+
+    // Signed download route and query parameters remain intact.
+    const downloadPath =
+      "/downloads/receipt/sample-order?token=synthetic-signature&lang=zh-TW";
+    const downloadResponse = await unstable_getResponseFromNextConfig({
+      url: `${origin}${downloadPath}`,
+      nextConfig: opsNextConfig,
+    });
+    expect(getRewrittenUrl(downloadResponse)).toBe(
+      `${origin}/control-plane-proxy${downloadPath}`,
+    );
+
+    // Non-coordinate paths under /mock-map-tiles are not matched by the tile fallback rule.
+    expect(
+      await resolveRewrittenPathname("/mock-map-tiles/labels.svg"),
+    ).toBeNull();
   });
 });

@@ -64,10 +64,28 @@ function failureMessage(error: unknown): string {
   }
   return "登入流程暫時無法完成，請重試。";
 }
+const SUPPORTED_NATIVE_PASSENGER_OAUTH_CALLBACK_PATTERN =
+  /^drtspassenger:\/\/(?:auth|oauth)(?:\/callback)?$/;
+
+export function isSupportedNativePassengerOAuthCallbackUri(
+  callbackUri: string,
+): boolean {
+  return SUPPORTED_NATIVE_PASSENGER_OAUTH_CALLBACK_PATTERN.test(
+    callbackUri.trim(),
+  );
+}
+
 /** Only callback query fields; transactionId remains the API start response. */
 export function callbackFields(
   url: string,
+  expectedState?: string,
+  expectedCallbackUri?: string,
 ): { code: string; state: string } | null {
+  if (expectedCallbackUri !== undefined) {
+    const returnedBase = url.split(/[?#]/, 1)[0];
+    const expectedBase = expectedCallbackUri.trim().split(/[?#]/, 1)[0];
+    if (!returnedBase || returnedBase !== expectedBase) return null;
+  }
   const query = url.split("?")[1]?.split("#")[0] ?? "";
   const fields: Record<string, string> = {};
   try {
@@ -80,9 +98,10 @@ export function callbackFields(
   } catch {
     return null;
   }
-  return fields.code && fields.state && !fields.error
-    ? { code: fields.code, state: fields.state }
-    : null;
+  if (!fields.code || !fields.state || fields.error) return null;
+  if (expectedState !== undefined && fields.state !== expectedState)
+    return null;
+  return { code: fields.code, state: fields.state };
 }
 function Action({
   id,
@@ -214,9 +233,13 @@ export function PassengerLoginScreen(props: PassengerLoginScreenProps) {
   }
   async function oauth(provider: "google" | "facebook" | "line") {
     if (busy) return;
-    setBusy("oauth");
     setError(null);
     setInfo(null);
+    if (!isSupportedNativePassengerOAuthCallbackUri(callbackUri)) {
+      setError("此登入方式尚未設定。");
+      return;
+    }
+    setBusy("oauth");
     try {
       const start = await session.oauthStart({
         provider,
@@ -232,7 +255,7 @@ export function PassengerLoginScreen(props: PassengerLoginScreenProps) {
         setInfo("已取消第三方登入。");
         return;
       }
-      const fields = callbackFields(returned.url);
+      const fields = callbackFields(returned.url, start.state, callbackUri);
       if (!fields) {
         setError("第三方登入未完成，請重新嘗試。");
         return;

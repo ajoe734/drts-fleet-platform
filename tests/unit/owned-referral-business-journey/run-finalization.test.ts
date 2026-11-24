@@ -67,6 +67,16 @@ type Harness = {
  */
 const STEP_BUDGET_MS = 1_500;
 
+/**
+ * Write budget for tests that expect the real artifact writes to land
+ * ("written"). Each write fsyncs the file and its directory; on a loaded CI
+ * shard one of them took over 300 ms, so the artifact outcome became
+ * "unknown-write-budget-exhausted" (ci-integ 45353828025 shard 4/4,
+ * 2026-11-24). A deliberately stalled write is waited on once per slot, so a
+ * larger budget changes only how long that single wait lasts.
+ */
+const REAL_WRITE_BUDGET_MS = 1_500;
+
 async function harness(
   plan: (
     step: StepRunner,
@@ -762,7 +772,7 @@ describe("Codex round-1 finalization regressions", () => {
         await step("own-Admin-session-revoked", async () => undefined);
       },
       {
-        writeBudgetMs: 300,
+        writeBudgetMs: REAL_WRITE_BUDGET_MS,
         persist: async (path, value) => {
           if (path.endsWith("-facts.json") && first) {
             first = false;
@@ -822,7 +832,7 @@ describe("Codex round-1 finalization regressions", () => {
         await step("own-synthetic-driver-offline", async () => undefined);
         await never();
       },
-      { budgetMs: 30, writeBudgetMs: 500 },
+      { budgetMs: 30, writeBudgetMs: REAL_WRITE_BUDGET_MS },
     );
     const started = Date.now();
     const result = await h.finalizer.run("failed");

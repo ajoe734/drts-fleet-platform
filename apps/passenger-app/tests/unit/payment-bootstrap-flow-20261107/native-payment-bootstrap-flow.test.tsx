@@ -139,6 +139,8 @@ function httpBoundary() {
       next_action_url: "https://payment.ecpay.com.tw/sim-action-required",
     } as Record<string, unknown>,
     rejectSessionOnce: false,
+    sessionFormat: "snake_wire" as "snake_wire" | "legacy_camel",
+    serverType: "Prod" as "Stage" | "Prod",
     merchantSequence: 0,
     unexpected: [] as string[],
   };
@@ -191,18 +193,40 @@ function httpBoundary() {
           state.rejectSessionOnce = false;
           return response({ error: { code: "unauthorized" } }, 401);
         }
+        const merchantToken = `sim-merchant-binding-${++state.merchantSequence}`;
+        const isStage = state.serverType === "Stage";
+        const sdkScriptUrl = isStage
+          ? "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js"
+          : "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js";
+        const approvedActionOrigins = isStage
+          ? [
+              "https://ecpg-stage.ecpay.com.tw",
+              "https://payment-stage.ecpay.com.tw",
+              "https://cc-stage.ecpay.com.tw",
+            ]
+          : ["https://ecpg.ecpay.com.tw", "https://payment.ecpay.com.tw"];
+        if (state.sessionFormat === "legacy_camel") {
+          return response({
+            data: {
+              provider: "ecpay",
+              merchantToken,
+              tokenExpireDate: "2099/12/31 23:59:59",
+              sandbox: isStage,
+              serverType: state.serverType,
+              sdkScriptUrl,
+              approvedActionOrigins,
+            },
+          });
+        }
         return response({
           data: {
             provider: "ecpay",
-            merchantToken: `sim-merchant-binding-${++state.merchantSequence}`,
-            tokenExpireDate: "2099/12/31 23:59:59",
-            sandbox: false,
-            serverType: "Prod",
-            sdkScriptUrl: "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
-            approvedActionOrigins: [
-              "https://ecpg.ecpay.com.tw",
-              "https://payment.ecpay.com.tw",
-            ],
+            merchant_token: merchantToken,
+            token_expire_date: "2099/12/31 23:59:59",
+            sandbox: isStage,
+            server_type: state.serverType,
+            sdk_script_url: sdkScriptUrl,
+            approved_action_origins: approvedActionOrigins,
           },
         });
       }
@@ -307,7 +331,10 @@ async function send(
     await flush();
   });
 }
-async function openFields(tree: Renderer) {
+async function openFields(
+  tree: Renderer,
+  expectedServerType: "Stage" | "Prod" = "Prod",
+) {
   await press(tree, "app-nav-payment");
   await press(tree, "payment-add");
   const view = webview(tree);
@@ -316,7 +343,12 @@ async function openFields(tree: Renderer) {
     true,
   );
   expect(view.props.source.html).toContain(
-    "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+    expectedServerType === "Stage"
+      ? "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js"
+      : "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+  );
+  expect(view.props.source.html).toContain(
+    `"serverType":${JSON.stringify(expectedServerType)}`,
   );
   expect(view.props.source.html).toContain("sim-merchant-binding-");
   await send(view, { type: "ready" });
@@ -550,6 +582,50 @@ describe("configured Native payment bootstrap with actual SDK and external SIM b
     expect(f.binds()[0]?.authorization).toBe(`Bearer ${PAIR_B.accessToken}`);
     expect(present(tree, "payment-success")).toBe(false);
     expect(present(tree, "payment-pending")).toBe(true);
+    expect(f.state.unexpected).toEqual([]);
+  });
+
+  it("opens hosted fields for Stage snake_case API wire session and preserves legacy camelCase session compatibility", async () => {
+    const f = httpBoundary();
+    f.state.serverType = "Stage";
+    f.state.sessionFormat = "snake_wire";
+    const { tree, runtime } = await configured(f);
+    const stageView = await openFields(tree, "Stage");
+    expect(stageView.props.source.html).toContain(
+      "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+    );
+    expect(stageView.props.source.html).toContain('"serverType":"Stage"');
+
+    const snakeSession = await runtime.payment.getBindingSession();
+    expect(snakeSession).toEqual({
+      provider: "ecpay",
+      merchantToken: "sim-merchant-binding-2",
+      tokenExpireDate: "2099/12/31 23:59:59",
+      sandbox: true,
+      serverType: "Stage",
+      sdkScriptUrl: "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+      approvedActionOrigins: [
+        "https://ecpg-stage.ecpay.com.tw",
+        "https://payment-stage.ecpay.com.tw",
+        "https://cc-stage.ecpay.com.tw",
+      ],
+    });
+
+    f.state.sessionFormat = "legacy_camel";
+    f.state.serverType = "Prod";
+    const legacySession = await runtime.payment.getBindingSession();
+    expect(legacySession).toEqual({
+      provider: "ecpay",
+      merchantToken: "sim-merchant-binding-3",
+      tokenExpireDate: "2099/12/31 23:59:59",
+      sandbox: false,
+      serverType: "Prod",
+      sdkScriptUrl: "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js",
+      approvedActionOrigins: [
+        "https://ecpg.ecpay.com.tw",
+        "https://payment.ecpay.com.tw",
+      ],
+    });
     expect(f.state.unexpected).toEqual([]);
   });
 });

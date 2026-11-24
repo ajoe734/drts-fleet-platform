@@ -2,10 +2,12 @@ import React from "react";
 import {
   Alert,
   Linking,
+  NativeModules,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  UIManager,
   View,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
@@ -24,6 +26,32 @@ import {
 } from "@/lib/driver-navigation";
 
 export type DriverTripMapLocation = NonNullable<DriverLocationFixInput>;
+
+function hasMapAndMarkers(name: string) {
+  return (
+    UIManager.hasViewManagerConfig(name) &&
+    UIManager.hasViewManagerConfig(name + "Marker")
+  );
+}
+
+function getNativeMapProvider(): "google" | "apple" | null {
+  if (
+    (Platform.OS !== "android" && Platform.OS !== "ios") ||
+    typeof UIManager?.hasViewManagerConfig !== "function"
+  ) {
+    return null;
+  }
+  const googleConfigured =
+    NativeModules?.DRTSDriverMapConfig?.googleMapsConfigured === true;
+  if (Platform.OS === "android") {
+    return googleConfigured && hasMapAndMarkers("AIRMap") ? "google" : null;
+  }
+  if (Platform.OS === "ios") {
+    if (googleConfigured && hasMapAndMarkers("AIRGoogleMap")) return "google";
+    if (hasMapAndMarkers("AIRMap")) return "apple";
+  }
+  return null;
+}
 
 function buildNativeMapRegion(
   stops: DriverNavigationCoordinate[],
@@ -185,7 +213,7 @@ export default function DriverTripMap({
   order,
   driverLocation,
   sourcePlatformOffline = false,
-  nativeMapAvailable = false,
+  nativeMapAvailable = true,
   now = Date.now(),
   onNavigationResult,
 }: DriverTripMapProps) {
@@ -206,9 +234,11 @@ export default function DriverTripMap({
     model.stops.pickup.coordinate,
     model.stops.dropoff.coordinate,
   ].filter((point): point is DriverNavigationCoordinate => point !== null);
-  const nativeMapEnabled =
-    nativeMapAvailable && Platform.OS !== "web" && nativePoints.length > 0;
-  const initialRegion = nativeMapEnabled
+  const provider =
+    nativeMapAvailable && nativePoints.length > 0
+      ? getNativeMapProvider()
+      : null;
+  const initialRegion = provider
     ? buildNativeMapRegion(nativePoints, driverLocation)
     : null;
 
@@ -273,23 +303,23 @@ export default function DriverTripMap({
 
       <View style={styles.previewPanel}>
         <View style={styles.previewHeader}>
-          <Text style={styles.previewTitle}>
-            {nativeMapAvailable
-              ? "Native map adapter"
-              : "Coordinate handoff mode"}
-          </Text>
+          <Text style={styles.previewTitle}>行程地圖</Text>
           <Text style={styles.previewStatus}>
-            {nativeMapEnabled
-              ? "Google native map active"
-              : "此 build 未 bundled native map SDK；不宣稱原生地圖渲染。"}
+            {provider === "google"
+              ? "Google 地圖"
+              : provider === "apple"
+                ? "Apple 地圖"
+                : nativePoints.length > 0
+                  ? "可用下方座標開啟外部導航"
+                  : "等待有效的上下車座標"}
           </Text>
         </View>
-        {nativeMapEnabled && initialRegion ? (
+        {initialRegion ? (
           <MapView
-            accessibilityLabel="Driver trip Google map"
+            accessibilityLabel="司機行程上下車點地圖"
             initialRegion={initialRegion}
             mapType="standard"
-            provider={PROVIDER_GOOGLE}
+            provider={provider === "google" ? PROVIDER_GOOGLE : undefined}
             showsMyLocationButton={fixState.state !== "stopped"}
             showsUserLocation={
               fixState.state === "fresh" || fixState.state === "stale"
