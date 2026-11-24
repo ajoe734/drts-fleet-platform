@@ -12,6 +12,7 @@ import imaplib
 import json
 import os
 import re
+import secrets
 import ssl
 import subprocess
 import sys
@@ -157,6 +158,9 @@ def observe(client, expected_id, recipient, sender, subject, required_text, time
     raise MailboxObservationError("message_not_found_before_deadline")
 
 
+ACCEPT_PATH = "/api/tenant/invitations/accept-with-password"
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args):
         return None
@@ -187,8 +191,14 @@ def accept_invitation(body, request, opener=None):
     require(expected in ("accepted", "denied", "expired"), "Invalid acceptance probe")
     if expected == "expired":
         require(datetime.now(timezone.utc) > expiry, "Real invitation expiry has not elapsed")
-    payload = json.dumps({"invitationToken": token}).encode()
-    call = urllib.request.Request(request["api_origin"] + "/api/tenant/invitations/accept",
+    # Shared dev signs tenants in with Google (OIDC_ISSUER=accounts.google.com).
+    # There the token-only /invitations/accept route refuses every token with
+    # the same 403, so it can neither activate the viewer nor tell a used,
+    # revoked or expired token from a valid one. The password branch
+    # (PWD-LOGIN-004) is the non-Google acceptance path that still judges the
+    # token itself. The password is random per call, never stored or emitted.
+    payload = json.dumps({"invitationToken": token, "password": secrets.token_urlsafe(24)}).encode()
+    call = urllib.request.Request(request["api_origin"] + ACCEPT_PATH,
                                   data=payload, headers={"Content-Type": "application/json"}, method="POST")
     started = time.monotonic()
     opener = opener or urllib.request.build_opener(NoRedirect)
@@ -201,9 +211,10 @@ def accept_invitation(body, request, opener=None):
         result = json.load(response)
         status = response.status
         if expected == "accepted":
-            data = result.get("data", {})
-            user = data.get("user", {})
-            require(status in (200, 201) and data.get("accepted") is True
+            data = result.get("data") or {}
+            # The password branch returns the activated user itself.
+            user = data.get("user") if isinstance(data.get("user"), dict) else data
+            require(status in (200, 201)
                     and user.get("user_id") == request["user_id"] and user.get("status") == "active"
                     and user.get("tenant_id") == "10000000-0000-0000-0000-000000000201", "Acceptance did not activate the expected user")
         else:
