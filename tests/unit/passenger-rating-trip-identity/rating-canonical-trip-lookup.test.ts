@@ -792,6 +792,88 @@ print(json.dumps(out))
       status: 409,
       code: "PASSENGER_RATING_ASSIGNMENT_MISSING",
     } satisfies Partial<ApiRequestError> & { status: number });
+
+    // 4. The same account resubmission stays idempotent: an old row that cannot
+    // be traced to the current assignment is returned as stored, not relabelled.
+    const accountReplay = await repository.persistPassengerRating(
+      { ...newRating, ratingId: "account-replay-id" },
+      {
+        execute: async (_db, rating, isNew) => {
+          hookCalls.push({ tripId: rating.tripId, isNew });
+        },
+      },
+    );
+    expect(accountReplay.rating.ratingId).toBe(sample.ratingId);
+    expect(accountReplay.rating.tripId).toBe("unrelated-other-assignment");
+    expect(hookCalls.at(-1)).toEqual({
+      tripId: "unrelated-other-assignment",
+      isNew: false,
+    });
+  });
+
+  it("shows the database-resolved trip in the durable list and detail, whatever this process remembers", async () => {
+    const sample = SHARED_SAMPLES[0];
+    const item = {
+      ratingId: sample.ratingId,
+      orderId: sample.orderId,
+      tripId: "database-resolved-trip",
+      driverId: sample.driverId,
+      driverDisplayName: null,
+      score: 5,
+      status: "active",
+      submittedAt: sample.completedAt,
+    };
+    const service = new MultiTaxiService(
+      {
+        getDriverTasksForOrder: () => [
+          {
+            taskId: sample.tripId,
+            orderId: sample.orderId,
+            assignmentId: "database-resolved-trip",
+            driverId: sample.driverId,
+            status: "completed",
+          },
+        ],
+        listOrders: () => [],
+      } as never,
+      {
+        isEnabled: () => true,
+        listPassengerRatingReviews: async () => ({
+          items: [item],
+          totalItems: 1,
+        }),
+        findPassengerRatingReview: async () => ({
+          rating: {
+            ...item,
+            passengerSubjectRef: sample.passengerSubjectRef,
+            tags: [],
+            comment: null,
+            updatedAt: sample.completedAt,
+          },
+          orderNo: sample.orderNo,
+          driverDisplayName: null,
+          summary: {
+            driverId: sample.driverId,
+            displayState: "rated",
+            averageRating: 5,
+            ratingCount: 1,
+            lastRatedAt: sample.completedAt,
+            aggregateVersion: 1,
+            calculatedAt: sample.completedAt,
+          },
+          moderationHistory: [],
+        }),
+      } as never,
+    );
+    const list = await service.listPassengerRatingReviews({});
+    expect(list.items.map((row) => row.tripId)).toEqual([
+      "database-resolved-trip",
+    ]);
+    const detail = await service.getPassengerRatingReview(
+      sample.ratingId,
+      false,
+    );
+    expect(detail.rating.tripId).toBe("database-resolved-trip");
   });
 
   it("R1 regression: resolves canonical completed task_id on cold-cache account and token rating replays (historical assignment_id and new task_id rows) and after another worker completes the task, matching admin tripId", async () => {

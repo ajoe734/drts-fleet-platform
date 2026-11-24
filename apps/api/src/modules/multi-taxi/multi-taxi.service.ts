@@ -999,16 +999,6 @@ export class MultiTaxiService implements OnModuleInit {
       rating,
       accountHook,
     )) ?? { rating, summary: null };
-    if (
-      persisted.rating.driverId === assignment.driver.driverId &&
-      persisted.rating.tripId !== assignment.assignmentId
-    ) {
-      this.recordRatingTripAlias(order.orderId, {
-        canonicalTripId: persisted.rating.tripId,
-        assignmentId: assignment.assignmentId,
-        driverId: persisted.rating.driverId,
-      });
-    }
     const canonicalPersistedRating = this.canonicalizePassengerRating(
       persisted.rating,
       {
@@ -1368,16 +1358,6 @@ export class MultiTaxiService implements OnModuleInit {
       rating,
       summary: null,
     };
-    if (
-      persisted.rating.driverId === assignment.driver.driverId &&
-      persisted.rating.tripId !== assignment.assignmentId
-    ) {
-      this.recordRatingTripAlias(order.orderId, {
-        canonicalTripId: persisted.rating.tripId,
-        assignmentId: assignment.assignmentId,
-        driverId: persisted.rating.driverId,
-      });
-    }
     const canonicalPersistedRating = this.canonicalizePassengerRating(
       persisted.rating,
       {
@@ -1421,9 +1401,7 @@ export class MultiTaxiService implements OnModuleInit {
       const result =
         await this.repository.listPassengerRatingReviews(normalized);
       return {
-        items: result.items.map((item) =>
-          this.canonicalizeRatingReviewListItem(structuredClone(item)),
-        ),
+        items: result.items.map((item) => structuredClone(item)),
         pageInfo: this.toRatingReviewPageInfo(
           normalized.page,
           normalized.pageSize,
@@ -1522,7 +1500,10 @@ export class MultiTaxiService implements OnModuleInit {
       authority.rating.driverId,
     );
 
-    const canonicalRating = this.canonicalizePassengerRating(authority.rating);
+    // The repository already resolved the durable trip id in SQL.
+    const canonicalRating = this.repository?.isEnabled()
+      ? authority.rating
+      : this.canonicalizePassengerRating(authority.rating);
 
     return {
       rating: this.toPassengerRatingModerationView(canonicalRating),
@@ -3239,6 +3220,9 @@ export class MultiTaxiService implements OnModuleInit {
     expectedAssignmentId?: string | null,
     expectedDriverId?: string | null,
   ): string | null {
+    // Certificate records carry no assignment or driver, so with durable data
+    // they cannot prove which driver's trip they describe.
+    if (this.repository?.isEnabled()) return null;
     const record =
       receipt?.record && typeof receipt.record === "object"
         ? (receipt.record as Record<string, unknown>)
@@ -3284,6 +3268,8 @@ export class MultiTaxiService implements OnModuleInit {
       driverId: string | null;
     },
   ) {
+    // Durable rows are resolved from the database, never from process memory.
+    if (this.repository?.isEnabled()) return;
     const canonicalTripId = alias.canonicalTripId.trim();
     const assignmentId = alias.assignmentId?.trim() || null;
     const driverId = alias.driverId?.trim() || null;
@@ -3634,23 +3620,6 @@ export class MultiTaxiService implements OnModuleInit {
     }
     return {
       ...rating,
-      tripId: canonicalTripId,
-    };
-  }
-
-  private canonicalizeRatingReviewListItem(
-    item: PassengerRatingReviewListItem,
-  ): PassengerRatingReviewListItem {
-    const { canonicalTripId } = this.resolveRatingTripIdentity({
-      orderId: item.orderId,
-      tripId: item.tripId,
-      driverId: item.driverId,
-    });
-    if (!canonicalTripId || canonicalTripId === item.tripId) {
-      return item;
-    }
-    return {
-      ...item,
       tripId: canonicalTripId,
     };
   }

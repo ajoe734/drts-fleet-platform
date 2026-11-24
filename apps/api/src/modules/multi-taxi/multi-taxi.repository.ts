@@ -2391,7 +2391,7 @@ export class MultiTaxiRepository {
           }>(
             `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now, task_id, assignment_id
              FROM ops.phase1_driver_tasks WHERE order_id = $1 AND (assignment_id = $2 OR task_id = $2)
-               AND status = 'completed' AND record->>'driverId' = $3 FOR SHARE`,
+               AND status = 'completed' AND record->>'driverId' = $3`,
             [rating.orderId, rating.tripId, rating.driverId],
           );
           const matchedTask = replayTask.rows[0];
@@ -2418,8 +2418,10 @@ export class MultiTaxiRepository {
               matchedTaskId ?? canonicalReplayTripId ?? rating.tripId;
           }
         }
+        // An account resubmission stays idempotent even when an old row cannot
+        // be traced to the current assignment; it returns the stored rating.
         if (
-          (accountHook || rideContext) &&
+          rideContext &&
           (!storedTripMatchesExpected ||
             storedRating.driverId !== rating.driverId)
         )
@@ -2608,11 +2610,11 @@ export class MultiTaxiRepository {
 
       const updatedRatingResult = await client.query<PassengerTripRatingRow>(
         `
-          UPDATE ops.passenger_trip_ratings
+          UPDATE ops.passenger_trip_ratings AS r
           SET status = 'invalidated',
               updated_at = $2
-          WHERE rating_id = $1
-          RETURNING *
+          WHERE r.rating_id = $1
+          RETURNING r.*, ${this.resolvedRatingTripIdSql("r")} AS canonical_trip_id
         `,
         [input.ratingId, input.invalidatedAt],
       );
@@ -2746,8 +2748,7 @@ export class MultiTaxiRepository {
       rawTaskId === expectedAssignmentId;
     const matchesExpectedDriver =
       !expectedDriverId || !rawDriverId || rawDriverId === expectedDriverId;
-    const identityMatches =
-      matchesExpectedAssignment && matchesExpectedDriver;
+    const identityMatches = matchesExpectedAssignment && matchesExpectedDriver;
     const taskId = identityMatches ? rawTaskId : undefined;
     const assignmentId = identityMatches
       ? (rawAssignmentId ?? expectedAssignmentId)
