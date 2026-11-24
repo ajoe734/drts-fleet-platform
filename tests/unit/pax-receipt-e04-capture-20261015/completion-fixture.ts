@@ -108,6 +108,15 @@ function sqlTransport(initial: Record<string, Row[]> = {}) {
         rowCount: rows.length,
       };
     }
+    if (
+      sql.startsWith(
+        "INSERT INTO mobility.phase1_first_party_notification_sequences",
+      )
+    ) {
+      // No first-party route in this fixture either: the V0143 fallback
+      // allocates nothing, exactly like the genuine SQL would.
+      return { rows: [], rowCount: 0 };
+    }
     if (sql.startsWith("INSERT INTO ")) {
       const table = /INSERT INTO ([\w.]+)/.exec(sql)![1]!;
       if (table === "ops.phase1_owned_orders" && pauseWrite) {

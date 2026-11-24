@@ -293,19 +293,62 @@ export async function openContext(browser, cfg) {
         return route.continue();
       // Forward the real response without following redirects in the credentialed
       // transport. The browser follows Location as a new, separately scoped hop.
-      const response = await route.fetch({
-        maxRedirects: 0,
-        timeout: 60000,
-        headers: {
-          ...route.request().headers(),
-          "X-Serverless-Authorization": `Bearer ${process.env.AGENCY_ID_TOKEN}`,
-        },
-      });
-      await route.fulfill({ response });
+      let response;
+      try {
+        response = await route.fetch({
+          maxRedirects: 0,
+          timeout: 60000,
+          headers: {
+            ...route.request().headers(),
+            "X-Serverless-Authorization": `Bearer ${process.env.AGENCY_ID_TOKEN}`,
+          },
+        });
+      } catch {
+        // A background asset (e.g. a Next chunk) can still be in flight when a
+        // check closes its context; route.fetch then rejects with
+        // TargetClosedError inside this callback, which Node treats as an
+        // unhandled rejection and kills the probe before it saves results
+        // (shared_agency run 45317005708). Abort that request instead; a fetch
+        // failure while the page is alive still surfaces as a failed check.
+        await route.abort().catch(() => {});
+        return;
+      }
+      await route.fulfill({ response }).catch(() => {});
     });
   context.setDefaultTimeout(30000);
   context.setDefaultNavigationTimeout(60000);
   return context;
+}
+
+// Next.js App Router mounts a visually hidden live region
+// (#__next-route-announcer__, role="alert") in an open shadow root of every
+// hydrated page, and Playwright's role engine counts it. The portal renders
+// its own alerts inside <main>, so only those are page alerts.
+export const pageAlerts = (page) => page.locator("main").getByRole("alert");
+
+// A click that lands before React hydrates the server-rendered language switch
+// is dropped; through the credentialed Cloud Run route, scripts load slowly
+// enough after a domcontentloaded reload for that to happen. A handled click
+// sets <html lang> synchronously, so retry only while lang is unchanged (the
+// switch's label flips once handled, so a late retry cannot toggle it back).
+export async function switchLanguage(page, label, lang) {
+  const html = page.locator("html");
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    if ((await html.getAttribute("lang")) === lang) return;
+    try {
+      await page
+        .getByRole("button", { name: label, exact: true })
+        .click({ timeout: 5000 });
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+    }
+    for (let i = 0; i < 20; i++) {
+      if ((await html.getAttribute("lang")) === lang) return;
+      await page.waitForTimeout(100);
+    }
+    check(Date.now() <= deadline, "language-switch-not-handled");
+  }
 }
 
 export async function openRole(browser, role, cfg) {
@@ -324,9 +367,7 @@ export async function openRole(browser, role, cfg) {
     const page = await context.newPage();
     await visit(page, "/login", cfg);
     if ((await page.locator("html").getAttribute("lang")) !== "en") {
-      await page
-        .getByRole("button", { name: "切換語言至 English", exact: true })
-        .click();
+      await switchLanguage(page, "切換語言至 English", "en");
       await page
         .getByRole("heading", {
           name: "Regulatory Agency Read-Only Portal",
@@ -496,7 +537,7 @@ export async function assertEnglishDetail(page, row) {
   await expect(detailCell(page, "Generated At / Retained Until")).toContainText(
     taipeiTime(row.retain_until, "en"),
   );
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(pageAlerts(page)).toHaveCount(0);
 }
 
 export const taipeiTime = (value, locale) =>
@@ -595,7 +636,7 @@ async function exportRecord(page, role, cfg, row) {
   );
   if (role === "viewer") {
     await body(preview, 403);
-    await expect(page.getByRole("alert")).toHaveText(
+    await expect(pageAlerts(page)).toHaveText(
       "This account lacks export permission (agency_exporter), or the requested data does not belong to this agency.",
     );
     await page
@@ -781,7 +822,7 @@ export async function dailyDispatch(page, cfg, row) {
       "daily-dispatch-pagination-contract",
     );
     totalRows += result.items.length;
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(pageAlerts(page)).toHaveCount(0);
     await expect(page.locator("main tbody tr")).toHaveCount(
       result.items.length,
     );
@@ -1141,6 +1182,7 @@ export async function selfTest() {
     "visit",
     "api",
     "check",
+    "pageAlerts",
     `return (${dailySource.replace(importLine, "")})`,
   );
   const runDailyPages = async (
@@ -1215,7 +1257,9 @@ export async function selfTest() {
         };
       },
     };
-    const fn = bindDaily(expectStub, visitStub, apiStub, check);
+    const fn = bindDaily(expectStub, visitStub, apiStub, check, (page) =>
+      page.getByRole("alert"),
+    );
     return fn(pageStub, { fixture: { serviceDate } }, detailRow);
   };
   const correctRow = makeRow(bookedNo, detail.pickup_at, detail.dropoff_at);
