@@ -13,11 +13,11 @@ import { AuditNotificationService } from "../../modules/audit-notification/audit
 import { IAPSubjectAdapter } from "../../modules/auth/iap-subject.adapter";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import {
-  AGENCY_WRITE_ROUTE_ALLOWLIST,
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
   AUTH_ROUTE_READ_METHODS,
+  isAgencyAllowedWriteRoute,
 } from "./auth.constants";
 import type {
   AuthenticatedRequestLike,
@@ -974,7 +974,7 @@ export class BootstrapAuthGuard implements CanActivate {
     }
     if (
       !AUTH_ROUTE_READ_METHODS.has(method) &&
-      !AGENCY_WRITE_ROUTE_ALLOWLIST.has(`${method} ${routePath}`)
+      !isAgencyAllowedWriteRoute(method, routePath)
     ) {
       throw new ApiRequestError(
         403,
@@ -1005,7 +1005,7 @@ export class BootstrapAuthGuard implements CanActivate {
       .replace(/\/+$/, "");
     if (
       !AUTH_ROUTE_READ_METHODS.has(method) &&
-      !AGENCY_WRITE_ROUTE_ALLOWLIST.has(`${method} ${routePath}`)
+      !isAgencyAllowedWriteRoute(method, routePath)
     ) {
       throw new ApiRequestError(
         403,

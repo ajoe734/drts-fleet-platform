@@ -16,9 +16,9 @@ import {
  * which differ only in cookie names and realm value (SA/SD §9).
  *
  * Deliberately NOT forwarded here (no corresponding apps/api endpoint
- * exists): adding a password credential to an already-Google-only account,
- * changing a password without a reset token, and regenerating recovery
- * codes. Building UI for those would call a route that 404s.
+ * exists): adding a password credential to an already-Google-only account
+ * and changing a password without a reset token. Building UI for those
+ * would call a route that 404s.
  */
 export type PortalCredentialRealm = "tenant" | "agency" | "partner";
 
@@ -69,7 +69,9 @@ function requireCsrfAndOrigin(
     );
   }
   const csrfCookie = request.cookies.get(config.csrfCookieName)?.value;
-  const csrfHeader = request.headers.get(config.csrfHeaderName ?? "x-csrf-token");
+  const csrfHeader = request.headers.get(
+    config.csrfHeaderName ?? "x-csrf-token",
+  );
   if (!verifyCsrfToken(csrfCookie, csrfHeader)) {
     return NextResponse.json(
       {
@@ -176,7 +178,10 @@ export async function handlePasswordLogin(
     }
 
     const isSecure = isSecureEnvironment(request);
-    const response = NextResponse.json({ authenticated: true }, { status: 200 });
+    const response = NextResponse.json(
+      { authenticated: true },
+      { status: 200 },
+    );
     response.cookies.set(
       config.sessionCookieName,
       accessToken,
@@ -330,6 +335,39 @@ export async function handleTotpConfirm(
     return relay(data, upstream.status || 400);
   } catch (error) {
     return unavailable(error, "AUTH_TOTP_CONFIRM_UNAVAILABLE");
+  }
+}
+
+/** `POST /api/auth/:realm/mfa/totp/recovery-codes/regenerate` (SA/SD §7, §9). Requires a live session. */
+export async function handleTotpRegenerateRecoveryCodes(
+  request: NextRequest,
+  config: PortalCredentialConfig,
+): Promise<NextResponse> {
+  const csrfError = requireCsrfAndOrigin(request, config);
+  if (csrfError) return csrfError;
+  const token = requireSessionToken(request, config);
+  if (!token) {
+    return NextResponse.json(
+      { error: "AUTHENTICATION_REQUIRED" },
+      { status: 401 },
+    );
+  }
+  try {
+    const upstream = await config.fetchImpl(
+      `${config.apiBaseUrl}/api/auth/${config.realm}/mfa/totp/recovery-codes/regenerate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      },
+    );
+    const data = await upstream.json().catch(() => null);
+    return relay(data, upstream.status || 502);
+  } catch (error) {
+    return unavailable(error, "AUTH_TOTP_RECOVERY_REGENERATE_UNAVAILABLE");
   }
 }
 

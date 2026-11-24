@@ -9,6 +9,10 @@ import {
   it,
   vi,
 } from "vitest";
+import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import { FirstPartyNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
+import { FcmFirstPartyPushProvider } from "../../../apps/api/src/modules/multi-taxi/fcm-push.provider";
 import { PassengerPushDevicesRepository } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository";
 import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { PassengerPushService } from "../../../apps/api/src/modules/passenger-app/push/passenger-push.service";
@@ -19,6 +23,7 @@ import {
   PaymentPostgresHarness,
 } from "../pax-qa-20261009/payment-postgres-harness";
 import {
+  assignedRide,
   bookingActor,
   type BookingActor,
 } from "../pax-booking-history-20261009/native-booking-actions-fixture";
@@ -172,6 +177,128 @@ describe.skipIf(!hostedPaymentEnabled)(
         f.actor.owned.listOrders().some((o) => o.orderId === orderId),
       ).toBe(true);
     });
+
+    it("delivers a normal passenger booking ETA through its frozen first-party context on retry", async () => {
+      vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", "true");
+      vi.stubEnv("PASSENGER_PUSH_FCM_PROJECT_ID", "synthetic-project");
+      const f = await bookingFixture(false);
+      const registration = body();
+      const { deviceId } = await f.p.service.register(f.identity, registration);
+      const other = await h.authenticatedAccount();
+      await f.p.service.register(other.identity, body());
+
+      const created = await f.actor.booking.createRide(f.owner, f.command);
+      const orderId = created.ride.order.orderId;
+      const assigned = await assignedRide(f.actor, orderId);
+      await f.actor.owned.updateDriverTaskEta(assigned.taskId, 7);
+      const repository = new MultiTaxiRepository(h.database);
+      const event = (await repository.listDuePartnerNotifications()).find(
+        (row) => row.orderId === orderId && row.eventType === "eta_changed",
+      );
+      if (!event)
+        throw new Error("Expected a durable ETA event for the assigned order");
+      const receiptId = "projects/synthetic-project/messages/accepted";
+      const network = vi.fn<typeof fetch>(async () =>
+        Response.json({ name: receiptId }),
+      );
+      network.mockResolvedValueOnce(
+        Response.json({ error: { status: "UNAVAILABLE" } }, { status: 503 }),
+      );
+      const provider = new FcmFirstPartyPushProvider(
+        {
+          accessToken: async () => "synthetic-credential",
+          identityToken: vi.fn(),
+        },
+        network,
+      );
+      const transport = new FirstPartyNotificationTransport(
+        repository,
+        f.p.devices,
+        provider,
+      );
+      const partnerSend = vi.fn();
+      const service = new MultiTaxiService(
+        f.actor.owned,
+        repository,
+        undefined,
+        undefined,
+        undefined,
+        { transportMode: "partner_webhook", send: partnerSend } as never,
+        undefined,
+        undefined,
+        undefined,
+        transport,
+      );
+
+      const initial = await Promise.allSettled([
+        service.deliverPassengerNotification(event),
+        service.deliverPassengerNotification(event),
+      ]);
+      expect(
+        initial.filter((outcome) => outcome.status === "fulfilled"),
+      ).toEqual([
+        expect.objectContaining({
+          value: expect.objectContaining({
+            retryDisposition: "automatic",
+            failureReason: "provider_transient_error",
+          }),
+        }),
+      ]);
+      expect(network).toHaveBeenCalledTimes(1);
+      const prepared =
+        await repository.findFirstPartyNotificationContextAndTokens(
+          event.outboxId,
+        );
+      expect(prepared?.context).toMatchObject({
+        orderId,
+        tenantId: null,
+        routeSnapshot: {
+          drtsPassengerId: f.owner,
+          appId: registration.app_id,
+          rideRef: orderId,
+        },
+        targetDevices: [{ deviceId }],
+      });
+
+      await f.p.service.register(f.identity, body());
+      await h.pool!.query(
+        "UPDATE ops.consumer_notification_outbox SET next_attempt_at=now() WHERE outbox_id=$1",
+        [event.outboxId],
+      );
+      expect(await service.deliverPassengerNotification(event)).toMatchObject({
+        status: "delivered",
+        deliveryStage: "provider_accepted",
+        receiptId,
+      });
+      expect(partnerSend).not.toHaveBeenCalled();
+      expect(network).toHaveBeenCalledTimes(2);
+      for (const [, init] of network.mock.calls) {
+        expect(JSON.parse(String(init?.body)).message).toMatchObject({
+          token: registration.token,
+          data: {
+            notification_id: event.outboxId,
+            event: "passenger.eta_changed.v1",
+            ride_ref: orderId,
+          },
+        });
+      }
+      const stored =
+        await repository.findFirstPartyNotificationContextAndTokens(
+          event.outboxId,
+        );
+      expect(stored?.context).toMatchObject({
+        tenantId: null,
+        deliveryStage: "provider_accepted",
+        receiptId,
+        wireMessageHash: prepared!.context.wireMessageHash,
+        targetDevices: prepared!.context.targetDevices,
+      });
+      expect(
+        (await repository.listDuePartnerNotifications()).some(
+          (row) => row.outboxId === event.outboxId,
+        ),
+      ).toBe(false);
+    }, 30000);
 
     it("retains successful durable booking without any registered notification device", async () => {
       const f = await bookingFixture(false);

@@ -184,7 +184,8 @@ channels and are not referenced by `.github/workflows/deploy-prod.yml`.
 1. Confirm the target tag exists:
    `git ls-remote --tags origin 'refs/tags/prod/v*' | awk '{print $2}' | sort -V`
 2. Confirm go/no-go owner and rollback owner from `docs/03-runbooks/phase1-rollout.md`.
-3. Confirm the `production` environment reviewer rule is active.
+3. Confirm the `production` environment reviewer rule is active. Follow the
+   [workflow branch selection](prod-deploy-rollback-runbook-20260519.md#select-the-production-workflow-branch) to set `PROD_WORKFLOW_REF` and the immutable `PROD_TAG`.
 4. Confirm the Artifact Registry path, Cloud SQL instance, and Secret Manager entries are current.
 
 ### Dispatch
@@ -192,13 +193,13 @@ channels and are not referenced by `.github/workflows/deploy-prod.yml`.
 Normal deploy:
 
 ```bash
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.19.0
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${PROD_TAG:?}"
 ```
 
 Application-only redeploy without migration:
 
 ```bash
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.19.0 -f skip_migration=true
+gh workflow run deploy-prod.yml --ref "${PROD_WORKFLOW_REF:?}" -f tag="${PROD_TAG:?}" -f skip_migration=true
 ```
 
 ## Post-Deploy Smoke Contract
