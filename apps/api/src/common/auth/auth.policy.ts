@@ -293,6 +293,7 @@ export function resolveRouteAuthPolicy(
         "tenant",
         "partner",
         "driver",
+        "agency",
       ),
       description: "Authenticated self session inventory listing",
     };
@@ -300,8 +301,7 @@ export function resolveRouteAuthPolicy(
 
   if (
     upperMethod === "POST" &&
-    routePath.startsWith("auth/sessions/") &&
-    routePath.endsWith("/revoke")
+    /^auth\/sessions\/[^/]+\/revoke$/.test(routePath)
   ) {
     return {
       routeKey: "auth:sessions:revoke",
@@ -312,8 +312,30 @@ export function resolveRouteAuthPolicy(
         "tenant",
         "partner",
         "driver",
+        "agency",
       ),
       description: "Authenticated self session revocation",
+    };
+  }
+
+  const totpMatch =
+    upperMethod === "POST"
+      ? /^auth\/(tenant|agency|partner)\/mfa\/totp\/(enroll|confirm|recovery-codes\/regenerate)$/.exec(
+          routePath,
+        )
+      : null;
+  if (totpMatch) {
+    const totpRealm = totpMatch[1] as "tenant" | "agency" | "partner";
+    const totpAction =
+      totpMatch[2] === "recovery-codes/regenerate"
+        ? "recovery-codes:regenerate"
+        : totpMatch[2];
+    return {
+      routeKey: `auth:${totpRealm}:mfa:totp:${totpAction}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(totpRealm),
+      description:
+        "Authenticated own-account TOTP enrollment, confirmation, and recovery-code regeneration",
     };
   }
 
