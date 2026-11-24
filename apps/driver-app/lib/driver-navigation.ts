@@ -259,7 +259,10 @@ export function buildDriverNavigationCandidates({
       {
         provider,
         label: "Google Maps app",
-        url: buildGoogleMapsAppNavigationUrl(coordinate),
+        url:
+          platform === "android"
+            ? buildAndroidGoogleNavigationUrl(coordinate)
+            : buildGoogleMapsAppNavigationUrl(coordinate),
         requiresCanOpen: true,
         fallback: false,
       },

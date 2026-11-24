@@ -9,8 +9,8 @@ import {
 } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { promisify } from "node:util";
-import { vi } from "vitest";
 import type { PoolClient } from "pg";
 import type {
   DriverTaskRecord,
@@ -30,6 +30,7 @@ import { PaymentRefundRepository } from "../../../apps/api/src/modules/passenger
 import { PaymentRefundService } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.service";
 import { PaymentTokenCipher } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
 import type { PaymentCapturePolicy } from "../../../apps/api/src/modules/passenger-app/payment/payment-capture.policy";
+import type { PaymentRuntime } from "../../../apps/api/src/modules/passenger-app/payment/payment-runtime.config";
 import type {
   BindResult,
   CaptureCommand,
@@ -69,8 +70,55 @@ import {
 } from "../../../apps/api/src/modules/auth/oidc-id-token-verifier";
 import { FACEBOOK_GRAPH_ORIGIN } from "../../../apps/api/src/modules/passenger-app/oauth/facebook-oauth";
 
+type ViLike = (typeof import("vitest"))["vi"];
+const fallbackVi = {
+  fn: <T extends (...args: any[]) => any>(impl?: T) => {
+    const calls: Parameters<T>[] = [];
+    let currentImpl: T | undefined = impl;
+    const queue: Array<(...args: Parameters<T>) => ReturnType<T>> = [];
+    const fn = ((...args: Parameters<T>) => {
+      calls.push(args);
+      const next = queue.shift();
+      if (next) return next(...args);
+      return currentImpl ? currentImpl(...args) : undefined;
+    }) as any;
+    fn.mock = { calls };
+    fn.mockImplementation = (next: T) => {
+      currentImpl = next;
+      return fn;
+    };
+    fn.mockImplementationOnce = (next: T) => {
+      queue.push(next);
+      return fn;
+    };
+    fn.mockResolvedValue = (value: Awaited<ReturnType<T>>) => {
+      currentImpl = (async () => value) as unknown as T;
+      return fn;
+    };
+    fn.mockResolvedValueOnce = (value: Awaited<ReturnType<T>>) => {
+      queue.push((async () => value) as unknown as T);
+      return fn;
+    };
+    fn.mockRejectedValueOnce = (reason: unknown) => {
+      queue.push((async () => {
+        throw reason;
+      }) as unknown as T);
+      return fn;
+    };
+    return fn as ReturnType<ViLike["fn"]>;
+  },
+  stubEnv: (name: string, value: string) => {
+    process.env[name] = value;
+  },
+  stubGlobal: (name: string, value: unknown) => {
+    Reflect.set(globalThis, name, value);
+  },
+} as unknown as ViLike;
+const vi: ViLike =
+  (Reflect.get(globalThis, "vi") as ViLike | undefined) ?? fallbackVi;
+
 const require = createRequire(
-  new URL("../../../apps/api/package.json", import.meta.url),
+  path.resolve(process.cwd(), "apps/api/package.json"),
 );
 require("reflect-metadata");
 const { Pool } = require("pg") as typeof import("pg");
@@ -80,6 +128,13 @@ const nativeFetch = globalThis.fetch;
 export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
 const databaseUrl =
   process.env.PASSENGER_APP_TEST_DATABASE_URL || process.env.DATABASE_URL;
+function resolveDatabaseUrl(): string | undefined {
+  return (
+    process.env.PASSENGER_APP_TEST_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    databaseUrl
+  );
+}
 const runFile = promisify(execFile);
 
 /** Public fixture keys, used only by guarded tests; never deployment config. */
@@ -403,6 +458,7 @@ export class PaymentPostgresHarness {
   accountStore!: PassengerAccountRepository;
   provider!: SyntheticPaymentProvider;
   cipher!: PaymentTokenCipher;
+  runtime!: PaymentRuntime;
   taxi!: MultiTaxiRepository;
   owned!: OwnedMobilityRepository;
   private peers: DiagnosedDatabaseService[] = [];
@@ -410,12 +466,13 @@ export class PaymentPostgresHarness {
   async open(): Promise<void> {
     if (!hostedPaymentEnabled)
       throw new Error("Payment DB/HTTP is GitHub-hosted only.");
-    if (!databaseUrl)
+    const activeDatabaseUrl = resolveDatabaseUrl();
+    if (!activeDatabaseUrl)
       throw new Error(
         "Hosted Payment QA requires PASSENGER_APP_TEST_DATABASE_URL or DATABASE_URL; missing configuration is a failure.",
       );
     this.admin = new Pool({
-      connectionString: databaseUrl,
+      connectionString: activeDatabaseUrl,
       connectionTimeoutMillis: 10000,
     });
     await this.admin.query(`CREATE DATABASE "${this.template}"`);
@@ -498,7 +555,7 @@ export class PaymentPostgresHarness {
   }
 
   private url(name: string): string {
-    const url = new URL(databaseUrl!);
+    const url = new URL(resolveDatabaseUrl()!);
     url.pathname = `/${name}`;
     return url.toString();
   }
@@ -522,7 +579,10 @@ export class PaymentPostgresHarness {
     }
   }
 
-  async reset(): Promise<void> {
+  async reset(options?: {
+    runtime?: PaymentRuntime;
+    capturePolicy?: PaymentCapturePolicy | null;
+  }): Promise<void> {
     await this.closeCase();
     const name = `pax_payment_case_${randomUUID().replaceAll("-", "")}`;
     await this.admin!.query(
@@ -544,13 +604,23 @@ export class PaymentPostgresHarness {
       else process.env.DATABASE_URL = previous;
     }
     this.provider = new SyntheticPaymentProvider();
-    this.cipher = new PaymentTokenCipher(
-      JSON.stringify({
-        activeKeyId: "qa-only",
-        keys: { "qa-only": Buffer.alloc(32, 42).toString("base64") },
-      }),
-    );
-    const runtime = { provider: this.provider, cipher: this.cipher };
+    this.cipher =
+      options?.runtime?.cipher ??
+      new PaymentTokenCipher(
+        JSON.stringify({
+          activeKeyId: "qa-only",
+          keys: { "qa-only": Buffer.alloc(32, 42).toString("base64") },
+        }),
+      );
+    const runtime: PaymentRuntime = options?.runtime ?? {
+      provider: this.provider,
+      cipher: this.cipher,
+    };
+    this.runtime = runtime;
+    const policy =
+      options?.capturePolicy !== undefined
+        ? options.capturePolicy
+        : syntheticPolicy;
     this.methods = new PaymentMethodRepository(this.database);
     this.methodService = new PaymentMethodService(this.methods, runtime);
     this.taxi = new MultiTaxiRepository(this.database);
@@ -559,7 +629,7 @@ export class PaymentPostgresHarness {
     this.chargeService = new PaymentChargeService(
       this.charges,
       runtime,
-      syntheticPolicy,
+      policy,
     );
     this.refunds = new PaymentRefundRepository(this.database);
     this.refundService = new PaymentRefundService(this.refunds, runtime);

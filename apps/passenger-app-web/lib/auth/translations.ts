@@ -46,6 +46,7 @@ const zhTW = {
   legalUnavailable: "服務條款與隱私權政策目前無法使用，請稍後重試。",
   oauth: "授權登入",
   redirect: "正在導向",
+  returnToPassengerApp: "返回智行乘客 App",
   oauthProcessing: "正在驗證授權...",
   oauthSuccess: "登入成功，正在導回應用程式...",
   denied: "您已取消社群帳號授權",

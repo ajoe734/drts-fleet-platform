@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isFleetPublicPath } from "./lib/fleet-portal-entry-paths";
 
 const SESSION_COOKIE_NAME = "drts_session";
 const CSRF_COOKIE_NAME = "drts_csrf";
-const PUBLIC_PATHS = [
-  "/login",
-  "/api/auth",
-  "/forgot-password",
-  "/reset-password",
-];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublic = isFleetPublicPath(pathname);
 
   // 1. Security Headers
   // Override inbound metadata: layouts need the actual route to avoid
