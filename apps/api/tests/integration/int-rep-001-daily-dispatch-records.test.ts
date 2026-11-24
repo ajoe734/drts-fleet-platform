@@ -775,6 +775,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     });
     expect(pgDateRows).toHaveLength(1);
     expect(pgDateRows[0]?.orderId).toBe(order.orderId);
+    expect(pgDateRows[0]?.serviceDate).toBe(serviceDate);
   });
 
   it("reconciles persisted legacy UTC-day daily_dispatch_records rows through real ReportingRepository and ReportingService with per-order transactional rollback on failure", async () => {
@@ -1965,8 +1966,10 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
           ).toISOString(),
         ).toBe("2026-10-24T17:45:00.000Z");
 
+        // Read the durable row itself: a service read now refreshes the range
+        // from canonical orders, which would replace this hand-written G2.
         const readDay25AfterLegacyG2SurvivesG1 =
-          await readerService.listDailyDispatchRecords({
+          await reportingRepository.listDailyDispatchRecords({
             serviceDate: taipeiServiceDay,
             orderId: taipeiMidnightOrder.orderId,
           });

@@ -167,6 +167,48 @@ function toTaipeiDate(value: string | null | undefined): string | null {
   return year && month && day ? `${year}-${month}-${day}` : null;
 }
 
+function dailyDispatchKey(record: DispatchDailyRecord): string {
+  return `${String(record.serviceDate).slice(0, 10)}|${record.orderId}`;
+}
+
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** Same persisted content, ignoring generatedAt (and the day key itself).
+ * Timestamps compare by instant, since a row read back from PostgreSQL and
+ * one built from source may format the same instant differently. */
+function sameDailyDispatchContent(
+  stored: DispatchDailyRecord,
+  fresh: DispatchDailyRecord,
+): boolean {
+  const left = stored as unknown as Record<string, unknown>;
+  const right = fresh as unknown as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  keys.delete("generatedAt");
+  keys.delete("serviceDate");
+  for (const key of keys) {
+    const a = left[key] ?? null;
+    const b = right[key] ?? null;
+    if (a === b) continue;
+    if (
+      typeof a === "string" &&
+      typeof b === "string" &&
+      ISO_TIMESTAMP.test(a) &&
+      ISO_TIMESTAMP.test(b) &&
+      Date.parse(a) === Date.parse(b)
+    )
+      continue;
+    if (
+      (typeof a === "number" || typeof b === "number") &&
+      a !== null &&
+      b !== null &&
+      Number(a) === Number(b)
+    )
+      continue;
+    return false;
+  }
+  return true;
+}
+
 @Injectable()
 export class ReportingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReportingService.name);
@@ -201,6 +243,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
   async rebuildDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
+    current?: readonly DispatchDailyRecord[],
   ): Promise<DispatchDailyRecordRebuildResult> {
     const generatedAt = new Date().toISOString();
     const source = await this.loadDailyDispatchRecordSource();
@@ -247,6 +290,15 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           right.orderId.localeCompare(left.orderId),
       );
 
+    const unchanged = new Map<string, DispatchDailyRecord>();
+    for (const row of current ?? []) {
+      unchanged.set(dailyDispatchKey(row), row);
+    }
+    const storedIfUnchanged = (record: DispatchDailyRecord) => {
+      const row = unchanged.get(dailyDispatchKey(record));
+      return row && sameDailyDispatchContent(row, record) ? row : null;
+    };
+
     const recordsToPersist = allBuilt
       .filter(
         ({ record, legacyUtcDate }) =>
@@ -258,6 +310,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
             )),
       )
       .map(({ record }) => record)
+      .filter((record) => storedIfUnchanged(record) === null)
       .sort(
         (left, right) =>
           right.requestedAt.localeCompare(left.requestedAt) ||
@@ -290,7 +343,12 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     return {
       rebuiltCount: records.length,
       generatedAt,
-      records: records.map((record) => ({ ...record })),
+      records: records.map((record) => {
+        const row = storedIfUnchanged(record);
+        return row
+          ? { ...record, generatedAt: row.generatedAt }
+          : { ...record };
+      }),
     };
   }
 
@@ -298,8 +356,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
     if (this.reportingRepository?.isEnabled()) {
+      let stored: DispatchDailyRecord[];
       try {
-        await this.reportingRepository.listDailyDispatchRecords(query);
+        stored = await this.reportingRepository.listDailyDispatchRecords(query);
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
@@ -317,11 +376,12 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       // completed 2026-11-20 order was missing from agency R13 while six
       // earlier cancelled rows for that day were served. The read above still
       // fails closed on a broken table; every successful read then rebuilds
-      // the queried range, which refreshes the durable rows (upsert keeps the
-      // newest generated_at) and returns the current canonical records.
-      return (await this.rebuildDailyDispatchRecords(query)).records.map(
-        (record) => ({ ...record }),
-      );
+      // the queried range from canonical orders. Rows whose content did not
+      // change are neither rewritten nor re-stamped, so repeated reads (every
+      // agency page) write only new or changed orders.
+      return (
+        await this.rebuildDailyDispatchRecords(query, stored)
+      ).records.map((record) => ({ ...record }));
     }
 
     let rebuiltRecords: DispatchDailyRecord[] | null = null;

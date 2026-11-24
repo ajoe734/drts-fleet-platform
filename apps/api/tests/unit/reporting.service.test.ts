@@ -374,6 +374,27 @@ describe("ReportingService", () => {
     );
   });
 
+  it("does not rewrite or re-stamp rows whose content is unchanged on read", async () => {
+    const { service, reportingRepository } = createService();
+    const query = { serviceDate: "2026-06-20" };
+    const [built] = (await service.rebuildDailyDispatchRecords(query)).records;
+    reportingRepository.upsertDailyDispatchRecords.mockClear();
+    reportingRepository.listDailyDispatchRecords.mockResolvedValueOnce([
+      { ...built!, generatedAt: "2026-06-20T03:00:00.000Z" },
+    ] as never);
+
+    const records = await service.listDailyDispatchRecords(query);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      orderId: "order-report-001",
+      generatedAt: "2026-06-20T03:00:00.000Z",
+    });
+    expect(reportingRepository.upsertDailyDispatchRecords).toHaveBeenCalledWith(
+      [],
+    );
+  });
+
   it("keeps arrivedPickupAt null when no arrival trace exists even if the task snapshot carries a timestamp", async () => {
     const { service } = createService({
       dispatchTraceLogs: [],
