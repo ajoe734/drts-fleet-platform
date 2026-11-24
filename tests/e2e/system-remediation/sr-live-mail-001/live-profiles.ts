@@ -201,7 +201,7 @@ async function accept(
   );
   recorder.recordHttpCall({
     method: "POST",
-    url: `${config.apiOrigin}/api/tenant/invitations/accept`,
+    url: `${config.apiOrigin}/api/tenant/invitations/accept-with-password`,
     statusCode: observation.acceptance_status,
     durationMs: observation.acceptance_duration_ms,
     responseHeaders: { "x-drts-candidate-sha": config.candidateSha },
