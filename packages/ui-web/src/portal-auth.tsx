@@ -755,6 +755,7 @@ export function PortalAccountSecurityPanel(
   } = props;
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [regenBusy, setRegenBusy] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
@@ -762,6 +763,11 @@ export function PortalAccountSecurityPanel(
 
   async function load() {
     const result = await getJson(sessionsEndpoint);
+    if (!result.ok) {
+      // An unreadable list is not an empty one.
+      setSessionError(errorMessage(record(result.data), m.genericError));
+      return;
+    }
     setSessions(readSessions(result.data));
   }
 
@@ -770,17 +776,30 @@ export function PortalAccountSecurityPanel(
   }, []);
 
   async function revoke(sessionId: string) {
-    await postJson(
+    setStatus(null);
+    setSessionError(null);
+    const result = await postJson(
       `${sessionRevokeBase}/${encodeURIComponent(sessionId)}/revoke`,
       {},
       csrfToken,
     );
+    if (!result.ok) {
+      setSessionError(errorMessage(result.data, m.genericError));
+      return;
+    }
     setStatus(m.sessionRevoked);
     await load();
   }
 
   async function revokeAll() {
-    await postJson(logoutAllEndpoint, {}, csrfToken);
+    setStatus(null);
+    setSessionError(null);
+    const result = await postJson(logoutAllEndpoint, {}, csrfToken);
+    // 401 means this session is already gone; the reload returns to sign-in.
+    if (!result.ok && result.status !== 401) {
+      setSessionError(errorMessage(result.data, m.genericError));
+      return;
+    }
     window.location.reload();
   }
 
@@ -895,6 +914,7 @@ export function PortalAccountSecurityPanel(
       <section style={{ display: "grid", gap: 12 }}>
         <h2>{m.sessionsTitle}</h2>
         {status ? <p role="status">{status}</p> : null}
+        <ErrorNotice message={sessionError} />
         {sessions === null ? null : sessions.length === 0 ? (
           <p>{m.sessionsEmpty}</p>
         ) : (

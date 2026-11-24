@@ -468,6 +468,68 @@ describe("PortalAccountSecurityPanel", () => {
     expect(revokeButtons).toHaveLength(1);
   });
 
+  it("reports a failed session read, sign-out or sign-out-everywhere instead of claiming success", async () => {
+    const fetchMock = vi.mocked(fetch);
+    const list = [
+      { session_id: "s1", realm: "agency", is_current: true },
+      { session_id: "s2", realm: "agency", is_current: false },
+    ];
+    const denied = (message: string, status: number) =>
+      jsonResponse({ error: { code: "DENIED", message } }, false, status);
+    fetchMock
+      .mockReturnValueOnce(jsonResponse({ data: list }))
+      .mockReturnValueOnce(denied("This session is not yours.", 403))
+      .mockReturnValueOnce(denied("Sign-out is unavailable.", 503));
+
+    render(
+      <PortalAccountSecurityPanel
+        messages={messages}
+        sessionsEndpoint="/api/auth/sessions"
+        sessionRevokeBase="/api/auth/sessions"
+        logoutAllEndpoint="/api/auth/logout-all"
+        totpSetupHref="/account/security/totp"
+      />,
+    );
+
+    await screen.findByText(/This device/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign out this device" }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "This session is not yours.",
+    );
+    expect(screen.queryByText(messages.sessionRevoked)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.revokeAllSessions }),
+    );
+    expect(await screen.findByText("Sign-out is unavailable.")).toBeTruthy();
+  });
+
+  it("does not present an unreadable session list as an empty one", async () => {
+    vi.mocked(fetch).mockReturnValueOnce(
+      jsonResponse(
+        { error: { message: "Sessions are unavailable." } },
+        false,
+        503,
+      ),
+    );
+    render(
+      <PortalAccountSecurityPanel
+        messages={messages}
+        sessionsEndpoint="/api/auth/sessions"
+        sessionRevokeBase="/api/auth/sessions"
+        logoutAllEndpoint="/api/auth/logout-all"
+        totpSetupHref="/account/security/totp"
+      />,
+    );
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Sessions are unavailable.",
+    );
+    expect(screen.queryByText(messages.sessionsEmpty)).toBeNull();
+  });
+
   it("regenerates one-time recovery codes from the account-security panel, shows them once, and surfaces step-up/MFA errors", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock
