@@ -85,6 +85,7 @@ vi.mock("expo-sharing", () => ({
 
 import PassengerAppEntry from "../../../app/index";
 import PassengerRootLayout from "../../../app/_layout";
+import { createNativePassengerPaymentBrowser } from "../../../lib/platform/native-passenger-platform-ports";
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -95,6 +96,8 @@ const APP = path.resolve(
 );
 const BASE = "https://native-oauth-return.example.invalid";
 const CALLBACK = "drtspassenger://auth/callback";
+const PAYMENT_RETURN = "drtspassenger://payment-methods/return";
+const PAYMENT_3DS_URL = "https://cc-stage.ecpay.com.tw/ThreeD/Verify";
 const TRANSACTION = "1616ef70-a87d-4280-97c0-a8e174ac83d8";
 const AUTH_URL =
   "https://provider.example.invalid/authorize?state=api-state&code_challenge=api-owned-pkce";
@@ -327,6 +330,13 @@ interface HttpCall {
 }
 function httpBoundary() {
   const calls: HttpCall[] = [];
+  const state = {
+    methods: [] as Array<Record<string, unknown>>,
+    bindResult: {
+      status: "action_required",
+      next_action_url: PAYMENT_3DS_URL,
+    } as Record<string, unknown>,
+  };
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const call = {
@@ -383,13 +393,29 @@ function httpBoundary() {
           additionalFees: {},
         },
       });
-    if (call.path === "/api/passenger-app/payment-methods")
-      return reply({ methods: [] });
+    if (
+      call.path === "/api/passenger-app/payment-methods" &&
+      call.method === "GET"
+    )
+      return reply({ methods: state.methods });
+    if (call.path === "/api/passenger-app/payment-methods?binding_session=1")
+      return reply({
+        provider: "ecpay",
+        merchant_token: "sim-merchant-token-1",
+        token_expire_date: "2099/12/31 23:59:59",
+        server_type: "Stage",
+        sandbox: true,
+      });
+    if (
+      call.path === "/api/passenger-app/payment-methods" &&
+      call.method === "POST"
+    )
+      return reply(state.bindResult);
     if (url.pathname === "/api/passenger-app/rides")
       return reply({ rides: [], next_cursor: null });
     throw new Error(`unexpected_http:${call.method}:${call.path}`);
   });
-  return { calls, fetch };
+  return { calls, fetch, state };
 }
 function RouterObserver({ sdk, actions }: { sdk: Sdk; actions: unknown[] }) {
   const navigation = React.useRef<Navigation>({
@@ -568,11 +594,16 @@ describe("actual native OAuth browser return and Expo Router event ownership", (
     const controls = [
       "drtspassenger:///",
       `${CALLBACK}-other?code=one&state=api-state`,
+      `${PAYMENT_RETURN}-other?ecpay_3ds=completed`,
       "another-app://auth/callback?code=one&state=api-state#kept",
     ];
     const seen: string[] = [];
     const unsubscribe = sdk.linking.subscribe((url) => seen.push(url));
     for (const url of controls) await emitURL(url);
+    expect(seen).toEqual(controls);
+    await emitURL(`${PAYMENT_RETURN}?ecpay_3ds=completed`);
+    await emitURL(`${PAYMENT_RETURN}?ecpay_3ds=failed`);
+    await emitURL(`${PAYMENT_RETURN}?ecpay_3ds=unknown`);
     expect(seen).toEqual(controls);
     const raw = `${CALLBACK}?code=cold-code&state=cold-state`;
     const state = sdk.linking.getStateFromPath(
@@ -596,5 +627,79 @@ describe("actual native OAuth browser return and Expo Router event ownership", (
     expect(external.urls.size).toBe(0);
     expect(external.browserCalls).toEqual([]);
     expect(external.stored).toBe("");
+  });
+
+  it("separates OAuth login callback and payment 3DS return across actual WebBrowser + Expo Router linking and refreshes owned payment methods", async () => {
+    const sdk = actualSdk();
+    const f = httpBoundary();
+    const { tree, actions } = await mount(sdk, f);
+    expect(present(tree, "app-login")).toBe(true);
+
+    // 1. OAuth login return via drtspassenger://auth/callback
+    const { pending: loginPending } = await begin(tree);
+    const oauthReturnUrl = `${CALLBACK}?code=returned%20code&state=api-state`;
+    await returned(oauthReturnUrl, loginPending);
+    expect(present(tree, "native-passenger-application")).toBe(true);
+    expect(actions).toEqual([]);
+
+    // 2. Navigate to payment methods screen in the same authenticated session
+    await act(async () => {
+      await onPress(tree, "app-nav-payment")();
+      await flush();
+    });
+    expect(present(tree, "payment-empty")).toBe(true);
+
+    // 3. Open payment 3DS verification via actual WebBrowser.openAuthSessionAsync with dedicated payment return URI
+    const paymentBrowser = createNativePassengerPaymentBrowser({
+      openAuthSessionAsync: (url, redirectUrl) =>
+        external.sdkBrowser!(url, String(redirectUrl)) as never,
+    });
+    if (paymentBrowser.status !== "ready")
+      throw new Error("expected_ready_payment_browser");
+    let paymentOpenPending!: Promise<{ type: "returned" | "cancelled" }>;
+    await act(async () => {
+      paymentOpenPending = paymentBrowser.port.openAction(PAYMENT_3DS_URL);
+      await flush();
+    });
+    expect(external.browserCalls.at(-1)).toBe(PAYMENT_3DS_URL);
+    expect(external.urls.size).toBe(2);
+
+    // Emit payment return URL while server adds the owner's bound card
+    f.state.methods = [
+      {
+        payment_method_id: "pm_router_3ds_001",
+        card_type: "VISA",
+        last4: "8888",
+        expiry_month: "11",
+        expiry_year: "2032",
+        is_default: true,
+      },
+    ];
+    const paymentReturnUrl = `${PAYMENT_RETURN}?ecpay_3ds=completed`;
+    let paymentResult!: { type: "returned" | "cancelled" };
+    await act(async () => {
+      await emitURL(paymentReturnUrl);
+      await flush();
+      resume();
+      paymentResult = await paymentOpenPending;
+      await onPress(tree, "payment-refresh")();
+      await flush();
+    });
+    expect(paymentResult).toEqual({ type: "returned" });
+    expect(present(tree, "payment-method-pm_router_3ds_001")).toBe(true);
+    expect(
+      f.calls
+        .filter(
+          (call) =>
+            call.path === "/api/passenger-app/payment-methods" &&
+            call.method === "GET",
+        )
+        .every((call) => call.authorization === `Bearer ${PAIR.accessToken}`),
+    ).toBe(true);
+    expect(
+      actions,
+      "Payment 3DS return must not dispatch a Router +not-found page action",
+    ).toEqual([]);
+    expect(external.urls.size).toBe(1);
   });
 });

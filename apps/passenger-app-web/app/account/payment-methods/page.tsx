@@ -19,6 +19,9 @@ import {
   isEcpayHostedFieldsRuntime,
 } from "../../../lib/payment/runtime-fields";
 
+const NATIVE_PASSENGER_PAYMENT_RETURN_URI =
+  "drtspassenger://payment-methods/return";
+
 export default function PaymentMethodsPage() {
   const review = useReviewDemo();
   const trial = useTrialMode();
@@ -97,6 +100,7 @@ export default function PaymentMethodsPage() {
           ) : undefined
         }
         approvedActionOrigins={approvedActionOrigins}
+        nativeReturnUri={NATIVE_PASSENGER_PAYMENT_RETURN_URI}
       />
     </>
   );

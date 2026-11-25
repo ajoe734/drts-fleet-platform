@@ -177,11 +177,14 @@ describe("BUREAU-R13 agency IAM catalog", () => {
     });
   });
 
-  it("keeps the agency write allowlist to export creation/preview and logout only", () => {
+  it("keeps the agency write allowlist to export creation/preview, logout, and own-account TOTP actions only", () => {
     expect([...AGENCY_WRITE_ROUTE_ALLOWLIST].sort()).toEqual(
       [
         "POST agency/trip-records/export-jobs/preview",
         "POST agency/trip-records/export-jobs",
+        "POST auth/agency/mfa/totp/confirm",
+        "POST auth/agency/mfa/totp/enroll",
+        "POST auth/agency/mfa/totp/recovery-codes/regenerate",
         "POST auth/logout",
         "POST auth/logout-all",
       ].sort(),

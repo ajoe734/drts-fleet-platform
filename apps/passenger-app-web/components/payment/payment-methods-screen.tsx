@@ -26,6 +26,52 @@ import { EcpayHostedFields } from "./ecpay-hosted-fields";
 export const MAX_BOUND_CARDS = 5;
 export const CARD_LIMIT_MESSAGE =
   "每個會員最多可綁定 5 張信用卡。如需新增第 6 張卡片，請先移除既有卡片。";
+export const NATIVE_PASSENGER_PAYMENT_RETURN_URI =
+  "drtspassenger://payment-methods/return";
+export type Ecpay3dsReturnStatus = "completed" | "failed" | "unknown";
+
+export function parseEcpay3dsReturnStatus(
+  value: string | null | undefined,
+): Ecpay3dsReturnStatus | null {
+  if (value === "completed" || value === "failed" || value === "unknown")
+    return value;
+  return null;
+}
+
+export function readWindowEcpay3dsReturnStatus(): Ecpay3dsReturnStatus | null {
+  if (typeof window === "undefined" || !window.location?.search) return null;
+  try {
+    return parseEcpay3dsReturnStatus(
+      new URLSearchParams(window.location.search).get("ecpay_3ds"),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function buildNativePassengerPaymentReturnHref(
+  status: Ecpay3dsReturnStatus | null,
+  baseUri = NATIVE_PASSENGER_PAYMENT_RETURN_URI,
+): string {
+  return status ? `${baseUri}?ecpay_3ds=${status}` : baseUri;
+}
+
+function ecpay3dsReturnNotice(
+  status: Ecpay3dsReturnStatus,
+  hasWebSession: boolean,
+): string {
+  if (status === "failed") {
+    return hasWebSession
+      ? T.bindingFailed
+      : `${T.bindingFailed} ${T.returnToAppToRetry}`;
+  }
+  if (status === "unknown") {
+    return hasWebSession ? T.pending : `${T.pending} ${T.returnToAppToRefresh}`;
+  }
+  return hasWebSession
+    ? T.verificationReturned
+    : T.verificationReturnedWithoutWebSession;
+}
 
 export interface PaymentMethodsScreenProps {
   client?: PassengerPaymentClient;
@@ -33,6 +79,8 @@ export interface PaymentMethodsScreenProps {
   fields?: PassengerPaymentFieldsAvailability;
   hostedFieldsView?: ReactNode;
   approvedActionOrigins?: readonly string[];
+  ecpay3dsReturn?: Ecpay3dsReturnStatus | null;
+  nativeReturnUri?: string;
 }
 export function PaymentMethodsScreen({
   client: supplied,
@@ -40,14 +88,31 @@ export function PaymentMethodsScreen({
   fields: fieldsProp,
   hostedFieldsView: hostedFieldsViewProp,
   approvedActionOrigins,
+  ecpay3dsReturn,
+  nativeReturnUri,
 }: PaymentMethodsScreenProps) {
+  const readReturnStatus = () =>
+    ecpay3dsReturn !== undefined
+      ? parseEcpay3dsReturnStatus(ecpay3dsReturn)
+      : readWindowEcpay3dsReturnStatus();
+  // The server cannot see the query, so the first client render must match it.
+  const [ecpayReturnStatus, setEcpayReturnStatus] =
+    useState<Ecpay3dsReturnStatus | null>(null);
+  useEffect(() => {
+    setEcpayReturnStatus(readReturnStatus());
+  }, [ecpay3dsReturn]);
+  const nativeAppReturnHref = buildNativePassengerPaymentReturnHref(
+    ecpayReturnStatus,
+    nativeReturnUri ?? NATIVE_PASSENGER_PAYMENT_RETURN_URI,
+  );
   const useManagedEcpay =
     fieldsProp === undefined &&
     hostedFieldsViewProp === undefined &&
     process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER === "ecpay";
   const [managedFields, setManagedFields] =
     useState<PassengerPaymentFieldsAvailability>({ status: "unavailable" });
-  const fields = fieldsProp ?? (useManagedEcpay ? managedFields : { status: "unavailable" });
+  const fields =
+    fieldsProp ?? (useManagedEcpay ? managedFields : { status: "unavailable" });
   const hostedFieldsView =
     hostedFieldsViewProp ??
     (useManagedEcpay ? (
@@ -98,7 +163,7 @@ export function PaymentMethodsScreen({
   useEffect(() => {
     heading.current?.focus();
   }, [view]);
-  function identityFence() {
+  function identityFence(options?: { suppressLoginRedirect?: boolean }) {
     invalidIdentity.current = true;
     actor.current = undefined;
     setMethods(undefined);
@@ -107,7 +172,7 @@ export function PaymentMethodsScreen({
     setPending(false);
     if (currentFields.current.status === "ready")
       currentFields.current.port.dispose();
-    router.push("/login");
+    if (!options?.suppressLoginRedirect) router.push("/login");
   }
   async function account(): Promise<PassengerAccount> {
     if (!alive.current || invalidIdentity.current)
@@ -119,7 +184,10 @@ export function PaymentMethodsScreen({
       !value.drtsPassengerId ||
       (actor.current && actor.current !== value.drtsPassengerId)
     ) {
-      identityFence();
+      const hadActor = actor.current !== undefined;
+      identityFence({
+        suppressLoginRedirect: readReturnStatus() !== null && !hadActor,
+      });
       throw new Error("payment_account_changed");
     }
     actor.current = value.drtsPassengerId;
@@ -136,8 +204,12 @@ export function PaymentMethodsScreen({
   }
   function report(reason: unknown, message: string) {
     if (!alive.current) return;
-    if (reason instanceof PassengerApiError && reason.status === 401)
-      identityFence();
+    if (reason instanceof PassengerApiError && reason.status === 401) {
+      const hadActor = actor.current !== undefined;
+      identityFence({
+        suppressLoginRedirect: readReturnStatus() !== null && !hadActor,
+      });
+    }
     setError(message);
   }
   async function refresh() {
@@ -179,6 +251,8 @@ export function PaymentMethodsScreen({
     lock.current = true;
     setBusy(true);
     setError("");
+    // The earlier return describes the previous attempt, not this one.
+    setEcpayReturnStatus(null);
     let sent = false;
     const port = fields.port;
     const revision = fieldsRevision.current;
@@ -254,6 +328,7 @@ export function PaymentMethodsScreen({
     lock.current = true;
     setBusy(true);
     setError("");
+    setEcpayReturnStatus(null);
     try {
       await account();
       if (kind === "delete") {
@@ -312,7 +387,23 @@ export function PaymentMethodsScreen({
   if (invalidIdentity.current)
     return (
       <AuthScreen title={T.title}>
-        <AuthAlert>{T.failed}</AuthAlert>
+        {ecpayReturnStatus !== null ? (
+          <>
+            <AuthAlert
+              kind={ecpayReturnStatus === "failed" ? "danger" : "warn"}
+            >
+              {ecpay3dsReturnNotice(ecpayReturnStatus, false)}
+            </AuthAlert>
+            <a
+              href={nativeAppReturnHref}
+              data-testid="payment-native-app-return"
+            >
+              {T.returnToAppPaymentMethods}
+            </a>
+          </>
+        ) : (
+          <AuthAlert>{T.failed}</AuthAlert>
+        )}
         <a href="/login">{T.login}</a>
       </AuthScreen>
     );
@@ -325,6 +416,16 @@ export function PaymentMethodsScreen({
       >
         {title}
       </h1>
+      {ecpayReturnStatus !== null && (
+        <>
+          <AuthAlert kind={ecpayReturnStatus === "failed" ? "danger" : "warn"}>
+            {ecpay3dsReturnNotice(ecpayReturnStatus, true)}
+          </AuthAlert>
+          <a href={nativeAppReturnHref} data-testid="payment-native-app-return">
+            {T.returnToAppPaymentMethods}
+          </a>
+        </>
+      )}
       {error && <AuthAlert>{error}</AuthAlert>}
       {error && !pending && <a href="tel:02-2944-0985">{T.support}</a>}
       {pending && (
@@ -404,8 +505,17 @@ export function PaymentMethodsScreen({
               ))
             )}
           </P5Card>
-          <div style={{ margin: "0 14px", display: "flex", flexDirection: "column", gap: 12 }}>
-            {atCardLimit && <AuthAlert kind="warn">{CARD_LIMIT_MESSAGE}</AuthAlert>}
+          <div
+            style={{
+              margin: "0 14px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {atCardLimit && (
+              <AuthAlert kind="warn">{CARD_LIMIT_MESSAGE}</AuthAlert>
+            )}
             <P5Btn
               kind="primary"
               disabled={busy || pending || methods === undefined || atCardLimit}

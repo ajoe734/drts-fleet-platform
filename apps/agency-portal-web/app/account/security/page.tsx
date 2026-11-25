@@ -11,22 +11,37 @@ import { t } from "@/lib/translations";
 
 export default async function AccountSecurityPage() {
   await requireAgencyToken("/account/security");
-  const [cookieStore, locale] = await Promise.all([cookies(), getServerLocale()]);
+  const [cookieStore, locale] = await Promise.all([
+    cookies(),
+    getServerLocale(),
+  ]);
   const csrfToken = cookieStore.get(AGENCY_CSRF_COOKIE_NAME)?.value;
 
   return (
     <main style={{ maxWidth: 640, margin: "40px auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: 12,
+        }}
+      >
         <LanguageSwitch locale={locale} />
       </div>
       <Card>
         <CardHeader>
-          <h1 style={{ fontSize: 20, margin: 0 }}>{t("accountSecurity.title", undefined, locale)}</h1>
+          <h1 style={{ fontSize: 20, margin: 0 }}>
+            {t("accountSecurity.title", undefined, locale)}
+          </h1>
         </CardHeader>
         <CardBody>
           <div>
-            <h2 style={{ fontSize: 15 }}>{t("accountSecurity.passwordSectionTitle", undefined, locale)}</h2>
-            <p style={{ fontSize: 13, opacity: 0.85 }}>{t("accountSecurity.passwordSectionBody", undefined, locale)}</p>
+            <h2 style={{ fontSize: 15 }}>
+              {t("accountSecurity.passwordSectionTitle", undefined, locale)}
+            </h2>
+            <p style={{ fontSize: 13, opacity: 0.85 }}>
+              {t("accountSecurity.passwordSectionBody", undefined, locale)}
+            </p>
             <a href="/forgot-password" style={{ fontSize: 13 }}>
               {t("accountSecurity.passwordCta", undefined, locale)}
             </a>
@@ -40,6 +55,7 @@ export default async function AccountSecurityPage() {
               sessionRevokeBase="/api/auth/sessions"
               logoutAllEndpoint="/api/auth/logout-all"
               totpSetupHref="/account/security/totp"
+              totpRegenerateRecoveryCodesEndpoint="/api/auth/agency/mfa/totp/recovery-codes/regenerate"
             />
           </div>
         </CardBody>
