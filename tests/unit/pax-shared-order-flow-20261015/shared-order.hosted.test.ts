@@ -309,9 +309,10 @@ describe.skipIf(!hostedPaymentEnabled)(
         )
       ).rows;
       expect(rows).toHaveLength(1);
+      // A new rating stores the completed driver task, the trip id the E-04 shows.
       expect(rows[0]).toMatchObject({
         order_id: f.orderId,
-        trip_id: assignment.assignmentId,
+        trip_id: assignment.taskId,
         driver_id: driver.candidate.driverId,
         score: 5,
       });
