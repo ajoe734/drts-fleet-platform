@@ -1914,6 +1914,8 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
+      - name: Verify four-portal password hosted journey fixture authenticator, redaction and boundary checks
+        run: pnpm exec vitest run tests/unit/agency-portal-business
       - name: Migrate and seed the disposable hosted database
         run: |
           PGPASSWORD=postgres psql \
@@ -1942,6 +1944,16 @@ jobs:
         run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
       - name: Run the Agency portal business journey using the completed Passenger trip
         run: pnpm exec playwright test -c playwright.agency-portal-business.config.ts
+      - name: Run the four-portal invitation, MFA and password-reset journey
+        env:
+          DRTS_FOUR_PORTAL_PASSWORD_JOURNEY: "true"
+        run: |
+          if ! pnpm exec playwright test -c playwright.agency-portal-business.config.ts > "$RUNNER_TEMP/four-portal-password.log" 2>&1; then
+            echo "::error::The four-portal password journey failed. See the last completed step in the redacted journey evidence."
+            # Source positions only; the log itself holds credentials.
+            grep -oE 'four-portal-password-journey\.spec\.ts:[0-9]+:[0-9]+' "$RUNNER_TEMP/four-portal-password.log" | sort -u | head -n 10 || true
+            exit 1
+          fi
       - name: Upload Agency portal business evidence
         if: always()
         uses: actions/upload-artifact@v4
