@@ -107,6 +107,23 @@ describe("FOUR-PORTAL-PASSWORD-HOSTED-JOURNEY-20261123: fixture authenticator, e
     }
   });
 
+  it("skips a code the server would stop accepting before the browser submits it", async () => {
+    const stepMs = 30_000;
+    const windowStart = 59_833_333 * stepMs;
+    const secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+
+    const early = await new SimulatedTotpAuthenticatorDevice().nextCode(
+      secret,
+      { nowMs: () => windowStart + 1_000 },
+    );
+    expect(early.step).toBe(59_833_332);
+
+    const late = await new SimulatedTotpAuthenticatorDevice().nextCode(secret, {
+      nowMs: () => windowStart + stepMs - 1_000,
+    });
+    expect(late.step).toBe(59_833_333);
+  });
+
   it("extracts invitation and password-reset targets and redacts all credentials, tokens, QR/otpauth URIs, secrets, recovery codes, cookies and JWTs", () => {
     const rawInviteToken = "ti_abcdefghijklmnopqrstuvwxyz0123456789";
     const inviteMail = [

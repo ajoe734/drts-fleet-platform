@@ -14,6 +14,8 @@ export interface SimulatedTotpNextCodeOptions {
   waitFn?: (ms: number) => Promise<void>;
 }
 
+const MIN_CODE_VALIDITY_MS = 15_000;
+
 /**
  * Simulated TOTP authenticator device for hosted browser rehearsals.
  *
@@ -51,6 +53,12 @@ export class SimulatedTotpAuthenticatorDevice {
       previousStep === undefined
         ? nowStep - 1
         : Math.max(nowStep - 1, previousStep + 1);
+
+    // The server stops accepting a step at the end of the one after it. Skip a
+    // step that could expire while the browser is still submitting its code.
+    if ((targetStep + 2) * 30 * 1000 - nowMs() < MIN_CODE_VALIDITY_MS) {
+      targetStep += 1;
+    }
 
     // Wait only if we have exhausted `[nowStep - 1, nowStep, nowStep + 1]`.
     while (targetStep > nowStep + 1) {

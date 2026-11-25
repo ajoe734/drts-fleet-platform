@@ -221,6 +221,20 @@ async function enrollAndConfirmTotpInBrowser(
   };
 }
 
+/** Reads the server's own record of how the signed-in session authenticated. */
+async function currentSessionAuthMethods(
+  page: Page,
+  portalOrigin: string,
+): Promise<string[]> {
+  const response = await page.request.get(`${portalOrigin}/api/auth/sessions`);
+  expect(response.status()).toBe(200);
+  const sessions: unknown = (await response.json())?.data;
+  const current = (Array.isArray(sessions) ? sessions : []).find(
+    (row) => row?.is_current === true,
+  );
+  return current?.auth_methods ?? [];
+}
+
 async function verifyAccountSecurityAndSignOutInBrowser(
   page: Page,
   portalOrigin: string,
@@ -277,7 +291,7 @@ async function verifyAccountSecurityAndSignOutInBrowser(
     `${portalOrigin}/api/auth/sessions`,
   );
   expect(afterLogout.status()).toBe(401);
-  expect((await replayedSessions()).ok()).toBe(false);
+  expect((await replayedSessions()).status()).toBe(401);
   await replay.close();
   return { sessionsStatus, logoutStatus };
 }
@@ -645,6 +659,12 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(tenantOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
+    // A reset that dropped the second factor would also return 200 here.
+    expect(
+      (await currentSessionAuthMethods(tenantPage, tenantOrigin)).includes(
+        "otp",
+      ),
+    ).toBe(true);
     await recordStep({
       step: "1g_tenant_relogin_with_new_password_and_totp",
       portal: "tenant-console-web",
@@ -779,6 +799,12 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(enterpriseOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
+    // A reset that dropped the second factor would also return 200 here.
+    expect(
+      (
+        await currentSessionAuthMethods(enterprisePage, enterpriseOrigin)
+      ).includes("otp"),
+    ).toBe(true);
     await recordStep({
       step: "2e_enterprise_relogin_with_new_password_and_totp",
       portal: "enterprise-dispatch-web",
@@ -1020,6 +1046,12 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(agencyOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
+    // A reset that dropped the second factor would also return 200 here.
+    expect(
+      (await currentSessionAuthMethods(agencyPage, agencyOrigin)).includes(
+        "otp",
+      ),
+    ).toBe(true);
     await recordStep({
       step: "3g_agency_relogin_with_new_password_and_totp",
       portal: "agency-portal-web",
@@ -1248,6 +1280,10 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
         url.origin === new URL(fleetOrigin).origin &&
         !url.pathname.startsWith("/login"),
     );
+    // A reset that dropped the second factor would also return 200 here.
+    expect(
+      (await currentSessionAuthMethods(fleetPage, fleetOrigin)).includes("otp"),
+    ).toBe(true);
     await recordStep({
       step: "4g_fleet_relogin_with_new_password_and_totp",
       portal: "fleet-partner-portal-web",
