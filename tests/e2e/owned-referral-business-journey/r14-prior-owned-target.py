@@ -1,13 +1,14 @@
 """Bounded official-artifact reader for R14 two-stage genuine-expiry normal FULL handoff.
 
-In normal FULL (`inputs.owned_referral_recovery_only != true`), discovers prior official
+In normal FULL (`inputs.owned_referral_recovery_only != true`), walks this workflow's
+manually dispatched runs within artifact retention, discovers their prior official
 `owned-referral-business-<runtime>-<run>` artifacts via the authenticated GitHub Actions
 API, validates archive bounds/members/digests and Stage A provenance, and writes a
 bounded local manifest under `.artifacts/owned-referral-business-journey/`.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -20,7 +21,8 @@ import sys
 import zipfile
 
 REPOSITORY = "ajoe734/drts-fleet-platform"
-WORKFLOW_PATH_SUFFIX = ".github/workflows/ci-integ.yml"
+WORKFLOW_FILE = "ci-integ.yml"
+WORKFLOW_PATH_SUFFIX = f".github/workflows/{WORKFLOW_FILE}"
 ENTRY_SLUG = "yuhe-residence"
 SUBJECT = "referral-demo-yuhe-residence"
 FLEET_PARTNER_ID = "fleet-demo-001"
@@ -31,7 +33,9 @@ DEFAULT_OUTPUT = Path(".artifacts/owned-referral-business-journey/r14-prior-owne
 
 MAX_PAGES = 3
 PER_PAGE = 30
-MAX_ARTIFACTS = 60
+# The job keeps its evidence for 14 days; an older run has nothing to read.
+ARTIFACT_RETENTION_DAYS = 14
+ARTIFACTS_PER_RUN = 100
 MAX_CANDIDATE_RUNS = 15
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_MEMBER_COUNT = 64
@@ -704,6 +708,74 @@ def validate_candidate_artifact(
     }
 
 
+def dispatched_runs_path(current_utc_date: str, page: int) -> str:
+    since = (
+        datetime.strptime(current_utc_date, "%Y-%m-%d")
+        - timedelta(days=ARTIFACT_RETENTION_DAYS)
+    ).strftime("%Y-%m-%d")
+    return (
+        f"repos/{REPOSITORY}/actions/workflows/{WORKFLOW_FILE}/runs"
+        f"?event=workflow_dispatch&created=%3E%3D{since}&per_page={PER_PAGE}&page={page}"
+    )
+
+
+def run_artifacts_path(run_id: int) -> str:
+    return f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page={ARTIFACTS_PER_RUN}"
+
+
+def read_run_artifacts(run_id: int, fetch_json) -> list[dict]:
+    listing = fetch_json(run_artifacts_path(run_id))
+    require(
+        isinstance(listing, dict) and isinstance(listing.get("artifacts"), list),
+        "r14-artifact-listing-invalid",
+    )
+    items = listing["artifacts"]
+    require(
+        listing.get("total_count") == len(items),
+        "r14-artifact-inspection-bound-exceeded",
+    )
+    require(
+        all(isinstance(item, dict) for item in items),
+        "r14-artifact-listing-item-invalid",
+    )
+    return items
+
+
+def _matching_artifact_id(
+    item: dict,
+    run_id: int,
+    *,
+    expected_definition_sha: str,
+    expected_runtime_sha: str,
+) -> int | None:
+    name = item.get("name")
+    if not isinstance(name, str) or not name.startswith("owned-referral-business-"):
+        return None
+    match = ARTIFACT_NAME_RE.match(name)
+    require(match is not None, "r14-artifact-name-malformed")
+    artifact_runtime, run_id_str = match.groups()
+    workflow_run = item.get("workflow_run")
+    require(isinstance(workflow_run, dict), "r14-artifact-workflow-run-missing")
+    head_sha = workflow_run.get("head_sha")
+    if artifact_runtime != expected_runtime_sha:
+        require(head_sha != expected_definition_sha, "r14-artifact-runtime-mismatch")
+        return None
+    require(head_sha == expected_definition_sha, "r14-artifact-head-sha-mismatch")
+    require(
+        int(run_id_str) == run_id and workflow_run.get("id") == run_id,
+        "r14-artifact-run-or-sha-mismatch",
+    )
+    require(item.get("expired") is False, "r14-artifact-expired")
+    artifact_id = item.get("id")
+    require(
+        isinstance(artifact_id, int)
+        and not isinstance(artifact_id, bool)
+        and artifact_id > 0,
+        "r14-artifact-id-invalid-or-duplicate",
+    )
+    return artifact_id
+
+
 def discover_prior_owned_target(
     *,
     expected_definition_sha: str,
@@ -723,63 +795,48 @@ def discover_prior_owned_target(
     )
     require(bool(DATE_ONLY_RE.match(current_utc_date)), "r14-current-utc-date-invalid")
 
-    inspected_artifacts = 0
     candidate_artifacts: list[tuple[int, dict]] = []
+    seen_run_ids: set[int] = set()
     seen_artifact_ids: set[int] = set()
 
-    for page in range(1, MAX_PAGES + 1):
-        listing = fetch_json(
-            f"repos/{REPOSITORY}/actions/artifacts?per_page={PER_PAGE}&page={page}"
-        )
+    for page in range(1, MAX_PAGES + 2):
+        listing = fetch_json(dispatched_runs_path(current_utc_date, page))
         require(
-            isinstance(listing, dict) and isinstance(listing.get("artifacts"), list),
-            "r14-artifact-listing-invalid",
+            isinstance(listing, dict) and isinstance(listing.get("workflow_runs"), list),
+            "r14-run-listing-invalid",
         )
-        items = listing["artifacts"]
-        if not items:
-            break
-        for item in items:
-            require(isinstance(item, dict), "r14-artifact-listing-item-invalid")
-            inspected_artifacts += 1
+        runs = listing["workflow_runs"]
+        require(page <= MAX_PAGES or not runs, "r14-run-listing-bound-exceeded")
+        for run in runs:
+            run_id = run.get("id") if isinstance(run, dict) else None
             require(
-                inspected_artifacts <= MAX_ARTIFACTS,
-                "r14-artifact-inspection-bound-exceeded",
+                isinstance(run_id, int) and not isinstance(run_id, bool) and run_id > 0,
+                "r14-run-listing-item-invalid",
             )
-            name = item.get("name")
-            if not isinstance(name, str) or not name.startswith("owned-referral-business-"):
+            # A run pushed to the next page by a newer dispatch is listed twice.
+            if run_id == current_run_id or run_id in seen_run_ids:
                 continue
-            match = ARTIFACT_NAME_RE.match(name)
-            require(match is not None, "r14-artifact-name-malformed")
-            artifact_runtime, run_id_str = match.groups()
-            run_id = int(run_id_str)
-            if run_id == current_run_id:
+            seen_run_ids.add(run_id)
+            # Only a successful official run can have left a Stage A target. A run
+            # that is still going might, so its artifact is kept and rejected below.
+            if run.get("status") == "completed" and run.get("conclusion") != "success":
                 continue
-            workflow_run = item.get("workflow_run")
-            require(isinstance(workflow_run, dict), "r14-artifact-workflow-run-missing")
-            head_sha = workflow_run.get("head_sha")
-            if artifact_runtime != expected_runtime_sha:
-                require(
-                    head_sha != expected_definition_sha,
-                    "r14-artifact-runtime-mismatch",
+            for artifact in read_run_artifacts(run_id, fetch_json):
+                artifact_id = _matching_artifact_id(
+                    artifact,
+                    run_id,
+                    expected_definition_sha=expected_definition_sha,
+                    expected_runtime_sha=expected_runtime_sha,
                 )
-                continue
-            require(
-                head_sha == expected_definition_sha,
-                "r14-artifact-head-sha-mismatch",
-            )
-            require(item.get("expired") is False, "r14-artifact-expired")
-            artifact_id = item.get("id")
-            require(
-                isinstance(artifact_id, int)
-                and not isinstance(artifact_id, bool)
-                and artifact_id > 0
-                and artifact_id not in seen_artifact_ids,
-                "r14-artifact-id-invalid-or-duplicate",
-            )
-            seen_artifact_ids.add(artifact_id)
-            candidate_artifacts.append((run_id, item))
-
-        if len(items) < PER_PAGE:
+                if artifact_id is None:
+                    continue
+                require(
+                    artifact_id not in seen_artifact_ids,
+                    "r14-artifact-id-invalid-or-duplicate",
+                )
+                seen_artifact_ids.add(artifact_id)
+                candidate_artifacts.append((run_id, artifact))
+        if len(runs) < PER_PAGE:
             break
 
     require(
