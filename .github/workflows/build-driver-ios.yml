@@ -318,6 +318,12 @@ jobs:
           set -euo pipefail
           result="$RUNNER_TEMP/driver-eas-build.json"
           log="$RUNNER_TEMP/driver-eas-build.log"
+          redact() {
+            sed -E \
+              -e 's#(https?://|expo\.dev/)[^[:space:]]+#[URL]#gI' \
+              -e 's/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/[ID]/g' \
+              -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
+          }
           build_exit=0
           npx --yes eas-cli@21.4.0 build \
             --platform "$BUILD_PLATFORM" \
@@ -327,11 +333,7 @@ jobs:
             --json > "$result" 2> "$log" || build_exit=$?
           if ! jq --exit-status 'type == "array" and length == 1' "$result" > /dev/null 2>&1; then
             echo "::error::EAS returned no build (exit $build_exit)."
-            sed -E \
-              -e 's#https?://[^[:space:]]+#[URL]#g' \
-              -e 's/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/[ID]/g' \
-              -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g' \
-              "$log" | tail -n 25
+            redact < "$log" | tail -n 25
             exit 1
           fi
           jq --raw-output '.[0] | [
@@ -339,15 +341,26 @@ jobs:
             "profile=\(.buildProfile)", "distribution=\(.distribution)",
             "version=\(.appVersion) (\(.appBuildVersion))",
             "commit=\(.gitCommitHash)",
-            "error=\(.error.errorCode // "none"): \(.error.message // "none" | gsub("https?://[^ ]+"; "[URL]"))"
-          ] | .[]' "$result"
+            "error=\(.error.errorCode // "none"): \(.error.message // "none")"
+          ] | .[]' "$result" | redact
           [[ "$(jq --raw-output '.[0].status' "$result")" == "FINISHED" ]]
           artifact_url="$(jq --raw-output '.[0].artifacts | .applicationArchiveUrl // .buildUrl // empty' "$result")"
           [[ -n "$artifact_url" ]]
-          curl --fail --silent --location --retry 3 --max-time 600 \
-            --output "$RUNNER_TEMP/driver-artifact" "$artifact_url"
-          echo "artifact_bytes=$(stat --format=%s "$RUNNER_TEMP/driver-artifact")"
-          echo "artifact_sha256=$(sha256sum "$RUNNER_TEMP/driver-artifact" | cut -d' ' -f1)"
+          # With unauthenticated access off, the download may be a sign-in page.
+          magic=""
+          if curl --fail --silent --location --retry 3 --max-time 600 \
+            --output "$RUNNER_TEMP/driver-artifact" "$artifact_url"; then
+            magic="$(head -c 2 "$RUNNER_TEMP/driver-artifact" | od -An -tx1 | tr -d ' \n')"
+          fi
+          case "$magic" in
+            504b|1f8b)
+              echo "artifact_bytes=$(stat --format=%s "$RUNNER_TEMP/driver-artifact")"
+              echo "artifact_sha256=$(sha256sum "$RUNNER_TEMP/driver-artifact" | cut -d' ' -f1)"
+              ;;
+            *)
+              echo "::warning::The build finished; its file needs an Expo sign-in to download, so it was not hashed."
+              ;;
+          esac
 
       - name: Queue EAS iOS build and TestFlight submission
         if: ${{ (inputs.mode || 'build') == 'build' && inputs.submit }}

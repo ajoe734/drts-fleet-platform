@@ -134,7 +134,7 @@ describe("driver native build", () => {
   const BUILD_PAGE = `https://expo.dev/accounts/a/projects/p/builds/${BUILD_ID}`;
   const MAP_KEY = `AIza${"k".repeat(35)}`;
 
-  function runBuild(result: unknown, exitCode = 0) {
+  function runBuild(result: unknown, exitCode = 0, artifact = "PK-app") {
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
@@ -145,7 +145,9 @@ describe("driver native build", () => {
     );
     fs.writeFileSync(
       path.join(bin, "curl"),
-      '#!/usr/bin/env bash\nwhile [[ $# -gt 0 ]]; do [[ $1 == --output ]] && printf artifact > "$2"; shift; done\n',
+      artifact
+        ? `#!/usr/bin/env bash\nwhile [[ $# -gt 0 ]]; do [[ $1 == --output ]] && printf '${artifact}' > "$2"; shift; done; true\n`
+        : "#!/usr/bin/env bash\necho curl failed >&2; exit 22\n",
       { mode: 0o755 },
     );
     const outcome = spawnSync("bash", ["-c", stepRun(build)], {
@@ -184,7 +186,7 @@ describe("driver native build", () => {
     expect(status).toBe(0);
     expect(output).toContain("status=FINISHED");
     expect(output).toContain(`commit=${"a".repeat(40)}`);
-    expect(output).toContain("artifact_bytes=8");
+    expect(output).toContain("artifact_bytes=6");
     expect(output).toMatch(/artifact_sha256=[0-9a-f]{64}/);
   });
 
@@ -193,13 +195,55 @@ describe("driver native build", () => {
       built({
         status: "ERRORED",
         artifacts: {},
-        error: { errorCode: "UNKNOWN_ERROR", message: `See ${BUILD_PAGE}` },
+        error: {
+          errorCode: "UNKNOWN_ERROR",
+          message: `See ${BUILD_PAGE} or expo.dev/b/1 build ${BUILD_ID} ${MAP_KEY}`,
+        },
       }),
       1,
     );
     expect(errored.status).not.toBe(0);
     expect(errored.output).toContain("status=ERRORED");
-    expect(errored.output).toContain("error=UNKNOWN_ERROR: See [URL]");
+    expect(errored.output).toContain(
+      "error=UNKNOWN_ERROR: See [URL] or [URL] build [ID] [REDACTED_MAP_KEY]",
+    );
+  });
+
+  it("fails on a cancelled build", () => {
+    const { status, output } = runBuild(
+      built({ status: "CANCELED", artifacts: {} }),
+    );
+    expect(status).not.toBe(0);
+    expect(output).toContain("status=CANCELED");
+  });
+
+  it.each(["<html>sign in</html>", ""])(
+    "does not hash a sign-in page or a refused download (%j)",
+    (artifact) => {
+      const { status, output } = runBuild(built({}), 0, artifact);
+      expect(status).toBe(0);
+      expect(output).toContain("::warning::The build finished");
+      expect(output).not.toContain("artifact_sha256");
+    },
+  );
+
+  it("stops before EAS when the prepared profile holds no map keys", () => {
+    run(prepare);
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "npx"), "#!/usr/bin/env bash\necho ran\n", {
+      mode: 0o755,
+    });
+    const PATH = `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`;
+    const validate = "Validate resolved native build configuration";
+    expect(() => run(validate, { PATH })).toThrow();
+    for (const file of ["app.json", "eas.json"])
+      fs.copyFileSync(
+        path.join(ROOT, "apps", "driver-app", file),
+        path.join(dir, file),
+      );
+    run(prepare, { GOOGLE_MAPS_ANDROID_KEY: "a", GOOGLE_MAPS_IOS_KEY: "b" });
+    expect(String(run(validate, { PATH }))).toContain("ran");
   });
 
   it("prints a redacted reason when EAS returns no build", () => {

@@ -320,7 +320,10 @@ secrets, and it bundles the app on the runner before using EAS capacity.
 The repository's logs are public and an internal build can be downloaded by
 anyone who knows its page, so a build prints only its status, version, commit,
 size and hash. Open the Expo dashboard for the build page. Keep "Unauthenticated
-access to internal builds" off in the EAS project settings.
+access to internal builds" off in the EAS project settings. Until it is off, do
+not look a new build up with `lookup-existing`: the build id is a workflow input
+and the id is enough to reach the page. A cancelled or timed-out run does not
+stop the build on EAS, so check the dashboard before starting another.
 
 The workflow verifies `/health` before consuming EAS capacity, injects the
 selected API origin and EAS project ID into an ephemeral checkout, validates
