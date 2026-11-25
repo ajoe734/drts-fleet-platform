@@ -9,6 +9,7 @@ import {
 } from "../../e2e/owned-referral-business-journey/r08-callcenter";
 import {
   object,
+  OPS_EVENT_STREAM_PATH,
   type CallResult,
   type ObjectData,
 } from "../../e2e/owned-referral-business-journey/protocol";
@@ -1627,6 +1628,27 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     });
     expect(forward).toHaveBeenCalledExactlyOnceWith();
     await f.finish("completed");
+  });
+  it("ends the Ops shell's event stream without fetching it or invalidating the refresh", async () => {
+    const f = await fullHarness();
+    await f.run.run();
+    const fulfill = vi.fn(async () => undefined);
+    const fetch = vi.fn();
+    const abort = vi.fn();
+    await f.route()({
+      request: () => ({
+        url: () => `${ORIGIN}${OPS_EVENT_STREAM_PATH}`,
+        method: () => "GET",
+      }),
+      fulfill,
+      fetch,
+      abort,
+    });
+    expect(fulfill).toHaveBeenCalledExactlyOnceWith({ status: 204 });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(abort).not.toHaveBeenCalled();
+    expect(f.run.snapshot().uiRefresh).toMatchObject({ status: "verified" });
+    expect((await f.finish("completed")).wholeRunPassed).toBe(true);
   });
   it("cleanup ACK loss stays unresolved and is never written twice", async () => {
     const f = await fullHarness("cleanup ACK lost");
