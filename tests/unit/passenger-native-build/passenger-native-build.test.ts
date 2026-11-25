@@ -84,7 +84,7 @@ describe("passenger native build", () => {
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
     return run(
       build,
-      `printf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company)" "- ${DEVICE} iPhone" "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2; cat "${dir}/result.json"; exit ${exitCode}`,
+      `printf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company Limited)" "Failed for Apple Team ABCDE12345 (Example Company)" "Authentication with an ASC API key is required" "Distribution credentials are missing" "EAS project not configured" "- ${DEVICE} iPhone" "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2; cat "${dir}/result.json"; exit ${exitCode}`,
       artifact,
     );
   }
@@ -166,7 +166,12 @@ describe("passenger native build", () => {
     expect(none.output).toContain(
       "Error: [URL] key [REDACTED_MAP_KEY] device [DEVICE]",
     );
-    fs.writeFileSync(path.join(dir, "result.json"), "");
+    for (const reason of [
+      "Authentication with an ASC API key is required",
+      "Distribution credentials are missing",
+      "EAS project not configured",
+    ])
+      expect(none.output).toContain(reason);
   });
 
   it.each(["", "not json", "null", "[] []"])(
