@@ -511,16 +511,27 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
             ):
                 discover(lambda path, listings=listings: listings[path])
 
-        listings[reader.journey_jobs_path(STAGE_A_RUN_ID)]["total_count"] = 200
-        with self.assertRaisesRegex(
-            reader.R14TargetError, "r14-job-listing-incomplete"
+        for incomplete in (
+            {**job_listing("failure"), "total_count": 200},
+            job_listing(),
+            {"total_count": 0, "jobs": []},
         ):
-            discover(lambda path: listings[path])
+            listings[reader.journey_jobs_path(STAGE_A_RUN_ID)] = incomplete
+            with self.subTest(jobs=incomplete), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-job-listing-incomplete"
+            ):
+                discover(lambda path: listings[path])
 
     def test_the_newest_attempt_artifact_of_a_rerun_is_read(self):
         metadata, run_detail, archive = build_candidate_bundle(artifact_id=14000000109)
+        metadata["created_at"] = "2026-11-22T11:00:00Z"
         stale = copy.deepcopy(metadata)
-        stale.update(id=14000000105, digest=f"sha256:{'0' * 64}")
+        # Artifact ids are not issued in time order.
+        stale.update(
+            id=14000000110,
+            digest=f"sha256:{'0' * 64}",
+            created_at="2026-11-22T10:00:00Z",
+        )
         listings = listing_map((metadata, run_detail))
         listings[reader.run_artifacts_path(STAGE_A_RUN_ID)] = {
             "total_count": 2,
@@ -917,7 +928,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
     def test_static_ci_integ_workflow_owned_job_controls(self):
         text = WORKFLOW.read_text("utf-8")
         # Extract workflow_dispatch inputs block and owned-referral-business-journey job block.
-        owned_start = text.index("  owned-referral-business-journey:")
+        owned_start = text.index(f"\n  {reader.JOURNEY_JOB}:") + 1
         shared_agency_start = text.index("  shared-agency-acceptance:", owned_start)
         owned_block = text[owned_start:shared_agency_start]
 

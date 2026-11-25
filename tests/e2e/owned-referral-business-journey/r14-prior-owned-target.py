@@ -760,10 +760,10 @@ def journey_job_ever_passed(run_id: int, fetch_json) -> bool:
         and all(isinstance(job, dict) for job in jobs),
         "r14-job-listing-incomplete",
     )
-    return any(
-        job.get("name") == JOURNEY_JOB and job.get("conclusion") == "success"
-        for job in jobs
-    )
+    attempts = [job for job in jobs if job.get("name") == JOURNEY_JOB]
+    # Its artifact exists, so the job ran; an answer without it is not usable.
+    require(attempts, "r14-job-listing-incomplete")
+    return any(job.get("conclusion") == "success" for job in attempts)
 
 
 def _names_this_release(item: dict, run_id: int, definition_sha: str, runtime_sha: str) -> bool:
@@ -893,7 +893,10 @@ def discover_prior_owned_target(
             if matching:
                 # Each attempt of a re-run job uploads under the same name; the
                 # newest belongs to the attempt that made the run succeed.
-                candidate_artifacts.append((run_id, matching[max(matching)]))
+                newest = max(
+                    matching, key=lambda key: (str(matching[key].get("created_at")), key)
+                )
+                candidate_artifacts.append((run_id, matching[newest]))
         if len(runs) < PER_PAGE:
             break
 
