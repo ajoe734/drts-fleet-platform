@@ -325,6 +325,26 @@ not look a new build up with `lookup-existing`: the build id is a workflow input
 and the id is enough to reach the page. A cancelled or timed-out run does not
 stop the build on EAS, so check the dashboard before starting another.
 
+#### Apple signing for internal iOS builds
+
+Xcode refuses the build when the internal (ad hoc) profile lacks an entitlement
+of `DRTSDriverApp.entitlements`. It needs the Actions secrets `ASC_API_KEY_P8`
+(or `ASC_API_KEY_P8_BASE64`), `ASC_KEY_ID` and `ASC_ISSUER_ID`, and the variable
+`APPLE_TEAM_ID`. The two ids are secrets only so that the public log masks them.
+
+- `mode=apple-signing-check` reads the identifier's capabilities, the profile
+  states and the number of devices, and changes nothing.
+- `refresh_apple_signing=true` (iOS `development` or `preview` builds only) turns
+  Associated Domains on when it is off and lets EAS regenerate the internal
+  profile with every device registered in EAS. Turning a capability on
+  invalidates every existing profile of this identifier, including a store one;
+  installed apps keep working. Leave it `false` for ordinary builds.
+
+The build stops before using EAS capacity when EAS has no registered device:
+register one with `eas device:create` first. For another entitlement, turn its
+capability on in the Apple developer account, then run with
+`refresh_apple_signing=true`.
+
 The workflow verifies `/health` before consuming EAS capacity, injects the
 selected API origin and EAS project ID into an ephemeral checkout, validates
 the resolved EAS config, and then queues the paid build. With `submit=true`,

@@ -85,6 +85,55 @@ describe("driver native build", () => {
     });
   });
 
+  it("refreshes Apple signing only for an iOS internal build", () => {
+    const refresh = { REFRESH_APPLE_SIGNING: "true", BUILD_PLATFORM: "ios" };
+    run(guard, refresh);
+    run(guard, { ...refresh, BUILD_PROFILE: "development" });
+    for (const other of [
+      { BUILD_PLATFORM: "android" },
+      { BUILD_PROFILE: "production" },
+      { BUILD_PROFILE: "development-simulator" },
+      { WORKFLOW_MODE: "lookup-existing" },
+      { WORKFLOW_MODE: "apple-signing-check" },
+    ])
+      expect(() => run(guard, { ...refresh, ...other })).toThrow();
+    run(guard, { WORKFLOW_MODE: "apple-signing-check" });
+    expect(() =>
+      run(guard, {
+        WORKFLOW_MODE: "apple-signing-check",
+        SUBMIT_TO_TESTFLIGHT: "true",
+      }),
+    ).toThrow();
+  });
+
+  it("keeps the Apple key out of every step but its own three", () => {
+    const steps = workflow.split("\n      - ").slice(1);
+    const named = (text: string) =>
+      steps
+        .filter((step) => step.includes(text))
+        .map((step) => step.split("\n")[0]?.replace("name: ", ""));
+    const ensure =
+      "Turn Associated Domains on before the profile is regenerated";
+    const check = "Check Apple signing without changing it";
+    expect(named("secrets.ASC_API_KEY_P8")).toEqual([check, ensure]);
+    expect(named("secrets.ASC_KEY_ID")).toEqual([check, ensure, build]);
+    // The public log prints variables, so the two ids must be secrets.
+    expect(workflow).not.toMatch(/vars\.ASC_/);
+    expect(steps.find((step) => step.startsWith(`name: ${check}\n`))).toContain(
+      "if: ${{ inputs.mode == 'apple-signing-check' }}",
+    );
+    expect(
+      steps.find((step) => step.startsWith(`name: ${ensure}\n`)),
+    ).toContain(
+      "if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}",
+    );
+    const at = (name: string) => workflow.indexOf(`- name: ${name}\n`);
+    expect(at(ensure)).toBeGreaterThan(
+      at("Bundle the app before consuming EAS capacity"),
+    );
+    expect(at(ensure)).toBeLessThan(at(build));
+  });
+
   it("passes the map keys to the remote builder and stops when one is missing", () => {
     run(prepare, {
       GOOGLE_MAPS_ANDROID_KEY: " android-key\n",
@@ -133,15 +182,21 @@ describe("driver native build", () => {
   const BUILD_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
   const BUILD_PAGE = `https://expo.dev/accounts/a/projects/p/builds/${BUILD_ID}`;
   const DEVICE = "00008030-001A2B3C4D5E6F70";
+  const CERTIFICATE = "0123456789ABCDEF0123456789ABCDEF";
   const MAP_KEY = `AIza${"k".repeat(35)}`;
 
-  function runBuild(result: unknown, exitCode = 0, artifact = "PK-app") {
+  function runBuild(
+    result: unknown,
+    exitCode = 0,
+    artifact = "PK-app",
+    env: Record<string, string> = {},
+  ) {
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
     fs.writeFileSync(
       path.join(bin, "npx"),
-      `#!/usr/bin/env bash\nprintf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company Limited)" "Failed for Apple Team ABCDE12345 (Example Company)" "Authentication with an ASC API key is required" "Distribution credentials are missing" "EAS project not configured" "- ${DEVICE} iPhone" "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company Limited)" "Failed for Apple Team ABCDE12345 (Example Company)" "Authentication with an ASC API key is required" "Distribution credentials are missing" "EAS project not configured" "- ${DEVICE} iPhone" "Error: No distribution certificate for serial number ${CERTIFICATE}" "✔ Created new profile: *[expo] app" "Error: No devices are registered for this Apple team." "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2\nprintf '%s\\n' "$@" > "${dir}/npx-args"\nenv | grep -E '^EXPO_' | sort > "${dir}/npx-env" || true\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
       { mode: 0o755 },
     );
     fs.writeFileSync(
@@ -160,6 +215,7 @@ describe("driver native build", () => {
         RUNNER_TEMP: dir,
         BUILD_PLATFORM: "android",
         BUILD_PROFILE: "preview",
+        ...env,
       },
     });
     const output = `${outcome.stdout}${outcome.stderr}`;
@@ -169,6 +225,7 @@ describe("driver native build", () => {
       MAP_KEY,
       "Example Company",
       DEVICE,
+      CERTIFICATE,
     ])
       expect(output).not.toContain(secret);
     return { status: outcome.status, output };
@@ -265,6 +322,55 @@ describe("driver native build", () => {
       "EAS project not configured",
     ])
       expect(none.output).toContain(reason);
+  });
+
+  const refreshEnv = {
+    BUILD_PLATFORM: "ios",
+    REFRESH_APPLE_SIGNING: "true",
+    ASC_KEY_ID: "KEY1234567",
+    ASC_ISSUER_ID: "issuer-fixture",
+    APPLE_TEAM_ID: "TEAM123456",
+  };
+  const npxArgs = () =>
+    fs.readFileSync(path.join(dir, "npx-args"), "utf8").trimEnd().split("\n");
+  const npxEnv = () => fs.readFileSync(path.join(dir, "npx-env"), "utf8");
+
+  it("lets EAS regenerate the profile, without its capability sync, when asked", () => {
+    const keyFile = path.join(dir, "apple-key.p8");
+    fs.writeFileSync(keyFile, "fixture");
+    const { status, output } = runBuild(built({}), 0, "PK-app", refreshEnv);
+    expect(status).toBe(0);
+    expect(output).toContain("Created new profile\n");
+    expect(output).not.toContain("*[expo]");
+    expect(npxArgs()).toContain("--refresh-ad-hoc-provisioning-profile");
+    expect(npxEnv()).toBe(
+      [
+        "EXPO_APPLE_TEAM_ID=TEAM123456",
+        "EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION",
+        `EXPO_ASC_API_KEY_PATH=${keyFile}`,
+        "EXPO_ASC_ISSUER_ID=issuer-fixture",
+        "EXPO_ASC_KEY_ID=KEY1234567",
+        "EXPO_NO_CAPABILITY_SYNC=1",
+        "",
+      ].join("\n"),
+    );
+    expect(fs.existsSync(keyFile)).toBe(false);
+  });
+
+  it("removes the Apple key and says so when EAS has no device", () => {
+    const keyFile = path.join(dir, "apple-key.p8");
+    fs.writeFileSync(keyFile, "fixture");
+    const { status, output } = runBuild([], 1, "PK-app", refreshEnv);
+    expect(status).not.toBe(0);
+    expect(output).toContain("No devices are registered\n");
+    expect(fs.existsSync(keyFile)).toBe(false);
+  });
+
+  it("leaves Apple alone in an ordinary build", () => {
+    expect(runBuild(built({})).status).toBe(0);
+    expect(npxArgs()).not.toContain("--refresh-ad-hoc-provisioning-profile");
+    expect(npxArgs()).not.toContain("");
+    expect(npxEnv()).toBe("");
   });
 
   it("fails with the CLI's own code even when it reports a finished build", () => {
