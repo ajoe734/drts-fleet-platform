@@ -86,6 +86,8 @@ function createClient(env, fetchImpl = fetch) {
         `Apple refused: ${label}, HTTP ${response.status}, ${constant(payload?.errors?.[0]?.code)}.`,
       );
     if (!payload?.data) throw new SigningError(`Apple sent no data: ${label}.`);
+    if (payload.links?.next)
+      throw new SigningError(`Apple sent more than one page: ${label}.`);
     return payload;
   };
   return { call, pem };
@@ -120,11 +122,11 @@ async function check(client, print) {
   const capabilities = await readCapabilities(client, bundle);
   const profiles = await client.call(
     "read the profiles",
-    `/v1/bundleIds/${bundle.id}/profiles?limit=200`,
+    `/v1/bundleIds/${bundle.id}/profiles?limit=200&fields[profiles]=profileType,profileState`,
   );
   const devices = await client.call(
     "count the devices",
-    "/v1/devices?filter[status]=ENABLED&limit=200",
+    "/v1/devices?filter[status]=ENABLED&limit=200&fields[devices]=deviceClass",
   );
   const counts = {};
   for (const { attributes } of profiles.data) {

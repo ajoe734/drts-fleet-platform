@@ -336,14 +336,23 @@ of `DRTSDriverApp.entitlements`. It needs the Actions secrets `ASC_API_KEY_P8`
   states and the number of devices, and changes nothing.
 - `refresh_apple_signing=true` (iOS `development` or `preview` builds only) turns
   Associated Domains on when it is off and lets EAS regenerate the internal
-  profile with every device registered in EAS. Turning a capability on
-  invalidates every existing profile of this identifier, including a store one;
-  installed apps keep working. Leave it `false` for ordinary builds.
+  profile. Leave it `false` for ordinary builds.
 
-The build stops before using EAS capacity when EAS has no registered device:
-register one with `eas device:create` first. For another entitlement, turn its
-capability on in the Apple developer account, then run with
-`refresh_apple_signing=true`.
+Know this before a refresh:
+
+- Turning a capability on invalidates every existing profile of this identifier,
+  including a store one, which this workflow does not regenerate. Installed apps
+  keep working.
+- The new profile holds the iPhones and iPads registered in EAS, not the ones
+  that only the old profile held. A device Apple does not know yet is registered
+  there and counts against the yearly limit. The run stops before any change
+  when EAS has none: register one with `eas device:create`.
+- EAS drops its record of a profile Expo did not create. At Apple that profile
+  stays, invalid.
+- A failure after the capability is on is safe to rerun with the flag.
+
+For another entitlement, turn its capability on in the Apple developer account,
+then run with `refresh_apple_signing=true`.
 
 The workflow verifies `/health` before consuming EAS capacity, injects the
 selected API origin and EAS project ID into an ephemeral checkout, validates

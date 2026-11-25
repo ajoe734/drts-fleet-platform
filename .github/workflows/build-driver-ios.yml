@@ -338,8 +338,32 @@ jobs:
             --output-dir "$RUNNER_TEMP/driver-native-bundle" 2>&1 |
             sed -E 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
 
-      # A capability change invalidates the app's existing profiles, so this is
-      # the last step before the build that regenerates the internal one.
+      # A capability change invalidates the app's existing profiles, so what EAS
+      # needs to regenerate the internal one is checked first, and the change is
+      # the last step before the build. EAS uses only these device classes.
+      - name: Require a test device in EAS before Apple is changed
+        if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${APPLE_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID is not configured in GitHub Actions variables."
+            exit 1
+          fi
+          devices="$(
+            npx --yes eas-cli@21.4.0 device:list \
+              --apple-team-id "$APPLE_TEAM_ID" --json --non-interactive 2> /dev/null |
+              sed -n '/^\[/,$p' |
+              jq --exit-status '[.[] | select(.deviceClass == "IPHONE" or .deviceClass == "IPAD")] | length'
+          )" || { echo "::error::EAS did not list the devices."; exit 1; }
+          echo "eas_devices=$devices"
+          if (( devices == 0 )); then
+            echo "::error::No iPhone or iPad is registered in EAS. Run eas device:create first."
+            exit 1
+          fi
+
       - name: Turn Associated Domains on before the profile is regenerated
         if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}
         working-directory: .
@@ -374,11 +398,17 @@ jobs:
               -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{16}/[DEVICE]/g' \
               -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
           }
+          redact_error() {
+            redact | sed -E \
+              -e 's/[0-9a-fA-F]{16,}/[DEVICE]/g' \
+              -e 's/(iPhone|Apple|iOS) (Distribution|Development|Developer): [^"]*/[CERTIFICATE]/gI'
+          }
           build_exit=0
           signing=()
           if [[ "${REFRESH_APPLE_SIGNING:-false}" == "true" ]]; then
             export EXPO_ASC_API_KEY_PATH="$RUNNER_TEMP/apple-key.p8"
-            export EXPO_ASC_KEY_ID="$ASC_KEY_ID" EXPO_ASC_ISSUER_ID="$ASC_ISSUER_ID"
+            export EXPO_ASC_KEY_ID="${ASC_KEY_ID//[[:space:]]/}"
+            export EXPO_ASC_ISSUER_ID="${ASC_ISSUER_ID//[[:space:]]/}"
             export EXPO_APPLE_TEAM_ID="$APPLE_TEAM_ID" EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
             # The CLI's own sync also turns off what the entitlements do not list.
             export EXPO_NO_CAPABILITY_SYNC=1
@@ -398,18 +428,19 @@ jobs:
           if ! jq --exit-status 'type == "array" and length == 1' "$result" > /dev/null 2>&1; then
             echo "::error::EAS returned no build (exit $build_exit)."
             # The log also lists the Apple team and devices; print only errors.
-            { grep -viE 'apple team|udid|provisioned devices' "$log" |
+            { grep -viE 'apple team|udid|provisioned devices|^[[:space:]]*- ' "$log" |
               grep -iE 'error|fail|cannot|could not|not supported|not set up|not configured|does not exist|required|missing|invalid|permission|denied|unauthorized|quota|\blimit\b' || true; } |
-              redact | sed -E 's/[0-9a-fA-F]{16,}/[DEVICE]/g' | tail -n 15
+              redact_error | tail -n 15
             exit 1
           fi
           jq --raw-output '.[0] | [
             "platform=\(.platform)", "status=\(.status)",
             "profile=\(.buildProfile)", "distribution=\(.distribution)",
             "version=\(.appVersion) (\(.appBuildVersion))",
-            "commit=\(.gitCommitHash)",
-            "error=\(.error.errorCode // "none"): \(.error.message // "none")"
+            "commit=\(.gitCommitHash)"
           ] | .[]' "$result" | redact
+          jq --raw-output '.[0].error |
+            "error=\(.errorCode // "none"): \(.message // "none")"' "$result" | redact_error
           if (( build_exit != 0 )); then
             exit "$build_exit"
           fi

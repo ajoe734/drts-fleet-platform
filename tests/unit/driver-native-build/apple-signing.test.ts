@@ -42,6 +42,7 @@ describe("driver Apple signing", () => {
     onPost = (list: string[]) => [...list, "ASSOCIATED_DOMAINS"],
     identifiers = [`${BUNDLE}.other`, BUNDLE],
     refuse = {} as Record<string, [number, unknown]>,
+    nextPage = "",
   } = {}) {
     let current = capabilities;
     return async (url: string, init: RequestInit) => {
@@ -55,6 +56,8 @@ describe("driver Apple signing", () => {
           (init.headers as Record<string, string>).authorization,
         ).replace("Bearer ", ""),
       });
+      if (nextPage && pathname.endsWith(nextPage))
+        return Response.json({ data: [], links: { next: SECRET } });
       const refusal = refuse[`${method} ${pathname}`];
       if (refusal) return Response.json(refusal[1], { status: refusal[0] });
       if (pathname === "/v1/bundleIds")
@@ -190,6 +193,16 @@ describe("driver Apple signing", () => {
     await expect(refusal(SECRET)).rejects.toThrow(/HTTP 403, UNKNOWN\.$/);
     expect(fs.existsSync(env().APPLE_KEY_FILE)).toBe(false);
   });
+
+  it.each(["/bundleIds", "/bundleIdCapabilities"])(
+    "changes nothing on a partial answer from %s",
+    async (nextPage) => {
+      await expect(run("ensure", apple({ nextPage }))).rejects.toThrow(
+        /^Apple sent more than one page: /,
+      );
+      expect(posts()).toEqual([]);
+    },
+  );
 
   it("does not repeat a network error", async () => {
     await expect(

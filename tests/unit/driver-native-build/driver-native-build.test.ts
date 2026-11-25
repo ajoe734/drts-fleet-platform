@@ -106,6 +106,59 @@ describe("driver native build", () => {
     ).toThrow();
   });
 
+  const devices = "Require a test device in EAS before Apple is changed";
+  it.each<[string, Record<string, unknown>[] | null, string, boolean]>([
+    [
+      "an iPhone",
+      [{ deviceClass: "IPHONE" }, { deviceClass: "MAC" }],
+      "eas_devices=1",
+      true,
+    ],
+    ["an iPad", [{ deviceClass: "IPAD" }], "eas_devices=1", true],
+    [
+      "only other classes",
+      [{ deviceClass: "MAC" }, { deviceClass: null }],
+      "No iPhone or iPad",
+      false,
+    ],
+    ["none", [], "No iPhone or iPad", false],
+    ["no answer", null, "EAS did not list", false],
+  ])("needs a device EAS can use: %s", (_name, list, message, ok) => {
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    const listed = list?.map((item) => ({
+      ...item,
+      name: "Fail Safe",
+      identifier: "udid",
+    }));
+    fs.writeFileSync(
+      path.join(dir, "devices.json"),
+      JSON.stringify(listed ?? null, null, 2),
+    );
+    fs.writeFileSync(
+      path.join(bin, "npx"),
+      `#!/usr/bin/env bash\necho "Account Example Company" >&2\n${list ? `echo warning; cat "${dir}/devices.json"` : "exit 1"}\n`,
+      { mode: 0o755 },
+    );
+    const outcome = (team: string) =>
+      spawnSync("bash", ["-c", stepRun(devices)], {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+          PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+          APPLE_TEAM_ID: team,
+        },
+      });
+    const { status, stdout, stderr } = outcome("TEAM123456");
+    expect(status === 0).toBe(ok);
+    expect(stdout).toContain(message);
+    for (const secret of ["Fail Safe", "udid", "Example Company"])
+      expect(stdout + stderr).not.toContain(secret);
+    for (const team of ["", "TEAM"])
+      expect(outcome(team).stdout).toContain("APPLE_TEAM_ID is not configured");
+  });
+
   it("keeps the Apple key out of every step but its own three", () => {
     const steps = workflow.split("\n      - ").slice(1);
     const named = (text: string) =>
@@ -117,6 +170,25 @@ describe("driver native build", () => {
     const check = "Check Apple signing without changing it";
     expect(named("secrets.ASC_API_KEY_P8")).toEqual([check, ensure]);
     expect(named("secrets.ASC_KEY_ID")).toEqual([check, ensure, build]);
+    const step = (name: string) =>
+      steps.find((text) => text.startsWith(`name: ${name}\n`)) ?? "";
+    expect(step(check)).toMatch(
+      /\n {8}run: node operations\/native-signing\/apple-signing\.cjs check\n/,
+    );
+    expect(step(check)).not.toContain("APPLE_KEY_FILE");
+    expect(step(ensure)).toMatch(
+      /\n {8}run: node operations\/native-signing\/apple-signing\.cjs ensure\n/,
+    );
+    // Outside the checkout, so EAS never uploads it; the build step reads it there.
+    expect(step(ensure)).toContain(
+      "APPLE_KEY_FILE: ${{ runner.temp }}/apple-key.p8\n",
+    );
+    expect(step(build)).toContain(
+      'EXPO_ASC_API_KEY_PATH="$RUNNER_TEMP/apple-key.p8"\n',
+    );
+    expect(workflow).toMatch(
+      /refresh_apple_signing:\n(?: {8}[^\n]+\n)*? {8}default: false\n/,
+    );
     // The public log prints variables, so the two ids must be secrets.
     expect(workflow).not.toMatch(/vars\.ASC_/);
     expect(steps.find((step) => step.startsWith(`name: ${check}\n`))).toContain(
@@ -128,9 +200,13 @@ describe("driver native build", () => {
       "if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}",
     );
     const at = (name: string) => workflow.indexOf(`- name: ${name}\n`);
-    expect(at(ensure)).toBeGreaterThan(
+    expect(step(devices)).toContain(
+      "if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}",
+    );
+    expect(at(devices)).toBeGreaterThan(
       at("Bundle the app before consuming EAS capacity"),
     );
+    expect(at(ensure)).toBeGreaterThan(at(devices));
     expect(at(ensure)).toBeLessThan(at(build));
   });
 
@@ -196,7 +272,7 @@ describe("driver native build", () => {
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
     fs.writeFileSync(
       path.join(bin, "npx"),
-      `#!/usr/bin/env bash\nprintf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company Limited)" "Failed for Apple Team ABCDE12345 (Example Company)" "Authentication with an ASC API key is required" "Distribution credentials are missing" "EAS project not configured" "- ${DEVICE} iPhone" "Error: No distribution certificate for serial number ${CERTIFICATE}" "✔ Created new profile: *[expo] app" "Error: No devices are registered for this Apple team." "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2\nprintf '%s\\n' "$@" > "${dir}/npx-args"\nenv | grep -E '^EXPO_' | sort > "${dir}/npx-env" || true\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company Limited)" "Failed for Apple Team ABCDE12345 (Example Company)" "Authentication with an ASC API key is required" "Distribution credentials are missing" "EAS project not configured" "- ${DEVICE} iPhone" "  - ${DEVICE} (iPhone 15) (Fail Safe)" "Error: No distribution certificate for serial number ${CERTIFICATE}" "✔ Created new profile: *[expo] app" "Error: No devices are registered for this Apple team." "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2\nprintf '%s\\n' "$@" > "${dir}/npx-args"\nenv | grep -E '^EXPO_' | sort > "${dir}/npx-env" || true\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
       { mode: 0o755 },
     );
     fs.writeFileSync(
@@ -226,6 +302,7 @@ describe("driver native build", () => {
       "Example Company",
       DEVICE,
       CERTIFICATE,
+      "Fail Safe",
     ])
       expect(output).not.toContain(secret);
     return { status: outcome.status, output };
@@ -261,7 +338,7 @@ describe("driver native build", () => {
         artifacts: {},
         error: {
           errorCode: "UNKNOWN_ERROR",
-          message: `See ${BUILD_PAGE} or expo.dev/b/1 build ${BUILD_ID} ${MAP_KEY}`,
+          message: `See ${BUILD_PAGE} or expo.dev/b/1 build ${BUILD_ID} ${MAP_KEY}\n- serial ${CERTIFICATE} "iPhone Distribution: Example Company (TEAM123456)"`,
         },
       }),
       1,
@@ -269,7 +346,7 @@ describe("driver native build", () => {
     expect(errored.status).not.toBe(0);
     expect(errored.output).toContain("status=ERRORED");
     expect(errored.output).toContain(
-      "error=UNKNOWN_ERROR: See [URL] or [URL] build [ID] [REDACTED_MAP_KEY]",
+      'error=UNKNOWN_ERROR: See [URL] or [URL] build [ID] [REDACTED_MAP_KEY]\n- serial [DEVICE] "[CERTIFICATE]"',
     );
   });
 
@@ -327,8 +404,8 @@ describe("driver native build", () => {
   const refreshEnv = {
     BUILD_PLATFORM: "ios",
     REFRESH_APPLE_SIGNING: "true",
-    ASC_KEY_ID: "KEY1234567",
-    ASC_ISSUER_ID: "issuer-fixture",
+    ASC_KEY_ID: "KEY1234567\n",
+    ASC_ISSUER_ID: " issuer-fixture",
     APPLE_TEAM_ID: "TEAM123456",
   };
   const npxArgs = () =>
