@@ -2118,7 +2118,11 @@ export async function runR10OperationsDownloads(
     const method = request.method().toUpperCase();
     const requestBody = request.postData();
     const parsedUrl = new URL(url);
-    if (method === "GET" && parsedUrl.pathname === OPS_EVENT_STREAM_PATH) {
+    if (
+      method === "GET" &&
+      parsedUrl.origin === opsOrigin &&
+      parsedUrl.pathname === OPS_EVENT_STREAM_PATH
+    ) {
       await route.fulfill({ status: 204 }).catch(() => undefined);
       return;
     }
