@@ -359,15 +359,14 @@ describe("usePendingCompletionReplay", () => {
       );
       await flushEffects();
     });
-    for (let second = 0; second < 82; second += 1) {
+    for (let second = 0; second < 83; second += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
     }
 
     // 0 s, 2 s, 7 s, 22 s, 82 s.
-    expect(replayPendingCompletion.mock.calls.length).toBeGreaterThanOrEqual(4);
-    expect(replayPendingCompletion.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(replayPendingCompletion).toHaveBeenCalledTimes(5);
   });
 
   function createSwitchableHarness(
@@ -461,5 +460,80 @@ describe("usePendingCompletionReplay", () => {
     });
 
     expect(submittingActions.slice(-1)).toEqual([null]);
+  });
+
+  it("resends after a session failure cleared the task and the driver signed in again", async () => {
+    vi.useFakeTimers();
+    const replay = createDeferredPromise<DriverTaskRecord | null>();
+    const replayPendingCompletion = vi
+      .fn<() => Promise<DriverTaskRecord | null>>()
+      .mockImplementationOnce(() => replay.promise)
+      .mockResolvedValue({
+        taskId: "task-001",
+        status: "completed",
+      } as DriverTaskRecord);
+    const submittingActions: Array<string | null> = [];
+    const harness = createSwitchableHarness(
+      {
+        getPendingCompletion: vi
+          .fn()
+          .mockResolvedValueOnce({
+            taskId: "task-001",
+            requestId: "request-001",
+          })
+          .mockResolvedValueOnce({
+            taskId: "task-001",
+            requestId: "request-001",
+          })
+          .mockResolvedValueOnce({
+            taskId: "task-001",
+            requestId: "request-001",
+          })
+          .mockResolvedValue(null),
+        replayPendingCompletion,
+      },
+      submittingActions,
+    );
+    await harness.mount();
+    await harness.show(null);
+    await act(async () => {
+      replay.reject(new Error("API error 401: session invalid"));
+      await replay.promise.catch(() => undefined);
+      await flushEffects();
+    });
+    expect(submittingActions.slice(-1)).toEqual([null]);
+
+    await harness.show("task-001");
+    expect(replayPendingCompletion).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(replayPendingCompletion).toHaveBeenCalledTimes(2);
+    expect(submittingActions.slice(-1)).toEqual([null]);
+  });
+
+  it("tries again after the stored completion could not be read", async () => {
+    vi.useFakeTimers();
+    const replayPendingCompletion = vi.fn(async () => null);
+    const harness = createSwitchableHarness(
+      {
+        getPendingCompletion: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("storage unavailable"))
+          .mockResolvedValueOnce({
+            taskId: "task-001",
+            requestId: "request-001",
+          })
+          .mockResolvedValue(null),
+        replayPendingCompletion,
+      },
+      [],
+    );
+    await harness.mount();
+    expect(replayPendingCompletion).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(replayPendingCompletion).toHaveBeenCalledTimes(1);
   });
 });

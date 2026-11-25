@@ -16,6 +16,7 @@ type UsePendingCompletionReplayParams = {
   onReplayError: (error: unknown) => void;
 };
 
+const STORAGE_READ = "storage-read";
 const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 60_000];
 
 export function usePendingCompletionReplay(
@@ -145,8 +146,9 @@ export function usePendingCompletionReplay(
 
         await latestParams.onReplayCompleted(replayedTask);
       } catch (error) {
-        if (claimedRequestId && mountedRef.current) {
-          scheduleRetry(claimedRequestId);
+        // Without a claimed request the stored completion could not be read.
+        if (mountedRef.current) {
+          scheduleRetry(claimedRequestId ?? STORAGE_READ);
         }
         if (!mountedRef.current || currentTaskIdRef.current !== replayTaskId) {
           return;
