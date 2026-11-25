@@ -1,7 +1,11 @@
 name: Build Passenger App (Native, EAS)
 
-# Manual hosted packaging. Wait for the remote native build and preserve its
-# final JSON and stderr; success does not prove device installation or delivery.
+# Manual hosted packaging. Wait for the remote native build and preserve a
+# redacted receipt; success does not prove device installation or delivery.
+#
+# Logs and artifacts of this repository are public, and anyone who knows a build
+# page or artifact URL can download the app. Neither EAS output nor its JSON may
+# be published as is: the receipt holds no build id and no URL.
 on:
   workflow_dispatch:
     inputs:
@@ -80,47 +84,81 @@ jobs:
           npx --yes eas-cli@21.4.0 config \
             --platform "$BUILD_PLATFORM" \
             --profile "$BUILD_PROFILE" \
-            --non-interactive \
-            2>&1 | tee "$RUNNER_TEMP/passenger-eas-config.log"
+            --non-interactive 2>&1 |
+            sed -E \
+              -e 's#(https?://|expo\.dev/)[^[:space:]]+#[URL]#gI' \
+              -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g' |
+            tee "$RUNNER_TEMP/passenger-eas-config.log"
 
-      - name: Complete hosted native build
+      - name: Complete hosted native build without publishing the build page
         shell: bash
         run: |
           set -euo pipefail
+          result="$RUNNER_TEMP/passenger-eas-build.json"
+          log="$RUNNER_TEMP/passenger-eas-build.log"
+          receipt="$RUNNER_TEMP/passenger-eas-build-receipt.json"
+          redact() {
+            sed -E \
+              -e 's#(https?://|expo\.dev/)[^[:space:]"]+#[URL]#gI' \
+              -e 's/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/[ID]/g' \
+              -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
+          }
           build_exit=0
           npx --yes eas-cli@21.4.0 build \
             --platform "$BUILD_PLATFORM" \
             --profile "$BUILD_PROFILE" \
             --non-interactive \
             --wait \
-            --json \
-            > "$RUNNER_TEMP/passenger-eas-build.json" \
-            2> "$RUNNER_TEMP/passenger-eas-build.stderr.log" || build_exit=$?
-          printf '%s\n' "$build_exit" > "$RUNNER_TEMP/passenger-eas-build.exit-code.txt"
-          if (( build_exit != 0 )); then
-            exit "$build_exit"
-          fi
-          if ! jq --exit-status '
-            type == "array" and length == 1 and
-            all(.[];
-              .status == "FINISHED" and
-              (.id | type == "string" and length > 0) and
-              ([.artifacts.buildUrl, .artifacts.applicationArchiveUrl] |
-                any(.[]; type == "string" and length > 0))
-            )
-          ' "$RUNNER_TEMP/passenger-eas-build.json" > /dev/null; then
-            echo "::error::EAS did not return one finished build with an artifact URL."
+            --json > "$result" 2> "$log" || build_exit=$?
+          redact < "$log" > "$RUNNER_TEMP/passenger-eas-build.stderr.log"
+          if ! jq --exit-status 'type == "array" and length == 1' "$result" > /dev/null 2>&1; then
+            echo "::error::EAS returned no build (exit $build_exit)."
+            tail -n 25 "$RUNNER_TEMP/passenger-eas-build.stderr.log"
             exit 1
           fi
+          jq --argjson exit_code "$build_exit" '.[0] | {
+            exitCode: $exit_code,
+            platform, status, buildProfile, distribution, sdkVersion,
+            runtimeVersion: (.runtimeVersion.version? // .runtimeVersion // null),
+            appVersion, appBuildVersion, gitCommitHash,
+            createdAt, completedAt,
+            error: (.error | if . == null then null else {errorCode, message} end)
+          }' "$result" | redact > "$receipt"
+          jq --raw-output 'to_entries[] | "\(.key)=\(.value)"' "$receipt"
+          [[ "$(jq --raw-output '.[0].status' "$result")" == "FINISHED" ]]
+          artifact_url="$(jq --raw-output '.[0].artifacts | .applicationArchiveUrl // .buildUrl // empty' "$result")"
+          if [[ -z "$artifact_url" ]]; then
+            echo "::error::The finished build has no artifact."
+            exit 1
+          fi
+          # Without a public artifact, the download may be a sign-in page.
+          magic=""
+          if curl --fail --silent --location --retry 3 --max-time 600 \
+            --output "$RUNNER_TEMP/passenger-artifact" "$artifact_url"; then
+            magic="$(head -c 2 "$RUNNER_TEMP/passenger-artifact" | od -An -tx1 | tr -d ' \n')"
+          fi
+          case "$magic" in
+            504b|1f8b)
+              jq \
+                --argjson bytes "$(stat --format=%s "$RUNNER_TEMP/passenger-artifact")" \
+                --arg sha256 "$(sha256sum "$RUNNER_TEMP/passenger-artifact" | cut -d' ' -f1)" \
+                '. + {artifact: {bytes: $bytes, sha256: $sha256}}' \
+                "$receipt" > "$receipt.tmp"
+              mv "$receipt.tmp" "$receipt"
+              jq --raw-output '"artifact_bytes=\(.artifact.bytes)\nartifact_sha256=\(.artifact.sha256)"' "$receipt"
+              ;;
+            *)
+              echo "::warning::The build finished; its file needs an Expo sign-in to download, so it was not hashed."
+              ;;
+          esac
 
-      - name: Preserve configuration and final build receipts
+      - name: Preserve the redacted configuration and build receipt
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: passenger-eas-build-${{ inputs.platform }}-${{ inputs.profile }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/passenger-eas-config.log
-            ${{ runner.temp }}/passenger-eas-build.json
+            ${{ runner.temp }}/passenger-eas-build-receipt.json
             ${{ runner.temp }}/passenger-eas-build.stderr.log
-            ${{ runner.temp }}/passenger-eas-build.exit-code.txt
           if-no-files-found: ignore
