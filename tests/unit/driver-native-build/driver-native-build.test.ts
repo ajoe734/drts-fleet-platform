@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,6 +51,7 @@ describe("driver native build", () => {
     });
   const guard = "Guard credentials, project linkage, and inputs";
   const prepare = "Prepare ephemeral EAS configuration";
+  const build = "Build on EAS without publishing the build page";
   const requireKeys =
     "Require the native map keys before consuming EAS capacity";
 
@@ -110,19 +111,100 @@ describe("driver native build", () => {
     ).toThrow();
   });
 
-  it("bundles the app before queueing and never echoes a map key", () => {
-    const bundle = workflow.indexOf("- name: Bundle the app before");
-    expect(bundle).toBeGreaterThan(0);
-    expect(bundle).toBeLessThan(
-      workflow.indexOf("- name: Queue EAS native build"),
-    );
+  it("bundles the app before the build and redacts map keys", () => {
+    const order = [
+      "Require the native map keys before consuming EAS capacity",
+      "Prepare ephemeral EAS configuration",
+      "Validate resolved native build configuration",
+      "Bundle the app before consuming EAS capacity",
+      build,
+    ].map((name) => workflow.indexOf(`- name: ${name}\n`));
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const name of [
       "Validate resolved native build configuration",
       "Bundle the app before consuming EAS capacity",
-      "Queue EAS native build",
     ])
-      expect(stepRun(name).trim()).toMatch(
-        /\|\nsed -E 's\/AIza\[0-9A-Za-z_-\]\{20,\}\/\[REDACTED_MAP_KEY\]\/g'$|\|\n\s*sed -E 's\/AIza\[0-9A-Za-z_-\]\{20,\}\/\[REDACTED_MAP_KEY\]\/g'$/,
+      expect(stepRun(name)).toMatch(
+        /2>&1 \|\n\s*sed -E 's\/AIza\[0-9A-Za-z_-\]\{20,\}/,
       );
+  });
+
+  const BUILD_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const BUILD_PAGE = `https://expo.dev/accounts/a/projects/p/builds/${BUILD_ID}`;
+  const MAP_KEY = `AIza${"k".repeat(35)}`;
+
+  function runBuild(result: unknown, exitCode = 0) {
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
+    fs.writeFileSync(
+      path.join(bin, "npx"),
+      `#!/usr/bin/env bash\necho "Build details: ${BUILD_PAGE} key ${MAP_KEY}" >&2\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(bin, "curl"),
+      '#!/usr/bin/env bash\nwhile [[ $# -gt 0 ]]; do [[ $1 == --output ]] && printf artifact > "$2"; shift; done\n',
+      { mode: 0o755 },
+    );
+    const outcome = spawnSync("bash", ["-c", stepRun(build)], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 10_000,
+      env: {
+        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        RUNNER_TEMP: dir,
+        BUILD_PLATFORM: "android",
+        BUILD_PROFILE: "preview",
+      },
+    });
+    const output = `${outcome.stdout}${outcome.stderr}`;
+    for (const secret of [BUILD_ID, "expo.dev", MAP_KEY])
+      expect(output).not.toContain(secret);
+    return { status: outcome.status, output };
+  }
+  const built = (fields: Record<string, unknown>) => [
+    {
+      id: BUILD_ID,
+      platform: "ANDROID",
+      status: "FINISHED",
+      buildProfile: "preview",
+      distribution: "INTERNAL",
+      appVersion: "0.1.0",
+      appBuildVersion: "1",
+      gitCommitHash: "a".repeat(40),
+      artifacts: { applicationArchiveUrl: `${BUILD_PAGE}/app.apk` },
+      ...fields,
+    },
+  ];
+
+  it("reports a finished build and its hash without the build id, page or key", () => {
+    const { status, output } = runBuild(built({}));
+    expect(status).toBe(0);
+    expect(output).toContain("status=FINISHED");
+    expect(output).toContain(`commit=${"a".repeat(40)}`);
+    expect(output).toContain("artifact_bytes=8");
+    expect(output).toMatch(/artifact_sha256=[0-9a-f]{64}/);
+  });
+
+  it("fails on an errored build, still without the page", () => {
+    const errored = runBuild(
+      built({
+        status: "ERRORED",
+        artifacts: {},
+        error: { errorCode: "UNKNOWN_ERROR", message: `See ${BUILD_PAGE}` },
+      }),
+      1,
+    );
+    expect(errored.status).not.toBe(0);
+    expect(errored.output).toContain("status=ERRORED");
+    expect(errored.output).toContain("error=UNKNOWN_ERROR: See [URL]");
+  });
+
+  it("prints a redacted reason when EAS returns no build", () => {
+    const none = runBuild([], 1);
+    expect(none.status).not.toBe(0);
+    expect(none.output).toContain("[URL] key [REDACTED_MAP_KEY]");
   });
 });
