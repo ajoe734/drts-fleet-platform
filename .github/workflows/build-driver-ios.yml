@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Execution mode (build queues a native build; lookup-existing performs read-only EAS build:view and signed artifact verification)
+        description: Execution mode (build queues a native build; lookup-existing performs read-only EAS build:view and signed artifact verification; apple-signing-check reads the Apple identifier, capabilities and profiles)
         required: true
         default: build
         type: choice
         options:
           - build
           - lookup-existing
+          - apple-signing-check
       platform:
         description: Native target platform for build mode
         required: false
@@ -40,6 +41,11 @@ on:
       submit:
         description: Auto-submit the completed production build to TestFlight
         required: true
+        default: false
+        type: boolean
+      refresh_apple_signing:
+        description: iOS development or preview only. Turn Associated Domains on for the app identifier and regenerate the internal profile before the build
+        required: false
         default: false
         type: boolean
       android_build_id:
@@ -80,6 +86,7 @@ jobs:
       DRIVER_APP_EAS_PROJECT_ID: ${{ vars.DRIVER_APP_EAS_PROJECT_ID }}
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
+      REFRESH_APPLE_SIGNING: ${{ inputs.refresh_apple_signing || false }}
       LOOKUP_ANDROID_BUILD_ID: ${{ inputs.android_build_id || 'cb4b7f81-90bd-481e-970a-fbb1009582c0' }}
       LOOKUP_IOS_BUILD_ID: ${{ inputs.ios_build_id || '3f4d1b8b-9811-4d03-ab31-e7554de30bff' }}
       LOOKUP_EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha || '0e722795dec202e960e504a8fa67526fc567ed0f' }}
@@ -108,6 +115,16 @@ jobs:
           fi
           if (( missing != 0 )); then
             exit 1
+          fi
+
+          if [[ "${REFRESH_APPLE_SIGNING:-false}" == "true" ]]; then
+            case "${WORKFLOW_MODE:-build}/${BUILD_PLATFORM:-ios}/$BUILD_PROFILE" in
+              build/ios/development|build/ios/preview) ;;
+              *)
+                echo "::error::refresh_apple_signing is allowed only for an iOS development or preview build."
+                exit 1
+                ;;
+            esac
           fi
 
           case "${WORKFLOW_MODE:-build}" in
@@ -163,6 +180,12 @@ jobs:
                 exit 1
               fi
               ;;
+            apple-signing-check)
+              if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" ]]; then
+                echo "::error::TestFlight submission is forbidden in apple-signing-check mode."
+                exit 1
+              fi
+              ;;
             *)
               echo "::error::Unsupported workflow mode: ${WORKFLOW_MODE:-}"
               exit 1
@@ -198,6 +221,16 @@ jobs:
           path: .artifacts/native-existing-builds/driver-existing-builds-receipt.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Check Apple signing without changing it
+        if: ${{ inputs.mode == 'apple-signing-check' }}
+        working-directory: .
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: node operations/native-signing/apple-signing.cjs check
 
       - name: Require the native map keys before consuming EAS capacity
         if: ${{ (inputs.mode || 'build') == 'build' }}
@@ -305,6 +338,43 @@ jobs:
             --output-dir "$RUNNER_TEMP/driver-native-bundle" 2>&1 |
             sed -E 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
 
+      # A capability change invalidates the app's existing profiles, so what EAS
+      # needs to regenerate the internal one is checked first, and the change is
+      # the last step before the build. EAS uses only these device classes.
+      - name: Require a test device in EAS before Apple is changed
+        if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${APPLE_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID is not configured in GitHub Actions variables."
+            exit 1
+          fi
+          devices="$(
+            npx --yes eas-cli@21.4.0 device:list \
+              --apple-team-id "$APPLE_TEAM_ID" --json --non-interactive 2> /dev/null |
+              sed -n '/^\[/,$p' |
+              jq --exit-status '[.[] | select(.deviceClass == "IPHONE" or .deviceClass == "IPAD")] | length'
+          )" || { echo "::error::EAS did not list the devices."; exit 1; }
+          echo "eas_devices=$devices"
+          if (( devices == 0 )); then
+            echo "::error::No iPhone or iPad is registered in EAS. Run eas device:create first."
+            exit 1
+          fi
+
+      - name: Turn Associated Domains on before the profile is regenerated
+        if: ${{ (inputs.mode || 'build') == 'build' && inputs.refresh_apple_signing }}
+        working-directory: .
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_KEY_FILE: ${{ runner.temp }}/apple-key.p8
+        run: node operations/native-signing/apple-signing.cjs ensure
+
       # Anyone who knows the page of an internal build can download it, and the
       # app holds the map key. Nothing EAS prints may reach the public log: only
       # the fields below do, with no build id or URL.
@@ -314,6 +384,9 @@ jobs:
         env:
           GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
           GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
+          ASC_KEY_ID: ${{ inputs.refresh_apple_signing && secrets.ASC_KEY_ID || '' }}
+          ASC_ISSUER_ID: ${{ inputs.refresh_apple_signing && secrets.ASC_ISSUER_ID || '' }}
+          APPLE_TEAM_ID: ${{ inputs.refresh_apple_signing && vars.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
           result="$RUNNER_TEMP/driver-eas-build.json"
@@ -325,28 +398,49 @@ jobs:
               -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{16}/[DEVICE]/g' \
               -e 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
           }
+          redact_error() {
+            redact | sed -E \
+              -e 's/[0-9a-fA-F]{16,}/[DEVICE]/g' \
+              -e 's/(iPhone|Apple|iOS) (Distribution|Development|Developer): [^"]*/[CERTIFICATE]/gI'
+          }
           build_exit=0
+          signing=()
+          if [[ "${REFRESH_APPLE_SIGNING:-false}" == "true" ]]; then
+            export EXPO_ASC_API_KEY_PATH="$RUNNER_TEMP/apple-key.p8"
+            export EXPO_ASC_KEY_ID="${ASC_KEY_ID//[[:space:]]/}"
+            export EXPO_ASC_ISSUER_ID="${ASC_ISSUER_ID//[[:space:]]/}"
+            export EXPO_APPLE_TEAM_ID="$APPLE_TEAM_ID" EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
+            # The CLI's own sync also turns off what the entitlements do not list.
+            export EXPO_NO_CAPABILITY_SYNC=1
+            trap 'rm -f "$EXPO_ASC_API_KEY_PATH"' EXIT
+            signing=(--refresh-ad-hoc-provisioning-profile)
+          fi
           npx --yes eas-cli@21.4.0 build \
             --platform "$BUILD_PLATFORM" \
             --profile "$BUILD_PROFILE" \
+            "${signing[@]}" \
             --non-interactive \
             --wait \
             --json > "$result" 2> "$log" || build_exit=$?
+          if [[ "${REFRESH_APPLE_SIGNING:-false}" == "true" ]]; then
+            { grep -oE '(Created new|Updated existing|Used existing) profile|Failed to provision [0-9]+ of the selected devices|No devices are registered' "$log" || true; } | sort -u
+          fi
           if ! jq --exit-status 'type == "array" and length == 1' "$result" > /dev/null 2>&1; then
             echo "::error::EAS returned no build (exit $build_exit)."
             # The log also lists the Apple team and devices; print only errors.
-            { grep -viE 'apple team|udid|provisioned devices' "$log" |
+            { grep -viE 'apple team|udid|provisioned devices|^[[:space:]]*- ' "$log" |
               grep -iE 'error|fail|cannot|could not|not supported|not set up|not configured|does not exist|required|missing|invalid|permission|denied|unauthorized|quota|\blimit\b' || true; } |
-              redact | sed -E 's/[0-9a-fA-F]{40}/[DEVICE]/g' | tail -n 15
+              redact_error | tail -n 15
             exit 1
           fi
           jq --raw-output '.[0] | [
             "platform=\(.platform)", "status=\(.status)",
             "profile=\(.buildProfile)", "distribution=\(.distribution)",
             "version=\(.appVersion) (\(.appBuildVersion))",
-            "commit=\(.gitCommitHash)",
-            "error=\(.error.errorCode // "none"): \(.error.message // "none")"
+            "commit=\(.gitCommitHash)"
           ] | .[]' "$result" | redact
+          jq --raw-output '.[0].error |
+            "error=\(.errorCode // "none"): \(.message // "none")"' "$result" | redact_error
           if (( build_exit != 0 )); then
             exit "$build_exit"
           fi
