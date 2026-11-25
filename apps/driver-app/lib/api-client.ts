@@ -720,12 +720,14 @@ export async function getPendingDriverTaskCompletion(): Promise<PendingDriverTas
   return loadPendingDriverTaskCompletion();
 }
 
-export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
-  const pending = await loadPendingDriverTaskCompletion();
-  if (!pending) {
-    return null;
-  }
+let pendingCompletionInFlight: {
+  requestId: string;
+  promise: Promise<DriverTaskRecord>;
+} | null = null;
 
+async function postPendingDriverTaskCompletion(
+  pending: PendingDriverTaskCompletion,
+): Promise<DriverTaskRecord> {
   try {
     const task = await getDriverClient().completeTask(
       pending.taskId,
@@ -747,6 +749,34 @@ export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRec
 
     throw error;
   }
+}
+
+/**
+ * The driver's own submit and the background replay can reach the same stored
+ * completion at the same time. Both share one request instead of sending it
+ * twice.
+ */
+async function sendPendingDriverTaskCompletion(
+  pending: PendingDriverTaskCompletion,
+): Promise<DriverTaskRecord> {
+  if (pendingCompletionInFlight?.requestId === pending.requestId) {
+    return pendingCompletionInFlight.promise;
+  }
+
+  const promise = postPendingDriverTaskCompletion(pending);
+  pendingCompletionInFlight = { requestId: pending.requestId, promise };
+  try {
+    return await promise;
+  } finally {
+    if (pendingCompletionInFlight?.promise === promise) {
+      pendingCompletionInFlight = null;
+    }
+  }
+}
+
+export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
+  const pending = await loadPendingDriverTaskCompletion();
+  return pending ? sendPendingDriverTaskCompletion(pending) : null;
 }
 
 export async function acceptForwardedDriverOffer(
@@ -780,22 +810,17 @@ export async function submitDriverTaskCompletion(
   command: DriverCompleteTaskCommand,
 ): Promise<DriverTaskRecord> {
   const now = new Date().toISOString();
-  await persistPendingDriverTaskCompletion({
+  const pending: PendingDriverTaskCompletion = {
     taskId,
     requestId: createLocalId("driver-task-complete"),
     command,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  await persistPendingDriverTaskCompletion(pending);
 
-  const task = await replayPendingDriverTaskCompletion();
-  if (!task) {
-    throw new Error(
-      "Pending driver task completion disappeared before replay.",
-    );
-  }
-
-  return task;
+  // Send what was just stored: a replay may already have sent and cleared it.
+  return sendPendingDriverTaskCompletion(pending);
 }
 
 function createDriverClientProxy(): ApiClient {

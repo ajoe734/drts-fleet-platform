@@ -33,6 +33,7 @@ export function usePendingCompletionReplay(
 
   const mountedRef = useRef(true);
   const currentTaskIdRef = useRef<string | null>(activeTaskId);
+  const submittingActionRef = useRef<string | null>(submittingAction);
   const inFlightRequestIdRef = useRef<string | null>(null);
   const latestParamsRef = useRef({
     setSubmittingAction,
@@ -45,6 +46,7 @@ export function usePendingCompletionReplay(
   });
 
   currentTaskIdRef.current = activeTaskId;
+  submittingActionRef.current = submittingAction;
   latestParamsRef.current = {
     setSubmittingAction,
     getPendingCompletion,
@@ -74,6 +76,12 @@ export function usePendingCompletionReplay(
 
       try {
         const pending = await latestParams.getPendingCompletion();
+        // The driver pressed an action while the stored completion was being
+        // read; that action owns whatever is stored now.
+        if (submittingActionRef.current) {
+          return;
+        }
+
         claimedRequestId = claimPendingCompletionReplayRequest({
           activeTaskId: replayTaskId,
           pending,
@@ -115,7 +123,12 @@ export function usePendingCompletionReplay(
           inFlightRequestIdRef.current = null;
         }
 
-        if (mountedRef.current && currentTaskIdRef.current === replayTaskId) {
+        // Only a replay that set the submitting state may clear it.
+        if (
+          claimedRequestId &&
+          mountedRef.current &&
+          currentTaskIdRef.current === replayTaskId
+        ) {
           latestParamsRef.current.setSubmittingAction(null);
         }
       }

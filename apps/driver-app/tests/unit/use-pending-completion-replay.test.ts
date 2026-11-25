@@ -17,6 +17,9 @@ type HarnessProps = {
   onIdentityFailure: () => Promise<void> | void;
   onReplayError: (error: unknown) => void;
   onSubmittingActionChange: (action: string | null) => void;
+  exposeSetSubmittingAction?: (
+    setSubmittingAction: (action: string | null) => void,
+  ) => void;
 };
 
 function createDeferredPromise<T>() {
@@ -44,6 +47,10 @@ function HookHarness(props: HarnessProps) {
   useEffect(() => {
     props.onSubmittingActionChange(submittingAction);
   }, [props, submittingAction]);
+
+  useEffect(() => {
+    props.exposeSetSubmittingAction?.(setSubmittingAction);
+  }, [props]);
 
   usePendingCompletionReplay({
     activeTaskId: props.activeTaskId,
@@ -230,5 +237,91 @@ describe("usePendingCompletionReplay", () => {
 
     expect(onReplayCompleted).toHaveBeenCalledTimes(1);
     expect(onIdentityFailure).not.toHaveBeenCalled();
+  });
+
+  it("leaves a completion the driver submits during the read to that submit", async () => {
+    const pendingRead = createDeferredPromise<{
+      taskId: string;
+      requestId: string;
+    } | null>();
+    const replayPendingCompletion = vi.fn(async () => null);
+    const submittingActions: Array<string | null> = [];
+    let setSubmittingAction!: (action: string | null) => void;
+
+    await act(async () => {
+      create(
+        React.createElement(HookHarness, {
+          activeTaskId: "task-001",
+          getPendingCompletion: vi
+            .fn()
+            .mockImplementationOnce(() => pendingRead.promise)
+            .mockResolvedValue(null),
+          replayPendingCompletion,
+          getIdentityIssue: vi.fn(() => null),
+          onReplayCompleted: vi.fn(),
+          onIdentityFailure: vi.fn(),
+          onReplayError: vi.fn(),
+          onSubmittingActionChange: (action) => {
+            submittingActions.push(action);
+          },
+          exposeSetSubmittingAction: (setter) => {
+            setSubmittingAction = setter;
+          },
+        }),
+      );
+      await flushEffects();
+    });
+
+    await act(async () => {
+      setSubmittingAction("complete");
+      await flushEffects();
+    });
+    await act(async () => {
+      pendingRead.resolve({ taskId: "task-001", requestId: "request-001" });
+      await pendingRead.promise;
+      await flushEffects();
+    });
+
+    expect(replayPendingCompletion).not.toHaveBeenCalled();
+    expect(submittingActions.slice(-1)).toEqual(["complete"]);
+  });
+
+  it("does not clear an action in progress when there is nothing to replay", async () => {
+    const pendingRead = createDeferredPromise<null>();
+    const submittingActions: Array<string | null> = [];
+    let setSubmittingAction!: (action: string | null) => void;
+
+    await act(async () => {
+      create(
+        React.createElement(HookHarness, {
+          activeTaskId: "task-001",
+          getPendingCompletion: vi.fn(() => pendingRead.promise),
+          replayPendingCompletion: vi.fn(async () => null),
+          getIdentityIssue: vi.fn(() => null),
+          onReplayCompleted: vi.fn(),
+          onIdentityFailure: vi.fn(),
+          onReplayError: vi.fn(),
+          onSubmittingActionChange: (action) => {
+            submittingActions.push(action);
+          },
+          exposeSetSubmittingAction: (setter) => {
+            setSubmittingAction = setter;
+          },
+        }),
+      );
+      await flushEffects();
+    });
+
+    await act(async () => {
+      setSubmittingAction("start");
+      await flushEffects();
+    });
+    await act(async () => {
+      pendingRead.resolve(null);
+      await pendingRead.promise;
+      await flushEffects();
+    });
+
+    expect(submittingActions.slice(-1)).toEqual(["start"]);
   });
 });
