@@ -21,6 +21,7 @@ function stepRun(name: string): string {
 const BUILD_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const BUILD_PAGE = `https://expo.dev/accounts/a/projects/p/builds/${BUILD_ID}`;
 const ARTIFACT = "https://expo.dev/artifacts/eas/secret-token.ipa";
+const DEVICE = "00008030-001A2B3C4D5E6F70";
 const MAP_KEY = `AIza${"k".repeat(35)}`;
 const build = "Complete hosted native build without publishing the build page";
 const config = "Resolve selected native build configuration";
@@ -61,14 +62,20 @@ describe("passenger native build", () => {
     const uploaded = [
       "passenger-eas-config.log",
       "passenger-eas-build-receipt.json",
-      "passenger-eas-build.stderr.log",
     ]
       .map((name) => path.join(dir, name))
       .filter((file) => fs.existsSync(file))
       .map((file) => fs.readFileSync(file, "utf8"))
       .join("\n");
     const output = `${outcome.stdout}${outcome.stderr}`;
-    for (const secret of [BUILD_ID, "expo.dev", "secret-token", MAP_KEY])
+    for (const secret of [
+      BUILD_ID,
+      "expo.dev",
+      "secret-token",
+      MAP_KEY,
+      "Example Company",
+      DEVICE,
+    ])
       expect(`${output}\n${uploaded}`).not.toContain(secret);
     return { status: outcome.status, output };
   }
@@ -77,7 +84,7 @@ describe("passenger native build", () => {
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
     return run(
       build,
-      `echo "Build details: ${BUILD_PAGE} key ${MAP_KEY}" >&2; cat "${dir}/result.json"; exit ${exitCode}`,
+      `printf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company)" "- ${DEVICE} iPhone" "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2; cat "${dir}/result.json"; exit ${exitCode}`,
       artifact,
     );
   }
@@ -124,14 +131,8 @@ describe("passenger native build", () => {
       error: null,
       artifact: { bytes: 6, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
     });
-    expect(Object.keys(receipt())).not.toEqual(
-      expect.arrayContaining([
-        "id",
-        "artifacts",
-        "logFiles",
-        "initiatingActor",
-      ]),
-    );
+    for (const key of ["id", "artifacts", "logFiles", "initiatingActor"])
+      expect(receipt()).not.toHaveProperty(key);
   });
 
   it("fails on an errored build and keeps a redacted reason", () => {
@@ -141,7 +142,7 @@ describe("passenger native build", () => {
         artifacts: {},
         error: {
           errorCode: "UNKNOWN_ERROR",
-          message: `See ${BUILD_PAGE} or expo.dev/b/1 build ${BUILD_ID} ${MAP_KEY}`,
+          message: `See "${BUILD_PAGE}" or expo.dev/b/1 build ${BUILD_ID} ${MAP_KEY}`,
         },
       }),
       1,
@@ -152,7 +153,7 @@ describe("passenger native build", () => {
       status: "ERRORED",
       error: {
         errorCode: "UNKNOWN_ERROR",
-        message: "See [URL] or [URL] build [ID] [REDACTED_MAP_KEY]",
+        message: 'See "[URL]" or [URL] build [ID] [REDACTED_MAP_KEY]',
       },
     });
   });
@@ -162,7 +163,23 @@ describe("passenger native build", () => {
     expect(runBuild(built({ artifacts: {} })).status).not.toBe(0);
     const none = runBuild([], 1);
     expect(none.status).not.toBe(0);
-    expect(none.output).toContain("[URL] key [REDACTED_MAP_KEY]");
+    expect(none.output).toContain(
+      "Error: [URL] key [REDACTED_MAP_KEY] device [DEVICE]",
+    );
+    fs.writeFileSync(path.join(dir, "result.json"), "");
+  });
+
+  it.each(["", "not json", "null", "[] []"])(
+    "fails on output that is not one build (%j)",
+    (raw) => {
+      fs.writeFileSync(path.join(dir, "result.json"), raw);
+      expect(run(build, `cat "${dir}/result.json"`).status).not.toBe(0);
+    },
+  );
+
+  it("fails with the CLI's own code even when it reports a finished build", () => {
+    expect(runBuild(built(), 7).status).toBe(7);
+    expect(receipt()).toMatchObject({ exitCode: 7, status: "FINISHED" });
   });
 
   it.each(["<html>sign in</html>", ""])(
@@ -186,10 +203,6 @@ describe("passenger native build", () => {
     const upload = workflow.slice(workflow.indexOf("actions/upload-artifact"));
     expect(
       [...upload.matchAll(/runner\.temp \}\}\/(\S+)/g)].map((m) => m[1]),
-    ).toEqual([
-      "passenger-eas-config.log",
-      "passenger-eas-build-receipt.json",
-      "passenger-eas-build.stderr.log",
-    ]);
+    ).toEqual(["passenger-eas-config.log", "passenger-eas-build-receipt.json"]);
   });
 });
