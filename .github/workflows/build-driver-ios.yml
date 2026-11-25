@@ -1,19 +1,27 @@
 name: Build Driver App (iOS, EAS)
 
-# Manual-only cloud build or read-only existing build lookup for apps/driver-app.
-# It never runs on push or pull requests because iOS builds consume paid EAS
-# capacity and signing resources.
+# Manual-only cloud build (iOS or Android) or read-only existing build lookup for
+# apps/driver-app. It never runs on push or pull requests because builds consume
+# paid EAS capacity and signing resources.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Execution mode (build queues an iOS build; lookup-existing performs read-only EAS build:view and signed artifact verification)
+        description: Execution mode (build queues a native build; lookup-existing performs read-only EAS build:view and signed artifact verification)
         required: true
         default: build
         type: choice
         options:
           - build
           - lookup-existing
+      platform:
+        description: Native target platform for build mode
+        required: false
+        default: ios
+        type: choice
+        options:
+          - ios
+          - android
       profile:
         description: EAS build profile
         required: true
@@ -54,17 +62,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-driver-ios-${{ github.ref }}
+  group: build-driver-ios-${{ github.ref }}-${{ inputs.platform }}
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Build iOS (${{ inputs.profile }})
+    name: Build ${{ inputs.platform || 'ios' }} (${{ inputs.profile }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       WORKFLOW_MODE: ${{ inputs.mode || 'build' }}
       BUILD_API_URL: ${{ inputs.api_url }}
+      BUILD_PLATFORM: ${{ inputs.platform || 'ios' }}
       BUILD_PROFILE: ${{ inputs.profile }}
       PROD_RUNTIME_API_ORIGIN: ${{ vars.PROD_RUNTIME_API_ORIGIN }}
       DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
@@ -130,6 +139,23 @@ jobs:
                 echo "::error::TestFlight auto-submit is allowed only with the production profile."
                 exit 1
               fi
+              case "${BUILD_PLATFORM:-ios}" in
+                ios) ;;
+                android)
+                  if [[ "$BUILD_PROFILE" == "development-simulator" ]]; then
+                    echo "::error::The development-simulator profile builds iOS only."
+                    exit 1
+                  fi
+                  if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" ]]; then
+                    echo "::error::TestFlight auto-submit is allowed only for iOS."
+                    exit 1
+                  fi
+                  ;;
+                *)
+                  echo "::error::Unsupported native platform: $BUILD_PLATFORM"
+                  exit 1
+                  ;;
+              esac
               ;;
             lookup-existing)
               if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" ]]; then
@@ -173,6 +199,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Require the native map keys before consuming EAS capacity
+        if: ${{ (inputs.mode || 'build') == 'build' }}
+        shell: bash
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
+        run: |
+          set -euo pipefail
+          for name in GOOGLE_MAPS_ANDROID_KEY GOOGLE_MAPS_IOS_KEY; do
+            if [[ -z "${!name//[[:space:]]/}" ]]; then
+              echo "::error::$name is not configured in GitHub Actions secrets."
+              exit 1
+            fi
+          done
+
       - name: Install workspace dependencies
         if: ${{ (inputs.mode || 'build') == 'build' }}
         run: pnpm install --frozen-lockfile
@@ -191,6 +232,9 @@ jobs:
       - name: Prepare ephemeral EAS configuration
         if: ${{ (inputs.mode || 'build') == 'build' }}
         shell: bash
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
         run: |
           set -euo pipefail
 
@@ -207,7 +251,12 @@ jobs:
               else
                 .build[$profile].env =
                   ((.build[$profile].env // {}) +
-                    {"EXPO_PUBLIC_API_URL": $api_url})
+                    {"EXPO_PUBLIC_API_URL": $api_url} +
+                    ({
+                      "GOOGLE_MAPS_ANDROID_KEY": (env.GOOGLE_MAPS_ANDROID_KEY // ""),
+                      "GOOGLE_MAPS_IOS_KEY": (env.GOOGLE_MAPS_IOS_KEY // "")
+                    } | map_values(gsub("[[:space:]]"; "")) |
+                      with_entries(select(.value != ""))))
                 | if $profile == "production" then
                     .cli.appVersionSource = "remote"
                     | .build.production.autoIncrement = true
@@ -221,25 +270,56 @@ jobs:
           jq empty app.json
           jq empty eas.json
 
-      - name: Validate resolved iOS build configuration
+      # Map keys are baked into the app, but they must not reach the public log.
+      - name: Validate resolved native build configuration
         if: ${{ (inputs.mode || 'build') == 'build' }}
-        run: >-
-          npx --yes eas-cli@21.4.0 config
-          --platform ios
-          --profile "$BUILD_PROFILE"
-          --non-interactive
+        shell: bash
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
+        run: |
+          set -euo pipefail
+          npx --yes eas-cli@21.4.0 config \
+            --platform "$BUILD_PLATFORM" \
+            --profile "$BUILD_PROFILE" \
+            --non-interactive 2>&1 |
+            sed -E 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
 
-      - name: Queue EAS iOS build
+      - name: Bundle the app before consuming EAS capacity
+        if: ${{ (inputs.mode || 'build') == 'build' }}
+        shell: bash
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
+          DRTS_REQUIRE_LIVE_MAP: "true"
+        run: |
+          set -euo pipefail
+          EXPO_PUBLIC_API_URL="$BUILD_API_URL" \
+            pnpm exec expo export \
+            --platform "$BUILD_PLATFORM" \
+            --output-dir "$RUNNER_TEMP/driver-native-bundle" 2>&1 |
+            sed -E 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
+
+      - name: Queue EAS native build
         if: ${{ (inputs.mode || 'build') == 'build' && inputs.submit == false }}
-        run: >-
-          npx --yes eas-cli@21.4.0 build
-          --platform ios
-          --profile "$BUILD_PROFILE"
-          --non-interactive
-          --no-wait
+        shell: bash
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
+        run: |
+          set -euo pipefail
+          npx --yes eas-cli@21.4.0 build \
+            --platform "$BUILD_PLATFORM" \
+            --profile "$BUILD_PROFILE" \
+            --non-interactive \
+            --no-wait 2>&1 |
+            sed -E 's/AIza[0-9A-Za-z_-]{20,}/[REDACTED_MAP_KEY]/g'
 
       - name: Queue EAS iOS build and TestFlight submission
         if: ${{ (inputs.mode || 'build') == 'build' && inputs.submit }}
+        env:
+          GOOGLE_MAPS_ANDROID_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_KEY }}
+          GOOGLE_MAPS_IOS_KEY: ${{ secrets.GOOGLE_MAPS_IOS_KEY }}
         run: >-
           npx --yes eas-cli@21.4.0 build
           --platform ios
