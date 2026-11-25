@@ -245,9 +245,10 @@ async function verifyAccountSecurityAndSignOutInBrowser(
   expect(Boolean(current)).toBe(true);
   // The server's own record of how this session signed in.
   expect(current.auth_methods.includes("otp")).toBe(secondFactor === "used");
+  // Other sessions carry a "sign out this device" button; match the badge only.
   await expect(
-    page.getByRole("listitem").filter({ hasText: /此裝置|This device/i }),
-  ).toBeVisible();
+    page.getByRole("listitem").filter({ hasText: /·\s*(此裝置|This device)/ }),
+  ).toHaveCount(1);
 
   // Keep the signed-in cookies elsewhere: after sign-out the page's own cookies
   // are cleared, which says nothing about the session on the server.
