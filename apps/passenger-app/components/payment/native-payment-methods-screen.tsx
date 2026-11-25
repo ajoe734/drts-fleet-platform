@@ -377,12 +377,18 @@ export function NativePaymentMethodsScreen({
           </Text>
           {outstanding.actionUrl &&
             (browser.status === "ready" ? (
-              <Button
-                id="payment-verify"
-                label="繼續付款驗證"
-                disabled={busy}
-                onPress={verify}
-              />
+              <>
+                <Text testID="payment-return-guidance" style={styles.note}>
+                  於驗證網頁完成後點選「返回 App
+                  付款方式」，系統將重新查詢此帳號的綁卡結果。
+                </Text>
+                <Button
+                  id="payment-verify"
+                  label="繼續付款驗證"
+                  disabled={busy}
+                  onPress={verify}
+                />
+              </>
             ) : (
               <Text testID="payment-browser-unavailable" style={styles.note}>
                 外部驗證瀏覽器尚未提供，此步驟略過；請稍後查詢或聯絡客服。

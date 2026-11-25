@@ -360,7 +360,10 @@ function redactAndClassifyCliError(stderr, exitCode = 1, stdout = "") {
     markers.push("GRAPHQL_REQUEST_FAILED");
   }
   if (
-    /Invalid token|Authentication|not logged in|401|403/i.test(combinedText)
+    /Invalid token|Authentication|not logged in|401|403/i.test(combinedText) ||
+    /Either log in with .*eas login.* or set the .*EXPO_TOKEN.* environment variable/i.test(
+      combinedText,
+    )
   ) {
     markers.push("AUTHENTICATION_ERROR");
   }
