@@ -31,11 +31,13 @@ MANIFEST_SCHEMA = "r14-prior-owned-target-manifest-v1"
 STAGE_A_SCHEMA = "r14-stage-a-owned-target-v1"
 DEFAULT_OUTPUT = Path(".artifacts/owned-referral-business-journey/r14-prior-owned-target.json")
 
-MAX_PAGES = 3
-PER_PAGE = 30
-# The job keeps its evidence for 14 days; an older run has nothing to read.
-ARTIFACT_RETENTION_DAYS = 14
+MAX_PAGES = 5
+PER_PAGE = 20
+# GitHub can re-run a run for 30 days after it was created.
+RUN_WINDOW_DAYS = 30
 ARTIFACTS_PER_RUN = 100
+JOBS_PER_RUN = 100
+JOURNEY_JOB = "owned-referral-business-journey"
 MAX_CANDIDATE_RUNS = 15
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_MEMBER_COUNT = 64
@@ -711,7 +713,7 @@ def validate_candidate_artifact(
 def dispatched_runs_path(current_utc_date: str, page: int) -> str:
     since = (
         datetime.strptime(current_utc_date, "%Y-%m-%d")
-        - timedelta(days=ARTIFACT_RETENTION_DAYS)
+        - timedelta(days=RUN_WINDOW_DAYS)
     ).strftime("%Y-%m-%d")
     return (
         f"repos/{REPOSITORY}/actions/workflows/{WORKFLOW_FILE}/runs"
@@ -739,6 +741,38 @@ def read_run_artifacts(run_id: int, fetch_json) -> list[dict]:
         "r14-artifact-listing-item-invalid",
     )
     return items
+
+
+def journey_jobs_path(run_id: int) -> str:
+    return f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs?filter=all&per_page={JOBS_PER_RUN}"
+
+
+def journey_job_ever_passed(run_id: int, fetch_json) -> bool:
+    """Whether any attempt of the run's journey job passed, whatever the run concluded."""
+    listing = fetch_json(journey_jobs_path(run_id))
+    require(
+        isinstance(listing, dict) and isinstance(listing.get("jobs"), list),
+        "r14-job-listing-invalid",
+    )
+    jobs = listing["jobs"]
+    require(
+        listing.get("total_count") == len(jobs)
+        and all(isinstance(job, dict) for job in jobs),
+        "r14-job-listing-incomplete",
+    )
+    return any(
+        job.get("name") == JOURNEY_JOB and job.get("conclusion") == "success"
+        for job in jobs
+    )
+
+
+def _names_this_release(item: dict, run_id: int, definition_sha: str, runtime_sha: str) -> bool:
+    workflow_run = item.get("workflow_run")
+    return (
+        item.get("name") == f"owned-referral-business-{runtime_sha}-{run_id}"
+        and isinstance(workflow_run, dict)
+        and workflow_run.get("head_sha") == definition_sha
+    )
 
 
 def _matching_artifact_id(
@@ -798,14 +832,19 @@ def discover_prior_owned_target(
     candidate_artifacts: list[tuple[int, dict]] = []
     seen_run_ids: set[int] = set()
     seen_artifact_ids: set[int] = set()
+    expected_run_count: int | None = None
 
     for page in range(1, MAX_PAGES + 2):
         listing = fetch_json(dispatched_runs_path(current_utc_date, page))
         require(
-            isinstance(listing, dict) and isinstance(listing.get("workflow_runs"), list),
+            isinstance(listing, dict)
+            and isinstance(listing.get("workflow_runs"), list)
+            and isinstance(listing.get("total_count"), int),
             "r14-run-listing-invalid",
         )
         runs = listing["workflow_runs"]
+        if expected_run_count is None:
+            expected_run_count = listing["total_count"]
         require(page <= MAX_PAGES or not runs, "r14-run-listing-bound-exceeded")
         for run in runs:
             run_id = run.get("id") if isinstance(run, dict) else None
@@ -814,14 +853,29 @@ def discover_prior_owned_target(
                 "r14-run-listing-item-invalid",
             )
             # A run pushed to the next page by a newer dispatch is listed twice.
-            if run_id == current_run_id or run_id in seen_run_ids:
+            if run_id in seen_run_ids:
                 continue
             seen_run_ids.add(run_id)
-            # Only a successful official run can have left a Stage A target. A run
-            # that is still going might, so its artifact is kept and rejected below.
-            if run.get("status") == "completed" and run.get("conclusion") != "success":
+            if run_id == current_run_id:
                 continue
-            for artifact in read_run_artifacts(run_id, fetch_json):
+            artifacts = read_run_artifacts(run_id, fetch_json)
+            if run.get("status") == "completed" and run.get("conclusion") != "success":
+                # Evidence of a journey that itself failed is not a target. One that
+                # passed in a run that failed elsewhere may be, and cannot be read
+                # as an official result; re-running the failed jobs resolves it.
+                require(
+                    not any(
+                        _names_this_release(
+                            item, run_id, expected_definition_sha, expected_runtime_sha
+                        )
+                        for item in artifacts
+                    )
+                    or not journey_job_ever_passed(run_id, fetch_json),
+                    "r14-passed-journey-in-unsuccessful-run",
+                )
+                continue
+            matching: dict[int, dict] = {}
+            for artifact in artifacts:
                 artifact_id = _matching_artifact_id(
                     artifact,
                     run_id,
@@ -835,10 +889,20 @@ def discover_prior_owned_target(
                     "r14-artifact-id-invalid-or-duplicate",
                 )
                 seen_artifact_ids.add(artifact_id)
-                candidate_artifacts.append((run_id, artifact))
+                matching[artifact_id] = artifact
+            if matching:
+                # Each attempt of a re-run job uploads under the same name; the
+                # newest belongs to the attempt that made the run succeed.
+                candidate_artifacts.append((run_id, matching[max(matching)]))
         if len(runs) < PER_PAGE:
             break
 
+    require(
+        expected_run_count is not None
+        and len(seen_run_ids) >= expected_run_count
+        and current_run_id in seen_run_ids,
+        "r14-run-listing-incomplete",
+    )
     require(
         len(candidate_artifacts) <= MAX_CANDIDATE_RUNS,
         "r14-candidate-run-bound-exceeded",

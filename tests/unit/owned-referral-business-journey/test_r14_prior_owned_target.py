@@ -279,10 +279,26 @@ def build_candidate_bundle(
     return metadata, run_detail, archive
 
 
+CURRENT_RUN = {"id": CURRENT_RUN_ID, "status": "in_progress", "conclusion": None}
+
+
+def job_listing(*conclusions: str) -> dict:
+    jobs = [{"name": "ci-integ", "conclusion": "failure"}] + [
+        {"name": reader.JOURNEY_JOB, "conclusion": conclusion}
+        for conclusion in conclusions
+    ]
+    return {"total_count": len(jobs), "jobs": jobs}
+
+
 def listing_map(*bundles: tuple[dict, dict], extra_runs: list[dict] | None = None) -> dict:
     """The run and per-run artifact listings for the given (artifact, run) pairs."""
-    runs = [run for _, run in bundles] + list(extra_runs or [])
-    listings = {reader.dispatched_runs_path(EVALUATED_DATE, 1): {"workflow_runs": runs}}
+    runs = [CURRENT_RUN, *(run for _, run in bundles), *(extra_runs or [])]
+    listings = {
+        reader.dispatched_runs_path(EVALUATED_DATE, 1): {
+            "total_count": len({run["id"] for run in runs}),
+            "workflow_runs": runs,
+        }
+    }
     for metadata, run in bundles:
         listings[reader.run_artifacts_path(run["id"])] = {
             "total_count": 1,
@@ -309,7 +325,10 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
             expected_runtime_sha=RUNTIME_SHA,
             current_run_id=CURRENT_RUN_ID,
             current_utc_date=EVALUATED_DATE,
-            fetch_json=lambda _path: {"workflow_runs": []},
+            fetch_json=lambda _path: {
+                "total_count": 1,
+                "workflow_runs": [CURRENT_RUN],
+            },
             fetch_bytes=lambda _path, _limit: b"",
         )
         self.assertEqual(manifest["schema"], reader.MANIFEST_SCHEMA)
@@ -457,20 +476,16 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
         # can neither stay bounded nor reach a run from the day before.
         self.assertFalse([p for p in requested if "/actions/artifacts?" in p])
         self.assertIn("event=workflow_dispatch", requested[0])
-        self.assertIn("created=%3E%3D2026-11-09", requested[0])
+        self.assertIn("created=%3E%3D2026-10-24", requested[0])
 
-    def test_failed_current_and_repeated_runs_are_not_candidates(self):
+    def test_a_run_whose_journey_failed_and_a_repeated_listing_are_not_candidates(self):
         failed_meta, failed_run, _ = build_candidate_bundle(
             run_id=45000000103,
             artifact_id=14000000103,
             mutate_run=lambda run: run.update(conclusion="failure"),
         )
-        current_meta, current_run, _ = build_candidate_bundle(
-            run_id=CURRENT_RUN_ID,
-            artifact_id=14000000104,
-            mutate_run=lambda run: run.update(status="in_progress", conclusion=None),
-        )
-        listings = listing_map((failed_meta, failed_run), (current_meta, current_run))
+        listings = listing_map((failed_meta, failed_run))
+        listings[reader.journey_jobs_path(45000000103)] = job_listing("failure")
         self.assertEqual(discover(lambda path: listings[path])["decision"], "stageA")
 
         metadata, run_detail, archive = build_candidate_bundle()
@@ -481,6 +496,85 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
         }
         manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
         self.assertEqual(manifest["candidateCount"], 1)
+
+    def test_a_passed_journey_in_an_unsuccessful_run_fails_closed(self):
+        for conclusion in ("failure", "cancelled", "timed_out", "neutral", None):
+            metadata, run_detail, _ = build_candidate_bundle(
+                mutate_run=lambda run, value=conclusion: run.update(conclusion=value)
+            )
+            listings = listing_map((metadata, run_detail))
+            listings[reader.journey_jobs_path(STAGE_A_RUN_ID)] = job_listing(
+                "failure", "success"
+            )
+            with self.subTest(conclusion=conclusion), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-passed-journey-in-unsuccessful-run"
+            ):
+                discover(lambda path, listings=listings: listings[path])
+
+        listings[reader.journey_jobs_path(STAGE_A_RUN_ID)]["total_count"] = 200
+        with self.assertRaisesRegex(
+            reader.R14TargetError, "r14-job-listing-incomplete"
+        ):
+            discover(lambda path: listings[path])
+
+    def test_the_newest_attempt_artifact_of_a_rerun_is_read(self):
+        metadata, run_detail, archive = build_candidate_bundle(artifact_id=14000000109)
+        stale = copy.deepcopy(metadata)
+        stale.update(id=14000000105, digest=f"sha256:{'0' * 64}")
+        listings = listing_map((metadata, run_detail))
+        listings[reader.run_artifacts_path(STAGE_A_RUN_ID)] = {
+            "total_count": 2,
+            "artifacts": [metadata, stale],
+        }
+        base = f"repos/{reader.REPOSITORY}/actions"
+        listings[f"{base}/artifacts/14000000109"] = metadata
+        listings[f"{base}/runs/{STAGE_A_RUN_ID}"] = run_detail
+        manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
+        self.assertEqual(manifest["officialArtifact"]["artifactId"], 14000000109)
+
+    def test_an_incomplete_run_listing_fails_closed(self):
+        metadata, run_detail, _ = build_candidate_bundle()
+        first = reader.dispatched_runs_path(EVALUATED_DATE, 1)
+        for listing in (
+            {"total_count": 5, "workflow_runs": []},
+            {"total_count": 0, "workflow_runs": []},
+            {"total_count": 3, "workflow_runs": [CURRENT_RUN]},
+        ):
+            with self.subTest(listing=listing), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-run-listing-incomplete"
+            ):
+                discover(lambda path, listing=listing: {first: listing}[path])
+
+    def test_the_target_is_found_on_a_later_page(self):
+        metadata, run_detail, archive = build_candidate_bundle()
+        others = [
+            {"id": 100 + n, "status": "completed", "conclusion": "failure"}
+            for n in range(reader.PER_PAGE - 1)
+        ]
+        total = len(others) + 2
+        base = f"repos/{reader.REPOSITORY}/actions"
+        listings = {
+            reader.dispatched_runs_path(EVALUATED_DATE, 1): {
+                "total_count": total,
+                "workflow_runs": [CURRENT_RUN, *others],
+            },
+            reader.dispatched_runs_path(EVALUATED_DATE, 2): {
+                "total_count": total,
+                "workflow_runs": [run_detail],
+            },
+            reader.run_artifacts_path(STAGE_A_RUN_ID): {
+                "total_count": 1,
+                "artifacts": [metadata],
+            },
+            f"{base}/artifacts/{ARTIFACT_ID}": metadata,
+            f"{base}/runs/{STAGE_A_RUN_ID}": run_detail,
+            **{
+                reader.run_artifacts_path(run["id"]): {"total_count": 0, "artifacts": []}
+                for run in others
+            },
+        }
+        manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
+        self.assertEqual(manifest["decision"], "stageB")
 
     def test_unfinished_run_with_a_matching_artifact_fails_closed(self):
         metadata, run_detail, archive = build_candidate_bundle(
@@ -540,6 +634,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
                 return {"total_count": 0, "artifacts": []}
             page = int(path.rsplit("page=", 1)[1])
             return {
+                "total_count": 10_000,
                 "workflow_runs": [
                     {
                         "id": page * 1000 + n,
