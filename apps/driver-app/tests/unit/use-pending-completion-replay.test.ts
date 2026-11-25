@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { act, create } from "react-test-renderer";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DriverTaskRecord } from "@drts/contracts";
 
 import { usePendingCompletionReplay } from "../../lib/use-pending-completion-replay";
+
+type Renderer = ReactTestRenderer & {
+  update(element: React.ReactElement): void;
+};
 
 type HarnessProps = {
   activeTaskId: string | null;
@@ -386,11 +390,13 @@ describe("usePendingCompletionReplay", () => {
       },
       ...overrides,
     };
-    let renderer!: ReturnType<typeof create>;
+    let renderer!: Renderer;
     return {
       mount: () =>
         act(async () => {
-          renderer = create(React.createElement(HookHarness, props));
+          renderer = create(
+            React.createElement(HookHarness, props),
+          ) as Renderer;
           await flushEffects();
         }),
       show: (activeTaskId: string | null) =>
