@@ -70,16 +70,31 @@ export function ConsentGate({
   const [account, setAccount] = useState<PassengerAccount | null>(null);
   const [checked, setChecked] = useState(false);
   const [pending, setPending] = useState(false);
-  const busy = useRef(false);
+  const activeRequest = useRef<symbol | null>(null);
+  const beginRequest = useCallback(() => {
+    if (activeRequest.current !== null) return null;
+    const request = Symbol();
+    activeRequest.current = request;
+    setPending(true);
+    const isCurrent = () => activeRequest.current === request;
+    return {
+      isCurrent,
+      finish() {
+        if (!isCurrent()) return;
+        activeRequest.current = null;
+        setPending(false);
+      },
+    };
+  }, []);
   const [error, setError] = useState("");
   const config = legalConfig(review, trial);
   const load = useCallback(async () => {
-    if (busy.current) return;
-    busy.current = true;
-    setPending(true);
+    const request = beginRequest();
+    if (!request) return;
     setError("");
     try {
       const result = await client.getAccount();
+      if (!request.isCurrent()) return;
       setAccount(result);
       if (
         config.ready &&
@@ -88,13 +103,14 @@ export function ConsentGate({
       )
         onAccepted();
     } catch {
+      if (!request.isCurrent()) return;
       setAccount(null);
       setError(t("consentReadFailed"));
     } finally {
-      busy.current = false;
-      setPending(false);
+      request.finish();
     }
   }, [
+    beginRequest,
     client,
     config.ready,
     config.termsVersion,
@@ -103,20 +119,25 @@ export function ConsentGate({
   ]);
   useEffect(() => {
     void load();
+    return () => {
+      activeRequest.current = null;
+    };
   }, [load]);
   const submit = async () => {
-    if (busy.current || !checked || !config.ready || !account) return;
-    busy.current = true;
-    setPending(true);
+    if (!checked || !config.ready || !account) return;
+    const request = beginRequest();
+    if (!request) return;
     setError("");
     try {
       const current = await client.getAccount();
+      if (!request.isCurrent()) return;
       if (current.drtsPassengerId !== account.drtsPassengerId)
         throw new Error("Session changed");
       const response = await client.updateAccount({
         termsVersion: config.termsVersion,
         privacyVersion: config.privacyVersion,
       });
+      if (!request.isCurrent()) return;
       if (
         response.account.termsVersion !== config.termsVersion ||
         response.account.privacyVersion !== config.privacyVersion ||
@@ -125,25 +146,23 @@ export function ConsentGate({
         throw new Error("Consent not persisted");
       onAccepted();
     } catch {
-      setError(t("consentWriteFailed"));
+      if (request.isCurrent()) setError(t("consentWriteFailed"));
     } finally {
-      busy.current = false;
-      setPending(false);
+      request.finish();
     }
   };
   const refuse = async () => {
-    if (busy.current) return;
-    busy.current = true;
-    setPending(true);
+    const request = beginRequest();
+    if (!request) return;
     try {
       await client.logout();
+      if (!request.isCurrent()) return;
       clearOtpState();
       onRefused();
     } catch {
-      setError(t("failed"));
+      if (request.isCurrent()) setError(t("failed"));
     } finally {
-      busy.current = false;
-      setPending(false);
+      request.finish();
     }
   };
   return (

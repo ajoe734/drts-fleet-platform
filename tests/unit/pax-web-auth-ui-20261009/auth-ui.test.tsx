@@ -15,6 +15,7 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 import LoginPage from "../../../apps/passenger-app-web/app/login/page";
 import AccountPage from "../../../apps/passenger-app-web/app/account/page";
 import CallbackPage from "../../../apps/passenger-app-web/app/auth/callback/[provider]/page";
+import { ConsentGate } from "../../../apps/passenger-app-web/components/auth/consent-gate";
 import { createFixture, origin } from "./fixture";
 
 const navigation = vi.hoisted(() => ({
@@ -339,6 +340,81 @@ describe("login capabilities and actual OTP components", () => {
 });
 
 describe("callback and recoverable consent", () => {
+  it.each(["load", "submit"] as const)(
+    "leaving consent while the %s account read is pending cannot navigate or write consent",
+    async (stage) => {
+      const account = await f.signIn();
+      if (stage === "load") {
+        const stored = f.accountStore.accounts.get(account.drtsPassengerId)!;
+        stored.termsVersion = "terms-2026";
+        stored.privacyVersion = "privacy-2026";
+      }
+      const held = f.holdNextAccountRead(stage === "submit" ? 1 : 0);
+      const reads = vi.spyOn(f.client, "getAccount");
+      const writes = vi.spyOn(f.client, "updateAccount");
+      const gate = render(
+        <ConsentGate
+          client={f.client}
+          onAccepted={() => navigation.push("/")}
+          onRefused={vi.fn()}
+        />,
+      );
+      if (stage === "submit") {
+        const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+        await waitFor(() => expect(checkbox.disabled).toBe(false));
+        fireEvent.click(checkbox);
+        click("繼續");
+      }
+      await held.started;
+      gate.unmount();
+      await act(async () => {
+        held.release();
+        await reads.mock.results.at(-1)!.value;
+      });
+      expect(writes).not.toHaveBeenCalled();
+      expect(navigation.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it("a late logout response does not redirect or clear the next login's OTP state", async () => {
+    await f.signIn();
+    let release!: () => void;
+    const acknowledgement = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const logout = f.client.logout;
+    const pending = vi
+      .spyOn(f.client, "logout")
+      .mockImplementation(async () => {
+        await logout();
+        await acknowledgement;
+      });
+    const gate = render(
+      <ConsentGate
+        client={f.client}
+        onAccepted={vi.fn()}
+        onRefused={() => navigation.push("/login")}
+      />,
+    );
+    await waitFor(() =>
+      expect((button("不同意並登出") as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    click("不同意並登出");
+    await waitFor(() => expect(f.jar.has("pax_session")).toBe(false));
+    gate.unmount();
+    sessionStorage.setItem("pax.otp.next.email.login", "new challenge");
+    await act(async () => {
+      release();
+      await pending.mock.results[0]!.value;
+    });
+    expect(sessionStorage.getItem("pax.otp.next.email.login")).toBe(
+      "new challenge",
+    );
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
   async function callback(
     provider: "google" | "facebook" | "line",
     purpose: "login" | "link" = "login",

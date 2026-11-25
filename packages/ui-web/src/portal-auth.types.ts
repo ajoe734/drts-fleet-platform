@@ -50,6 +50,7 @@ export interface PortalAuthMessages {
   copyFailed: string;
   download: string;
   dismissRecoveryCodes: string;
+  regenerateRecoveryCodes?: string;
   sessionsTitle: string;
   sessionsEmpty: string;
   currentSessionBadge: string;
@@ -74,6 +75,8 @@ export interface PortalAuthEndpoints {
   totpEnroll: string;
   /** `POST`, e.g. `/api/auth/tenant/mfa/totp/confirm`. */
   totpConfirm: string;
+  /** `POST`, e.g. `/api/auth/agency/mfa/totp/recovery-codes/regenerate`. */
+  totpRegenerateRecoveryCodes?: string;
   /** `GET`, e.g. `/api/auth/sessions`. */
   sessions: string;
   /** Base such as `/api/auth/sessions`; the panel appends `/{encoded sid}/revoke`. */
@@ -130,4 +133,5 @@ export interface PortalAccountSecurityPanelProps extends PortalAuthBaseProps {
   sessionRevokeBase: string;
   logoutAllEndpoint: string;
   totpSetupHref: string;
+  totpRegenerateRecoveryCodesEndpoint?: string;
 }

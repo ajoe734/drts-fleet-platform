@@ -182,6 +182,12 @@ async function matchTotpStep(
 export class TotpService {
   constructor(private readonly repository: TotpCredentialRepository) {}
 
+  /** Whether login currently demands a second factor for this principal. */
+  async hasConfirmedCredential(principalId: string): Promise<boolean> {
+    const credential = await this.repository.findCredential(principalId);
+    return Boolean(credential?.confirmedAt);
+  }
+
   async enroll(
     principalId: string,
     accountLabel: string,

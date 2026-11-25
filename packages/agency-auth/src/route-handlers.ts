@@ -25,6 +25,7 @@ import {
   handleRevokeSession,
   handleTotpConfirm,
   handleTotpEnroll,
+  handleTotpRegenerateRecoveryCodes,
   type PortalCredentialConfig,
 } from "@drts/tenant-auth/credential-handlers";
 
@@ -422,9 +423,16 @@ async function postAuth(request: NextRequest, context: AuthRouteContext) {
   if (actionPath === "agency/mfa/totp/confirm") {
     return handleTotpConfirm(request, agencyCredentialConfig());
   }
+  if (actionPath === "agency/mfa/totp/recovery-codes/regenerate") {
+    return handleTotpRegenerateRecoveryCodes(request, agencyCredentialConfig());
+  }
   const revokeMatch = actionPath.match(/^sessions\/([^/]+)\/revoke$/);
   if (revokeMatch && revokeMatch[1]) {
-    return handleRevokeSession(request, revokeMatch[1], agencyCredentialConfig());
+    return handleRevokeSession(
+      request,
+      revokeMatch[1],
+      agencyCredentialConfig(),
+    );
   }
 
   // PWD-LOGIN-004 "set a password" branch (SA/SD §5), agency realm
@@ -437,8 +445,7 @@ async function postAuth(request: NextRequest, context: AuthRouteContext) {
       typeof body?.invitationToken === "string"
         ? body.invitationToken.trim()
         : "";
-    const password =
-      typeof body?.password === "string" ? body.password : "";
+    const password = typeof body?.password === "string" ? body.password : "";
     if (!invitationToken || invitationToken.length > 512 || !password) {
       return NextResponse.json(
         {

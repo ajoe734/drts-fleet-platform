@@ -761,6 +761,20 @@
         "Existing delivery-context rows and columns are preserved; only the tenant_id NOT NULL constraint is relaxed, as V0116 already did for mobility.phase1_order_first_party_notification_routes.",
         "mobility.phase1_first_party_notification_sequences has order_id as PK and FK to mobility.phase1_order_first_party_notification_routes, next_sequence >= 1; allocation is one atomic statement shared with the V0104 partner counter, and an order holding a partner counter never allocates here."
       ]
+    },
+    {
+      "task_id": "PAX-RATING-CANONICAL-TRIP-LOOKUP-20261123",
+      "version": "V0144",
+      "migration_filename": "V0144__driver_task_order_lookup_index.sql",
+      "domain": "driver_task_order_lookup",
+      "target_schema": "ops",
+      "primary_tables": [],
+      "modifies_existing_tables": ["ops.phase1_driver_tasks"],
+      "referenced_tables": [],
+      "description": "Adds a non-unique (order_id, status) index to the existing V0011 driver task table so rating search, detail and readback resolve an order's completed task without scanning every task row.",
+      "table_invariants": [
+        "CREATE INDEX IF NOT EXISTS only; no column, constraint or row of ops.phase1_driver_tasks changes."
+      ]
     }
   ],
   "fleet_statement_decision_allocations": [

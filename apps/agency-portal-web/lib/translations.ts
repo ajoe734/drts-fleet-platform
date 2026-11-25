@@ -370,6 +370,7 @@ const en = {
   "accountSecurity.title": "Account security",
   "accountSecurity.totpSectionTitle": "Two-factor authentication",
   "accountSecurity.totpCta": "Set up two-factor authentication",
+  "accountSecurity.regenerateRecoveryCodes": "Regenerate recovery codes",
   "accountSecurity.passwordSectionTitle": "Password",
   "accountSecurity.passwordSectionBody":
     "To change your password, request a reset link by email on the forgot-password page.",
@@ -739,6 +740,7 @@ const zh: Record<TranslationKey, string> = {
   "accountSecurity.title": "帳號安全",
   "accountSecurity.totpSectionTitle": "兩步驟驗證",
   "accountSecurity.totpCta": "設定兩步驟驗證",
+  "accountSecurity.regenerateRecoveryCodes": "重新產生復原碼",
   "accountSecurity.passwordSectionTitle": "密碼",
   "accountSecurity.passwordSectionBody":
     "若要變更密碼，請至忘記密碼頁申請以電子郵件寄送重設連結。",

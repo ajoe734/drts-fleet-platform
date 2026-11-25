@@ -20,6 +20,7 @@ export interface PassengerAccountRatingHook {
 export interface PassengerRideRatingContext extends PassengerAccountRatingHook {
   token: PassengerRideAccessToken;
   tokenDigest: string;
+  assignmentId?: string | null;
 }
 
 export interface TripOperationalRecordQueryExecutor {
@@ -537,6 +538,9 @@ type PassengerTripRatingRow = QueryResultRow & {
   rating_id: string;
   order_id: string;
   trip_id: string;
+  canonical_trip_id?: string | null;
+  completed_task_id?: string | null;
+  operational_record_trip_id?: string | null;
   driver_id: string;
   passenger_subject_ref: string;
   score: 1 | 2 | 3 | 4 | 5;
@@ -575,6 +579,7 @@ type PassengerRatingReviewListRow = QueryResultRow & {
   rating_id: string;
   order_id: string;
   trip_id: string;
+  canonical_trip_id?: string | null;
   driver_id: string;
   driver_display_name: string | null;
   score: PassengerTripRatingRecord["score"];
@@ -1908,6 +1913,89 @@ export class MultiTaxiRepository {
     }
   }
 
+  private resolvedRatingTripIdSql(ratingAlias = "r"): string {
+    return `COALESCE(
+      (
+        SELECT dt.task_id
+        FROM ops.phase1_driver_tasks dt
+        WHERE dt.order_id = ${ratingAlias}.order_id
+          AND dt.status = 'completed'
+          AND (dt.assignment_id = ${ratingAlias}.trip_id OR dt.task_id = ${ratingAlias}.trip_id)
+          AND (
+            NULLIF(dt.record->>'driverId', '') IS NULL
+            OR dt.record->>'driverId' = ${ratingAlias}.driver_id
+          )
+        ORDER BY
+          dt.updated_at DESC,
+          dt.task_id ASC
+        LIMIT 1
+      ),
+      (
+        SELECT NULLIF(mtr.trip_id, '')
+        FROM reporting.multi_taxi_trip_operational_records mtr
+        WHERE mtr.order_id = ${ratingAlias}.order_id
+          AND (
+            mtr.assignment_id = ${ratingAlias}.trip_id
+            OR mtr.trip_id = ${ratingAlias}.trip_id
+          )
+          AND (
+            NULLIF(mtr.record->>'driverId', '') IS NULL
+            OR mtr.record->>'driverId' = ${ratingAlias}.driver_id
+          )
+        ORDER BY
+          mtr.generated_at DESC,
+          mtr.record_id ASC
+        LIMIT 1
+      ),
+      ${ratingAlias}.trip_id
+    )`;
+  }
+
+  private ratingTripOrOrderSearchClause(
+    ratingAlias: string,
+    orderAlias: string,
+    searchParam: string,
+  ): string {
+    return `(
+        ${ratingAlias}.trip_id ILIKE ${searchParam} ESCAPE '\\'
+        OR ${ratingAlias}.order_id ILIKE ${searchParam} ESCAPE '\\'
+        OR COALESCE(${orderAlias}.order_no, '') ILIKE ${searchParam} ESCAPE '\\'
+        OR EXISTS (
+          SELECT 1
+          FROM ops.phase1_driver_tasks dt
+          WHERE dt.order_id = ${ratingAlias}.order_id
+            AND dt.status = 'completed'
+            AND (dt.assignment_id = ${ratingAlias}.trip_id OR dt.task_id = ${ratingAlias}.trip_id)
+            AND (
+              NULLIF(dt.record->>'driverId', '') IS NULL
+              OR dt.record->>'driverId' = ${ratingAlias}.driver_id
+            )
+            AND (
+              dt.task_id ILIKE ${searchParam} ESCAPE '\\'
+              OR dt.assignment_id ILIKE ${searchParam} ESCAPE '\\'
+            )
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM reporting.multi_taxi_trip_operational_records mtr
+          WHERE mtr.order_id = ${ratingAlias}.order_id
+            AND (
+              mtr.assignment_id = ${ratingAlias}.trip_id
+              OR mtr.trip_id = ${ratingAlias}.trip_id
+            )
+            AND (
+              NULLIF(mtr.record->>'driverId', '') IS NULL
+              OR mtr.record->>'driverId' = ${ratingAlias}.driver_id
+            )
+            AND (
+              mtr.trip_id ILIKE ${searchParam} ESCAPE '\\'
+              OR COALESCE(mtr.assignment_id, '') ILIKE ${searchParam} ESCAPE '\\'
+              OR COALESCE(mtr.order_no, '') ILIKE ${searchParam} ESCAPE '\\'
+            )
+        )
+      )`;
+  }
+
   async findPassengerRating(orderId: string, passengerSubjectRef: string) {
     if (!this.isEnabled()) {
       return null;
@@ -1957,11 +2045,7 @@ export class MultiTaxiRepository {
     }
     if (query.tripOrOrder) {
       const search = bind(`%${this.escapeLike(query.tripOrOrder)}%`);
-      clauses.push(`(
-        r.trip_id ILIKE ${search} ESCAPE '\\'
-        OR r.order_id ILIKE ${search} ESCAPE '\\'
-        OR COALESCE(o.order_no, '') ILIKE ${search} ESCAPE '\\'
-      )`);
+      clauses.push(this.ratingTripOrOrderSearchClause("r", "o", search));
     }
     if (query.from) {
       clauses.push(
@@ -1995,7 +2079,7 @@ export class MultiTaxiRepository {
           SELECT
             r.rating_id,
             r.order_id,
-            r.trip_id,
+            ${this.resolvedRatingTripIdSql("r")} AS trip_id,
             r.driver_id,
             d.full_name AS driver_display_name,
             r.score,
@@ -2037,6 +2121,7 @@ export class MultiTaxiRepository {
         `
           SELECT
             r.*,
+            ${this.resolvedRatingTripIdSql("r")} AS canonical_trip_id,
             o.order_no,
             d.full_name AS driver_display_name
           FROM ops.passenger_trip_ratings r
@@ -2265,7 +2350,7 @@ export class MultiTaxiRepository {
           rating.updatedAt,
         ],
       );
-      const storedRating = this.mapPassengerRating(ratingResult.rows[0]!);
+      let storedRating = this.mapPassengerRating(ratingResult.rows[0]!);
       if (accountHook || rideContext) {
         if (
           storedRating.score !== rating.score ||
@@ -2281,9 +2366,63 @@ export class MultiTaxiRepository {
           );
         }
         const isNew = storedRating.ratingId === rating.ratingId;
+        const expectedAssignmentId =
+          typeof rideContext?.assignmentId === "string" &&
+          rideContext.assignmentId.trim()
+            ? rideContext.assignmentId.trim()
+            : null;
+        let storedTripMatchesExpected =
+          storedRating.tripId === rating.tripId ||
+          (expectedAssignmentId !== null &&
+            storedRating.tripId === expectedAssignmentId);
+        let canonicalReplayTripId: string | null =
+          storedTripMatchesExpected &&
+          expectedAssignmentId !== null &&
+          storedRating.tripId === expectedAssignmentId &&
+          rating.tripId !== expectedAssignmentId
+            ? rating.tripId
+            : null;
+        if (!isNew && storedRating.driverId === rating.driverId) {
+          const replayTask = await client.query<{
+            completed_at: string | null;
+            database_now: Date | string;
+            task_id?: string | null;
+            assignment_id?: string | null;
+          }>(
+            `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now, task_id, assignment_id
+             FROM ops.phase1_driver_tasks WHERE order_id = $1 AND (assignment_id = $2 OR task_id = $2)
+               AND status = 'completed' AND record->>'driverId' = $3`,
+            [rating.orderId, rating.tripId, rating.driverId],
+          );
+          const matchedTask = replayTask.rows[0];
+          const matchedTaskId =
+            typeof matchedTask?.task_id === "string" &&
+            matchedTask.task_id.trim()
+              ? matchedTask.task_id.trim()
+              : null;
+          const matchedAssignmentId =
+            typeof matchedTask?.assignment_id === "string" &&
+            matchedTask.assignment_id.trim()
+              ? matchedTask.assignment_id.trim()
+              : null;
+          if (
+            matchedTask &&
+            (storedRating.tripId === matchedTaskId ||
+              storedRating.tripId === matchedAssignmentId ||
+              (!matchedTaskId &&
+                !matchedAssignmentId &&
+                storedTripMatchesExpected))
+          ) {
+            storedTripMatchesExpected = true;
+            canonicalReplayTripId =
+              matchedTaskId ?? canonicalReplayTripId ?? rating.tripId;
+          }
+        }
+        // An account resubmission stays idempotent even when an old row cannot
+        // be traced to the current assignment; it returns the stored rating.
         if (
           rideContext &&
-          (storedRating.tripId !== rating.tripId ||
+          (!storedTripMatchesExpected ||
             storedRating.driverId !== rating.driverId)
         )
           throw new ApiRequestError(
@@ -2295,9 +2434,11 @@ export class MultiTaxiRepository {
           const task = await client.query<{
             completed_at: string | null;
             database_now: Date | string;
+            task_id?: string | null;
+            assignment_id?: string | null;
           }>(
-            `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
-             FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+            `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now, task_id, assignment_id
+             FROM ops.phase1_driver_tasks WHERE order_id = $1 AND (assignment_id = $2 OR task_id = $2)
                AND status = 'completed' AND record->>'driverId' = $3 FOR SHARE`,
             [rating.orderId, rating.tripId, rating.driverId],
           );
@@ -2307,6 +2448,17 @@ export class MultiTaxiRepository {
               "PASSENGER_RATING_WINDOW_CLOSED",
               "Ratings require an actual completion within 24 hours.",
             );
+          }
+          const completedTaskId =
+            typeof task.rows[0]?.task_id === "string" &&
+            task.rows[0].task_id.trim()
+              ? task.rows[0].task_id.trim()
+              : null;
+          if (completedTaskId && completedTaskId !== storedRating.tripId) {
+            storedRating = {
+              ...storedRating,
+              tripId: completedTaskId,
+            };
           }
           const paid = await client.query(
             `SELECT payment_id FROM billing.multi_taxi_passenger_payments
@@ -2319,6 +2471,14 @@ export class MultiTaxiRepository {
               "PASSENGER_RATING_PAYMENT_REQUIRED",
               "The completed trip must be paid.",
             );
+        } else if (
+          canonicalReplayTripId &&
+          canonicalReplayTripId !== storedRating.tripId
+        ) {
+          storedRating = {
+            ...storedRating,
+            tripId: canonicalReplayTripId,
+          };
         }
         await (accountHook ?? rideContext)!.execute(
           client,
@@ -2450,11 +2610,11 @@ export class MultiTaxiRepository {
 
       const updatedRatingResult = await client.query<PassengerTripRatingRow>(
         `
-          UPDATE ops.passenger_trip_ratings
+          UPDATE ops.passenger_trip_ratings AS r
           SET status = 'invalidated',
               updated_at = $2
-          WHERE rating_id = $1
-          RETURNING *
+          WHERE r.rating_id = $1
+          RETURNING r.*, ${this.resolvedRatingTripIdSql("r")} AS canonical_trip_id
         `,
         [input.ratingId, input.invalidatedAt],
       );
@@ -2546,12 +2706,56 @@ export class MultiTaxiRepository {
     }
   }
 
-  private passengerRatingWindow(row?: {
-    completed_at: string | null;
-    database_now: Date | string;
-  }) {
+  private passengerRatingWindow(
+    row?: {
+      completed_at: string | null;
+      database_now: Date | string;
+      task_id?: string | null;
+      assignment_id?: string | null;
+      driver_id?: string | null;
+    },
+    expected?: {
+      assignmentId?: string | null;
+      driverId?: string | null;
+    },
+  ) {
     const completedAt = Date.parse(row?.completed_at ?? "");
     const databaseNow = new Date(row?.database_now ?? NaN).getTime();
+    const rawTaskId =
+      typeof row?.task_id === "string" && row.task_id.trim()
+        ? row.task_id.trim()
+        : undefined;
+    const rawAssignmentId =
+      typeof row?.assignment_id === "string" && row.assignment_id.trim()
+        ? row.assignment_id.trim()
+        : undefined;
+    const rawDriverId =
+      typeof row?.driver_id === "string" && row.driver_id.trim()
+        ? row.driver_id.trim()
+        : undefined;
+    const expectedAssignmentId =
+      typeof expected?.assignmentId === "string" && expected.assignmentId.trim()
+        ? expected.assignmentId.trim()
+        : undefined;
+    const expectedDriverId =
+      typeof expected?.driverId === "string" && expected.driverId.trim()
+        ? expected.driverId.trim()
+        : undefined;
+    const matchesExpectedAssignment =
+      !expectedAssignmentId ||
+      (!rawAssignmentId && !rawTaskId) ||
+      rawAssignmentId === expectedAssignmentId ||
+      rawTaskId === expectedAssignmentId;
+    const matchesExpectedDriver =
+      !expectedDriverId || !rawDriverId || rawDriverId === expectedDriverId;
+    const identityMatches = matchesExpectedAssignment && matchesExpectedDriver;
+    const taskId = identityMatches ? rawTaskId : undefined;
+    const assignmentId = identityMatches
+      ? (rawAssignmentId ?? expectedAssignmentId)
+      : undefined;
+    const driverId = identityMatches
+      ? (rawDriverId ?? expectedDriverId)
+      : undefined;
     return {
       completedAt: Number.isFinite(completedAt)
         ? new Date(completedAt).toISOString()
@@ -2561,6 +2765,9 @@ export class MultiTaxiRepository {
         Number.isFinite(databaseNow) &&
         completedAt <= databaseNow &&
         databaseNow - completedAt <= 24 * 60 * 60 * 1000,
+      ...(taskId ? { taskId } : {}),
+      ...(assignmentId ? { assignmentId } : {}),
+      ...(driverId ? { driverId } : {}),
     };
   }
 
@@ -2573,13 +2780,19 @@ export class MultiTaxiRepository {
     const result = await this.databaseService!.query<{
       completed_at: string | null;
       database_now: Date | string;
+      task_id?: string | null;
+      assignment_id?: string | null;
+      driver_id?: string | null;
     }>(
-      `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
-       FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+      `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now, task_id, assignment_id
+       FROM ops.phase1_driver_tasks WHERE order_id = $1 AND (assignment_id = $2 OR task_id = $2)
          AND status = 'completed' AND record->>'driverId' = $3`,
       [orderId, assignmentId, driverId],
     );
-    return this.passengerRatingWindow(result.rows[0]);
+    return this.passengerRatingWindow(result.rows[0], {
+      assignmentId,
+      driverId,
+    });
   }
 
   async findBookedPassengerQuote(
@@ -2737,10 +2950,18 @@ export class MultiTaxiRepository {
   private mapPassengerRating(
     row: PassengerTripRatingRow,
   ): PassengerTripRatingRecord {
+    const resolvedTripId =
+      (typeof row.canonical_trip_id === "string" &&
+        row.canonical_trip_id.trim()) ||
+      (typeof row.completed_task_id === "string" &&
+        row.completed_task_id.trim()) ||
+      (typeof row.operational_record_trip_id === "string" &&
+        row.operational_record_trip_id.trim()) ||
+      row.trip_id;
     return {
       ratingId: row.rating_id,
       orderId: row.order_id,
-      tripId: row.trip_id,
+      tripId: resolvedTripId,
       driverId: row.driver_id,
       passengerSubjectRef: row.passenger_subject_ref,
       score: row.score,
@@ -2755,10 +2976,14 @@ export class MultiTaxiRepository {
   private mapPassengerRatingReviewRow(
     row: PassengerRatingReviewListRow,
   ): PassengerRatingReviewListItem {
+    const resolvedTripId =
+      (typeof row.canonical_trip_id === "string" &&
+        row.canonical_trip_id.trim()) ||
+      row.trip_id;
     return {
       ratingId: row.rating_id,
       orderId: row.order_id,
-      tripId: row.trip_id,
+      tripId: resolvedTripId,
       driverId: row.driver_id,
       driverDisplayName: row.driver_display_name,
       score: row.score,
@@ -3385,6 +3610,35 @@ export class MultiTaxiRepository {
 
   hasDurableTripOperationalRecordAuthority(): boolean {
     return this.isEnabled() || this.inMemoryTripOperationalRecords.size > 0;
+  }
+
+  findInMemoryTripOperationalRecordByOrder(
+    orderId: string,
+    assignmentOrTripId?: string | null,
+    driverId?: string | null,
+  ): StoredMultiTaxiTripOperationalRecord | null {
+    const candidate = this.inMemoryTripOperationalRecords.get(orderId);
+    if (!candidate) {
+      return null;
+    }
+    if (
+      driverId &&
+      candidate.driverId &&
+      candidate.driverId.trim() !== driverId.trim()
+    ) {
+      return null;
+    }
+    if (assignmentOrTripId) {
+      const normalizedTarget = assignmentOrTripId.trim();
+      if (
+        normalizedTarget &&
+        candidate.assignmentId !== normalizedTarget &&
+        candidate.tripId !== normalizedTarget
+      ) {
+        return null;
+      }
+    }
+    return structuredClone(candidate);
   }
 
   async resolveTripTelemetryRouteInTransaction(
