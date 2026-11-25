@@ -132,6 +132,7 @@ describe("driver native build", () => {
 
   const BUILD_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
   const BUILD_PAGE = `https://expo.dev/accounts/a/projects/p/builds/${BUILD_ID}`;
+  const DEVICE = "00008030-001A2B3C4D5E6F70";
   const MAP_KEY = `AIza${"k".repeat(35)}`;
 
   function runBuild(result: unknown, exitCode = 0, artifact = "PK-app") {
@@ -140,7 +141,7 @@ describe("driver native build", () => {
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
     fs.writeFileSync(
       path.join(bin, "npx"),
-      `#!/usr/bin/env bash\necho "Build details: ${BUILD_PAGE} key ${MAP_KEY}" >&2\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "Build details: ${BUILD_PAGE}" "Apple Team ABCDE12345 (Example Company)" "- ${DEVICE} iPhone" "Error: ${BUILD_PAGE} key ${MAP_KEY} device ${DEVICE}" >&2\ncat "${dir}/result.json"\nexit ${exitCode}\n`,
       { mode: 0o755 },
     );
     fs.writeFileSync(
@@ -162,7 +163,13 @@ describe("driver native build", () => {
       },
     });
     const output = `${outcome.stdout}${outcome.stderr}`;
-    for (const secret of [BUILD_ID, "expo.dev", MAP_KEY])
+    for (const secret of [
+      BUILD_ID,
+      "expo.dev",
+      MAP_KEY,
+      "Example Company",
+      DEVICE,
+    ])
       expect(output).not.toContain(secret);
     return { status: outcome.status, output };
   }
@@ -249,6 +256,12 @@ describe("driver native build", () => {
   it("prints a redacted reason when EAS returns no build", () => {
     const none = runBuild([], 1);
     expect(none.status).not.toBe(0);
-    expect(none.output).toContain("[URL] key [REDACTED_MAP_KEY]");
+    expect(none.output).toContain(
+      "Error: [URL] key [REDACTED_MAP_KEY] device [DEVICE]",
+    );
+  });
+
+  it("fails with the CLI's own code even when it reports a finished build", () => {
+    expect(runBuild(built({}), 7).status).toBe(7);
   });
 });
