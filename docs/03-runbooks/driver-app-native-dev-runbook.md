@@ -311,6 +311,20 @@ For current dev UAT, the `api_url` is
 replace it deliberately with the approved production direct API origin; never
 use an IAP-protected control-plane URL.
 
+The same workflow builds Android: set `platform` to `android` (no
+`development-simulator`, no `submit`). Leave `api_url` empty to use the live
+environment variable for the profile; the URLs on this page are historical.
+It needs the `GOOGLE_MAPS_ANDROID_KEY` and `GOOGLE_MAPS_IOS_KEY` Actions
+secrets, and it bundles the app on the runner before using EAS capacity.
+
+The repository's logs are public and an internal build can be downloaded by
+anyone who knows its page, so a build prints only its status, version, commit,
+size and hash. Open the Expo dashboard for the build page. Keep "Unauthenticated
+access to internal builds" off in the EAS project settings. Until it is off, do
+not look a new build up with `lookup-existing`: the build id is a workflow input
+and the id is enough to reach the page. A cancelled or timed-out run does not
+stop the build on EAS, so check the dashboard before starting another.
+
 The workflow verifies `/health` before consuming EAS capacity, injects the
 selected API origin and EAS project ID into an ephemeral checkout, validates
 the resolved EAS config, and then queues the paid build. With `submit=true`,
