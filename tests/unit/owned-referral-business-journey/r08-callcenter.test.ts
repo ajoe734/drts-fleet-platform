@@ -9,6 +9,7 @@ import {
 } from "../../e2e/owned-referral-business-journey/r08-callcenter";
 import {
   object,
+  OPS_EVENT_STREAM_PATH,
   type CallResult,
   type ObjectData,
 } from "../../e2e/owned-referral-business-journey/protocol";
@@ -829,6 +830,8 @@ async function fullHarness(fault = "") {
     [];
   let unownedForwarded = 0;
   let unownedFulfilled = 0;
+  let releaseInFlightGet: (() => void) | undefined;
+  let inFlightGet: Promise<void> | undefined;
   const identity = h.proof.identity;
   const session = h.session;
   const callback = h.callback;
@@ -1081,6 +1084,26 @@ async function fullHarness(fault = "") {
     }
     async textContent() {
       if (this.form === "active-card") {
+        if (fault === "reloaded UI error with a GET in flight") {
+          const held = new Promise<void>((resolve) => {
+            releaseInFlightGet = resolve;
+          });
+          inFlightGet = routeHandler({
+            request: () => ({
+              url: () => `${ORIGIN}${BASE}/incidents`,
+              method: () => "GET",
+              postData: () => null,
+              headers: () => ({}),
+            }),
+            fetch: async () => {
+              await held;
+              return response(`${ORIGIN}${BASE}/incidents`, { items: [] });
+            },
+            fulfill: async () => undefined,
+            abort: async () => undefined,
+          });
+          throw new Error("SIM real UI failure");
+        }
         if (!selectedSession) return "";
         const shownCallId =
           fault === "reloaded UI wrong card call"
@@ -1330,6 +1353,8 @@ async function fullHarness(fault = "") {
     getByRole: (_role: string, options: { name: RegExp }) =>
       new Locator(options.name.source),
     close: async () => {
+      releaseInFlightGet?.();
+      await inFlightGet;
       stopped = true;
     },
   };
@@ -1627,6 +1652,33 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
     });
     expect(forward).toHaveBeenCalledExactlyOnceWith();
     await f.finish("completed");
+  });
+  it("ends the Ops shell's event stream without fetching it or invalidating the refresh", async () => {
+    const f = await fullHarness();
+    await f.run.run();
+    const fulfill = vi.fn(async () => undefined);
+    const fetch = vi.fn();
+    const abort = vi.fn();
+    await f.route()({
+      request: () => ({
+        url: () => `${ORIGIN}${OPS_EVENT_STREAM_PATH}`,
+        method: () => "GET",
+      }),
+      fulfill,
+      fetch,
+      abort,
+    });
+    expect(fulfill).toHaveBeenCalledExactlyOnceWith({ status: 204 });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(abort).not.toHaveBeenCalled();
+    expect(f.run.snapshot().uiRefresh).toMatchObject({ status: "verified" });
+    expect((await f.finish("completed")).wholeRunPassed).toBe(true);
+  });
+  it("reports the failure that stopped the run, not the requests its stop cancelled", async () => {
+    const f = await fullHarness("reloaded UI error with a GET in flight");
+    await expect(f.run.run()).rejects.toThrow("SIM real UI failure");
+    expect(f.run.snapshot().uiRefresh).toBeUndefined();
+    expect((await f.finish("runner-interrupted")).wholeRunPassed).toBe(false);
   });
   it("cleanup ACK loss stays unresolved and is never written twice", async () => {
     const f = await fullHarness("cleanup ACK lost");

@@ -18,6 +18,7 @@ import {
   records,
   JourneyFailure,
   object,
+  OPS_EVENT_STREAM_PATH,
   requireFact,
   type CallResult,
   type ObjectData,
@@ -884,6 +885,8 @@ export class R08ExistingFull {
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin !== this.ports.origin) return route.continue();
+    if (request.method() === "GET" && url.pathname === OPS_EVENT_STREAM_PATH)
+      return route.fulfill({ status: 204 }).catch(() => undefined);
     try {
       await this.ports.finalizer.guardOperation(async (assertOpen) => {
         requireFact(!this.closed, "r08-ui-command-closed");
@@ -1471,6 +1474,9 @@ export class R08ExistingFull {
       this.state.result = "verified";
       await this.save();
     } catch (error) {
+      // A failed route also invalidates the refresh, so report what failed
+      // first. Read it before stop(), which fails every request in flight.
+      const cause = this.routeError ?? error;
       await this.stop();
       if (this.helper?.snapshot().replay === "verified") {
         delete this.state.uiRefresh;
@@ -1478,7 +1484,7 @@ export class R08ExistingFull {
       }
       this.state.result = "failed";
       await this.save();
-      throw error;
+      throw cause;
     } finally {
       await this.stop();
     }
