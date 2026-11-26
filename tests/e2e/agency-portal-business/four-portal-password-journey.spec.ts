@@ -287,6 +287,13 @@ async function verifyAccountSecurityAndSignOutInBrowser(
   const logoutResponse = await logoutResponsePromise;
   const logoutStatus = logoutResponse.status();
   expect(logoutStatus).toBe(200);
+  // After logout-all the page reloads itself (portal-auth revokeAll), and the
+  // signed-out reload is redirected to /login?redirect_uri=…. Wait for that
+  // to land: a goto issued while it is still under way is aborted with
+  // "interrupted by another navigation" (CI, 2026-11-26).
+  await page.waitForURL((url) => url.pathname === "/login", {
+    timeout: 120_000,
+  });
   const afterLogout = await page.request.get(
     `${portalOrigin}/api/auth/sessions`,
   );
@@ -363,6 +370,36 @@ async function requestAndConfirmPasswordResetInBrowser(
   };
 }
 
+const WARM_PAGES = [
+  "/login",
+  "/invite",
+  "/forgot-password",
+  "/reset-password",
+  "/account/security",
+  "/account/security/totp",
+  "/",
+];
+
+async function warmPortalPages() {
+  for (const origin of [
+    tenantOrigin,
+    enterpriseOrigin,
+    agencyOrigin,
+    fleetOrigin,
+  ]) {
+    // The dev servers listen on 127.0.0.1; skip localhost's IPv6 attempt.
+    const base = origin.replace("//localhost:", "//127.0.0.1:");
+    for (const page of WARM_PAGES) {
+      // Status does not matter (an unauthenticated page may redirect or
+      // 404); the request only has to make the server compile the route.
+      await fetch(`${base}${page}`, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(120_000),
+      }).catch(() => undefined);
+    }
+  }
+}
+
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
 test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, forgot/reset password and re-login rehearsal", () => {
@@ -381,6 +418,12 @@ test.describe("Four-portal hosted invitation, password setup, TOTP MFA, logout, 
       }) + "\n",
       "utf8",
     );
+    // `next dev` compiles a page on its first request. Compile the pages this
+    // journey opens now, so a slow compile on a loaded runner is not charged
+    // to a step's own wait halfway through the agency portal.
+    test.setTimeout(10 * 60_000);
+    await warmPortalPages();
+
     const personnel = await seedAgencyPlatformPersonnel();
     smtpInbox = await startAgencySmtpInbox(smtpPort);
 

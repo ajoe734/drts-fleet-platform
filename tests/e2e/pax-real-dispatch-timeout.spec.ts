@@ -149,10 +149,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
             const assigned = await assign(ops);
             await driver.goto(`${driverBase}/jobs`);
             await driver
-              .getByRole("button")
-              .filter({
-                has: driver.getByText(assigned.taskId, { exact: true }),
-              })
+              .getByTestId(`driver-job-task-${assigned.taskId}`)
               .click();
             await expect(driver).toHaveURL(
               (url) =>

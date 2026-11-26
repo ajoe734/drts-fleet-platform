@@ -1834,10 +1834,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await registerDriver(ops, driver, DRIVER, step);
         await driver.goto(`${DRIVER}/jobs`);
         await driver
-          .getByRole("button")
-          .filter({
-            has: driver.getByText(cancelledAssignment.taskId, { exact: true }),
-          })
+          .getByTestId(`driver-job-task-${cancelledAssignment.taskId}`)
           .click();
         const cancellationHeader = `${cancelledAssignment.taskId} · ${cancelled}`;
         await expect(

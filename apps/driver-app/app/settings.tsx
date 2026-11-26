@@ -16,7 +16,6 @@ import { ActionButton } from "@/components/ui/ActionButton";
 import { AppScreen } from "@/components/ui/AppScreen";
 import { BottomActionBar } from "@/components/ui/BottomActionBar";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { AuthorityBanner } from "@/components/ui/AuthorityBanner";
 import { FormField } from "@/components/ui/FormField";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
@@ -25,7 +24,6 @@ import {
   formatDriverError,
   getDriverClient,
   getDriverId,
-  getProvisionedSession,
   initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
@@ -350,19 +348,7 @@ export default function SettingsScreen() {
   });
   const saveStatus = describeSaveStatus(saveState);
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
-  const identitySummary = [
-    driverId ? `ID ${driverId}` : null,
-    profileValues.profilePhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const emergencySummary = [
-    profileValues.emergencyName.trim() || "尚未設定",
-    profileValues.emergencyRelationship.trim() || null,
-    profileValues.emergencyPhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const identitySummary = profileValues.profilePhone.trim();
 
   const updateSettings = (patch: Partial<SettingsFormValues>) => {
     setSettingsValues((prev) => ({ ...prev, ...patch }));
@@ -528,7 +514,7 @@ export default function SettingsScreen() {
         <View style={styles.heroHeader}>
           <Text style={styles.screenTitle}>設定</Text>
           <Text style={styles.screenSubtitle}>
-            個人資料、偏好設定與平台帳號綁定
+            個人資料、偏好設定與手機登入
           </Text>
         </View>
 
@@ -539,27 +525,11 @@ export default function SettingsScreen() {
           ) : null}
           {saveError ? <ErrorBanner message={saveError} /> : null}
 
-          {/* First: without a bound platform the driver cannot take external
-              work, and the platform screen sends drivers here to bind one. */}
-          <FormSection
-            title="平台帳號綁定"
-            description="綁定外部平台帳號後才能接那個平台的單；授權過期時也在這裡重新驗證。"
-          >
-            <PlatformBinding showSectionTitle={false} />
-          </FormSection>
-
           <FormSection
             title={driverWorkforceStrings.sectionTitle}
             description={driverWorkforceStrings.sectionDescription}
           >
             <View style={styles.utilityCard}>
-              <UtilityRow
-                label={driverRouteTitles.leave}
-                detail={driverWorkforceStrings.leaveDetail}
-                testID="driver-settings-leave"
-                onPress={() => router.push("/leave")}
-              />
-              <View style={styles.utilityDivider} />
               <UtilityRow
                 label={driverRouteTitles.academy}
                 detail={driverWorkforceStrings.academyDetail}
@@ -582,7 +552,7 @@ export default function SettingsScreen() {
                   {profileValues.profileName.trim() || "尚未填寫司機姓名"}
                 </Text>
                 <Text style={styles.profileMeta}>
-                  {identitySummary || "尚未填寫聯絡資訊"}
+                  {identitySummary || "尚未填寫電話"}
                 </Text>
               </View>
               <StatusChip
@@ -710,91 +680,32 @@ export default function SettingsScreen() {
             title={driverAuthStrings.devices.title}
             description={driverAuthStrings.devices.subtitle}
           >
-            <View style={styles.deviceCard}>
-              <View style={styles.deviceRowHeader}>
-                <Text style={styles.deviceCardTitle}>
-                  {driverAuthStrings.devices.activeDevice}
-                </Text>
-                <StatusChip label="生效中" variant="success" />
-              </View>
-              <View style={styles.deviceDetailGrid}>
-                <View style={styles.deviceField}>
-                  <Text style={styles.deviceFieldLabel}>
-                    {driverAuthStrings.devices.deviceIdLabel}
-                  </Text>
-                  <Text style={styles.deviceFieldValue} selectable>
-                    {getProvisionedSession()?.deviceId ?? "—"}
-                  </Text>
-                </View>
-                <View style={styles.deviceField}>
-                  <Text style={styles.deviceFieldLabel}>
-                    {driverAuthStrings.devices.bindingIdLabel}
-                  </Text>
-                  <Text style={styles.deviceFieldValue} selectable>
-                    {getProvisionedSession()?.bindingId ?? "—"}
-                  </Text>
-                </View>
-                <View style={styles.deviceField}>
-                  <Text style={styles.deviceFieldLabel}>
-                    {driverAuthStrings.devices.driverIdLabel}
-                  </Text>
-                  <Text style={styles.deviceFieldValue} selectable>
-                    {driverId || "尚未綁定"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.deviceActionsRow}>
-                <ActionButton
-                  accessibilityHint="進入裝置啟用與重新綁定頁面"
-                  accessibilityLabel="重新綁定裝置"
-                  icon="swap-horizontal-outline"
-                  onPress={() => router.push("/onboarding")}
-                  title={driverAuthStrings.devices.rebindAction}
-                  variant="secondary"
-                />
-                <ActionButton
-                  accessibilityHint="撤銷此裝置的司機綁定並登出"
-                  accessibilityLabel="登出並撤銷裝置"
-                  icon="trash-outline"
-                  onPress={handleLogout}
-                  title={driverAuthStrings.devices.revokeAction}
-                  variant="danger"
-                />
-              </View>
-            </View>
-            <AuthorityBanner
-              authorityLabel="離線佐證已保留"
-              description={driverAuthStrings.devices.offlineProofNotice}
-              icon="shield-checkmark-outline"
-              title="安全合規保證"
-              tone="owned"
+            {/* No rebind button: /onboarding shows the home screen while this
+                phone is signed in, so signing out is the way to rebind. */}
+            <ActionButton
+              accessibilityHint="撤銷此裝置的司機綁定並登出"
+              accessibilityLabel="登出並撤銷裝置"
+              icon="trash-outline"
+              onPress={handleLogout}
+              title={driverAuthStrings.devices.revokeAction}
+              variant="danger"
             />
+            <Text style={styles.deviceNotice}>
+              {driverAuthStrings.devices.offlineProofNotice}
+            </Text>
           </FormSection>
 
-          <FormSection
-            title="其他"
-            description="快速查看緊急聯絡、裝置資訊與帳號動作。"
-          >
+          {/* Read-only: the fleet binds external platform accounts. */}
+          <FormSection title="平台帳號綁定">
+            <PlatformBinding showSectionTitle={false} />
+          </FormSection>
+
+          <FormSection title="其他">
             <View style={styles.utilityCard}>
-              <UtilityRow label="緊急聯絡人" detail={emergencySummary} />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="關於本機"
-                detail={identitySummary || driverId}
-              />
-              <View style={styles.utilityDivider} />
               <UtilityRow
                 label="查看收益"
                 detail="前往收益與月結摘要"
                 onPress={() => router.push("/earnings")}
-              />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="登出"
-                detail="清除此裝置上的司機登入狀態"
-                tone="danger"
-                onPress={handleLogout}
               />
             </View>
           </FormSection>
@@ -947,56 +858,9 @@ const styles = StyleSheet.create({
     ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
-  utilityDivider: {
-    height: 1,
-    backgroundColor: Tokens.colors.border,
-    marginHorizontal: Tokens.spacing.md,
-  },
-  deviceCard: {
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceLo,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.md,
-    marginBottom: Tokens.spacing.sm,
-  },
-  deviceRowHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  deviceCardTitle: {
-    ...Tokens.type.label,
-    fontWeight: "700",
-    color: Tokens.colors.textStrong,
-  },
-  deviceDetailGrid: {
-    gap: Tokens.spacing.xs,
-  },
-  deviceField: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.sm,
-    flexWrap: "wrap",
-  },
-  deviceFieldLabel: {
+  deviceNotice: {
     ...Tokens.type.small,
     color: Tokens.colors.textMuted,
-    flexShrink: 0,
-    maxWidth: "45%",
-  },
-  deviceFieldValue: {
-    ...Tokens.type.small,
-    fontWeight: "600",
-    color: Tokens.colors.textStrong,
-    fontFamily: Tokens.fonts.mono,
-    flex: 1,
-    minWidth: 160,
-    textAlign: "right",
-    flexWrap: "wrap",
-  },
-  deviceActionsRow: {
-    gap: Tokens.spacing.sm,
     marginTop: Tokens.spacing.xs,
   },
 });

@@ -130,28 +130,17 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
   });
 
   describe("Acceptance Criterion 2: DeviceId and BindingId overflow & user obtainability", () => {
-    it("verifies settings.tsx wraps device fields and marks DeviceId and BindingId selectable", () => {
+    // Superseded for Settings (DRIVER-PLATFORM-ONBOARDING-CLEANUP-20261126):
+    // drivers must not see internal identifiers, so the device, binding and
+    // driver ids that used to overflow there are no longer rendered at all.
+    it("verifies settings.tsx no longer shows device, binding or driver ids", () => {
       const source = readFileSync(join(APP_DIR, "app/settings.tsx"), "utf8");
 
-      // Verify style rules in settings.tsx
-      expect(source).toContain("deviceField: {");
-      expect(source).toMatch(/deviceField:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*flex:\s*1/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*minWidth:\s*160/);
-      expect(source).toMatch(
-        /deviceFieldValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/,
-      );
-
-      // Verify selectable prop on DeviceId, BindingId, and driverId
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{getProvisionedSession\(\)\?\.deviceId/,
-      );
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{getProvisionedSession\(\)\?\.bindingId/,
-      );
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{driverId \|\| "尚未綁定"\}/,
-      );
+      expect(source).not.toContain("getProvisionedSession");
+      expect(source).not.toMatch(/\.deviceId\b/);
+      expect(source).not.toMatch(/\.bindingId\b/);
+      expect(source).not.toContain("ID ${driverId}");
+      expect(source).not.toContain("deviceFieldValue");
     });
   });
 
