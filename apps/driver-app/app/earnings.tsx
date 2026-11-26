@@ -3,7 +3,6 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
 import {
-  PLATFORM_CODE_REGISTRY,
   type DriverStatementRecord,
   type MoneyAmount,
   type PlatformEarningsByPlatformResponse,
@@ -22,10 +21,6 @@ import {
 } from "@/components/canvas-primitives";
 import { DriverStatementRow } from "@/components/earnings/driver-statement-row";
 import {
-  isOwnedPlatformCode,
-  isShadowOnlyPlatformCode,
-} from "@/components/earnings-by-platform";
-import {
   formatDriverError,
   getDriverClient,
   isDriverIdentityProvisioned,
@@ -33,10 +28,17 @@ import {
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
+  formatMoney,
   formatSignedAmountNumber,
   getCurrencyLabel,
   sumMoneyAmounts,
 } from "@/lib/money";
+import {
+  getDriverPlatformName,
+  getDriverPlatformNames,
+  isFleetOwnPlatformCode,
+  isReferenceOnlyPlatformCode,
+} from "@/lib/platform-display-name";
 import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 import { listDriverEarningsStatements } from "@/lib/driver-statement-actions";
 
@@ -78,85 +80,71 @@ function sumStatementAmounts(
   );
 }
 
-function getLatestStatementMonth(
-  statements: DriverStatementRecord[],
-): string | null {
-  const months = Array.from(
-    new Set(
-      statements
-        .map((statement) => statement.periodMonth.trim())
-        .filter((periodMonth) => periodMonth.length > 0),
-    ),
-  ).sort((left, right) => right.localeCompare(left));
+// Taiwan has a fixed UTC+8 offset (no daylight saving). The earnings API
+// resolves today/week/month on the Asia/Taipei calendar, so the labels use the
+// same calendar regardless of the device time zone.
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-  return months[0] ?? null;
+function getTaipeiCalendarDate(now: number) {
+  const shifted = new Date(now + TAIPEI_OFFSET_MS);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    weekday: shifted.getUTCDay(),
+  };
 }
 
-function formatCurrentDateLabel() {
-  return new Date().toLocaleDateString("zh-TW", {
-    month: "numeric",
-    day: "numeric",
-  });
+function formatMonthDay(month: number, day: number) {
+  return `${month}/${day}`;
 }
 
-function getHeaderSubtitle(
-  period: PeriodKey,
-  latestStatementMonth: string | null,
-) {
+function getEarningsPeriodSubtitle(period: PeriodKey) {
+  const today = getTaipeiCalendarDate(Date.now());
+
   if (period === "today") {
-    return `本日 ${formatCurrentDateLabel()}`;
+    return `今日 ${formatMonthDay(today.month, today.day)}`;
   }
 
   if (period === "week") {
-    return `本週 ${formatCurrentDateLabel()}`;
+    // Monday through Sunday, matching the API's calendar week.
+    const daysSinceMonday = (today.weekday + 6) % 7;
+    const monday = new Date(
+      Date.UTC(today.year, today.month - 1, today.day - daysSinceMonday),
+    );
+    const sunday = new Date(
+      Date.UTC(today.year, today.month - 1, today.day - daysSinceMonday + 6),
+    );
+    return `本週 ${formatMonthDay(
+      monday.getUTCMonth() + 1,
+      monday.getUTCDate(),
+    )}–${formatMonthDay(sunday.getUTCMonth() + 1, sunday.getUTCDate())}`;
   }
 
-  return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
+  return `本月 ${today.year}年${today.month}月`;
 }
 
-function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
+function getHeroLabel(period: PeriodKey) {
   if (period === "today") {
-    return "淨收入 · 本日";
+    return "淨收入 · 今日";
   }
 
   if (period === "week") {
     return "淨收入 · 本週";
   }
 
-  return latestStatementMonth
-    ? `淨收入 · ${latestStatementMonth}`
-    : "淨收入 · 本月";
+  return "淨收入 · 本月";
 }
 
-function getHeroContext(
-  period: PeriodKey,
-  latestStatementMonth: string | null,
-) {
-  if (period === "month") {
-    return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
-  }
-
-  return "即時切片";
+// Only the fleet's own dispatch is 車隊結算. Any other code, including one the
+// app does not know yet, is another platform whose own payout is final.
+function isOtherPlatformItem(item: PlatformEarningsItem) {
+  return !isFleetOwnPlatformCode(item.platformCode);
 }
 
-function getHeroNote(period: PeriodKey) {
-  if (period === "month") {
-    return "月結視圖會同時顯示 DRTS 對帳金額與外部平台參考收益。";
-  }
-
-  return "此檢視顯示平台收益切片；月結報表仍列出最近對帳週期。";
-}
-
-function getPeriodMetricLabel(period: PeriodKey) {
-  return period === "month"
-    ? driverStrings.earnings.metrics.pendingPayout
-    : driverStrings.earnings.metrics.external;
-}
-
-function getPlatformDisplayName(platformCode: string) {
+function isSettledOnOtherPlatform(item: PlatformEarningsItem) {
   return (
-    PLATFORM_CODE_REGISTRY[platformCode as keyof typeof PLATFORM_CODE_REGISTRY]
-      ?.displayName ?? platformCode
+    isOtherPlatformItem(item) && !isReferenceOnlyPlatformCode(item.platformCode)
   );
 }
 
@@ -171,31 +159,26 @@ function isEmptyBreakdown(item: PlatformEarningsItem) {
 
 function BreakdownRow({
   item,
+  displayName,
 }: {
   item: PlatformEarningsByPlatformResponse["items"][number];
+  displayName: string;
 }) {
-  const owned = isOwnedPlatformCode(item.platformCode);
-  const shadowOnly = isShadowOnlyPlatformCode(item.platformCode);
+  const owned = !isOtherPlatformItem(item);
+  const shadowOnly = isReferenceOnlyPlatformCode(item.platformCode);
   const forwarded = !owned;
   const empty = isEmptyBreakdown(item);
   const typeLabel = owned
     ? driverStrings.platformPresence.owned
+    : driverStrings.platformPresence.external;
+  const settlementLabel = owned
+    ? driverStrings.earnings.sections.ownedSettlement
     : shadowOnly
-      ? "鏡像"
-      : driverStrings.platformPresence.external;
-  const authorityLabel = owned
-    ? "DRTS 結算"
-    : shadowOnly
-      ? "鏡像參考"
-      : "平台結算";
-  const authorityTone = owned
-    ? ("accent" as const)
-    : shadowOnly
-      ? ("info" as const)
-      : ("warn" as const);
+      ? driverStrings.earnings.sections.referenceOnly
+      : driverStrings.earnings.sections.platformSettlement;
+  const typeTone = owned ? ("accent" as const) : ("warn" as const);
   const markColor = forwarded ? THEME.warn : THEME.accentHi;
   const markBg = forwarded ? THEME.warnBg : THEME.accentBg;
-  const displayName = getPlatformDisplayName(item.platformCode);
 
   return (
     <View
@@ -216,7 +199,7 @@ function BreakdownRow({
               { color: markColor, fontFamily: THEME.monoFamily },
             ]}
           >
-            {String(item.platformCode).slice(0, 4).toUpperCase()}
+            {Array.from(displayName)[0]?.toUpperCase() ?? ""}
           </Text>
         </View>
 
@@ -230,7 +213,7 @@ function BreakdownRow({
             >
               {displayName}
             </Text>
-            <Pill theme={THEME} tone={authorityTone}>
+            <Pill theme={THEME} tone={typeTone}>
               {typeLabel}
             </Pill>
           </View>
@@ -240,9 +223,7 @@ function BreakdownRow({
               { color: THEME.textMuted, fontFamily: THEME.fontFamily },
             ]}
           >
-            {owned
-              ? driverStrings.earnings.sections.drtsRecon
-              : driverStrings.earnings.sections.financeAuthority}
+            {settlementLabel}
           </Text>
         </View>
 
@@ -261,7 +242,7 @@ function BreakdownRow({
               { color: THEME.textDim, fontFamily: THEME.fontFamily },
             ]}
           >
-            {item.netAmount.currency}
+            {getCurrencyLabel(item.netAmount.currency)}
           </Text>
         </View>
       </View>
@@ -326,22 +307,6 @@ function BreakdownRow({
           >
             {formatSignedAmountNumber(item.subsidy)}
           </Text>
-        </Text>
-        <Text
-          style={[
-            styles.breakdownAuthority,
-            {
-              color:
-                authorityTone === "accent"
-                  ? THEME.accentHi
-                  : authorityTone === "info"
-                    ? THEME.info
-                    : THEME.warn,
-              fontFamily: THEME.fontFamily,
-            },
-          ]}
-        >
-          {authorityLabel}
         </Text>
       </View>
     </View>
@@ -518,7 +483,6 @@ export default function EarningsScreen() {
     summary?.totalNet.currency ??
     DEFAULT_CURRENCY;
   const currencyLabel = getCurrencyLabel(baseCurrency);
-  const latestStatementMonth = getLatestStatementMonth(statements);
   const grossAmount = sumPlatformAmounts(
     platformItems,
     "grossEarning",
@@ -540,9 +504,7 @@ export default function EarningsScreen() {
   const forwardedPlatformAmount = sumPlatformAmounts(
     platformItems,
     "netAmount",
-    (item) =>
-      !isOwnedPlatformCode(item.platformCode) &&
-      !isShadowOnlyPlatformCode(item.platformCode),
+    isSettledOnOtherPlatform,
     baseCurrency,
   );
   const pendingPayoutAmount = sumStatementAmounts(
@@ -550,10 +512,15 @@ export default function EarningsScreen() {
     "netAmount",
     (statement) => statement.payoutStatus !== "paid",
   );
-  const hasAnyData = platformItems.length > 0 || statements.length > 0;
-  const metricAmount =
-    selectedPeriod === "month" ? pendingPayoutAmount : forwardedPlatformAmount;
-  const summaryNotes = summary?.notes ?? [];
+  const hasPeriodEarnings = platformItems.length > 0;
+  const hasAnyData = hasPeriodEarnings || statements.length > 0;
+  const hasOtherPlatforms = platformItems.some(isOtherPlatformItem);
+  const platformNames = getDriverPlatformNames(
+    platformItems.map((item) => item.platformCode),
+  );
+  // Unpaid statements are owed regardless of the selected period, so their
+  // total stays visible even when this period has no income yet.
+  const hasPendingPayout = pendingPayoutAmount.amountMinor > 0;
 
   if (error && !hasAnyData) {
     return (
@@ -590,7 +557,7 @@ export default function EarningsScreen() {
       <PageHeader
         theme={THEME}
         title={driverStrings.earnings.title}
-        subtitle={getHeaderSubtitle(selectedPeriod, latestStatementMonth)}
+        subtitle={getEarningsPeriodSubtitle(selectedPeriod)}
         actions={
           <Btn
             theme={THEME}
@@ -645,245 +612,212 @@ export default function EarningsScreen() {
         </View>
       </View>
 
-      <Card theme={THEME} padding={18} style={styles.heroCard}>
-        <Text
-          style={[
-            styles.heroEyebrow,
-            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-          ]}
-        >
-          {getHeroLabel(selectedPeriod, latestStatementMonth)}
-        </Text>
-
-        <View style={styles.heroValueRow}>
-          <Text
-            style={[
-              styles.heroValue,
-              { color: THEME.text, fontFamily: THEME.monoFamily },
-            ]}
-          >
-            {formatAmountNumber(netAmount)}
-          </Text>
-          <Text
-            style={[
-              styles.heroUnit,
-              { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-            ]}
-          >
-            {currencyLabel}
-          </Text>
-          <Text
-            style={[
-              styles.heroContext,
-              {
-                color:
-                  selectedPeriod === "month" ? THEME.accentHi : THEME.success,
-                fontFamily: THEME.fontFamily,
-              },
-            ]}
-          >
-            {getHeroContext(selectedPeriod, latestStatementMonth)}
-          </Text>
-        </View>
-
-        <Text
-          style={[
-            styles.heroNote,
-            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-          ]}
-        >
-          {getHeroNote(selectedPeriod)}
-        </Text>
-
-        <View
-          style={[
-            styles.heroMetricRow,
-            {
-              borderTopColor: THEME.border,
-            },
-          ]}
-        >
-          <View style={styles.heroMetricItem}>
+      {hasPeriodEarnings ? (
+        <>
+          <Card theme={THEME} padding={18} style={styles.heroCard}>
             <Text
               style={[
-                styles.heroMetricLabel,
+                styles.heroEyebrow,
                 { color: THEME.textMuted, fontFamily: THEME.fontFamily },
               ]}
             >
-              {driverStrings.earnings.metrics.gross}
+              {getHeroLabel(selectedPeriod)}
             </Text>
-            <Text
+
+            <View style={styles.heroValueRow}>
+              <Text
+                style={[
+                  styles.heroValue,
+                  { color: THEME.text, fontFamily: THEME.monoFamily },
+                ]}
+              >
+                {formatAmountNumber(netAmount)}
+              </Text>
+              <Text
+                style={[
+                  styles.heroUnit,
+                  { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                {currencyLabel}
+              </Text>
+            </View>
+
+            <View
               style={[
-                styles.heroMetricValue,
-                { color: THEME.text, fontFamily: THEME.monoFamily },
+                styles.heroMetricRow,
+                {
+                  borderTopColor: THEME.border,
+                },
               ]}
             >
-              {formatAmountNumber(grossAmount)}
-            </Text>
-          </View>
-          <View style={styles.heroMetricItem}>
+              <View style={styles.heroMetricItem}>
+                <Text
+                  style={[
+                    styles.heroMetricLabel,
+                    { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {driverStrings.earnings.metrics.gross}
+                </Text>
+                <Text
+                  style={[
+                    styles.heroMetricValue,
+                    { color: THEME.text, fontFamily: THEME.monoFamily },
+                  ]}
+                >
+                  {formatAmountNumber(grossAmount)}
+                </Text>
+              </View>
+              <View style={styles.heroMetricItem}>
+                <Text
+                  style={[
+                    styles.heroMetricLabel,
+                    { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {driverStrings.earnings.metrics.serviceFee}
+                </Text>
+                <Text
+                  style={[
+                    styles.heroMetricValue,
+                    { color: THEME.danger, fontFamily: THEME.monoFamily },
+                  ]}
+                >
+                  {feeAmount.amountMinor === 0
+                    ? "0"
+                    : formatSignedAmountNumber({
+                        ...feeAmount,
+                        amountMinor: -Math.abs(feeAmount.amountMinor),
+                      })}
+                </Text>
+              </View>
+              <View style={styles.heroMetricItem}>
+                <Text
+                  style={[
+                    styles.heroMetricLabel,
+                    { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {driverStrings.earnings.metrics.external}
+                </Text>
+                <Text
+                  style={[
+                    styles.heroMetricValue,
+                    { color: THEME.warn, fontFamily: THEME.monoFamily },
+                  ]}
+                >
+                  {formatAmountNumber(forwardedPlatformAmount)}
+                </Text>
+              </View>
+            </View>
+          </Card>
+
+          <Card
+            theme={THEME}
+            title={driverStrings.earnings.sections.platformBreakdown}
+            subtitle={
+              hasOtherPlatforms
+                ? driverStrings.earnings.sections.platformNote
+                : undefined
+            }
+            padding={14}
+          >
+            <View style={styles.breakdownList}>
+              {platformItems.map((item) => (
+                <BreakdownRow
+                  key={item.platformCode}
+                  item={item}
+                  displayName={
+                    platformNames.get(item.platformCode) ??
+                    getDriverPlatformName(item.platformCode)
+                  }
+                />
+              ))}
+            </View>
+          </Card>
+        </>
+      ) : (
+        <Card theme={THEME} padding={18}>
+          <Text
+            style={[
+              styles.emptyPeriodText,
+              { color: THEME.text, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {driverStrings.earnings.emptyPeriod}
+          </Text>
+        </Card>
+      )}
+
+      {hasPendingPayout ? (
+        <Card theme={THEME} padding={14}>
+          <View
+            style={styles.pendingPayoutRow}
+            testID="earnings-pending-payout"
+          >
             <Text
               style={[
-                styles.heroMetricLabel,
+                styles.pendingPayoutLabel,
                 { color: THEME.textMuted, fontFamily: THEME.fontFamily },
               ]}
             >
-              {driverStrings.earnings.metrics.serviceFee}
+              {driverStrings.earnings.metrics.pendingPayout}
             </Text>
             <Text
               style={[
-                styles.heroMetricValue,
-                { color: THEME.danger, fontFamily: THEME.monoFamily },
-              ]}
-            >
-              {feeAmount.amountMinor === 0
-                ? "0"
-                : formatSignedAmountNumber({
-                    ...feeAmount,
-                    amountMinor: -Math.abs(feeAmount.amountMinor),
-                  })}
-            </Text>
-          </View>
-          <View style={styles.heroMetricItem}>
-            <Text
-              style={[
-                styles.heroMetricLabel,
-                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-              ]}
-            >
-              {getPeriodMetricLabel(selectedPeriod)}
-            </Text>
-            <Text
-              style={[
-                styles.heroMetricValue,
+                styles.pendingPayoutValue,
                 { color: THEME.warn, fontFamily: THEME.monoFamily },
               ]}
             >
-              {formatAmountNumber(metricAmount)}
+              {formatMoney(pendingPayoutAmount)}
             </Text>
           </View>
-        </View>
-      </Card>
+        </Card>
+      ) : null}
 
-      <Banner
-        theme={THEME}
-        tone="info"
-        title={driverStrings.earnings.sections.financeAuthority}
-        body={
-          <View style={styles.bannerBody}>
-            <Text
-              style={[
-                styles.bannerText,
-                { color: THEME.text, fontFamily: THEME.fontFamily },
-              ]}
-            >
-              不同平台有不同的結算權威；外部平台金額為參考值。
-            </Text>
-            {summaryNotes.map((note) => (
-              <View key={note} style={styles.bannerNoteRow}>
-                <Ionicons name="sync-outline" size={12} color={THEME.info} />
-                <Text
-                  style={[
-                    styles.bannerNoteText,
-                    { color: THEME.text, fontFamily: THEME.fontFamily },
-                  ]}
-                >
-                  {note}
-                </Text>
-              </View>
-            ))}
-          </View>
-        }
-        icon={<Ionicons name="wallet-outline" size={16} color={THEME.info} />}
-      />
-
-      <Card
-        theme={THEME}
-        title={driverStrings.earnings.sections.platformBreakdown}
-        subtitle="不同平台有不同的結算權威；外部平台金額為參考值。"
-        padding={14}
-      >
-        {platformItems.length > 0 ? (
-          <View style={styles.breakdownList}>
-            {platformItems.map((item) => (
-              <BreakdownRow key={item.platformCode} item={item} />
-            ))}
-          </View>
-        ) : (
-          <Banner
-            theme={THEME}
-            tone="info"
-            title="這段期間還沒有平台收益"
-            body="切換到其他期間，或稍後再查看最新對帳彙整。"
-            icon={<Ionicons name="cash-outline" size={16} color={THEME.info} />}
-          />
-        )}
-      </Card>
-
-      <Card
-        theme={THEME}
-        title={driverStrings.earnings.sections.monthlyStatements}
-        subtitle={
-          latestStatementMonth
-            ? `依對帳週期排序，最新為 ${latestStatementMonth}`
-            : "等待最新月結資料"
-        }
-        padding={0}
-      >
-        {statements.length > 0 ? (
-          <View>
-            {statements.map((statement, index) => (
-              <DriverStatementRow
-                key={statement.statementId}
-                statement={statement}
-                last={index === statements.length - 1}
-                onLoaded={(record) =>
-                  setStatements((rows) =>
-                    rows.map((row) =>
-                      row.statementId === record.statementId ? record : row,
-                    ),
-                  )
-                }
+      {statements.length > 0 || statementError ? (
+        <Card
+          theme={THEME}
+          title={driverStrings.earnings.sections.monthlyStatements}
+          padding={0}
+        >
+          {statements.length > 0 ? (
+            <View>
+              {statements.map((statement, index) => (
+                <DriverStatementRow
+                  key={statement.statementId}
+                  statement={statement}
+                  last={index === statements.length - 1}
+                  onLoaded={(record) =>
+                    setStatements((rows) =>
+                      rows.map((row) =>
+                        row.statementId === record.statementId ? record : row,
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={styles.statementEmpty}>
+              <Banner
+                theme={THEME}
+                tone="warn"
+                title={driverStrings.earnings.statement.errorTitle}
+                body={statementError}
               />
-            ))}
-          </View>
-        ) : statementError ? (
-          <View style={styles.statementEmpty}>
-            <Banner
-              theme={THEME}
-              tone="warn"
-              title={driverStrings.earnings.statement.errorTitle}
-              body={statementError}
-            />
-            <Btn
-              theme={THEME}
-              disabled={refreshing}
-              onPress={() => void onRefresh()}
-            >
-              {driverStrings.earnings.statement.listRetry}
-            </Btn>
-          </View>
-        ) : (
-          <View style={styles.statementEmpty}>
-            <Text
-              style={[
-                styles.statementEmptyTitle,
-                { color: THEME.text, fontFamily: THEME.fontFamily },
-              ]}
-            >
-              尚無月結報表
-            </Text>
-            <Text
-              style={[
-                styles.statementEmptyBody,
-                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-              ]}
-            >
-              本月還沒有可顯示的對帳單，請稍後重新整理。
-            </Text>
-          </View>
-        )}
-      </Card>
+              <Btn
+                theme={THEME}
+                disabled={refreshing}
+                onPress={() => void onRefresh()}
+              >
+                {driverStrings.earnings.statement.listRetry}
+              </Btn>
+            </View>
+          )}
+        </Card>
+      ) : null}
     </Shell>
   );
 }
@@ -948,17 +882,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginBottom: 5,
   },
-  heroContext: {
-    marginLeft: "auto",
-    marginBottom: 6,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  heroNote: {
-    marginTop: 10,
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
   heroMetricRow: {
     flexDirection: "row",
     gap: 14,
@@ -981,23 +904,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: "700",
     letterSpacing: -0.2,
-  },
-  bannerBody: {
-    gap: 8,
-  },
-  bannerText: {
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
-  bannerNoteRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 6,
-  },
-  bannerNoteText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
   },
   breakdownList: {
     gap: 10,
@@ -1082,24 +988,29 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     fontWeight: "700",
   },
-  breakdownAuthority: {
-    marginLeft: "auto",
-    fontSize: 11.5,
-    lineHeight: 15,
-    fontWeight: "700",
-  },
   statementEmpty: {
     paddingHorizontal: 14,
     paddingVertical: 18,
     gap: 6,
   },
-  statementEmptyTitle: {
-    fontSize: 14,
-    lineHeight: 18,
+  pendingPayoutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  pendingPayoutLabel: {
+    fontSize: 13,
     fontWeight: "700",
   },
-  statementEmptyBody: {
-    fontSize: 12,
-    lineHeight: 17,
+  pendingPayoutValue: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+  emptyPeriodText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "600",
   },
 });
