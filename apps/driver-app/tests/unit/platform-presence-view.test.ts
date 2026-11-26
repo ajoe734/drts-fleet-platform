@@ -6,6 +6,7 @@ import {
   getEligibilityLabel,
   getPlatformReauthMechanism,
   getPlatformReauthUrl,
+  isRealPlatformPresence,
   resolveEmptyReason,
   type PlatformPresenceViewSummary,
 } from "../../lib/platform-presence-view";
@@ -70,6 +71,32 @@ describe("platform-presence-view helpers", () => {
         reauthUrl: "https://auth.example.test/line",
       }),
     ).toBeNull();
+  });
+
+  it("treats only bound accounts and busy reports as platforms", () => {
+    expect(isRealPlatformPresence(baseRecord)).toBe(true);
+    // Leftovers of the old in-app bind form and on/off toggles.
+    expect(
+      isRealPlatformPresence({
+        ...baseRecord,
+        accountId: null,
+        status: "offline",
+      }),
+    ).toBe(false);
+    expect(
+      isRealPlatformPresence({
+        ...baseRecord,
+        accountId: "  ",
+        status: "online",
+      }),
+    ).toBe(false);
+    expect(
+      isRealPlatformPresence({
+        ...baseRecord,
+        accountId: null,
+        status: "busy",
+      }),
+    ).toBe(true);
   });
 
   it("labels eligibility in plain words", () => {

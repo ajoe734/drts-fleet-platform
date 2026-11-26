@@ -228,27 +228,40 @@ export class PlatformPresenceService {
     );
   }
 
+  // Only a record with a bound platform account says anything about whether
+  // the driver is reachable on that platform. Records without one were left
+  // by the driver app's old in-app bind form and on/off toggles: the app
+  // never sent platform heartbeats, so they went stale and blocked the
+  // driver's own fleet dispatch with no way to clear them.
+  private hasBoundAccount(record: PlatformPresenceRecord): boolean {
+    return Boolean(record.accountId?.trim());
+  }
+
   // Consulted by owned-fleet dispatch eligibility (listDispatchCandidates /
   // assertAssignmentEligibilityRecheck) so a driver who is busy or
   // disconnected on another bound platform is not also handed an owned
   // dispatch. A driver with no presence records at all (never bound to an
   // external platform) is never blocked here -- absence of data is not a
-  // busy/offline signal.
+  // busy/offline signal. Neither are offline or stale records without a
+  // bound account (see hasBoundAccount). A busy report still blocks
+  // whatever the account: it says the driver is carrying someone elsewhere.
   async findDispatchBlockingPresence(
     driverId: string,
     now: Date = new Date(),
   ): Promise<PlatformPresenceDispatchBlock | null> {
-    const records = await this.listForDriver(driverId);
+    const allRecords = await this.listForDriver(driverId);
+
+    const busy = allRecords.find((r) => r.status === "busy");
+    if (busy) {
+      return { platformCode: busy.platformCode, reason: "busy" };
+    }
+
+    const records = allRecords.filter((r) => this.hasBoundAccount(r));
     if (records.length === 0) {
       return null;
     }
 
     const nowMs = now.getTime();
-
-    const busy = records.find((r) => r.status === "busy");
-    if (busy) {
-      return { platformCode: busy.platformCode, reason: "busy" };
-    }
 
     const liveOnline = records.find(
       (r) => r.status === "online" && !this.isHeartbeatStale(r, nowMs),

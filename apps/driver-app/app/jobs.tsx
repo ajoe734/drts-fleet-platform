@@ -12,11 +12,13 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
-import type {
-  DriverTaskAction,
-  DriverTaskRecord,
-  DriverTaskOrderSummary,
-  UnifiedDriverTaskView,
+import {
+  PLATFORM_CODE_REGISTRY,
+  type DriverTaskAction,
+  type DriverTaskRecord,
+  type DriverTaskOrderSummary,
+  type PlatformCode,
+  type UnifiedDriverTaskView,
 } from "@drts/contracts";
 
 import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
@@ -97,6 +99,14 @@ type TaskAuthorityDescriptor = {
 
 const THEME = driverCanvasTheme;
 const OWNED_TASK_LABEL = "車隊派單";
+
+// One display name per platform, from the shared registry ("LINE Taxi").
+function platformDisplayName(platformCode: string | null | undefined) {
+  const registered = platformCode
+    ? PLATFORM_CODE_REGISTRY[platformCode as PlatformCode]?.displayName
+    : undefined;
+  return registered ?? getPlatformDisplayLabel(platformCode);
+}
 const FILTER_OPTIONS = driverJobFilterOptions;
 const ACTION_LABELS: Record<DriverTaskAction, string> = driverTaskActionLabels;
 const SWIPE_LIMIT = 124;
@@ -331,7 +341,7 @@ function buildFallbackUnifiedTaskView(
       ? (task.sourcePlatform as UnifiedDriverTaskView["sourcePlatform"])
       : "drts",
     platformDisplayName: forwarded
-      ? getPlatformDisplayLabel(task.sourcePlatform)
+      ? platformDisplayName(task.sourcePlatform)
       : "DRTS",
     externalOrderId: null,
     nativeStatus: null,
@@ -485,8 +495,9 @@ function jobRowTestId(task: UnifiedDriverTaskView): string {
   return `driver-job-task-${task.taskId}`;
 }
 
-// The last six characters are enough for dispatch to find the order; the
-// full identifier is noise on a phone screen.
+// A short visual reference to tell cards apart; the full identifier is noise
+// on a phone screen. It is not a lookup key: the ops console has no suffix
+// search.
 function formatShortReference(id: string | null | undefined): string | null {
   const trimmed = id?.trim();
   return trimmed ? `#${trimmed.slice(-6)}` : null;
@@ -657,7 +668,7 @@ function getTaskPlatformCode(task: UnifiedDriverTaskView) {
 function getTaskPlatformName(task: UnifiedDriverTaskView) {
   return isOwnedTask(task)
     ? OWNED_TASK_LABEL
-    : task.platformDisplayName || getPlatformDisplayLabel(task.sourcePlatform);
+    : task.platformDisplayName || platformDisplayName(task.sourcePlatform);
 }
 
 function getTaskVisualState(task: UnifiedDriverTaskView): TaskVisualState {
@@ -703,12 +714,61 @@ function getTaskVisualState(task: UnifiedDriverTaskView): TaskVisualState {
 function buildTaskAuthorityDescriptor(
   task: UnifiedDriverTaskView,
 ): TaskAuthorityDescriptor {
-  const owned = isOwnedTask(task);
-  const platformLabel = getPlatformDisplayLabel(task.sourcePlatform);
-  const authorityLabel = owned ? OWNED_TASK_LABEL : platformLabel;
+  const visualState = getTaskVisualState(task);
+
+  // Fleet jobs never get platform wording: rejected and cancelled fleet jobs
+  // arrive as read_only, and "drts" is not a platform the driver runs.
+  if (isOwnedTask(task)) {
+    const authorityLabel = OWNED_TASK_LABEL;
+    switch (visualState) {
+      case "sync_failed":
+        return {
+          title: "同步異常",
+          authorityLabel,
+          description: "這張單暫時無法同步，請聯絡派車台處理。",
+          tone: "danger",
+          icon: "alert-circle-outline",
+        };
+      case "completed":
+        return {
+          title: "任務已完成",
+          authorityLabel,
+          description: "這趟已完成，可以在這裡查看結果。",
+          tone: "owned",
+          icon: "checkmark-done-outline",
+        };
+      case "needs_action":
+        return {
+          title: "待司機處理",
+          authorityLabel,
+          description: "點開這張單，處理下一步。",
+          tone: "owned",
+          icon: "alert-circle-outline",
+        };
+      case "in_progress":
+        return {
+          title: "進行中",
+          authorityLabel,
+          description: "請依序完成出發、抵達、接客與完單。",
+          tone: "owned",
+          icon: "shield-checkmark",
+        };
+      default:
+        return {
+          title: driverStrings.jobs.actionStateLabels.read_only,
+          authorityLabel,
+          description: "這張單已結束，僅供查看。",
+          tone: "owned",
+          icon: "eye-outline",
+        };
+    }
+  }
+
+  const platformLabel = getTaskPlatformName(task);
+  const authorityLabel = platformLabel;
   const managedByPlatform = `這張單由${platformLabel}管理，請在${platformLabel} App 操作。`;
 
-  switch (getTaskVisualState(task)) {
+  switch (visualState) {
     case "sync_failed":
       return {
         title: "同步異常",
@@ -742,21 +802,13 @@ function buildTaskAuthorityDescriptor(
         icon: "checkmark-circle-outline",
       };
     case "completed":
-      return owned
-        ? {
-            title: "任務已完成",
-            authorityLabel,
-            description: "這趟已完成，可以在這裡查看結果。",
-            tone: "owned",
-            icon: "checkmark-done-outline",
-          }
-        : {
-            title: "平台已完成",
-            authorityLabel,
-            description: `這張單已在${platformLabel}完成。`,
-            tone: "platform",
-            icon: "checkmark-done-outline",
-          };
+      return {
+        title: "平台已完成",
+        authorityLabel,
+        description: `這張單已在${platformLabel}完成。`,
+        tone: "platform",
+        icon: "checkmark-done-outline",
+      };
     case "lost_race":
       return {
         title: "已由其他司機接走",
@@ -781,31 +833,14 @@ function buildTaskAuthorityDescriptor(
         tone: "platform",
         icon: "eye-outline",
       };
-    case "needs_action":
-      return {
-        title: "待司機處理",
-        authorityLabel,
-        description: "點開這張單，處理下一步。",
-        tone: "owned",
-        icon: "alert-circle-outline",
-      };
-    case "in_progress":
     default:
-      return owned
-        ? {
-            title: "進行中",
-            authorityLabel,
-            description: "請依序完成出發、抵達、接客與完單。",
-            tone: "owned",
-            icon: "shield-checkmark",
-          }
-        : {
-            title: "平台行程進行中",
-            authorityLabel,
-            description: managedByPlatform,
-            tone: "platform",
-            icon: "navigate-outline",
-          };
+      return {
+        title: "平台行程進行中",
+        authorityLabel,
+        description: managedByPlatform,
+        tone: "platform",
+        icon: "navigate-outline",
+      };
   }
 }
 

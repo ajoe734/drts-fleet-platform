@@ -616,11 +616,7 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(page).not.toContain("9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d");
       const banner = renderer.root.findByType("AuthorityBanner");
       expect(banner.props.authorityLabel).toBe("車隊派單");
-      for (const jargon of ["主控", "鏡像", "生命周期", "DRTS"]) {
-        expect(
-          `${banner.props.title}${banner.props.authorityLabel}${banner.props.description}`,
-        ).not.toContain(jargon);
-      }
+      expectPlainBanner(banner);
 
       // The dense layout drops the full identifiers too.
       const toggle = button(headerActions(renderer), "清單檢視");
@@ -635,11 +631,94 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       act(() => renderer.unmount());
     });
 
-    it("Platforms with nothing bound explains that the fleet binds them", async () => {
+    // Case-insensitive: "drts" humanizes to "Drts", not just "DRTS".
+    function expectPlainBanner(banner: any) {
+      const copy =
+        `${banner.props.title}${banner.props.authorityLabel}${banner.props.description}`.toLowerCase();
+      for (const jargon of ["主控", "鏡像", "生命周期", "drts"]) {
+        expect(copy).not.toContain(jargon);
+      }
+    }
+
+    it.each(["rejected", "cancelled"])(
+      "A %s fleet job is plainly finished, not managed by a platform",
+      async (localStatus) => {
+        mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+        // The API maps owned rejected and cancelled tasks to read_only.
+        mocks.listUnifiedDriverTasks.mockResolvedValue([
+          {
+            ...buildMockTask("task-ended"),
+            localStatus,
+            driverActionState: "read_only",
+            allowedActions: [],
+          },
+        ]);
+
+        let renderer: any;
+        await act(async () => {
+          renderer = create(React.createElement(JobsScreen));
+          await flushAsync();
+        });
+
+        const banner = renderer.root.findByType("AuthorityBanner");
+        expect(banner.props.authorityLabel).toBe("車隊派單");
+        expect(banner.props.description).toBe("這張單已結束，僅供查看。");
+        expect(banner.props.description).not.toContain("App 操作");
+        expectPlainBanner(banner);
+
+        act(() => renderer.unmount());
+      },
+    );
+
+    it("Platform job cards use the registry's platform name", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      mocks.listUnifiedDriverTasks.mockResolvedValue([
+        {
+          ...buildMockTask("task-line"),
+          orderDomain: "forwarded",
+          sourcePlatform: "line-taxi",
+          platformDisplayName: "",
+          driverActionState: "read_only",
+          allowedActions: [],
+        },
+      ]);
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(JobsScreen));
+        await flushAsync();
+      });
+
+      const banner = renderer.root.findByType("AuthorityBanner");
+      expect(banner.props.authorityLabel).toBe("LINE Taxi");
+      expect(banner.props.description).toBe(
+        "這張單由LINE Taxi管理，請在LINE Taxi App 操作。",
+      );
+      expectPlainBanner(banner);
+
+      act(() => renderer.unmount());
+    });
+
+    it("Platforms with nothing bound says binding is not available in the app", async () => {
       mocks.isDriverIdentityProvisioned.mockReturnValue(true);
       // Older APIs still send developer notes; the driver must not see them.
+      // The only row is an unbound leftover of the old in-app bind form.
       mocks.getPlatformPresence.mockResolvedValue({
-        presences: [],
+        presences: [
+          {
+            driverId: "drv-001",
+            platformCode: "uber",
+            accountId: null,
+            status: "offline",
+            eligibility: "eligible",
+            tokenExpiresAt: null,
+            reauthRequired: false,
+            lastOnlineAt: null,
+            lastOfflineAt: "2026-11-26T01:00:00Z",
+            lastHeartbeatAt: null,
+            updatedAt: "2026-11-26T01:00:00Z",
+          },
+        ],
         notes: [
           "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
           "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
@@ -654,8 +733,14 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
 
       const page = rendered(renderer);
       expect(page).toContain("還沒有綁定外部平台");
-      expect(page).toContain("車隊派單不用綁定，上班打卡後就能接單。");
+      expect(page).toContain(
+        "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",
+      );
       for (const noise of [
+        "Uber",
+        "暫停接單",
+        "尚未綁定平台帳號",
+        "幫您綁定",
         "平台健康中心",
         "測試環境",
         "更新頻率",
@@ -711,6 +796,14 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
             eligibility: "pending",
             reauthRequired: true,
           },
+          // An unbound leftover is not a binding and is not listed.
+          {
+            ...base,
+            platformCode: "grab",
+            accountId: null,
+            status: "offline",
+            reauthRequired: false,
+          },
         ],
         adapterStatuses: [],
       });
@@ -729,6 +822,8 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(page).toContain(
         "暫時無法在 App 內重新登入LINE Taxi，請聯絡派車台。",
       );
+      expect(page).not.toContain("Grab");
+      expect(page).toContain("2 個平台");
       for (const noise of [
         "uber ·",
         "line-taxi",

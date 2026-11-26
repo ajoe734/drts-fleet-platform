@@ -53,3 +53,69 @@ describe("PlatformPresenceService", () => {
     ]);
   });
 });
+
+describe("PlatformPresenceService.findDispatchBlockingPresence", () => {
+  const now = new Date("2026-11-26T12:00:00.000Z");
+  const stale = "2026-11-26T11:00:00.000Z";
+
+  // Nothing in the product writes accountId today; a bound account is set
+  // here directly on the in-memory record, as a real binding would be.
+  async function bindAccount(
+    service: PlatformPresenceService,
+    driverId: string,
+    platformCode: string,
+  ) {
+    const record = (await service.listForDriver(driverId)).find(
+      (entry) => entry.platformCode === platformCode,
+    )!;
+    record.accountId = `${platformCode}-account`;
+    return record;
+  }
+
+  it("does not block fleet dispatch on rows without a bound account", async () => {
+    // Rows the driver app's old bind form and on/off toggles left behind.
+    const service = new PlatformPresenceService();
+    await service.setOffline("driver-offline", "uber");
+    expect(
+      await service.findDispatchBlockingPresence("driver-offline", now),
+    ).toBeNull();
+
+    await service.setOnline("driver-stale", "uber");
+    (await service.listForDriver("driver-stale"))[0]!.lastHeartbeatAt = stale;
+    await service.setOffline("driver-stale", "line-taxi");
+    expect(
+      await service.findDispatchBlockingPresence("driver-stale", now),
+    ).toBeNull();
+  });
+
+  it("still blocks on a bound account that is offline or has gone stale", async () => {
+    const service = new PlatformPresenceService();
+    await service.setOnline("driver-bound", "uber");
+    const record = await bindAccount(service, "driver-bound", "uber");
+    record.lastHeartbeatAt = stale;
+    // An unbound row next to it neither blocks nor unblocks.
+    await service.setOffline("driver-bound", "line-taxi");
+    expect(
+      await service.findDispatchBlockingPresence("driver-bound", now),
+    ).toEqual({ platformCode: "uber", reason: "heartbeat_expired" });
+
+    await service.setOffline("driver-bound", "uber");
+    expect(
+      await service.findDispatchBlockingPresence("driver-bound", now),
+    ).toEqual({ platformCode: "uber", reason: "offline" });
+
+    // Going back online keeps the account and a fresh heartbeat.
+    await service.setOnline("driver-bound", "uber");
+    expect(
+      await service.findDispatchBlockingPresence("driver-bound", new Date()),
+    ).toBeNull();
+  });
+
+  it("still blocks while the driver is reported busy on another platform", async () => {
+    const service = new PlatformPresenceService();
+    await service.setBusy("driver-busy", "uber");
+    expect(
+      await service.findDispatchBlockingPresence("driver-busy", now),
+    ).toEqual({ platformCode: "uber", reason: "busy" });
+  });
+});

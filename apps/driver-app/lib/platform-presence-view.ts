@@ -43,6 +43,16 @@ export type PlatformPresenceViewSummary = PlatformPresenceSummary & {
   };
 };
 
+// Records the driver should see: a bound platform account, or a busy report.
+// Online/offline records without an account were left by the app's old
+// in-app bind form and toggles; they bind nothing and no longer affect
+// dispatch, so the app treats them as not bound.
+export function isRealPlatformPresence(
+  record: PlatformPresenceRecord,
+): boolean {
+  return Boolean(record.accountId?.trim()) || record.status === "busy";
+}
+
 export function getPlatformReauthMechanism(
   record: PlatformPresenceViewRecord,
 ): ReauthMechanism {

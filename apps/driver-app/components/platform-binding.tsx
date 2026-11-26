@@ -12,14 +12,13 @@ import { formatDriverError, getDriverClient } from "@/lib/api-client";
 import {
   canReceiveOrders,
   deriveBlockingReasons,
+  isRealPlatformPresence,
 } from "@/lib/platform-presence-view";
+import { driverStrings } from "@/lib/strings";
 
 interface PlatformBindingProps {
   showSectionTitle?: boolean;
 }
-
-export const PLATFORM_BINDING_CONTACT_NOTE =
-  "外部平台帳號由車隊幫您綁定，需要新增請聯絡派車台。";
 
 function getPlatformDisplayName(record: PlatformPresenceRecord): string {
   return (
@@ -28,10 +27,11 @@ function getPlatformDisplayName(record: PlatformPresenceRecord): string {
   );
 }
 
-// Read-only on purpose. The fleet binds external platform accounts. A
-// driver-side bind only marked the platform online without an account, and
-// the app sends no platform heartbeats, so that status went stale and then
-// blocked the driver's own fleet dispatch.
+// Read-only on purpose; nothing in the product binds an external platform
+// account yet. The old driver-side bind only marked the platform online
+// without an account, and the app sends no platform heartbeats, so that
+// status went stale and then blocked the driver's own fleet dispatch. Those
+// unbound leftovers are not listed.
 export function PlatformBinding({
   showSectionTitle = true,
 }: PlatformBindingProps) {
@@ -48,7 +48,7 @@ export function PlatformBinding({
       try {
         const summary = await getDriverClient().getPlatformPresence();
         if (!active) return;
-        setPresences(summary.presences);
+        setPresences((summary.presences ?? []).filter(isRealPlatformPresence));
         setAdapterStatuses(summary.adapterStatuses ?? []);
         setLoadError(null);
       } catch (error) {
@@ -122,7 +122,9 @@ export function PlatformBinding({
         </View>
       ))}
 
-      <Text style={styles.contactNote}>{PLATFORM_BINDING_CONTACT_NOTE}</Text>
+      <Text style={styles.contactNote}>
+        {driverStrings.platformPresence.noInAppBinding}
+      </Text>
     </View>
   );
 }

@@ -27,6 +27,7 @@ import {
   tokens,
 } from "@/components/ui";
 import { assessPlatformHealth } from "@/components/platform-status-card";
+import { isRealPlatformPresence } from "@/lib/platform-presence-view";
 import {
   formatDriverError,
   formatDriverRegistrationError,
@@ -686,7 +687,11 @@ export default function OnboardingScreen() {
     () => summarizeWorkspaceTasks(taskViews),
     [taskViews],
   );
-  const externalPresences = platformSummary?.presences ?? [];
+  // Unbound leftovers from the old in-app bind form are not platforms.
+  const externalPresences = useMemo(
+    () => (platformSummary?.presences ?? []).filter(isRealPlatformPresence),
+    [platformSummary],
+  );
   const reauthPlatforms = useMemo(
     () => externalPresences.filter((record) => record.reauthRequired),
     [externalPresences],
@@ -868,8 +873,7 @@ export default function OnboardingScreen() {
       return {
         tone: "neutral" as StatusTone,
         label: "沒有綁定外部平台",
-        description:
-          "車隊派單不用綁定。外部平台帳號由車隊幫您綁定，需要請聯絡派車台。",
+        description: driverStrings.platformPresence.noInAppBinding,
       };
     }
 
@@ -1565,7 +1569,7 @@ export default function OnboardingScreen() {
         ) : (
           <WarningCallout
             iconName="swap-horizontal-outline"
-            message="沒有綁定外部平台。車隊派單不用綁定，外部平台帳號由車隊幫您綁定。"
+            message={driverStrings.platformPresence.noInAppBinding}
             tone="info"
           />
         )}

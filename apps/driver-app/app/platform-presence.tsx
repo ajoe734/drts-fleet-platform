@@ -38,6 +38,7 @@ import {
   deriveBlockingReasons,
   getEligibilityLabel,
   getPlatformReauthUrl,
+  isRealPlatformPresence,
   resolveEmptyReason,
   type PlatformPresenceViewRecord,
   type PlatformPresenceViewSummary,
@@ -237,10 +238,10 @@ function emptyStateCopy(reason: EmptyReason): {
 } {
   switch (reason) {
     case "not_provisioned":
-      // Drivers cannot bind a platform themselves; the fleet does it.
+      // There is no way to bind a platform in the app.
       return {
         title: "還沒有綁定外部平台",
-        body: "車隊派單不用綁定，上班打卡後就能接單。外部平台帳號由車隊幫您綁定，需要請聯絡派車台。",
+        body: driverStrings.platformPresence.noInAppBinding,
         tone: "info",
       };
     case "fetch_failed":
@@ -258,7 +259,7 @@ function emptyStateCopy(reason: EmptyReason): {
     case "external_unavailable":
       return {
         title: "外部平台同步異常",
-        body: "所有外部平台目前都無法正常運作，請先查看需處理平台或聯絡派車台。",
+        body: "所有外部平台目前都無法正常運作，原因列在下方各平台，或請聯絡派車台。",
         tone: "warn",
       };
     case "driver_not_eligible":
@@ -383,11 +384,12 @@ function PlatformCard({
               <Text style={[styles.platformName, { color: THEME.text }]}>
                 {item.displayName}
               </Text>
-              <Pill theme={THEME} tone={item.forwarded ? "warn" : "accent"}>
-                {item.forwarded
-                  ? driverStrings.platformPresence.external
-                  : driverStrings.platformPresence.owned}
-              </Pill>
+              {/* A fleet row's name already says 車隊派單. */}
+              {item.forwarded ? (
+                <Pill theme={THEME} tone="warn">
+                  {driverStrings.platformPresence.external}
+                </Pill>
+              ) : null}
               <Pill theme={THEME} tone={item.statusTone} dot>
                 {item.statusLabel}
               </Pill>
@@ -516,6 +518,8 @@ export default function PlatformPresenceScreen() {
         (await client.getPlatformPresence()) as PlatformPresenceViewSummary;
       setSummary({
         ...nextSummary,
+        // Unbound leftovers from the old in-app bind form are not bindings.
+        presences: (nextSummary.presences ?? []).filter(isRealPlatformPresence),
         refreshTier: nextSummary.refreshTier ?? "medium",
       });
       setError(null);
@@ -616,9 +620,19 @@ export default function PlatformPresenceScreen() {
       });
   }, [summary]);
 
+  const showFilters = enrichedPresences.length >= FILTER_MIN_PLATFORMS;
+  // A filter picked while the tabs were shown must not keep hiding
+  // platforms once the tabs disappear.
+  const activeFilter: PresenceFilter = showFilters ? filter : "all";
+  useEffect(() => {
+    if (!showFilters) {
+      setFilter("all");
+    }
+  }, [showFilters]);
+
   const filteredPresences = useMemo(
-    () => enrichedPresences.filter((item) => matchesFilter(item, filter)),
-    [enrichedPresences, filter],
+    () => enrichedPresences.filter((item) => matchesFilter(item, activeFilter)),
+    [enrichedPresences, activeFilter],
   );
 
   const emptyReason = resolveEmptyReason({
@@ -716,8 +730,8 @@ export default function PlatformPresenceScreen() {
         </Text>
       ) : null}
 
-      {enrichedPresences.length >= FILTER_MIN_PLATFORMS ? (
-        <PresenceFilterTabs activeFilter={filter} onChange={setFilter} />
+      {showFilters ? (
+        <PresenceFilterTabs activeFilter={activeFilter} onChange={setFilter} />
       ) : null}
 
       {error && summary ? (

@@ -268,16 +268,18 @@ export const driverStrings = {
   platformPresence: {
     title: "平台連線",
     subtitle: "檢查可接單平台狀態",
-    managedByDrts: "自營派單",
+    managedByDrts: "車隊派單",
     external: "外部",
-    owned: "自營",
+    owned: "車隊派單",
+    // Nothing in the product binds an external platform account yet.
+    noInAppBinding:
+      "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",
     kpis: {
       available: "可接單",
       online: "上線中",
       attention: "需動作",
     },
     sectionTitle: "逐平台狀態",
-    bindAction: "管理綁定",
   },
   earnings: {
     title: "收入",
