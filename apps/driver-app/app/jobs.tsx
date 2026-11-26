@@ -480,6 +480,11 @@ function buildTaskTitle(task: UnifiedDriverTaskView) {
   return "派車台訂單";
 }
 
+// Tests find a row by its full task ID; drivers never see it as text.
+function jobRowTestId(task: UnifiedDriverTaskView): string {
+  return `driver-job-task-${task.taskId}`;
+}
+
 // The last six characters are enough for dispatch to find the order; the
 // full identifier is noise on a phone screen.
 function formatShortReference(id: string | null | undefined): string | null {
@@ -969,7 +974,11 @@ function TaskCard({
       padding={14}
     >
       <View>
-        <Pressable accessibilityRole="button" onPress={onOpen}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onOpen}
+          testID={jobRowTestId(task)}
+        >
           <View style={styles.cardTopRow}>
             <View style={styles.cardTopLead}>
               <PlatformBadge
@@ -1191,6 +1200,7 @@ function DenseTaskRow({
           accessibilityRole="button"
           disabled={busy}
           onPress={onOpen}
+          testID={jobRowTestId(task)}
           style={({ pressed }) => [
             styles.denseRowPressable,
             pressed && !busy ? styles.denseRowPressed : null,

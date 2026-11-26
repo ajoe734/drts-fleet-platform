@@ -574,9 +574,11 @@ it.each([true, false])(
         "actual Jobs outlet",
       );
     }
-    await waitForState(() =>
-      expect(text(jobs())).toContain(`pickup-${h.record.taskId}`),
-    );
+    // Job rows carry the full task id only as a testID.
+    const jobRow = (node: NativeNode) =>
+      node.type === "Pressable" &&
+      node.props.testID === `driver-job-task-${h.record.taskId}`;
+    await waitForState(() => expect(jobs().findAll(jobRow)).toHaveLength(1));
     expect(text(jobs()).includes("輪椅需求")).toBe(accessible);
     await press(
       one(
@@ -590,10 +592,7 @@ it.each([true, false])(
     await press(
       one(
         jobs().findAll(
-          (node) =>
-            node.type === "Pressable" &&
-            node.props.accessibilityRole === "button" &&
-            text(node).includes(`pickup-${h.record.taskId}`),
+          (node) => jobRow(node) && node.props.accessibilityRole === "button",
         ),
         "same task real Jobs row",
       ),
