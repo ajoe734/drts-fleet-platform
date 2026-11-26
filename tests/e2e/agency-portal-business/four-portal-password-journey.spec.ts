@@ -287,6 +287,13 @@ async function verifyAccountSecurityAndSignOutInBrowser(
   const logoutResponse = await logoutResponsePromise;
   const logoutStatus = logoutResponse.status();
   expect(logoutStatus).toBe(200);
+  // After logout-all the page reloads itself (portal-auth revokeAll), and the
+  // signed-out reload is redirected to /login?redirect_uri=…. Wait for that
+  // to land: a goto issued while it is still under way is aborted with
+  // "interrupted by another navigation" (CI, 2026-11-26).
+  await page.waitForURL((url) => url.pathname === "/login", {
+    timeout: 120_000,
+  });
   const afterLogout = await page.request.get(
     `${portalOrigin}/api/auth/sessions`,
   );
