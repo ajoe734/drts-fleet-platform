@@ -13,6 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
+  isFeatureEnabled: vi.fn(),
+  listShifts: vi.fn(),
   isDriverIdentityProvisioned: vi.fn(),
   getDriverIdentityIssue: vi.fn(),
   getForegroundPermissionsAsync: vi.fn(),
@@ -33,7 +36,7 @@ vi.mock("react-native", () => ({
 }));
 
 vi.mock("expo-router", () => ({
-  useRouter: () => ({ push: mocks.push }),
+  useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
 }));
 
 vi.mock("expo-location", () => ({
@@ -54,8 +57,8 @@ vi.mock("@/lib/api-client", () => ({
   isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
   getDriverIdentityIssue: mocks.getDriverIdentityIssue,
   getDriverClient: () => ({
-    isFeatureEnabled: vi.fn().mockResolvedValue(true),
-    listShifts: vi.fn().mockResolvedValue([]),
+    isFeatureEnabled: mocks.isFeatureEnabled,
+    listShifts: mocks.listShifts,
     getPlatformPresence: vi.fn().mockResolvedValue(null),
     clockIn: vi.fn(),
     clockOut: vi.fn(),
@@ -74,9 +77,6 @@ vi.mock("@/lib/strings", () => ({
   driverStrings: {
     shift: {
       title: "班次",
-      summaryTitle: "班次摘要",
-      readinessTitle: "上線準備",
-      statusLabel: "狀態",
       punchIn: "上線打卡",
       punchOut: "下線打卡",
     },
@@ -98,13 +98,22 @@ vi.mock("@/components/ui", async () => {
   });
 
   const uiComponent =
-    (name: string) =>
-    (props: { children?: React.ReactNode }) =>
+    (name: string) => (props: { children?: React.ReactNode }) =>
       React.createElement(name, props, props.children);
 
   return {
     ActionButton: uiComponent("ActionButton"),
-    AppScreen: uiComponent("AppScreen"),
+    // Render the footer too, so the bottom clock-in/out bar is inspectable.
+    AppScreen: (props: {
+      children?: React.ReactNode;
+      footer?: React.ReactNode;
+    }) =>
+      React.createElement(
+        "AppScreen",
+        props,
+        props.children,
+        props.footer ?? null,
+      ),
     AuthorityBanner: uiComponent("AuthorityBanner"),
     BottomActionBar: uiComponent("BottomActionBar"),
     EmptyState: uiComponent("EmptyState"),
@@ -121,9 +130,48 @@ vi.mock("@/components/ui", async () => {
 import ShiftScreen from "../../app/shift";
 
 async function flushEffects() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
+}
+
+type JsonNode = {
+  type: string;
+  props: Record<string, unknown>;
+  children: Array<JsonNode | string> | null;
+};
+
+// Every string the driver could see: text children plus copy-bearing props of
+// the mocked UI components (titles, labels, notices…).
+function visibleStrings(renderer: any): string[] {
+  const out: string[] = [];
+  const walk = (node: JsonNode | JsonNode[] | string | null) => {
+    if (node == null) return;
+    if (typeof node === "string") {
+      out.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    for (const value of Object.values(node.props)) {
+      if (typeof value === "string") out.push(value);
+    }
+    (node.children ?? []).forEach(walk);
+  };
+  walk(renderer.toJSON());
+  return out;
+}
+
+function textNodes(renderer: any): string[] {
+  return renderer.root
+    .findAllByType("Text")
+    .map((node: any) =>
+      (node.children as unknown[])
+        .filter((child) => typeof child === "string")
+        .join(""),
+    );
 }
 
 async function renderShift() {
@@ -138,6 +186,8 @@ async function renderShift() {
 describe("ShiftScreen pre-online gate (unprovisioned)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isFeatureEnabled.mockResolvedValue(true);
+    mocks.listShifts.mockResolvedValue([]);
     mocks.getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
     mocks.getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
   });
@@ -174,5 +224,109 @@ describe("ShiftScreen pre-online gate (unprovisioned)", () => {
     expect(emptyState.props.title).toBe("尚未綁定裝置");
     expect(emptyState.props.description).toContain("車隊綁定");
     expect(emptyState.props.actionTitle).toBe("前往配置裝置");
+  });
+});
+
+describe("ShiftScreen shows only real shift data (provisioned)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+    mocks.getDriverIdentityIssue.mockReturnValue(null);
+    mocks.isFeatureEnabled.mockResolvedValue(true);
+    mocks.listShifts.mockResolvedValue([]);
+    mocks.getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
+    mocks.getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
+  });
+
+  it("off shift: shows the pre-online checklist and clock-in, with no invented off time or placeholder tiles", async () => {
+    const renderer = await renderShift();
+    const visible = visibleStrings(renderer).join("\n");
+
+    // The invented "clock-in + 8 hours" off time is gone everywhere.
+    expect(visible).not.toContain("預計下線");
+    // No hero of placeholders and no wall of "waiting" tiles before a shift.
+    for (const placeholder of [
+      "--:--",
+      "尚未填寫",
+      "等待上線",
+      "開始後顯示",
+      "待上線",
+      "尚未開始",
+      "尚無資料",
+    ]) {
+      expect(visible).not.toContain(placeholder);
+    }
+    // Developer notes are not shown as copy.
+    expect(visible).not.toContain("班次資料保護原則");
+    expect(visible).not.toContain("保護機制");
+    expect(visible).not.toContain("沿用既有");
+    expect(renderer.root.findAllByType("AuthorityBanner")).toHaveLength(0);
+
+    expect(textNodes(renderer)).toContain("上線前檢查");
+    const clockIn = renderer.root
+      .findAllByType("ActionButton")
+      .filter((node: any) => node.props.title === "上線打卡");
+    expect(clockIn).toHaveLength(1);
+    expect(renderer.root.findAllByType("StatusChip").length).toBeGreaterThan(0);
+  });
+
+  it("on shift: shows recorded values only, in Taiwan time, and no invented off time", async () => {
+    mocks.listShifts.mockResolvedValue([
+      {
+        shiftId: "shift-1",
+        driverId: "driver-001",
+        vehicleId: null,
+        status: "active",
+        clockedInAt: "2026-11-26T01:00:00.000Z",
+        clockedOutAt: null,
+        startLocation: null,
+        endLocation: null,
+        startOdometer: 50000,
+        endOdometer: null,
+        notes: null,
+        totalHours: null,
+      },
+    ]);
+
+    const renderer = await renderShift();
+    const visible = visibleStrings(renderer).join("\n");
+    const texts = textNodes(renderer);
+
+    expect(visible).not.toContain("預計下線");
+    expect(visible).not.toContain("未填寫");
+    expect(visible).toContain("上班中");
+    expect(texts).toContain("起始里程");
+    expect(texts).toContain("50,000 km");
+    expect(texts).toContain("開始時間");
+    // Fields the shift does not have are left out instead of padded.
+    expect(texts).not.toContain("車輛");
+    expect(texts).not.toContain("起始位置");
+    // 01:00 UTC is 09:00 in Taiwan.
+    expect(visible).toMatch(/自 \S*09:00 起/);
+
+    // With no platform data the section says so once and offers the next step.
+    expect(texts).toContain("目前沒有平台資料。");
+    const platformAction = renderer.root
+      .findAllByType("ActionButton")
+      .find((node: any) => node.props.title === "查看平台狀態");
+    expect(platformAction).toBeDefined();
+    await act(async () => {
+      platformAction.props.onPress();
+    });
+    expect(mocks.push).toHaveBeenCalledWith("/platform-presence");
+  });
+
+  it("feature off: 返回工作台 goes to the home tab, not onboarding", async () => {
+    mocks.isFeatureEnabled.mockResolvedValue(false);
+
+    const renderer = await renderShift();
+    const emptyState = renderer.root.findByType("EmptyState");
+    expect(emptyState.props.actionTitle).toBe("返回工作台");
+
+    await act(async () => {
+      emptyState.props.onAction();
+    });
+    expect(mocks.replace).toHaveBeenCalledWith("/");
+    expect(mocks.push).not.toHaveBeenCalledWith("/onboarding");
   });
 });

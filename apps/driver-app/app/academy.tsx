@@ -15,10 +15,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Tokens } from "@/components/ui/tokens";
-import {
-  formatDriverError,
-  getDriverClient,
-} from "@/lib/api-client";
+import { formatDriverError, getDriverClient } from "@/lib/api-client";
 import {
   CourseCard,
   ModuleReader,
@@ -87,9 +84,7 @@ export default function DriverAcademyScreen() {
       setSelectedCourse(detail);
       setViewMode("detail");
     } catch (err) {
-      setError(
-        formatDriverError(err, "無法取得課程詳細教材，請稍候重試。"),
-      );
+      setError(formatDriverError(err, "無法取得課程詳細教材，請稍候重試。"));
     } finally {
       setIsDetailLoading(false);
     }
@@ -104,19 +99,19 @@ export default function DriverAcademyScreen() {
       setSelectedCourse(detail);
       setViewMode("detail");
     } catch (err) {
-      setError(
-        formatDriverError(err, "無法取得課程詳細教材，請稍候重試。"),
-      );
+      setError(formatDriverError(err, "無法取得課程詳細教材，請稍候重試。"));
     } finally {
       setIsDetailLoading(false);
     }
   };
 
   const handleStartQuiz = () => {
+    setError(null);
     setViewMode("quiz");
   };
 
   const handleCancelQuiz = () => {
+    setError(null);
     setViewMode("detail");
   };
 
@@ -126,18 +121,13 @@ export default function DriverAcademyScreen() {
     setError(null);
     try {
       const client = getDriverClient();
-      const result = await client.submitQuiz(
-        selectedCourse.courseId,
-        command,
-      );
+      const result = await client.submitQuiz(selectedCourse.courseId, command);
       setQuizResult(result);
       setViewMode("result");
       // Refresh list in background so new score and status are immediately updated
       void loadData();
     } catch (err) {
-      setError(
-        formatDriverError(err, "提交測驗失敗，請檢查答案後再試一次。"),
-      );
+      setError(formatDriverError(err, "提交測驗失敗，請檢查答案後再試一次。"));
     } finally {
       setIsSubmitting(false);
     }
@@ -145,6 +135,7 @@ export default function DriverAcademyScreen() {
 
   const handleRetakeQuiz = () => {
     setQuizResult(null);
+    setError(null);
     setViewMode("quiz");
   };
 
@@ -187,6 +178,13 @@ export default function DriverAcademyScreen() {
           subtitle={selectedCourse.title}
           rightElement={renderBackButton(handleCancelQuiz, "放棄測驗")}
         />
+        {/* A failed submit must stay visible here; the list-view banner is not
+            rendered while the quiz is open. */}
+        {error ? (
+          <View style={styles.errorWrapper}>
+            <ErrorBanner message={error} />
+          </View>
+        ) : null}
         <QuizRunner
           course={selectedCourse}
           onSubmit={handleSubmitQuiz}
@@ -225,11 +223,7 @@ export default function DriverAcademyScreen() {
           subtitle={selectedCourse.title}
           rightElement={renderBackButton(handleBackToCourses, "回清單")}
         />
-        <ModuleReader
-          course={selectedCourse}
-          onStartQuiz={handleStartQuiz}
-          onBack={handleBackToCourses}
-        />
+        <ModuleReader course={selectedCourse} onStartQuiz={handleStartQuiz} />
       </AppScreen>
     );
   }

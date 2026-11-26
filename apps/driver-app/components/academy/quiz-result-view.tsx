@@ -3,6 +3,22 @@ import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
 import type { DriverQuizAttemptDetail, QuizResultRecord } from "./types";
 
+// Taiwan has a fixed UTC+8 offset (no daylight saving), so the attempt time is
+// shown on the Taiwan clock whatever the device time zone is.
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function formatTaipeiDateTime(value: string): string | null {
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) {
+    return null;
+  }
+  const taipei = new Date(time + TAIPEI_OFFSET_MS);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${taipei.getUTCFullYear()}/${pad(taipei.getUTCMonth() + 1)}/${pad(
+    taipei.getUTCDate(),
+  )} ${pad(taipei.getUTCHours())}:${pad(taipei.getUTCMinutes())}`;
+}
+
 interface QuizResultViewProps {
   result: QuizResultRecord | DriverQuizAttemptDetail;
   passingScore: number;
@@ -19,6 +35,7 @@ export function QuizResultView({
   const isPassed = result.passed;
   const answersSummary =
     "answersSummary" in result ? result.answersSummary : [];
+  const attemptedAt = formatTaipeiDateTime(result.attemptedAt);
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -40,9 +57,7 @@ export function QuizResultView({
           style={[
             styles.resultTitle,
             {
-              color: isPassed
-                ? Tokens.colors.success
-                : Tokens.colors.danger,
+              color: isPassed ? Tokens.colors.success : Tokens.colors.danger,
             },
           ]}
         >
@@ -54,9 +69,7 @@ export function QuizResultView({
             style={[
               styles.scoreNumber,
               {
-                color: isPassed
-                  ? Tokens.colors.success
-                  : Tokens.colors.danger,
+                color: isPassed ? Tokens.colors.success : Tokens.colors.danger,
               },
             ]}
           >
@@ -66,45 +79,33 @@ export function QuizResultView({
         </View>
 
         <Text style={styles.scoreSubtext}>
-          及格門檻：{passingScore} 分 · 判定狀態：
-          {isPassed ? " 合格 (Passed)" : " 未通過 (Failed)"}
+          及格門檻：{passingScore} 分 · {isPassed ? "合格" : "未通過"}
         </Text>
 
         <Text style={styles.resultMessage}>
           {isPassed
-            ? "您的測驗成績已正式寫入權威資料庫，車行完訓看板已即時同步此項合格證據，保障您派車服務資格。"
-            : "本次測驗成績未達及格標準，未具備完訓資格。請再次研讀課程教材或 SOP 指引後重新作答。"}
+            ? "成績已記錄，車行可看到你已完訓。"
+            : "這次成績未達及格分數。請再讀一次教材後重新測驗。"}
         </Text>
       </View>
 
-      {/* Audit Evidence Card */}
-      <View style={styles.evidenceCard}>
-        <Text style={styles.evidenceCardTitle}>作答憑據與稽核資訊</Text>
+      {attemptedAt || result.feedback ? (
+        <View style={styles.evidenceCard}>
+          {attemptedAt ? (
+            <View style={styles.evidenceRow}>
+              <Text style={styles.evidenceLabel}>測驗時間：</Text>
+              <Text style={styles.evidenceValue}>{attemptedAt}</Text>
+            </View>
+          ) : null}
 
-        <View style={styles.evidenceRow}>
-          <Text style={styles.evidenceLabel}>歷程編號 (Attempt ID)：</Text>
-          <Text style={styles.evidenceValueMono}>{result.attemptId}</Text>
+          {result.feedback ? (
+            <View style={styles.feedbackBox}>
+              <Text style={styles.feedbackTitle}>評語：</Text>
+              <Text style={styles.feedbackText}>{result.feedback}</Text>
+            </View>
+          ) : null}
         </View>
-
-        <View style={styles.evidenceRow}>
-          <Text style={styles.evidenceLabel}>課程代碼：</Text>
-          <Text style={styles.evidenceValue}>
-            {result.courseId} (v{result.courseVersion})
-          </Text>
-        </View>
-
-        <View style={styles.evidenceRow}>
-          <Text style={styles.evidenceLabel}>測驗時間：</Text>
-          <Text style={styles.evidenceValue}>{result.attemptedAt}</Text>
-        </View>
-
-        {result.feedback && (
-          <View style={styles.feedbackBox}>
-            <Text style={styles.feedbackTitle}>評分評語：</Text>
-            <Text style={styles.feedbackText}>{result.feedback}</Text>
-          </View>
-        )}
-      </View>
+      ) : null}
 
       {/* Answers Breakdown if present */}
       {answersSummary && answersSummary.length > 0 && (
@@ -115,7 +116,7 @@ export function QuizResultView({
               <View key={ans.questionId} style={styles.breakdownItem}>
                 <View style={styles.breakdownItemHeader}>
                   <Text style={styles.breakdownQuestionText}>
-                    第 {idx + 1} 題 ({ans.questionId})
+                    第 {idx + 1} 題
                   </Text>
                   <View
                     style={[
@@ -140,13 +141,10 @@ export function QuizResultView({
                         },
                       ]}
                     >
-                      {ans.isCorrect ? "正解" : "錯誤"}
+                      {ans.isCorrect ? "答對" : "答錯"}
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.breakdownOptionText}>
-                  選答選項：{ans.selectedOptionId}
-                </Text>
               </View>
             ))}
           </View>
@@ -230,12 +228,6 @@ const styles = StyleSheet.create({
     padding: Tokens.spacing.lg,
     gap: Tokens.spacing.sm,
   },
-  evidenceCardTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Tokens.colors.text,
-    marginBottom: Tokens.spacing.xs,
-  },
   evidenceRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -249,12 +241,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: Tokens.colors.text,
-  },
-  evidenceValueMono: {
-    fontSize: 11,
-    fontFamily: Tokens.fonts.mono,
-    color: Tokens.colors.brandHi,
-    fontWeight: "600",
   },
   feedbackBox: {
     marginTop: Tokens.spacing.xs,
@@ -315,11 +301,6 @@ const styles = StyleSheet.create({
   correctBadgeText: {
     fontSize: 10,
     fontWeight: "700",
-  },
-  breakdownOptionText: {
-    fontSize: 11,
-    color: Tokens.colors.textMuted,
-    fontFamily: Tokens.fonts.mono,
   },
   actionsRow: {
     gap: Tokens.spacing.sm,

@@ -56,7 +56,7 @@ export function TrainingRecordsList({
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyTitle}>尚無完訓紀錄</Text>
         <Text style={styles.emptySubtitle}>
-          請前往「課程專區」研讀教材並完成線上測驗，通過後將自動列入權威完訓證明。
+          請前往「課程專區」研讀教材並完成線上測驗，通過後會列入完訓紀錄。
         </Text>
       </View>
     );
@@ -132,12 +132,17 @@ export function TrainingRecordsList({
               <Text style={styles.dateText}>
                 完訓：
                 {rec.completedAt
-                  ? new Date(rec.completedAt).toLocaleDateString("zh-TW")
+                  ? new Date(rec.completedAt).toLocaleDateString("zh-TW", {
+                      timeZone: "Asia/Taipei",
+                    })
                   : "未完訓"}
               </Text>
               {rec.expiresAt && (
                 <Text style={styles.dateText}>
-                  到期：{new Date(rec.expiresAt).toLocaleDateString("zh-TW")}
+                  到期：
+                  {new Date(rec.expiresAt).toLocaleDateString("zh-TW", {
+                    timeZone: "Asia/Taipei",
+                  })}
                 </Text>
               )}
             </View>
