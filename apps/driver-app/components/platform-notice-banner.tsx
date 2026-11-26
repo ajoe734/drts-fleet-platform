@@ -16,9 +16,14 @@ type Notice = {
     readAt: string | null;
   };
 };
+// Shown when marking a notice as read fails. A failed notice fetch shows
+// nothing: the raw error ("API error 500: {...}", "Network request failed")
+// is not something a driver can act on, and the next poll retries anyway.
+const READ_FAILED_MESSAGE = "無法標示已讀，請稍後再試";
+
 export function PlatformNoticeBanner() {
   const [notices, setNotices] = useState<Notice[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const observer = useRef<{ read: (n: Notice) => Promise<void> } | null>(null);
   useEffect(() => {
@@ -39,12 +44,11 @@ export function PlatformNoticeBanner() {
         );
         if (!disposed && !request.signal.aborted && generation === current) {
           setNotices(items);
-          setError(null);
+          setReadError(null);
         }
-      } catch (e) {
+      } catch {
         if (!disposed && !request.signal.aborted && generation === current) {
           setNotices([]);
-          setError(e instanceof Error ? e.message : String(e));
         }
       } finally {
         if (generation === current) active = null;
@@ -63,22 +67,22 @@ export function PlatformNoticeBanner() {
     const unregister = registerProtectedCacheClearHandler(() => {
       clear();
       setNotices([]);
-      setError(null);
+      setReadError(null);
     });
     observer.current = {
       async read(n) {
         setPending(n.noticeId);
-        setError(null);
+        setReadError(null);
         try {
           const ack = await client.post<Notice["outcome"]>(
             `/api/driver/platform-notices/${encodeURIComponent(n.noticeId)}/read`,
             { body: { outcomeId: n.outcome.outcomeId } },
           );
           if (!ack?.readAt || ack.outcomeId !== n.outcome.outcomeId)
-            throw new Error("讀取未獲確認");
+            throw new Error("read not acknowledged");
           if (!disposed) await refresh();
-        } catch (e) {
-          if (!disposed) setError(e instanceof Error ? e.message : String(e));
+        } catch {
+          if (!disposed) setReadError(READ_FAILED_MESSAGE);
         } finally {
           if (!disposed) setPending(null);
         }
@@ -92,7 +96,7 @@ export function PlatformNoticeBanner() {
   }, []);
   return (
     <View accessibilityLabel="平台公告">
-      {error && <Text accessibilityRole="alert">{error}</Text>}
+      {readError && <Text accessibilityRole="alert">{readError}</Text>}
       {notices.map((n) => (
         <View
           key={n.noticeId}

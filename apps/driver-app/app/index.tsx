@@ -11,7 +11,6 @@ import {
   View,
 } from "react-native";
 import {
-  type CrossAppResourceLink,
   type DriverTaskAction,
   type EmptyStateEnvelope,
   type NotificationRecord,
@@ -24,7 +23,6 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
   type ShiftRecord,
-  type UiRefreshMetadata,
   type UnifiedDriverTaskView,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
@@ -140,7 +138,9 @@ type NotificationCardModel = {
   createdAt: string;
   readAt: string | null;
   tone: Exclude<CanvasTone, "neutral">;
-  route: WorkspaceRoute;
+  // null when the notification does not point at a screen; the inbox then
+  // offers no 開啟 button instead of guessing a destination.
+  route: WorkspaceRoute | null;
   iconName: keyof typeof Ionicons.glyphMap;
   persistent: boolean;
 };
@@ -172,20 +172,6 @@ type DeepLinkTileModel = {
   tone?: Exclude<CanvasTone, "neutral"> | "accent";
 };
 
-type ReadinessStripItem = {
-  key: string;
-  label: string;
-  value: string;
-  tone: CanvasTone;
-};
-
-type CrossAppNoticeModel = {
-  notificationId: string;
-  title: string;
-  body: string;
-  createdAt: string;
-};
-
 type WorkspaceActionModel = {
   route: WorkspaceRoute;
   descriptor: ResourceActionDescriptor;
@@ -193,7 +179,12 @@ type WorkspaceActionModel = {
 
 const THEME = driverCanvasTheme;
 const WORKSPACE_REFRESH_TIER: RefreshTier = "medium";
-const WORKSPACE_CROSS_APP_LINKS: CrossAppResourceLink[] = [];
+// Taiwan has no daylight saving, so a fixed UTC+8 offset gives Taiwan local
+// time on any device without relying on the phone's own time zone.
+const TAIWAN_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
+const NOTICE_RECEIPT_MISSING_MESSAGE =
+  "無法標示已讀，請按右上角重新整理後再試。";
+const NOTICE_READ_FAILED_MESSAGE = "無法標示已讀，請稍後再試。";
 const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
   urgent: 5_000,
   fast: 3_000,
@@ -312,39 +303,6 @@ function getActionDisabledReason(
   }
 }
 
-function getActionRiskTone(
-  riskLevel: ResourceActionDescriptor["riskLevel"],
-): CanvasTone {
-  switch (riskLevel) {
-    case "high":
-      return "danger";
-    case "medium":
-      return "warn";
-    default:
-      return "info";
-  }
-}
-
-function getRefreshTierLabel(tier: RefreshTier) {
-  switch (tier) {
-    case "urgent":
-      return "每 5 秒更新";
-    case "fast":
-      return "每 3 秒更新";
-    case "dispatch":
-      return "派單更新";
-    case "medium":
-      return "每 15 秒更新";
-    case "medium_slow":
-    case "slow":
-      return "每 30 秒更新";
-    case "manual":
-      return "手動更新";
-    default:
-      return "定期更新";
-  }
-}
-
 function getRefreshTierIntervalMs(tier: RefreshTier) {
   return REFRESH_TIER_INTERVAL_MS[tier];
 }
@@ -378,7 +336,7 @@ function isSosNotification(notification: NotificationRecord) {
 
 function getNotificationRoute(
   notification: NotificationRecord,
-): WorkspaceRoute {
+): WorkspaceRoute | null {
   const haystack = `${notification.title} ${notification.message}`
     .trim()
     .toLowerCase();
@@ -398,7 +356,10 @@ function getNotificationRoute(
     return "/jobs";
   }
 
-  return "/sos";
+  // A notification that names no task, platform or authorisation has no
+  // screen to open. It used to fall through to /sos, so 開啟 on a plain
+  // announcement opened the emergency screen.
+  return null;
 }
 
 function getNotificationTone(
@@ -441,20 +402,33 @@ function getNotificationIconName(
   return "chatbox-ellipses-outline";
 }
 
+// Returns a Date whose UTC fields read as Taiwan wall-clock time.
+function toTaiwanWallClock(value: string | number): Date | null {
+  const ms = typeof value === "number" ? value : Date.parse(value);
+  if (!Number.isFinite(ms)) {
+    return null;
+  }
+  return new Date(ms + TAIWAN_UTC_OFFSET_MS);
+}
+
+function padTwo(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatTaiwanClock(value: string | number) {
+  const wall = toTaiwanWallClock(value);
+  if (!wall) {
+    return "—";
+  }
+  return `${padTwo(wall.getUTCHours())}:${padTwo(wall.getUTCMinutes())}`;
+}
+
 function formatClockLabel(value: string | null | undefined) {
   if (!value) {
-    return "待同步";
+    return "—";
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleTimeString("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatTaiwanClock(value);
 }
 
 function formatCompactDateTime(value: string | null | undefined) {
@@ -462,29 +436,25 @@ function formatCompactDateTime(value: string | null | undefined) {
     return driverStrings.common.notUpdatedYet;
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
+  const wall = toTaiwanWallClock(value);
+  if (!wall) {
+    return "—";
   }
 
-  return parsed.toLocaleString("zh-TW", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return `${wall.getUTCMonth() + 1}/${wall.getUTCDate()} ${formatTaiwanClock(value)}`;
 }
 
-function isSameLocalDay(value: string, reference: Date) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+function isSameTaiwanDay(value: string, reference: Date) {
+  const wall = toTaiwanWallClock(value);
+  const referenceWall = toTaiwanWallClock(reference.getTime());
+  if (!wall || !referenceWall) {
     return false;
   }
 
   return (
-    parsed.getFullYear() === reference.getFullYear() &&
-    parsed.getMonth() === reference.getMonth() &&
-    parsed.getDate() === reference.getDate()
+    wall.getUTCFullYear() === referenceWall.getUTCFullYear() &&
+    wall.getUTCMonth() === referenceWall.getUTCMonth() &&
+    wall.getUTCDate() === referenceWall.getUTCDate()
   );
 }
 
@@ -549,8 +519,10 @@ function getPlatformTone(
   return "neutral";
 }
 
-function formatTaskHeadline(task: UnifiedDriverTaskView) {
-  return task.dropoffSummary ?? task.pickupSummary ?? task.taskId;
+// Never fall back to the task ID: drivers cannot use it, and callers show
+// their own Chinese fallback when there is no address yet.
+function formatTaskHeadline(task: UnifiedDriverTaskView): string | null {
+  return task.dropoffSummary ?? task.pickupSummary ?? null;
 }
 
 function formatTaskRouteSummary(task: UnifiedDriverTaskView) {
@@ -575,66 +547,6 @@ function formatTaskActionSummary(task: UnifiedDriverTaskView) {
   }
 
   return "目前無可直接操作的任務動作";
-}
-
-function buildRefreshMetadata(
-  loadedAt: string | null,
-  nowSeed: number,
-  tier: RefreshTier,
-): UiRefreshMetadata {
-  if (!loadedAt) {
-    return {
-      generatedAt: new Date(nowSeed).toISOString(),
-      staleAfterMs: 0,
-      dataFreshness: "unknown",
-      source: "static",
-    };
-  }
-
-  const age = nowSeed - Date.parse(loadedAt);
-  if (!Number.isFinite(age) || age < 0) {
-    return {
-      generatedAt: loadedAt,
-      staleAfterMs: 0,
-      dataFreshness: "unknown",
-      source: "cache",
-    };
-  }
-
-  const staleAfterMs = getRefreshTierIntervalMs(tier) ?? 0;
-
-  return {
-    generatedAt: loadedAt,
-    staleAfterMs,
-    dataFreshness: age <= staleAfterMs ? "fresh" : "stale",
-    source: "live",
-  };
-}
-
-function getRefreshFreshnessLabel(metadata: UiRefreshMetadata) {
-  switch (metadata.dataFreshness) {
-    case "fresh":
-      return "已更新";
-    case "stale":
-      return "資料稍舊";
-    case "degraded":
-      return "更新延遲";
-    default:
-      return "尚未同步";
-  }
-}
-
-function getRefreshSourceLabel(metadata: UiRefreshMetadata) {
-  switch (metadata.source) {
-    case "live":
-      return "即時";
-    case "cache":
-      return "快取";
-    case "sandbox":
-      return "測試環境";
-    default:
-      return "靜態資料";
-  }
 }
 
 function createEmptyStateEnvelope(
@@ -781,22 +693,18 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     );
   }
 
+  // Platform and notification failures are shown as fixed copy: the raw
+  // error text can be English or an HTTP status, which drivers cannot use.
   if (platformResult.status === "fulfilled") {
     next.platformSummary = platformResult.value;
   } else {
-    next.platformLoadError = toErrorMessage(
-      platformResult.reason,
-      "平台就緒狀態暫時無法同步。",
-    );
+    next.platformLoadError = "平台狀態暫時無法更新，請稍後再試。";
   }
 
   if (notificationsResult.status === "fulfilled") {
     next.notifications = notificationsResult.value;
   } else {
-    next.notificationLoadError = toErrorMessage(
-      notificationsResult.reason,
-      "通知收件匣暫時無法同步。",
-    );
+    next.notificationLoadError = "通知暫時無法載入，請稍後再試。";
   }
 
   next.shiftFeatureEnabled =
@@ -862,28 +770,13 @@ function HeaderActionButton({
   );
 }
 
-function RefreshTierPill({
-  loadedAt,
-  nowSeed,
-  tier,
-}: {
-  loadedAt: string | null;
-  nowSeed: number;
-  tier: RefreshTier;
-}) {
-  const metadata = buildRefreshMetadata(loadedAt, nowSeed, tier);
-  const tone = metadata.dataFreshness === "fresh" ? "success" : "warn";
-
+// The workspace is always read live from the server (this screen keeps no
+// offline copy), so the line only says when it was last updated.
+function RefreshStamp({ loadedAt }: { loadedAt: string | null }) {
   return (
-    <View style={styles.refreshRow}>
-      <Pill theme={THEME} tone={tone} dot>
-        {getRefreshTierLabel(tier)}
-      </Pill>
-      <Text style={styles.refreshLabel}>
-        {getRefreshFreshnessLabel(metadata)} · {getRefreshSourceLabel(metadata)}{" "}
-        · {formatCompactDateTime(metadata.generatedAt)}
-      </Text>
-    </View>
+    <Text style={styles.refreshLabel}>
+      {loadedAt ? `更新於 ${formatTaiwanClock(loadedAt)}` : "尚未更新"}
+    </Text>
   );
 }
 
@@ -948,23 +841,14 @@ function HeroActionCard({
           {model.title}
         </Text>
         <Text style={styles.heroDetail}>{model.detail}</Text>
-        <Text style={styles.heroMeta}>{model.meta}</Text>
-        <View style={styles.heroAvailableActionsRow}>
-          <Pill
-            theme={THEME}
-            tone={getActionRiskTone(model.primaryAction.descriptor.riskLevel)}
-            dot
-          >
-            {`availableAction · ${model.primaryAction.descriptor.action}`}
-          </Pill>
-          {model.primaryAction.descriptor.enabled ? null : (
-            <Text style={styles.heroDisabledHint}>
-              {getActionDisabledReason(
-                model.primaryAction.descriptor.disabledReasonCode,
-              )}
-            </Text>
-          )}
-        </View>
+        {model.meta ? <Text style={styles.heroMeta}>{model.meta}</Text> : null}
+        {model.primaryAction.descriptor.enabled ? null : (
+          <Text style={styles.heroDisabledHint}>
+            {getActionDisabledReason(
+              model.primaryAction.descriptor.disabledReasonCode,
+            )}
+          </Text>
+        )}
         <View style={styles.heroActionRow}>
           <Btn
             theme={THEME}
@@ -997,9 +881,11 @@ function HeroActionCard({
 
 function FocusEmptyStateCard({
   state,
+  showAction,
   onPress,
 }: {
   state: EmptyStateModel;
+  showAction: boolean;
   onPress: () => void;
 }) {
   const palette =
@@ -1040,20 +926,6 @@ function FocusEmptyStateCard({
               : state.envelope.reason === "filtered_empty"
                 ? "sparkles-outline"
                 : "moon-outline";
-  const eyebrow =
-    state.envelope.reason === "driver_not_eligible"
-      ? "Eligibility blocked"
-      : state.envelope.reason === "external_unavailable"
-        ? "Adapter degraded"
-        : state.envelope.reason === "permission_denied"
-          ? "Access check required"
-          : state.envelope.reason === "fetch_failed"
-            ? "Needs refresh"
-            : state.envelope.reason === "not_provisioned"
-              ? "Setup required"
-              : state.envelope.reason === "filtered_empty"
-                ? "Urgent lane cleared"
-                : "Quiet lane";
 
   return (
     <Card
@@ -1074,45 +946,39 @@ function FocusEmptyStateCard({
           <Ionicons name={iconName} size={18} color={palette.icon} />
         </View>
         <View style={styles.emptyStateCopy}>
-          <Text style={[styles.emptyStateEyebrow, { color: palette.icon }]}>
-            {eyebrow}
-          </Text>
           <Text style={styles.emptyStateTitle}>{state.title}</Text>
           <Text style={styles.emptyStateBody}>{state.body}</Text>
         </View>
       </View>
-      <View style={styles.emptyStateFooter}>
-        <Pill
-          theme={THEME}
-          tone={getActionRiskTone(state.action.descriptor.riskLevel)}
-          dot
-        >
-          {`${state.envelope.reason} · ${state.action.descriptor.action}`}
-        </Pill>
-        <Btn
-          theme={THEME}
-          variant="secondary"
-          size="sm"
-          disabled={!state.action.descriptor.enabled}
-          onPress={onPress}
-        >
-          {getActionLabel(state.action.descriptor.action)}
-        </Btn>
-      </View>
-      {state.action.descriptor.enabled ? null : (
+      {showAction ? (
+        <View style={styles.emptyStateFooter}>
+          <Btn
+            theme={THEME}
+            variant="secondary"
+            size="sm"
+            disabled={!state.action.descriptor.enabled}
+            onPress={onPress}
+          >
+            {getActionLabel(state.action.descriptor.action)}
+          </Btn>
+        </View>
+      ) : null}
+      {showAction && !state.action.descriptor.enabled ? (
         <Text style={styles.emptyStateDisabledHint}>
           {getActionDisabledReason(state.action.descriptor.disabledReasonCode)}
         </Text>
-      )}
+      ) : null}
     </Card>
   );
 }
 
 function UrgentSignalCard({
   item,
+  showAction,
   onPress,
 }: {
   item: UrgentItem;
+  showAction: boolean;
   onPress: () => void;
 }) {
   const palette =
@@ -1158,9 +1024,11 @@ function UrgentSignalCard({
           </Text>
           <Text style={styles.urgentBody}>{item.body}</Text>
         </View>
-        <Btn theme={THEME} variant="secondary" size="sm" onPress={onPress}>
-          {getActionLabel(item.action.descriptor.action)}
-        </Btn>
+        {showAction ? (
+          <Btn theme={THEME} variant="secondary" size="sm" onPress={onPress}>
+            {getActionLabel(item.action.descriptor.action)}
+          </Btn>
+        ) : null}
       </View>
     </Card>
   );
@@ -1183,42 +1051,48 @@ function PlatformHealthCard({
   forwardedPendingCount: number;
   onPress: () => void;
 }) {
+  // Only counts above zero get a pill; a row of "0" pills says nothing.
+  const summaryPills = [
+    {
+      key: "reauth",
+      tone: "warn" as const,
+      label: "重新授權",
+      count: reauthCount,
+    },
+    {
+      key: "unstable",
+      tone: "warn" as const,
+      label: "連線不穩",
+      count: degradedCount,
+    },
+    {
+      key: "forwarded-pending",
+      tone: "info" as const,
+      label: "待平台確認",
+      count: forwardedPendingCount,
+    },
+  ].filter((pill) => pill.count > 0);
+
   return (
     <View style={styles.sectionBlock}>
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={styles.sectionEyebrow}>平台健康</Text>
+          <Text style={styles.sectionEyebrow}>平台</Text>
           <Text style={styles.sectionTitle}>
-            Online {onlineCount} / {totalCount}
+            在線 {onlineCount}／{totalCount}
           </Text>
         </View>
-        <Btn theme={THEME} variant="ghost" size="sm" onPress={onPress}>
-          全部平台
-        </Btn>
       </View>
       <Card theme={THEME} padding={14}>
-        <View style={styles.platformSummaryRow}>
-          <Pill
-            theme={THEME}
-            tone={onlineCount > 0 ? "success" : "neutral"}
-            dot
-          >
-            上線 {onlineCount}
-          </Pill>
-          <Pill theme={THEME} tone={reauthCount > 0 ? "warn" : "neutral"} dot>
-            重新授權 {reauthCount}
-          </Pill>
-          <Pill theme={THEME} tone={degradedCount > 0 ? "warn" : "neutral"} dot>
-            降級 {degradedCount}
-          </Pill>
-          <Pill
-            theme={THEME}
-            tone={forwardedPendingCount > 0 ? "info" : "neutral"}
-            dot
-          >
-            待平台確認 {forwardedPendingCount}
-          </Pill>
-        </View>
+        {summaryPills.length > 0 ? (
+          <View style={styles.platformSummaryRow}>
+            {summaryPills.map((pill) => (
+              <Pill key={pill.key} theme={THEME} tone={pill.tone} dot>
+                {`${pill.label} ${pill.count}`}
+              </Pill>
+            ))}
+          </View>
+        ) : null}
         <View style={styles.platformList}>
           {rows.map((row) => (
             <Pressable
@@ -1286,6 +1160,7 @@ function DeepLinkTile({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={model.label}
       disabled={!model.action.descriptor.enabled}
       onPress={model.action.descriptor.enabled ? onPress : undefined}
       style={({ pressed }) => [
@@ -1304,14 +1179,6 @@ function DeepLinkTile({
           <View style={styles.deepLinkCopy}>
             <Text style={styles.deepLinkLabel}>{model.label}</Text>
             <Text style={styles.deepLinkHelper}>{model.helper}</Text>
-            <Text style={styles.deepLinkActionMeta}>
-              {model.action.descriptor.action}
-              {model.action.descriptor.enabled
-                ? ""
-                : ` · ${getActionDisabledReason(
-                    model.action.descriptor.disabledReasonCode,
-                  )}`}
-            </Text>
           </View>
         </View>
       </Card>
@@ -1321,10 +1188,14 @@ function DeepLinkTile({
 
 function ActiveTripSummaryCard({
   model,
+  showPrimary,
+  showSecondary,
   onPrimaryPress,
   onSecondaryPress,
 }: {
   model: ActiveTripCardModel;
+  showPrimary: boolean;
+  showSecondary: boolean;
   onPrimaryPress: () => void;
   onSecondaryPress: () => void;
 }) {
@@ -1346,19 +1217,30 @@ function ActiveTripSummaryCard({
         </Pill>
         <Text style={styles.platformRowMeta}>{model.meta}</Text>
       </View>
-      <View style={styles.activeTripActionRow}>
-        <Btn theme={THEME} variant="primary" size="sm" onPress={onPrimaryPress}>
-          {getActionLabel(model.primaryAction.descriptor.action)}
-        </Btn>
-        <Btn
-          theme={THEME}
-          variant="secondary"
-          size="sm"
-          onPress={onSecondaryPress}
-        >
-          {getActionLabel(model.secondaryAction.descriptor.action)}
-        </Btn>
-      </View>
+      {showPrimary || showSecondary ? (
+        <View style={styles.activeTripActionRow}>
+          {showPrimary ? (
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={onPrimaryPress}
+            >
+              {getActionLabel(model.primaryAction.descriptor.action)}
+            </Btn>
+          ) : null}
+          {showSecondary ? (
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              onPress={onSecondaryPress}
+            >
+              {getActionLabel(model.secondaryAction.descriptor.action)}
+            </Btn>
+          ) : null}
+        </View>
+      ) : null}
     </Card>
   );
 }
@@ -1403,10 +1285,7 @@ function NotificationInboxCard({
               {expanded ? "收合" : "展開"}
             </Pill>
           </View>
-          <Text style={styles.sectionBody}>
-            {error ??
-              "這裡會顯示與你的任務、行程或帳號相關的通知，點一下可以展開查看。"}
-          </Text>
+          {error ? <Text style={styles.sectionBody}>{error}</Text> : null}
         </Card>
       </Pressable>
 
@@ -1425,9 +1304,7 @@ function NotificationInboxCard({
           </View>
           <View style={styles.notificationList}>
             {items.length === 0 ? (
-              <Text style={styles.sectionBody}>
-                目前沒有通知。新的通知會顯示在這裡，並保留已讀記錄。
-              </Text>
+              <Text style={styles.sectionBody}>目前沒有通知。</Text>
             ) : (
               items.map((item) => (
                 <View key={item.notificationId} style={styles.notificationRow}>
@@ -1473,19 +1350,20 @@ function NotificationInboxCard({
                       <Text style={styles.notificationBody}>{item.body}</Text>
                       <Text style={styles.platformRowMeta}>
                         {formatCompactDateTime(item.createdAt)}
-                        {item.persistent ? " · persistent banner" : ""}
                       </Text>
                     </View>
                   </View>
                   <View style={styles.notificationButtons}>
-                    <Btn
-                      theme={THEME}
-                      variant="ghost"
-                      size="xs"
-                      onPress={() => onOpen(item.route)}
-                    >
-                      開啟
-                    </Btn>
+                    {item.route ? (
+                      <Btn
+                        theme={THEME}
+                        variant="ghost"
+                        size="xs"
+                        onPress={() => item.route && onOpen(item.route)}
+                      >
+                        開啟
+                      </Btn>
+                    ) : null}
                     <Btn
                       theme={THEME}
                       variant="secondary"
@@ -1515,7 +1393,6 @@ export default function WorkspaceIndex() {
     useState<WorkspaceLoadResult>(INITIAL_WORKSPACE);
   const [loading, setLoading] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
-  const [nowSeed, setNowSeed] = useState(Date.now());
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [markingNotificationsRead, setMarkingNotificationsRead] =
     useState(false);
@@ -1577,7 +1454,6 @@ export default function WorkspaceIndex() {
 
     const timer = setInterval(() => {
       setRefreshSeed((current) => current + 1);
-      setNowSeed(Date.now());
     }, refreshIntervalMs);
 
     return () => clearInterval(timer);
@@ -1598,7 +1474,6 @@ export default function WorkspaceIndex() {
         }
 
         setWorkspace(result);
-        setNowSeed(Date.now());
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -1608,7 +1483,7 @@ export default function WorkspaceIndex() {
         setWorkspace({
           ...INITIAL_WORKSPACE,
           taskLoadError: toErrorMessage(error, "工作台資料載入失敗。"),
-          platformLoadError: "平台就緒狀態暫時無法同步。",
+          platformLoadError: "平台狀態暫時無法更新，請稍後再試。",
           loadedAt: new Date().toISOString(),
         });
       })
@@ -1687,8 +1562,8 @@ export default function WorkspaceIndex() {
                   } · ${formatClockLabel(latestAt ?? record.updatedAt)}`,
           meta:
             adapter?.status === "degraded" || adapter?.status === "down"
-              ? adapter.blockingReason?.trim() || "平台連線降級"
-              : `最後同步 ${formatCompactDateTime(record.updatedAt)}`,
+              ? "平台連線不穩"
+              : `更新於 ${formatCompactDateTime(record.updatedAt)}`,
           tone: getPlatformTone(record, adapter),
           forwarded: true,
         };
@@ -1742,36 +1617,24 @@ export default function WorkspaceIndex() {
     [adapterStatusByCode, externalPresences],
   );
 
-  const notEligibleCount = useMemo(
-    () =>
-      externalPresences.filter((record) => record.eligibility === "ineligible")
-        .length,
-    [externalPresences],
-  );
-
-  const pendingEligibilityCount = useMemo(
-    () =>
-      externalPresences.filter((record) => record.eligibility === "pending")
-        .length,
-    [externalPresences],
-  );
-
-  const todayNetSummary = useMemo(() => {
+  // Quoted fares of trips completed today (Taiwan time). This is an
+  // estimate, not net or settled earnings; the earnings tab owns those.
+  const todayFareEstimate = useMemo(() => {
     const now = new Date();
     const completedTodayTasks = taskSummary.orderedTasks.filter(
       (task) =>
         task.driverActionState === "completed" &&
-        isSameLocalDay(task.updatedAt, now),
+        isSameTaiwanDay(task.updatedAt, now),
     );
-    const amount = sumMoneyAmounts(
-      completedTodayTasks.map(
-        (task) => workspace.orderMap[task.orderId]?.quotedFare ?? null,
-      ),
-    );
+    const quotedFares = completedTodayTasks
+      .map((task) => workspace.orderMap[task.orderId]?.quotedFare ?? null)
+      .filter((fare) => fare !== null);
 
     return {
       count: completedTodayTasks.length,
-      amount,
+      // Without any known fare the total would be a made-up NT$ 0.
+      hasFare: quotedFares.length > 0,
+      amount: sumMoneyAmounts(quotedFares),
     };
   }, [taskSummary.orderedTasks, workspace.orderMap]);
 
@@ -1843,8 +1706,8 @@ export default function WorkspaceIndex() {
     ) {
       return {
         tone: "warn",
-        title: "平台通道目前全部降級",
-        body: "所有外部平台目前都處於 degraded / down，工作台改為顯示整備與通知，請先前往平台中心檢查原因。",
+        title: "平台連線不穩",
+        body: "所有平台目前連線異常，請到平台頁查看。",
         action: createWorkspaceAction(
           "/platform-presence",
           "open_platform_presence",
@@ -1980,7 +1843,7 @@ export default function WorkspaceIndex() {
         key: `reauth-${platform.platformCode}`,
         tone: "warn",
         title: `${name} 需重新授權`,
-        body: `憑證已失效 · 最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
+        body: `授權已過期 · 更新於 ${formatCompactDateTime(platform.updatedAt)}`,
         action: createWorkspaceAction(
           "/platform-presence",
           "resolve_reauth",
@@ -1993,10 +1856,11 @@ export default function WorkspaceIndex() {
     }
 
     if (taskSummary.actionRequiredTask) {
+      const headline = formatTaskHeadline(taskSummary.actionRequiredTask);
       items.push({
         key: `urgent-${taskSummary.actionRequiredTask.taskId}`,
         tone: "info",
-        title: `任務待回應 · ${formatTaskHeadline(taskSummary.actionRequiredTask)}`,
+        title: headline ? `任務待回應 · ${headline}` : "任務待回應",
         body: formatTaskActionSummary(taskSummary.actionRequiredTask),
         action: getPrimaryTaskAction(taskSummary.actionRequiredTask),
         iconName: "timer-outline",
@@ -2071,24 +1935,6 @@ export default function WorkspaceIndex() {
     [workspace.notifications],
   );
 
-  const crossAppNotices = useMemo<CrossAppNoticeModel[]>(
-    () =>
-      workspace.notifications
-        .filter((notification) => notification.channel === "ops_notice")
-        .map((notification) => ({
-          notificationId: notification.notificationId,
-          title: notification.title,
-          body: notification.message,
-          createdAt: notification.createdAt,
-        }))
-        .sort(
-          (left, right) =>
-            Date.parse(right.createdAt) - Date.parse(left.createdAt),
-        )
-        .slice(0, 2),
-    [workspace.notifications],
-  );
-
   const persistentSosNotification = useMemo(
     () =>
       notificationItems.find(
@@ -2128,11 +1974,12 @@ export default function WorkspaceIndex() {
       const task = taskSummary.actionRequiredTask;
       const primaryAction = getPrimaryTaskAction(task);
       const secondaryAction = getSecondaryTaskAction(task, primaryAction);
+      const headline = formatTaskHeadline(task);
       return {
         state: "urgent_task",
         tone: "info",
         eyebrow: "建議動作",
-        title: `優先回應 ${formatTaskHeadline(task)}`,
+        title: headline ? `優先回應 ${headline}` : "新任務",
         detail: formatTaskRouteSummary(task),
         meta: `${task.platformDisplayName} · ${formatTaskActionSummary(task)}`,
         primaryAction,
@@ -2157,7 +2004,7 @@ export default function WorkspaceIndex() {
             ? `下一步：${getActionLabel(primaryAction.descriptor.action)}`
             : "返回進行中的行程",
         detail: formatTaskRouteSummary(task),
-        meta: `${task.taskId} · ${fareLabel} · ${formatCompactDateTime(task.updatedAt)}`,
+        meta: `${fareLabel} · 更新於 ${formatCompactDateTime(task.updatedAt)}`,
         primaryAction,
         secondaryAction,
       };
@@ -2225,7 +2072,7 @@ export default function WorkspaceIndex() {
       title: "工作台待命中",
       detail:
         "沒有需要立即處理的任務，保持平台在線並留意新的派單或重新授權提醒。",
-      meta: "這裡是你的工作台，不只是入口頁；最重要的狀態已集中在上方。",
+      meta: "",
       primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       secondaryAction: createWorkspaceAction("/earnings", "open_earnings"),
     };
@@ -2251,9 +2098,9 @@ export default function WorkspaceIndex() {
     const primaryAction = getPrimaryTaskAction(task);
     const secondaryAction = getSecondaryTaskAction(task, primaryAction);
     return {
-      title: formatTaskHeadline(task),
+      title: formatTaskHeadline(task) ?? "進行中的行程",
       routeSummary: formatTaskRouteSummary(task),
-      meta: `${task.taskId} · 最後同步 ${formatCompactDateTime(task.updatedAt)}`,
+      meta: `更新於 ${formatCompactDateTime(task.updatedAt)}`,
       fareLabel: quotedFare ? formatMoney(quotedFare) : "車資待確認",
       platformLabel: task.platformDisplayName || task.sourcePlatform,
       primaryAction,
@@ -2261,28 +2108,29 @@ export default function WorkspaceIndex() {
     };
   }, [taskSummary.activeTripTask, workspace.orderMap]);
 
-  const deepLinks = useMemo<DeepLinkTileModel[]>(
-    () => [
+  const deepLinks = useMemo<DeepLinkTileModel[]>(() => {
+    const activeTripHeadline = taskSummary.activeTripTask
+      ? (formatTaskHeadline(taskSummary.activeTripTask) ?? "進行中的行程")
+      : null;
+    const tiles: DeepLinkTileModel[] = [
       {
         iconName: "briefcase-outline",
         label: "任務收件匣",
         helper:
           taskSummary.pendingCount > 0
             ? `${taskSummary.pendingCount} 件待處理`
-            : "查看全部任務與可用動作",
+            : "查看全部任務",
         action: createWorkspaceAction("/jobs", "open_jobs"),
       },
       {
         iconName: "car-sport-outline",
-        label: "行程工作區",
-        helper: taskSummary.activeTripTask
-          ? formatTaskHeadline(taskSummary.activeTripTask)
-          : "沒有進行中的行程時會顯示空態",
+        label: "行程",
+        helper: activeTripHeadline ?? "目前沒有行程",
         action: createWorkspaceAction(
           "/trip",
           "open_trip",
-          taskSummary.activeTripTask !== null,
-          taskSummary.activeTripTask !== null ? undefined : "no_active_trip",
+          activeTripHeadline !== null,
+          activeTripHeadline !== null ? undefined : "no_active_trip",
         ),
       },
       {
@@ -2291,7 +2139,9 @@ export default function WorkspaceIndex() {
         helper:
           reauthPlatforms.length > 0
             ? `${reauthPlatforms.length} 個平台需重新授權`
-            : `${onlinePlatformCount} 個平台在線`,
+            : onlinePlatformCount > 0
+              ? `${onlinePlatformCount} 個平台在線`
+              : "查看平台狀態",
         action: createWorkspaceAction(
           "/platform-presence",
           "open_platform_presence",
@@ -2300,113 +2150,38 @@ export default function WorkspaceIndex() {
       },
       {
         iconName: "cash-outline",
-        label: "今日收入",
-        helper: `${getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"} ${formatAmountNumber(
-          todayNetSummary.amount,
-          { fractionDigits: 0 },
-        )}`,
+        label: "收入",
+        helper: "查看收入明細",
         action: createWorkspaceAction("/earnings", "open_earnings"),
       },
-      {
+    ];
+
+    // A disabled shift feature has nothing to open, so no tile for it.
+    if (workspace.shiftFeatureEnabled) {
+      tiles.push({
         iconName: "time-outline",
         label: "班次",
         helper: formatShiftDuration(workspace.activeShift),
-        action: createWorkspaceAction(
-          "/shift",
-          "open_shift",
-          workspace.shiftFeatureEnabled,
-          workspace.shiftFeatureEnabled ? undefined : "feature_disabled",
-        ),
-      },
-      {
-        iconName: "settings-outline",
-        label: "設定",
-        helper: "裝置身份、帳號與通知設定",
-        action: createWorkspaceAction("/settings", "open_settings"),
-      },
-    ],
-    [
-      onlinePlatformCount,
-      reauthPlatforms.length,
-      taskSummary.activeTripTask,
-      taskSummary.pendingCount,
-      todayNetSummary.amount,
-      workspace.activeShift,
-    ],
-  );
+        action: createWorkspaceAction("/shift", "open_shift"),
+      });
+    }
 
-  const readinessItems = useMemo<ReadinessStripItem[]>(
-    () => [
-      {
-        key: "identity",
-        label: "身份",
-        value: identityIssue ? "需重建" : "已啟用",
-        tone: identityIssue ? "danger" : "success",
-      },
-      {
-        key: "shift",
-        label: "班次",
-        value: workspace.shiftLoadError
-          ? "同步延遲"
-          : isDriverOnShift
-            ? "上班中"
-            : "未上班",
-        tone: workspace.shiftLoadError
-          ? "warn"
-          : isDriverOnShift
-            ? "success"
-            : "neutral",
-      },
-      {
-        key: "platforms",
-        label: "平台",
-        value: `${onlinePlatformCount}/${platformRows.length} 在線`,
-        tone: reauthPlatforms.length > 0 ? "warn" : "accent",
-      },
-      {
-        key: "urgent",
-        label: "Urgent",
-        value:
-          taskSummary.urgentCount > 0
-            ? `${taskSummary.urgentCount} 件`
-            : "已清空",
-        tone: taskSummary.urgentCount > 0 ? "info" : "neutral",
-      },
-    ],
-    [
-      identityIssue,
-      isDriverOnShift,
-      onlinePlatformCount,
-      platformRows.length,
-      reauthPlatforms.length,
-      taskSummary.urgentCount,
-      workspace.shiftLoadError,
-    ],
-  );
+    tiles.push({
+      iconName: "settings-outline",
+      label: "設定",
+      helper: "裝置身份、帳號與通知設定",
+      action: createWorkspaceAction("/settings", "open_settings"),
+    });
 
-  const availableActions = useMemo(
-    () =>
-      dedupeActions([
-        heroAction.primaryAction,
-        heroAction.secondaryAction,
-        ...(focusEmptyState ? [focusEmptyState.action] : []),
-        ...(taskSummary.actionRequiredTask
-          ? [getPrimaryTaskAction(taskSummary.actionRequiredTask)]
-          : []),
-        ...(taskSummary.activeTripTask
-          ? [getPrimaryTaskAction(taskSummary.activeTripTask)]
-          : []),
-        ...deepLinks.map((item) => item.action),
-      ]),
-    [
-      deepLinks,
-      focusEmptyState,
-      heroAction.primaryAction,
-      heroAction.secondaryAction,
-      taskSummary.actionRequiredTask,
-      taskSummary.activeTripTask,
-    ],
-  );
+    return tiles;
+  }, [
+    onlinePlatformCount,
+    reauthPlatforms.length,
+    taskSummary.activeTripTask,
+    taskSummary.pendingCount,
+    workspace.activeShift,
+    workspace.shiftFeatureEnabled,
+  ]);
 
   const headerStatusLabel = useMemo(() => {
     if (!workspace.shiftFeatureEnabled) {
@@ -2429,11 +2204,32 @@ export default function WorkspaceIndex() {
     workspace.shiftLoadError,
   ]);
 
-  const notificationCount =
-    notificationItems.filter((item) => item.readAt === null).length +
-    urgentItems.length +
-    (focusEmptyState?.envelope.reason === "driver_not_eligible" ? 1 : 0) +
-    (identityIssue ? 1 : 0);
+  // The bell's dot means unread notifications only. Urgent cards and identity
+  // problems already have their own cards on this screen.
+  const unreadNotificationCount = notificationItems.filter(
+    (item) => item.readAt === null,
+  ).length;
+
+  // Buttons below the top card skip any screen the top card already opens,
+  // so the same 查看任務 / 查看收入 button does not repeat down the page.
+  const heroRoutes = new Set<WorkspaceRoute>(
+    [heroAction.primaryAction, heroAction.secondaryAction]
+      .filter((action) => action.descriptor.enabled)
+      .map((action) => action.route),
+  );
+  const repeatsHeroRoute = (action: WorkspaceActionModel) =>
+    heroRoutes.has(action.route);
+  // When the top card is already the trip, the trip card would repeat it.
+  const showActiveTripCard =
+    activeTripCard !== null && heroAction.state !== "trip";
+  // A standing-by top card already says there is nothing to do.
+  const showFocusEmptyState =
+    focusEmptyState !== null &&
+    !(
+      heroAction.state === "standing_by" &&
+      (focusEmptyState.envelope.reason === "no_data" ||
+        focusEmptyState.envelope.reason === "filtered_empty")
+    );
 
   const markNotificationsRead = async (notificationIds: string[]) => {
     const ids = [...new Set(notificationIds.filter(Boolean))];
@@ -2452,8 +2248,7 @@ export default function WorkspaceIndex() {
       );
       const selected = ids.map((id) => {
         const notice = notices.find((n) => n.outcome.notificationId === id);
-        if (!notice)
-          throw new Error("找不到自己的公告讀取回執，請刷新後重試。");
+        if (!notice) throw new Error(NOTICE_RECEIPT_MISSING_MESSAGE);
         return notice;
       });
       for (const notice of selected) {
@@ -2492,9 +2287,16 @@ export default function WorkspaceIndex() {
       }));
     } catch (error) {
       if (request.signal.aborted) return;
+      // Only our own receipt message is specific enough to show; anything
+      // else (network, HTTP status) becomes one plain sentence.
+      const message =
+        error instanceof Error &&
+        error.message === NOTICE_RECEIPT_MISSING_MESSAGE
+          ? NOTICE_RECEIPT_MISSING_MESSAGE
+          : NOTICE_READ_FAILED_MESSAGE;
       setWorkspace((current) => ({
         ...current,
-        notificationLoadError: toErrorMessage(error, "通知已讀同步失敗。"),
+        notificationLoadError: message,
       }));
     } finally {
       if (notificationReadRequest.current === request) {
@@ -2545,29 +2347,21 @@ export default function WorkspaceIndex() {
                 ]}
               />
               <Text style={styles.headerStatusText}>{headerStatusLabel}</Text>
-              <Text style={styles.headerMetaText}>{getDriverId()}</Text>
             </View>
-            <RefreshTierPill
-              loadedAt={workspace.loadedAt}
-              nowSeed={nowSeed}
-              tier={WORKSPACE_REFRESH_TIER}
-            />
+            <RefreshStamp loadedAt={workspace.loadedAt} />
           </View>
         }
         actions={
           <View style={styles.headerActions}>
             <HeaderActionButton
               iconName="refresh-outline"
-              label="手動刷新工作台"
-              onPress={() => {
-                setNowSeed(Date.now());
-                setRefreshSeed((current) => current + 1);
-              }}
+              label="重新整理"
+              onPress={() => setRefreshSeed((current) => current + 1)}
             />
             <HeaderActionButton
               iconName="notifications-outline"
-              label="查看通知與緊急事件"
-              withDot={notificationCount > 0}
+              label="查看通知"
+              withDot={unreadNotificationCount > 0}
               onPress={() => setNotificationPanelOpen((current) => !current)}
             />
             <HeaderActionButton
@@ -2593,8 +2387,8 @@ export default function WorkspaceIndex() {
         <Banner
           theme={THEME}
           tone="info"
-          title="任務同步降級模式"
-          body="目前改用舊版任務摘要。平台原生狀態與可執行動作尚未完整帶出時，請以前往任務頁查看為準。"
+          title="任務資料可能不完整"
+          body="請到任務頁確認最新狀態。"
         />
       ) : null}
 
@@ -2602,7 +2396,7 @@ export default function WorkspaceIndex() {
         <Banner
           theme={THEME}
           tone="warn"
-          title="平台健康資訊延遲"
+          title="平台狀態更新延遲"
           body={workspace.platformLoadError}
         />
       ) : null}
@@ -2619,7 +2413,7 @@ export default function WorkspaceIndex() {
                 theme={THEME}
                 variant="secondary"
                 size="sm"
-                onPress={() => navigateTo(persistentSosNotification.route)}
+                onPress={() => navigateTo("/sos")}
               >
                 查看 SOS
               </Btn>
@@ -2647,76 +2441,57 @@ export default function WorkspaceIndex() {
         onSecondaryPress={navigate(heroAction.secondaryAction.route)}
       />
 
-      <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>整備狀態</Text>
-            <Text style={styles.sectionTitle}>裝置 / 身份 / 平台整備狀態</Text>
-          </View>
-        </View>
-        <View style={styles.readinessStrip}>
-          {readinessItems.map((item) => (
-            <View key={item.key} style={styles.readinessStripCell}>
-              <Card theme={THEME} padding={12}>
-                <Text style={styles.readinessStripLabel}>{item.label}</Text>
-                <Text style={styles.readinessStripValue}>{item.value}</Text>
-                <Pill theme={THEME} tone={item.tone} dot>
-                  {item.tone === "success"
-                    ? "就緒"
-                    : item.tone === "danger"
-                      ? "已阻擋"
-                      : item.tone === "warn"
-                        ? "待注意"
-                        : item.tone === "info"
-                          ? "使用中"
-                          : "閒置"}
-                </Pill>
-              </Card>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {activeTripCard ? (
+      {showActiveTripCard && activeTripCard ? (
         <ActiveTripSummaryCard
           model={activeTripCard}
+          showPrimary={!repeatsHeroRoute(activeTripCard.primaryAction)}
+          showSecondary={
+            !repeatsHeroRoute(activeTripCard.secondaryAction) &&
+            activeTripCard.secondaryAction.route !==
+              activeTripCard.primaryAction.route
+          }
           onPrimaryPress={navigate(activeTripCard.primaryAction.route)}
           onSecondaryPress={navigate(activeTripCard.secondaryAction.route)}
         />
       ) : null}
 
-      <View style={styles.kpiRow}>
-        <View style={styles.kpiCell}>
-          <KPI
-            theme={THEME}
-            label="待處理"
-            value={String(taskSummary.pendingCount)}
-            sub={`${taskSummary.urgentCount} 件需立即回應`}
-          />
+      {taskSummary.pendingCount > 0 || todayFareEstimate.hasFare ? (
+        <View style={styles.kpiRow}>
+          {taskSummary.pendingCount > 0 ? (
+            <View style={styles.kpiCell}>
+              <KPI
+                theme={THEME}
+                label="待處理"
+                value={String(taskSummary.pendingCount)}
+                sub={
+                  taskSummary.urgentCount > 0
+                    ? `${taskSummary.urgentCount} 件需立即回應`
+                    : undefined
+                }
+              />
+            </View>
+          ) : null}
+          {todayFareEstimate.hasFare ? (
+            <View style={styles.kpiCell}>
+              <KPI
+                theme={THEME}
+                label="今日預估車資"
+                value={`${
+                  getCurrencyLabel(todayFareEstimate.amount.currency) || "NT$"
+                } ${formatAmountNumber(todayFareEstimate.amount, {
+                  fractionDigits: 0,
+                })}`}
+                sub={`已完成 ${todayFareEstimate.count} 趟`}
+              />
+            </View>
+          ) : null}
         </View>
-        <View style={styles.kpiCell}>
-          <KPI
-            theme={THEME}
-            label="平台在線"
-            value={String(onlinePlatformCount)}
-            sub={`/ ${platformRows.length}`}
-          />
-        </View>
-        <View style={styles.kpiCell}>
-          <KPI
-            theme={THEME}
-            label="今日淨收"
-            value={formatAmountNumber(todayNetSummary.amount, {
-              fractionDigits: 0,
-            })}
-            sub={getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"}
-          />
-        </View>
-      </View>
+      ) : null}
 
-      {focusEmptyState ? (
+      {showFocusEmptyState && focusEmptyState ? (
         <FocusEmptyStateCard
           state={focusEmptyState}
+          showAction={!repeatsHeroRoute(focusEmptyState.action)}
           onPress={navigate(focusEmptyState.action.route)}
         />
       ) : null}
@@ -2725,6 +2500,7 @@ export default function WorkspaceIndex() {
         <UrgentSignalCard
           key={item.key}
           item={item}
+          showAction={!repeatsHeroRoute(item.action)}
           onPress={navigate(item.action.route)}
         />
       ))}
@@ -2759,122 +2535,7 @@ export default function WorkspaceIndex() {
       />
 
       <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>立即可做</Text>
-            <Text style={styles.sectionTitle}>工作台當前可執行動作</Text>
-          </View>
-        </View>
-        <Card theme={THEME} padding={14}>
-          <View style={styles.availableActionsList}>
-            {availableActions.map((action, index) => (
-              <View
-                key={`${action.route}-${action.descriptor.action}-${index}`}
-                style={styles.availableActionRow}
-              >
-                <View style={styles.availableActionCopy}>
-                  <Text style={styles.availableActionLabel}>
-                    {getActionLabel(action.descriptor.action)}
-                  </Text>
-                  <Text style={styles.availableActionMeta}>
-                    {action.descriptor.enabled
-                      ? "可直接前往對應工作區處理"
-                      : getActionDisabledReason(
-                          action.descriptor.disabledReasonCode,
-                        )}
-                  </Text>
-                </View>
-                <Pill
-                  theme={THEME}
-                  tone={
-                    action.descriptor.enabled
-                      ? getActionRiskTone(action.descriptor.riskLevel)
-                      : "neutral"
-                  }
-                  dot
-                >
-                  {action.descriptor.enabled
-                    ? action.descriptor.riskLevel === "high"
-                      ? "需確認"
-                      : action.descriptor.riskLevel === "medium"
-                        ? "可處理"
-                        : "可前往"
-                    : "暫不可用"}
-                </Pill>
-              </View>
-            ))}
-          </View>
-        </Card>
-      </View>
-
-      <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>工作台導覽</Text>
-            <Text style={styles.sectionTitle}>工作台入口與深連結</Text>
-          </View>
-        </View>
-        <Text style={styles.sectionBody}>
-          這裡整理了任務、行程、平台中心、收入、班次與設定的捷徑，最需要處理的項目會排在最上面。
-        </Text>
-        <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-          <Text style={styles.crossAppPolicyTitle}>跨平台訊息處理方式</Text>
-          <Text style={styles.crossAppPolicyBody}>
-            本 App 不會另外跳轉到其他管理後台。跨平台的相關訊息會直接以通知方式
-            送進工作台，你可以留在 App 內完成後續處理。
-          </Text>
-          <Text style={styles.crossAppPolicyMeta}>
-            {WORKSPACE_CROSS_APP_LINKS.length === 0
-              ? "目前沒有需要另外開啟的外部連結"
-              : `目前有 ${WORKSPACE_CROSS_APP_LINKS.length} 個外部連結待處理`}
-          </Text>
-        </Card>
-        {WORKSPACE_CROSS_APP_LINKS.length > 0 ? (
-          <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-            <Text style={styles.crossAppPolicyTitle}>跨平台連結</Text>
-            <View style={styles.crossAppNoticeList}>
-              {WORKSPACE_CROSS_APP_LINKS.map((link) => (
-                <View
-                  key={`${link.targetApp}-${link.resourceType}-${link.resourceId}`}
-                  style={styles.crossAppNoticeRow}
-                >
-                  <View style={styles.crossAppNoticeCopy}>
-                    <Text style={styles.availableActionLabel}>
-                      {link.label}
-                    </Text>
-                    <Text style={styles.sectionBody}>
-                      {`${link.targetApp} · ${link.route} · ${link.openMode}`}
-                    </Text>
-                  </View>
-                  <Text style={styles.platformRowMeta}>{link.resourceId}</Text>
-                </View>
-              ))}
-            </View>
-          </Card>
-        ) : null}
-        {crossAppNotices.length > 0 ? (
-          <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-            <Text style={styles.crossAppPolicyTitle}>跨平台通知</Text>
-            <View style={styles.crossAppNoticeList}>
-              {crossAppNotices.map((notice) => (
-                <View
-                  key={notice.notificationId}
-                  style={styles.crossAppNoticeRow}
-                >
-                  <View style={styles.crossAppNoticeCopy}>
-                    <Text style={styles.availableActionLabel}>
-                      {notice.title}
-                    </Text>
-                    <Text style={styles.sectionBody}>{notice.body}</Text>
-                  </View>
-                  <Text style={styles.platformRowMeta}>
-                    {formatCompactDateTime(notice.createdAt)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </Card>
-        ) : null}
+        <Text style={styles.sectionTitle}>捷徑</Text>
         <View style={styles.deepLinkGrid}>
           {deepLinks.map((item) => (
             <DeepLinkTile
@@ -2884,43 +2545,6 @@ export default function WorkspaceIndex() {
             />
           ))}
         </View>
-      </View>
-
-      <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>資格與整備</Text>
-            <Text style={styles.sectionTitle}>平台資格與工作台摘要</Text>
-          </View>
-        </View>
-        <Card theme={THEME} padding={14}>
-          <View style={styles.readinessRow}>
-            <Pill
-              theme={THEME}
-              tone={notEligibleCount > 0 ? "danger" : "neutral"}
-              dot
-            >
-              不符合資格 {notEligibleCount}
-            </Pill>
-            <Pill
-              theme={THEME}
-              tone={pendingEligibilityCount > 0 ? "info" : "neutral"}
-              dot
-            >
-              待審核 {pendingEligibilityCount}
-            </Pill>
-            <Pill
-              theme={THEME}
-              tone={taskSummary.syncIssueCount > 0 ? "warn" : "neutral"}
-              dot
-            >
-              同步異常 {taskSummary.syncIssueCount}
-            </Pill>
-          </View>
-          <Text style={styles.readinessBody}>
-            這裡彙整你目前的資格狀態、班次進度與待處理事項，方便你快速掌握下一步該做什麼。
-          </Text>
-        </Card>
       </View>
     </Shell>
   );
@@ -2981,11 +2605,6 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
   },
-  headerMetaText: {
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-  },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -3017,12 +2636,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: THEME.danger,
-  },
-  refreshRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
   },
   refreshLabel: {
     color: THEME.textDim,
@@ -3093,21 +2706,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
-  heroAvailableActionsRow: {
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 2,
-  },
   heroDisabledHint: {
     color: THEME.textMuted,
     fontFamily: THEME.fontFamily,
     fontSize: 11.5,
     lineHeight: 16,
+    marginTop: 6,
   },
   heroActionRow: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 6,
+    marginTop: 12,
   },
   heroPrimaryButton: {
     flex: 1,
@@ -3127,27 +2736,6 @@ const styles = StyleSheet.create({
   kpiCell: {
     flex: 1,
   },
-  readinessStrip: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  readinessStripCell: {
-    width: "48%",
-  },
-  readinessStripLabel: {
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-    fontSize: 10.5,
-    marginBottom: 6,
-  },
-  readinessStripValue: {
-    color: THEME.text,
-    fontFamily: THEME.fontFamily,
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
   emptyStateCard: {
     overflow: "hidden",
   },
@@ -3166,11 +2754,6 @@ const styles = StyleSheet.create({
   emptyStateCopy: {
     flex: 1,
     gap: 4,
-  },
-  emptyStateEyebrow: {
-    fontFamily: THEME.monoFamily,
-    fontSize: 10.5,
-    fontWeight: "700",
   },
   emptyStateTitle: {
     color: THEME.text,
@@ -3406,86 +2989,6 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 11.5,
     lineHeight: 16,
-  },
-  deepLinkActionMeta: {
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-    fontSize: 10.5,
-    lineHeight: 15,
-    marginTop: 4,
-  },
-  availableActionsList: {
-    gap: 10,
-  },
-  availableActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  availableActionCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  availableActionLabel: {
-    color: THEME.text,
-    fontFamily: THEME.fontFamily,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  availableActionMeta: {
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-    fontSize: 10.5,
-    lineHeight: 15,
-  },
-  crossAppPolicyCard: {
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  crossAppPolicyTitle: {
-    color: THEME.text,
-    fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  crossAppPolicyBody: {
-    color: THEME.textMuted,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  crossAppPolicyMeta: {
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-    fontSize: 10.5,
-    marginTop: 8,
-  },
-  crossAppNoticeList: {
-    gap: 10,
-  },
-  crossAppNoticeRow: {
-    gap: 6,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
-  },
-  crossAppNoticeCopy: {
-    gap: 4,
-  },
-  readinessRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  readinessBody: {
-    color: THEME.textMuted,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12.5,
-    lineHeight: 18,
   },
   tilePressed: {
     opacity: 0.86,
