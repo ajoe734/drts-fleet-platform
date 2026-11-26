@@ -13,7 +13,7 @@ const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 // Same shapes as redactStringSecrets in totp-authenticator-fixture.ts.
 const TOKEN_QUERY = /([?&]token=)[^&\s"']+/gi;
 const OTPAUTH_URI = /otpauth:\/\/totp\/[^\s"']+/gi;
-const PREFIXED_TOKEN = /\b(?:ai|ti|fi|prt|inv)_[A-Za-z0-9_-]{12,}\b/g;
+const PREFIXED_TOKEN = /\b(?:ai|ti|fi|prt|pwr|inv)_[A-Za-z0-9_-]{12,}\b/g;
 const JWT =
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 const RECOVERY_CODE = /\b[A-Z2-9]{4}-[A-Z2-9]{4}\b/g;

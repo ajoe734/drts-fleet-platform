@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { seedAgencyPlatformPersonnel } from "./platform-personnel-fixture";
 import { startAgencySmtpInbox } from "./smtp-inbox";
@@ -91,6 +91,31 @@ async function issueStepUpReference(
   return stepUp.body.data.step_up_reference;
 }
 
+// `next dev` serves the server-rendered form first and React attaches its
+// handlers when the page hydrates. A fill or click that lands before then is
+// lost: the click does nothing, or the controlled inputs keep their empty
+// state, and the request the step waits for never comes (CI 2026-11-26: a
+// reset-password confirm waited until the 9-minute test timeout). Wait until
+// React owns the control before touching the form.
+async function waitForHydrated(control: Locator) {
+  await expect
+    .poll(
+      () =>
+        control
+          .first()
+          .evaluate((element) =>
+            Object.keys(element).some(
+              (key) =>
+                key.startsWith("__reactProps$") ||
+                key.startsWith("__reactFiber$"),
+            ),
+          )
+          .catch(() => false),
+      { timeout: 120_000 },
+    )
+    .toBe(true);
+}
+
 async function acceptInvitationWithPasswordInBrowser(
   page: Page,
   acceptUrl: string,
@@ -101,6 +126,7 @@ async function acceptInvitationWithPasswordInBrowser(
   const form = page
     .locator("form")
     .filter({ has: page.locator('input[type="email"]') });
+  await waitForHydrated(form.locator('button[type="submit"]'));
   await form.locator('input[type="email"]').fill(email);
   const fields = form.locator('input[type="password"]');
   await fields.nth(0).fill(password);
@@ -134,6 +160,7 @@ async function loginWithPasswordInBrowser(
   const form = page
     .locator("form")
     .filter({ has: page.locator('input[autocomplete="current-password"]') });
+  await waitForHydrated(form.locator('button[type="submit"]'));
   await form.locator('input[type="email"]').fill(email);
   await form.locator('input[type="password"]').fill(password);
 
@@ -175,11 +202,12 @@ async function enrollAndConfirmTotpInBrowser(
       res.url().includes("/mfa/totp/enroll") &&
       res.request().method() === "POST",
   );
-  await page
+  const startSetup = page
     .locator("button")
     .filter({ hasText: /^(開始設定|Start setup)$/i })
-    .first()
-    .click();
+    .first();
+  await waitForHydrated(startSetup);
+  await startSetup.click();
   const enrollResponse = await enrollResponsePromise;
   const enrollStatus = enrollResponse.status();
   expect(enrollResponse.ok()).toBe(true);
@@ -279,11 +307,12 @@ async function verifyAccountSecurityAndSignOutInBrowser(
       new URL(res.url()).pathname === "/api/auth/logout-all" &&
       res.request().method() === "POST",
   );
-  await page
+  const signOutAll = page
     .locator("button")
     .filter({ hasText: /^(登出所有裝置|Sign out of all devices)$/i })
-    .first()
-    .click();
+    .first();
+  await waitForHydrated(signOutAll);
+  await signOutAll.click();
   const logoutResponse = await logoutResponsePromise;
   const logoutStatus = logoutResponse.status();
   expect(logoutStatus).toBe(200);
@@ -329,6 +358,7 @@ async function requestAndConfirmPasswordResetInBrowser(
   await page.goto(`${portalOrigin}/forgot-password`, {
     waitUntil: "networkidle",
   });
+  await waitForHydrated(page.locator('button[type="submit"]'));
   await page.locator('input[type="email"]').fill(email);
 
   const requestResponsePromise = page.waitForResponse(
@@ -349,6 +379,7 @@ async function requestAndConfirmPasswordResetInBrowser(
   await page.goto(resetTarget.resetUrl, { waitUntil: "networkidle" });
   const passwordInputs = page.locator('input[type="password"]');
   await expect(passwordInputs).toHaveCount(2);
+  await waitForHydrated(page.locator('button[type="submit"]'));
   await passwordInputs.nth(0).fill(newPassword);
   await passwordInputs.nth(1).fill(newPassword);
 

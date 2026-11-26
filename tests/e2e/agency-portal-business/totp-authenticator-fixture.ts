@@ -165,7 +165,7 @@ const SENSITIVE_KEY_PATTERN =
 const TOKEN_QUERY_PATTERN = /([?&]token=)[^&\s"']+/gi;
 const OTPAUTH_URI_PATTERN = /otpauth:\/\/totp\/[^\s"']+/gi;
 const OPAQUE_PREFIXED_TOKEN_PATTERN =
-  /\b(?:ai|ti|fi|prt)_[A-Za-z0-9_-]{12,}\b/g;
+  /\b(?:ai|ti|fi|prt|pwr)_[A-Za-z0-9_-]{12,}\b/g;
 const JWT_PATTERN =
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 const RECOVERY_CODE_PATTERN = /\b[A-Z2-9]{4}-[A-Z2-9]{4}\b/g;
