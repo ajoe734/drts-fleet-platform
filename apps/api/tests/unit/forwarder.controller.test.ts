@@ -197,7 +197,7 @@ describe("ForwarderController", () => {
       acceptForwardedOrder: vi.fn(async () => ({
         action: "accept",
         outcome: "accept_pending",
-        driverMessage: "Waiting for platform confirmation.",
+        driverMessage: "已送出接單，平台確認前請先不要出發。",
         taskView: {
           taskId: "FWD-accept-001",
           orderDomain: "forwarded",
@@ -227,7 +227,7 @@ describe("ForwarderController", () => {
       data: {
         action: "accept",
         outcome: "accept_pending",
-        driverMessage: "Waiting for platform confirmation.",
+        driverMessage: "已送出接單，平台確認前請先不要出發。",
         taskView: {
           taskId: "FWD-accept-001",
           orderDomain: "forwarded",
@@ -250,7 +250,7 @@ describe("ForwarderController", () => {
       rejectForwardedOrder: vi.fn(() => ({
         action: "reject",
         outcome: "rejected",
-        driverMessage: "Offer declined.",
+        driverMessage: "已婉拒這筆訂單。",
         taskView: null,
         managementCorrelationIds: {
           mirrorOrderId: "FWD-reject-001",
@@ -280,7 +280,7 @@ describe("ForwarderController", () => {
       data: {
         action: "reject",
         outcome: "rejected",
-        driverMessage: "Offer declined.",
+        driverMessage: "已婉拒這筆訂單。",
         taskView: null,
         managementCorrelationIds: {
           mirrorOrderId: "FWD-reject-001",

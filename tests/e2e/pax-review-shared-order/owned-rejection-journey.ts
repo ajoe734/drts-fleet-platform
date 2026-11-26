@@ -127,7 +127,13 @@ export async function ownedRejectionJourney(
       await expect(
         driver.getByRole("button", { name: "婉拒任務", exact: true }),
       ).toHaveCount(0);
-      await expect(driver.getByText(/已拒絕/).first()).toBeVisible();
+      // Page title and status card both read 已婉拒任務 on the same trip.
+      await expect(
+        driver.getByTestId(`driver-trip-order-${orderId}`),
+      ).toBeVisible();
+      const rejectedStatus = driver.getByText("已婉拒任務", { exact: true });
+      await expect(rejectedStatus.first()).toBeVisible();
+      expect(await rejectedStatus.count()).toBeLessThanOrEqual(2);
       const rows = await recordOrderEvidence(
         orderId,
         "G-driver-rejected-same-order",

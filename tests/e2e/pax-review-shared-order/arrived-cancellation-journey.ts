@@ -297,7 +297,11 @@ export async function arrivedCancellationJourney(
           driver.getByTestId(`driver-trip-order-${orderId}`),
         ).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
-        // The footer states the result; there is no dead "任務已取消" button.
+        // The trip reads as cancelled (page title and status card) and offers
+        // no footer or lifecycle action, including the old dead button.
+        const cancelledStatus = driver.getByText("任務已取消", { exact: true });
+        await expect(cancelledStatus.first()).toBeVisible();
+        expect(await cancelledStatus.count()).toBeLessThanOrEqual(2);
         await expect(
           driver.getByRole("button", { name: "任務已取消", exact: true }),
         ).toHaveCount(0);
@@ -312,12 +316,10 @@ export async function arrivedCancellationJourney(
           "抵達上車點",
           "開始行程",
           "完成行程",
-        ]) {
-          for (const action of await driver
-            .getByRole("button", { name, exact: true })
-            .all())
-            await expect(action).toBeDisabled();
-        }
+        ])
+          await expect(
+            driver.getByRole("button", { name, exact: true }),
+          ).toHaveCount(0);
         const rows = await recordOrderEvidence(
           orderId,
           "H-arrived-then-cancelled",

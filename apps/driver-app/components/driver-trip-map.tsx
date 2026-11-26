@@ -136,7 +136,9 @@ function StopCoordinateCard({
 }) {
   const hasCoordinate = stop.coordinate !== null;
   const coordinateTone = toneStyle(hasCoordinate ? "success" : "danger");
-  const systemLabel = Platform.OS === "ios" ? "Apple" : "系統";
+  // "Apple 導航" keeps a space after the Latin name; "系統導航" has none.
+  const isIos = Platform.OS === "ios";
+  const systemNavLabel = isIos ? "Apple 導航" : "系統導航";
 
   return (
     <View style={styles.stopCard}>
@@ -183,16 +185,14 @@ function StopCoordinateCard({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`用${systemLabel}導航到${stop.label}`}
+            accessibilityLabel={`用${isIos ? " Apple " : "系統"}導航到${stop.label}`}
             onPress={() => onOpenNavigation(stop, "system")}
             style={({ pressed }) => [
               styles.navButtonSecondary,
               pressed ? styles.navButtonPressed : null,
             ]}
           >
-            <Text style={styles.navButtonSecondaryText}>
-              {systemLabel} 導航
-            </Text>
+            <Text style={styles.navButtonSecondaryText}>{systemNavLabel}</Text>
           </Pressable>
         </View>
       ) : (

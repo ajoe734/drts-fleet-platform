@@ -337,27 +337,12 @@ function toBannerTone(
   return "info";
 }
 
-function formatShortTime(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toLocaleTimeString("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 // Taiwan has used UTC+8 without daylight saving since 1979, so a fixed offset
 // gives Taiwan local time on any device clock or time-zone setting.
 const TAIWAN_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-function formatTimestamp(value: string | null | undefined): string | null {
+/** "YYYY-MM-DDTHH:mm…" in Taiwan local time, or null for a missing value. */
+function toTaiwanLocalIso(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
@@ -367,11 +352,21 @@ function formatTimestamp(value: string | null | undefined): string | null {
     return null;
   }
 
-  return new Date(parsed.getTime() + TAIWAN_UTC_OFFSET_MS)
-    .toISOString()
-    .replace("T", " ")
-    .slice(0, 16);
+  return new Date(parsed.getTime() + TAIWAN_UTC_OFFSET_MS).toISOString();
 }
+
+/** "HH:mm" in Taiwan local time. */
+function formatShortTime(value: string | null | undefined): string | null {
+  return toTaiwanLocalIso(value)?.slice(11, 16) ?? null;
+}
+
+/** "YYYY-MM-DD HH:mm" in Taiwan local time. */
+function formatTimestamp(value: string | null | undefined): string | null {
+  return toTaiwanLocalIso(value)?.replace("T", " ").slice(0, 16) ?? null;
+}
+
+/** One fixed line; raw platform sync text is ops wording, not driver copy. */
+const PLATFORM_SYNC_PROBLEM_COPY = "平台同步有問題，請聯絡派車台。";
 
 // Fulfillment facts come from the selected task's existing owned-order read.
 // These are booking details, not a claim of external program verification.
@@ -487,7 +482,7 @@ function getTrackingDescriptor(
     return {
       label: "已結束",
       tone: "neutral" as const,
-      detail: "行程已完成，追蹤已結束，不再更新里程與時長。",
+      detail: "追蹤已結束，不再更新里程與時長。",
     };
   }
 
@@ -777,15 +772,7 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
-function getIdleBottomActionLabel(
-  state: TripExperienceState | null,
-  task: DriverTaskRecord | null,
-) {
-  if (task && !isForwardedTask(task)) {
-    if (task.status === "cancelled") return "任務已取消";
-    if (task.status === "rejected") return "已婉拒任務";
-    if (task.status === "completed") return "行程已完成";
-  }
+function getIdleBottomActionLabel(state: TripExperienceState | null) {
   switch (state) {
     case "forwarded_pending":
       return "等待平台確認";
@@ -820,12 +807,9 @@ function getTripAuthorityBannerProps(
   if (!task || !isForwardedTask(task)) {
     if (task && ["cancelled", "rejected", "completed"].includes(task.status)) {
       const completed = task.status === "completed";
+      // The header and status card already state the result.
       return {
-        title: completed
-          ? "行程已完成"
-          : task.status === "rejected"
-            ? "已婉拒任務"
-            : "任務已取消",
+        title: "自營派單",
         authorityLabel: null,
         description: completed
           ? "行程已結束，保留原訂單與任務紀錄供查閱。"
@@ -1111,6 +1095,18 @@ export default function TripScreen() {
   const queuedCompletionForActiveTask =
     queuedCompletionTaskId === taskDetail?.taskId;
   const isForwardedOffer = tripExperienceState === "forwarded_offered";
+  // The platform reported a sync problem or handed the order to dispatch.
+  const platformSyncIssue = Boolean(
+    taskViewDetail?.blockingReason?.trim() ||
+    taskViewDetail?.syncIssueSummary?.trim() ||
+    taskViewDetail?.requiresManualFallback,
+  );
+  // Live forwarded trips keep a visible warning; terminal and sync_failed
+  // states already explain themselves.
+  const showPlatformSyncWarning =
+    platformSyncIssue &&
+    (tripExperienceState === "forwarded_confirmed" ||
+      tripExperienceState === "forwarded_pending");
   const forwardedAcceptAllowed =
     isForwardedOffer &&
     (taskViewDetail?.allowedActions.includes("accept") ?? true);
@@ -1130,16 +1126,18 @@ export default function TripScreen() {
     : forwardedOfferOfflineBlocked
       ? "平台目前離線，暫時不能接這筆訂單。"
       : !forwardedAcceptAllowed
-        ? taskViewDetail?.blockingReason?.trim() ||
-          taskViewDetail?.syncIssueSummary?.trim() ||
-          "這個平台不能在 App 接單。"
+        ? platformSyncIssue
+          ? PLATFORM_SYNC_PROBLEM_COPY
+          : "這個平台不能在 App 接單。"
         : null;
   const disabledForwardedRejectReason = !isForwardedOffer
     ? null
     : forwardedOfferOfflineBlocked
       ? "平台目前離線，暫時不能婉拒這筆訂單。"
       : !forwardedRejectAllowed
-        ? taskViewDetail?.blockingReason?.trim() || "這個平台不能在 App 婉拒。"
+        ? platformSyncIssue
+          ? PLATFORM_SYNC_PROBLEM_COPY
+          : "這個平台不能在 App 婉拒。"
         : null;
   const queuedCompletionSavedAt = formatTimestamp(queuedCompletionUpdatedAt);
   const offlineBannerBody = queuedCompletionForActiveTask
@@ -1297,11 +1295,14 @@ export default function TripScreen() {
   const proofSummaryItems = [
     {
       label: "照片需求",
-      value:
-        proofRequirements.minPhotoCount > 0
+      // The minimum comes from the order; until it loads it is unknown.
+      value: proofRequirementsUnavailable
+        ? "待載入"
+        : proofRequirements.minPhotoCount > 0
           ? `${proofPhotos.length}/${proofRequirements.minPhotoCount} 張`
           : "免附",
-      mono: proofRequirements.minPhotoCount > 0,
+      mono:
+        !proofRequirementsUnavailable && proofRequirements.minPhotoCount > 0,
     },
     {
       label: "簽收識別",
@@ -2026,12 +2027,17 @@ export default function TripScreen() {
       theme={driverCanvasTheme}
       contentContainerStyle={styles.shellContent}
       footer={
-        taskDetail ? (
+        taskDetail &&
+        !(
+          isOwnedTaskTerminal &&
+          !bottomPrimaryAction &&
+          !bottomSecondaryAction
+        ) ? (
           <View style={styles.footerBar}>
             <Text style={styles.footerNotice}>
               {bottomPrimaryAction || bottomSecondaryAction
                 ? footerNotice
-                : getIdleBottomActionLabel(tripExperienceState, taskDetail)}
+                : getIdleBottomActionLabel(tripExperienceState)}
             </Text>
             {bottomPrimaryAction || bottomSecondaryAction ? (
               <View style={styles.footerButtons}>
@@ -2200,6 +2206,21 @@ export default function TripScreen() {
             }
             body={tripAuthorityBanner.description}
           />
+
+          {showPlatformSyncWarning ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="warn"
+              icon={
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={16}
+                  color={driverCanvasTheme.warn}
+                />
+              }
+              title={PLATFORM_SYNC_PROBLEM_COPY}
+            />
+          ) : null}
 
           <DriverTripMap
             task={taskDetail}

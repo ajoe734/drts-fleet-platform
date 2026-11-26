@@ -299,9 +299,9 @@ describe("DriverTripMap", () => {
       now: Date.parse("2026-07-01T00:00:30.000Z"),
     });
 
-    expect(text).toContain("導航");
+    // Card title, then the map panel; no route notice on an owned trip.
+    expect(text).toMatch(/^導航 行程地圖 Google 地圖 /);
     expect(text).not.toContain("此單路線由平台決定");
-    expect(text).toContain("Google 地圖");
     expect(text).toContain("台北車站");
     expect(text).toContain("25.047800, 121.517000");
     expect(text).toContain("松山機場");
@@ -405,9 +405,9 @@ describe("DriverTripMap", () => {
       );
       expect(pressables.map((item) => item.label)).toEqual([
         "用 Google 導航到上車點",
-        "用Apple導航到上車點",
+        "用 Apple 導航到上車點",
         "用 Google 導航到下車點",
-        "用Apple導航到下車點",
+        "用 Apple 導航到下車點",
       ]);
 
       pressables[2]!.onPress();
@@ -422,6 +422,34 @@ describe("DriverTripMap", () => {
       expect(Linking.openURL).toHaveBeenCalledWith(
         "comgooglemaps://?daddr=25.0697,121.5525&directionsmode=driving",
       );
+    },
+  );
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "labels the second navigation button 系統導航 on Android in the %s card",
+    (_platform, Component) => {
+      native.platform.OS = "android";
+      const texts = collectText(
+        React.createElement(Component, {
+          task: buildTask(),
+          order: buildOrder(),
+          driverLocation: null,
+        }),
+      );
+      expect(texts.filter((value) => value === "系統導航")).toHaveLength(2);
+      expect(texts.join(" ")).not.toContain("系統 導航");
+      expect(
+        collectPressables(
+          React.createElement(Component, {
+            task: buildTask(),
+            order: buildOrder(),
+            driverLocation: null,
+          }),
+        ).map((item) => item.label),
+      ).toContain("用系統導航到上車點");
     },
   );
 
@@ -523,10 +551,14 @@ describe("DriverTripMap", () => {
         sourcePlatformOffline: true,
         nativeMapAvailable: false,
       });
-      const text = collectText(element).join(" ");
+      const texts = collectText(element);
+      const text = texts.join(" ");
 
-      expect(text).toContain("導航");
-      expect(text).toContain("此單路線由平台決定，要改路線請先聯絡派車台。");
+      // Card title, then the one-line forwarded route rule.
+      expect(texts.slice(0, 2)).toEqual([
+        "導航",
+        "此單路線由平台決定，要改路線請先聯絡派車台。",
+      ]);
       expect(text).toContain("平台目前離線");
       expect(text).toContain("缺少座標");
       expect(text).toContain("這個地點沒有座標，請聯絡派車台。");

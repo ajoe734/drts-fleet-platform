@@ -526,7 +526,9 @@ function createRequirementHarness(accessible: boolean) {
     completionRequests,
     paths,
     unexpected,
-    async mount() {
+    // Owned trips read their order through the task; forwarded trips read
+    // /api/orders/<orderId>.
+    async mount(orderPath = `/api/driver/tasks/${record.taskId}/order`) {
       await initializeDriverIdentity();
       let mounted!: Mounted;
       await renderer.act(async () => {
@@ -536,9 +538,7 @@ function createRequirementHarness(accessible: boolean) {
       await waitForState(() =>
         expectTripShows(mounted, { taskId: "task-A", orderId: "order-task-A" }),
       );
-      await waitForState(() =>
-        expect(paths).toContain(`/api/driver/tasks/${record.taskId}/order`),
-      );
+      await waitForState(() => expect(paths).toContain(orderPath));
       expect(unexpected).toEqual([]);
       return mounted;
     },
@@ -762,19 +762,155 @@ it("normal pending Trip shows its status once and its own next step in the foote
   expect(h.unexpected).toEqual([]);
 });
 
-it("normal completed Trip states the result once in the footer without a dead button", async () => {
+// Standalone occurrences only: status sentences such as "此任務已取消，…" do not
+// repeat the status label itself.
+function countStandalone(visible: string, label: string) {
+  return (
+    visible.match(new RegExp(`(?<=^|\\s)${label}(?=\\s|$)`, "g"))?.length ?? 0
+  );
+}
+
+it.each([
+  ["completed", "行程已完成"],
+  ["cancelled", "任務已取消"],
+  ["rejected", "已婉拒任務"],
+] as const)(
+  "normal %s Trip shows its result twice (header and status card) with no footer or dead button",
+  async (status, label) => {
+    const h = createRequirementHarness(false);
+    h.record.status = status;
+    Object.assign(h.view, taskView(h.record), { allowedActions: [] });
+    h.owned.status = status === "completed" ? "completed" : "cancelled";
+    const mounted = await h.mount();
+    const visible = text(trip(mounted));
+    expect(countStandalone(visible, label)).toBe(2);
+    // No action-less footer: neither a repeated status nor filler text.
+    expect(visible).not.toContain("目前沒有可執行動作");
+    expect(countStandalone(visible, "自營派單")).toBeGreaterThan(0);
+    expect(
+      trip(mounted).findAll((node) => node.type === "NativeButton"),
+    ).toEqual(
+      // Only the header refresh and SOS entry remain.
+      [expect.anything(), expect.anything()],
+    );
+    expect(
+      trip(mounted)
+        .findAll((node) => node.type === "NativeButton")
+        .map((node) => text(node)),
+    ).toEqual(["重新整理", "SOS"]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal Trip shows reservation times in Taiwan local time", async () => {
   const h = createRequirementHarness(false);
-  h.record.status = "completed";
-  Object.assign(h.view, taskView(h.record));
-  h.owned.status = "completed";
+  h.owned.reservationWindowStart = "2026-11-07T06:30:00.000Z";
+  h.owned.reservationWindowEnd = "2026-11-07T07:10:00.000Z";
   const mounted = await h.mount();
-  const buttons = trip(mounted)
-    .findAll((node) => node.type === "NativeButton")
-    .map((node) => text(node));
-  expect(buttons).not.toContain("行程已完成");
-  expect(buttons).not.toContain("接受任務");
-  expect(buttons).not.toContain("完成行程");
-  expect(text(trip(mounted))).toContain("行程已完成");
+  await waitForState(() => expect(text(trip(mounted))).toContain("預計 14:30"));
+  expect(text(trip(mounted))).toContain("預計 15:10");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip shows 待載入 for the photo requirement until the order is read", async () => {
+  const h = normalMultiTaxiCompletionHarness(false);
+  const transport = globalThis.fetch;
+  let orderReadable = false;
+  vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+    const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+    if (
+      !orderReadable &&
+      url.endsWith(`/api/driver/tasks/${h.record.taskId}/order`)
+    ) {
+      await transport(...args); // keep the harness's request record
+      return new Response(
+        JSON.stringify({
+          error: { code: "FORBIDDEN", message: "SIM order unavailable" },
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return transport(...args);
+  });
+  const mounted = await h.mount();
+  // The order's proof minimum is unknown, so "免附" would be invented.
+  await waitForState(() => expect(photoRequirement(mounted)).toBe("待載入"));
+  orderReadable = true;
+  await press(
+    one(
+      trip(mounted).findAll(
+        (node) => node.type === "NativeButton" && text(node) === "重新整理",
+      ),
+      "header refresh",
+    ),
+  );
+  await waitForState(() => expect(photoRequirement(mounted)).toBe("免附"));
+  expect(h.unexpected).toEqual([]);
+});
+
+function forwardedHarness(
+  status: DriverTaskRecord["status"],
+  nativeStatus: string | null,
+) {
+  const h = createRequirementHarness(false);
+  Object.assign(h.record, { sourcePlatform: "grab_taiwan", status });
+  if (status === "pending_acceptance")
+    Object.assign(h.record, {
+      acceptedAt: null,
+      departedAt: null,
+      arrivedPickupAt: null,
+      startedAt: null,
+    });
+  Object.assign(h.view, taskView(h.record), {
+    orderDomain: "forwarded",
+    sourcePlatform: "grab_taiwan",
+    platformDisplayName: "Grab",
+    nativeStatus,
+  });
+  return h;
+}
+
+it("forwarded confirmed Trip warns once in plain Chinese when the platform reports a sync problem", async () => {
+  const h = forwardedHarness("accepted", "confirmed_by_platform");
+  h.view.syncIssueSummary =
+    "Platform sync failed and is waiting for dispatch follow-up.";
+  h.view.allowedActions = ["depart"];
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("平台同步有問題，請聯絡派車台。"),
+  );
+  const visible = text(trip(mounted));
+  expect(visible.split("平台同步有問題").length - 1).toBe(1);
+  expect(visible).not.toContain("Platform sync failed");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("forwarded confirmed Trip shows no sync warning when the platform reports none", async () => {
+  const h = forwardedHarness("accepted", "confirmed_by_platform");
+  h.view.allowedActions = ["depart"];
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  expect(text(trip(mounted))).not.toContain("平台同步有問題");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("blocked forwarded offer explains itself with fixed Chinese copy, not the raw platform reason", async () => {
+  const h = forwardedHarness("pending_acceptance", null);
+  h.view.allowedActions = ["reject"];
+  h.view.blockingReason =
+    "Dispatch must verify platform confirmation before continuing.";
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("平台同步有問題，請聯絡派車台。"),
+  );
+  const visible = text(trip(mounted));
+  expect(visible).not.toContain("Dispatch must verify");
+  const accept = one(
+    trip(mounted).findAll(
+      (node) => node.type === "NativeButton" && text(node) === "接受平台訂單",
+    ),
+    "blocked platform accept",
+  );
+  expect(accept.props.disabled).toBe(true);
   expect(h.unexpected).toEqual([]);
 });
 
