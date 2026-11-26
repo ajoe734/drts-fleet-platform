@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import {
@@ -16,7 +15,6 @@ import {
   type EmptyReason,
   type PlatformPresenceAdapterStatusRecord,
   type PlatformPresenceRecord,
-  type ResourceActionDescriptor,
 } from "@drts/contracts";
 
 import {
@@ -24,7 +22,6 @@ import {
   Btn,
   Card,
   DL,
-  KPI,
   PageHeader,
   Pill,
   Shell,
@@ -39,10 +36,9 @@ import {
 import {
   canReceiveOrders,
   deriveBlockingReasons,
-  findAction,
-  getMechanismActionLabel,
-  getMechanismLabel,
-  getPlatformReauthMechanism,
+  getEligibilityLabel,
+  getPlatformReauthUrl,
+  isRealPlatformPresence,
   resolveEmptyReason,
   type PlatformPresenceViewRecord,
   type PlatformPresenceViewSummary,
@@ -53,6 +49,8 @@ import { driverStrings } from "@/lib/strings";
 const THEME = driverCanvasTheme;
 const REFRESH_INTERVAL_MS = 15_000;
 const REFRESH_TIER_LABEL = "每 15 秒自動更新";
+// Filters only help once there are more platforms than fit on one screen.
+const FILTER_MIN_PLATFORMS = 4;
 const DATA_SOURCE_LABELS: Record<string, string> = {
   live: "即時",
   cache: "快取",
@@ -67,17 +65,10 @@ type EnrichedPresence = {
   forwarded: boolean;
   canReceive: boolean;
   blockingReasons: string[];
-  mechanismLabel: string;
-  actionLabel: string;
+  reauthUrl: string | null;
   attention: boolean;
   statusTone: "success" | "warn" | "danger" | "info" | "neutral";
   statusLabel: string;
-};
-
-type ManualReauthState = {
-  platformCode: PlatformPresenceRecord["platformCode"];
-  displayName: string;
-  tokenExpiresAt: string;
 };
 
 function toErrorMessage(error: unknown): string {
@@ -111,7 +102,7 @@ function formatCompactDateTime(value: string | null | undefined): string {
 
 function formatTokenExpiry(value: string | null | undefined): string {
   if (!value) {
-    return "未提供期限";
+    return "—";
   }
 
   const parsed = new Date(value);
@@ -180,6 +171,9 @@ function getStatusLabel(item: EnrichedPresence): string {
   if (item.canReceive) {
     return "可接單";
   }
+  if (item.record.status === "busy") {
+    return "載客中";
+  }
   if (item.record.status === "online") {
     return "已上線";
   }
@@ -221,18 +215,6 @@ function toneColor(tone: EnrichedPresence["statusTone"]): string {
   }
 }
 
-function buildActionState(
-  record: PlatformPresenceViewRecord,
-  actionCandidates: string[],
-  fallback: ResourceActionDescriptor | null,
-): ResourceActionDescriptor | null {
-  const explicit = findAction(record, actionCandidates);
-  if (record.availableActions) {
-    return explicit;
-  }
-  return fallback;
-}
-
 function matchesFilter(
   item: EnrichedPresence,
   filter: PresenceFilter,
@@ -253,15 +235,14 @@ function emptyStateCopy(reason: EmptyReason): {
   title: string;
   body: string;
   tone: "info" | "warn" | "danger";
-  cta?: { label: string; route?: "/settings"; onPressHint?: string };
 } {
   switch (reason) {
     case "not_provisioned":
+      // There is no way to bind a platform in the app.
       return {
-        title: "還沒有綁定任何平台",
-        body: "綁定平台帳號後，這裡會顯示每個平台能不能接單。",
-        tone: "warn",
-        cta: { label: "去綁定平台", route: "/settings" },
+        title: "還沒有綁定外部平台",
+        body: driverStrings.platformPresence.noInAppBinding,
+        tone: "info",
       };
     case "fetch_failed":
       return {
@@ -278,7 +259,7 @@ function emptyStateCopy(reason: EmptyReason): {
     case "external_unavailable":
       return {
         title: "外部平台同步異常",
-        body: "所有外部平台目前都無法正常運作，請先查看需處理平台或聯絡派車台。",
+        body: "所有外部平台目前都無法正常運作，原因列在下方各平台，或請聯絡派車台。",
         tone: "warn",
       };
     case "driver_not_eligible":
@@ -290,7 +271,7 @@ function emptyStateCopy(reason: EmptyReason): {
     case "filtered_empty":
       return {
         title: "這個篩選沒有符合的平台",
-        body: "切換到其他視角查看全部平台，或先處理需要重新授權的平台。",
+        body: "切換到「全部」查看其他平台。",
         tone: "info",
       };
     case "no_data":
@@ -349,160 +330,13 @@ function PresenceFilterTabs({
   );
 }
 
-function MechanismLegend() {
-  return (
-    <Card
-      theme={THEME}
-      title="重新授權方式"
-      subtitle="不同平台會依情況使用以下四種方式之一"
-    >
-      <View style={styles.legendList}>
-        {[
-          "external_browser_oauth",
-          "native_app_deeplink",
-          "manual_credential",
-          "ops_managed",
-        ].map((key) => (
-          <View key={key} style={styles.legendItem}>
-            <Pill theme={THEME} tone="accent">
-              {getMechanismLabel(
-                key as ReturnType<typeof getPlatformReauthMechanism>,
-              )}
-            </Pill>
-            <Text style={[styles.legendText, { color: THEME.textMuted }]}>
-              {getMechanismActionLabel(
-                key as ReturnType<typeof getPlatformReauthMechanism>,
-              )}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </Card>
-  );
-}
-
-function ManualReauthCard({
-  state,
-  busy,
-  onChange,
-  onCancel,
-  onSubmit,
-}: {
-  state: ManualReauthState;
-  busy: boolean;
-  onChange: (next: string) => void;
-  onCancel: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <Card
-      theme={THEME}
-      title={`${state.displayName} 手動重新授權`}
-      subtitle="這個平台需要手動輸入驗證資料才能重新授權"
-    >
-      <View style={styles.manualCardBody}>
-        <Text style={[styles.manualHint, { color: THEME.textMuted }]}>
-          本階段 API 僅提交重新驗證請求與選填 Token
-          到期時間。若平台要求完整帳密，請依派車台流程補件。
-        </Text>
-        <View style={styles.fieldBlock}>
-          <Text style={[styles.fieldLabel, { color: THEME.textMuted }]}>
-            Token 到期時間（選填）
-          </Text>
-          <TextInput
-            value={state.tokenExpiresAt}
-            onChangeText={onChange}
-            placeholder="例如 2026-06-01T12:00:00Z"
-            placeholderTextColor={THEME.textDim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.textInput,
-              {
-                color: THEME.text,
-                borderColor: THEME.border,
-                backgroundColor: THEME.surfaceLo,
-              },
-            ]}
-          />
-        </View>
-        <View style={styles.manualActions}>
-          <Btn theme={THEME} variant="ghost" size="sm" onPress={onCancel}>
-            取消
-          </Btn>
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="sm"
-            onPress={onSubmit}
-            disabled={busy}
-          >
-            {busy ? "送出中" : "送出重新驗證"}
-          </Btn>
-        </View>
-      </View>
-    </Card>
-  );
-}
-
 function PlatformCard({
   item,
-  busy,
-  onToggle,
   onReauth,
-  onOpenBinding,
 }: {
   item: EnrichedPresence;
-  busy: boolean;
-  onToggle: (item: EnrichedPresence) => void;
   onReauth: (item: EnrichedPresence) => void;
-  onOpenBinding: () => void;
 }) {
-  const onlineAction = buildActionState(
-    item.record,
-    ["go_online", "set_online", "online"],
-    item.record.status === "offline"
-      ? {
-          action: "go_online",
-          enabled: !item.record.reauthRequired,
-          disabledReasonCode: item.record.reauthRequired
-            ? "reauth_required"
-            : undefined,
-          riskLevel: "medium",
-        }
-      : null,
-  );
-  const offlineAction = buildActionState(
-    item.record,
-    ["go_offline", "set_offline", "offline"],
-    item.record.status === "online"
-      ? {
-          action: "go_offline",
-          enabled: true,
-          riskLevel: "medium",
-        }
-      : null,
-  );
-  const reauthAction = buildActionState(
-    item.record,
-    ["reauthenticate", "reauth", "resolve_reauth"],
-    item.record.reauthRequired
-      ? {
-          action: "reauthenticate",
-          enabled: true,
-          riskLevel: "medium",
-        }
-      : null,
-  );
-  const bindingAction = buildActionState(
-    item.record,
-    ["view_binding_details", "manage_binding", "open_settings"],
-    {
-      action: "view_binding_details",
-      enabled: true,
-      riskLevel: "low",
-    },
-  );
   const lastSync = formatCompactDateTime(
     item.adapterStatus?.lastSyncAt ??
       item.record.lastOnlineAt ??
@@ -539,13 +373,10 @@ function PlatformCard({
             <Text
               style={[
                 styles.platformMarkText,
-                {
-                  color: item.forwarded ? THEME.warn : THEME.accentHi,
-                  fontFamily: THEME.monoFamily,
-                },
+                { color: item.forwarded ? THEME.warn : THEME.accentHi },
               ]}
             >
-              {String(item.record.platformCode).slice(0, 3).toUpperCase()}
+              {item.displayName.slice(0, 1)}
             </Text>
           </View>
           <View style={styles.platformNameBlock}>
@@ -553,21 +384,21 @@ function PlatformCard({
               <Text style={[styles.platformName, { color: THEME.text }]}>
                 {item.displayName}
               </Text>
-              <Pill theme={THEME} tone={item.forwarded ? "warn" : "accent"}>
-                {item.forwarded
-                  ? driverStrings.platformPresence.external
-                  : driverStrings.platformPresence.owned}
-              </Pill>
+              {/* A fleet row's name already says 車隊派單. */}
+              {item.forwarded ? (
+                <Pill theme={THEME} tone="warn">
+                  {driverStrings.platformPresence.external}
+                </Pill>
+              ) : null}
               <Pill theme={THEME} tone={item.statusTone} dot>
                 {item.statusLabel}
               </Pill>
             </View>
             <Text style={[styles.platformSubline, { color: THEME.textMuted }]}>
-              {item.record.platformCode} · 最後同步 {lastSync}
+              最後同步 {lastSync}
             </Text>
           </View>
         </View>
-        {busy ? <ActivityIndicator size="small" color={THEME.accent} /> : null}
       </View>
 
       <View style={styles.cardSection}>
@@ -580,11 +411,13 @@ function PlatformCard({
               value: item.canReceive ? "可以接單" : "暫停接單",
             },
             {
-              label: "Token",
+              label: "授權期限",
               value: formatTokenExpiry(item.record.tokenExpiresAt),
             },
-            { label: "資格", value: item.record.eligibility },
-            { label: "重新授權", value: item.mechanismLabel },
+            {
+              label: "資格",
+              value: getEligibilityLabel(item.record.eligibility),
+            },
           ]}
         />
       </View>
@@ -621,79 +454,43 @@ function PlatformCard({
         </View>
       ) : null}
 
-      {(item.record.eligibleServiceBuckets?.length ?? 0) > 0 ? (
-        <View style={styles.bucketRow}>
-          {(item.record.eligibleServiceBuckets ?? []).map((bucket: string) => (
-            <Pill key={bucket} theme={THEME} tone="success">
-              {bucket}
-            </Pill>
-          ))}
-        </View>
+      {/* Bindings are read-only here: the app does not report platform
+          heartbeats, so a status the driver sets goes stale and then blocks
+          the driver's own fleet dispatch. */}
+      {item.record.reauthRequired ? (
+        item.reauthUrl ? (
+          <View style={styles.platformActions}>
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => onReauth(item)}
+            >
+              {`重新登入${item.displayName}`}
+            </Btn>
+          </View>
+        ) : (
+          <Text style={[styles.reauthNote, { color: THEME.textMuted }]}>
+            {reauthUnavailableMessage(item.displayName)}
+          </Text>
+        )
       ) : null}
-
-      <View style={styles.platformActions}>
-        {reauthAction ? (
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="sm"
-            disabled={busy || !reauthAction.enabled}
-            onPress={() => onReauth(item)}
-          >
-            {item.actionLabel}
-          </Btn>
-        ) : null}
-        {onlineAction ? (
-          <Btn
-            theme={THEME}
-            variant="secondary"
-            size="sm"
-            disabled={busy || !onlineAction.enabled}
-            onPress={() => onToggle(item)}
-          >
-            上線
-          </Btn>
-        ) : null}
-        {offlineAction ? (
-          <Btn
-            theme={THEME}
-            variant="secondary"
-            size="sm"
-            disabled={busy || !offlineAction.enabled}
-            onPress={() => onToggle(item)}
-          >
-            下線
-          </Btn>
-        ) : null}
-        {bindingAction ? (
-          <Btn
-            theme={THEME}
-            variant="ghost"
-            size="sm"
-            disabled={busy || !bindingAction.enabled}
-            onPress={onOpenBinding}
-          >
-            帳號詳情
-          </Btn>
-        ) : null}
-      </View>
     </Card>
   );
 }
 
+function reauthUnavailableMessage(displayName: string): string {
+  return `暫時無法在 App 內重新登入${displayName}，請聯絡派車台。`;
+}
+
 export default function PlatformPresenceScreen() {
-  const router = useRouter();
   const [summary, setSummary] = useState<PlatformPresenceViewSummary | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<PresenceFilter>("all");
-  const [manualReauth, setManualReauth] = useState<ManualReauthState | null>(
-    null,
-  );
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
   const isProvisioned = isDriverIdentityProvisioned();
@@ -721,6 +518,8 @@ export default function PlatformPresenceScreen() {
         (await client.getPlatformPresence()) as PlatformPresenceViewSummary;
       setSummary({
         ...nextSummary,
+        // Unbound leftovers from the old in-app bind form are not bindings.
+        presences: (nextSummary.presences ?? []).filter(isRealPlatformPresence),
         refreshTier: nextSummary.refreshTier ?? "medium",
       });
       setError(null);
@@ -777,7 +576,6 @@ export default function PlatformPresenceScreen() {
         const adapterStatus = adapterMap.get(record.platformCode);
         const canReceive = canReceiveOrders(record, adapterStatus);
         const blockingReasons = deriveBlockingReasons(record, adapterStatus);
-        const mechanism = getPlatformReauthMechanism(record);
         const displayName = getPlatformDisplayName(record);
         const forwarded = !isOwnedPlatform(record);
         const attention =
@@ -794,8 +592,7 @@ export default function PlatformPresenceScreen() {
           forwarded,
           canReceive,
           blockingReasons,
-          mechanismLabel: getMechanismLabel(mechanism),
-          actionLabel: getMechanismActionLabel(mechanism),
+          reauthUrl: getPlatformReauthUrl(record),
           attention,
           statusTone: "neutral" as const,
           statusLabel: "",
@@ -823,9 +620,19 @@ export default function PlatformPresenceScreen() {
       });
   }, [summary]);
 
+  const showFilters = enrichedPresences.length >= FILTER_MIN_PLATFORMS;
+  // A filter picked while the tabs were shown must not keep hiding
+  // platforms once the tabs disappear.
+  const activeFilter: PresenceFilter = showFilters ? filter : "all";
+  useEffect(() => {
+    if (!showFilters) {
+      setFilter("all");
+    }
+  }, [showFilters]);
+
   const filteredPresences = useMemo(
-    () => enrichedPresences.filter((item) => matchesFilter(item, filter)),
-    [enrichedPresences, filter],
+    () => enrichedPresences.filter((item) => matchesFilter(item, activeFilter)),
+    [enrichedPresences, activeFilter],
   );
 
   const emptyReason = resolveEmptyReason({
@@ -842,14 +649,6 @@ export default function PlatformPresenceScreen() {
   const attentionCount = enrichedPresences.filter(
     (item) => item.attention,
   ).length;
-  const reauthCount = enrichedPresences.filter(
-    (item) => item.record.reauthRequired,
-  ).length;
-  const degradedCount = enrichedPresences.filter(
-    (item) =>
-      item.adapterStatus?.status === "degraded" ||
-      item.adapterStatus?.status === "down",
-  ).length;
   const hasPlatforms = enrichedPresences.length > 0;
   const subtitle = hasPlatforms
     ? `${enrichedPresences.length} 個平台 · ${availableCount} 可接單 · ${attentionCount} 需處理`
@@ -862,112 +661,21 @@ export default function PlatformPresenceScreen() {
   ]
     .filter(Boolean)
     .join(" · ");
-  const openBindingSettings = () => router.push("/settings");
-
-  const handleTogglePresence = async (item: EnrichedPresence) => {
-    const nextAction = item.record.status === "online" ? "下線" : "上線";
-    Alert.alert(
-      `${item.displayName}${nextAction}`,
-      `確定要將 ${item.displayName} 設為${nextAction}嗎？此操作會影響平台是否派單給您。`,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: `確認${nextAction}`,
-          onPress: async () => {
-            setBusyPlatform(item.record.platformCode);
-            try {
-              const client = getDriverClient();
-              if (item.record.status === "online") {
-                await client.setPlatformOffline({
-                  platformCode: item.record.platformCode,
-                });
-              } else {
-                await client.setPlatformOnline({
-                  platformCode: item.record.platformCode,
-                });
-              }
-              await onRefresh();
-            } catch (toggleError) {
-              Alert.alert("無法更新平台狀態", toErrorMessage(toggleError));
-            } finally {
-              setBusyPlatform(null);
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  const openExternalTarget = async (
-    url: string | null | undefined,
-    fallback: string,
-  ) => {
-    if (!url) {
-      Alert.alert("缺少跳轉目標", fallback);
-      return;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch (linkError) {
-      Alert.alert("無法開啟目標", toErrorMessage(linkError));
-    }
-  };
+  // Never keep showing platform data the driver is no longer allowed to read.
+  const showPlatformList =
+    filteredPresences.length > 0 && emptyReason !== "permission_denied";
 
   const handleReauth = async (item: EnrichedPresence) => {
-    const mechanism = getPlatformReauthMechanism(item.record);
-
-    switch (mechanism) {
-      case "manual_credential":
-        setManualReauth({
-          platformCode: item.record.platformCode,
-          displayName: item.displayName,
-          tokenExpiresAt: "",
-        });
-        return;
-      case "ops_managed":
-        Alert.alert(
-          "請聯絡派車台",
-          `${item.displayName} 的重新授權由營運端處理。請透過設定頁或值班流程聯絡派車台。`,
-          [
-            { text: "稍後處理", style: "cancel" },
-            { text: "前往設定", onPress: () => router.push("/settings") },
-          ],
-        );
-        return;
-      case "native_app_deeplink":
-        await openExternalTarget(
-          item.record.nativeAppUrl,
-          `${item.displayName} 需要平台 App 深連結，但目前 API 尚未提供目標 URL。`,
-        );
-        return;
-      case "external_browser_oauth":
-      default:
-        await openExternalTarget(
-          item.record.reauthUrl,
-          `${item.displayName} 需要外部瀏覽器 OAuth，但目前 API 尚未提供授權 URL。`,
-        );
-    }
-  };
-
-  const submitManualReauth = async () => {
-    if (!manualReauth) {
+    if (!item.reauthUrl) {
       return;
     }
-
-    setBusyPlatform(manualReauth.platformCode);
     try {
-      const client = getDriverClient();
-      await client.setPlatformOnline({
-        platformCode: manualReauth.platformCode,
-        tokenExpiresAt: manualReauth.tokenExpiresAt.trim() || null,
-      });
-      setManualReauth(null);
-      await onRefresh();
-      Alert.alert("已送出重新驗證", "請依平台規範完成後續人工審核或憑證補件。");
-    } catch (submitError) {
-      Alert.alert("無法送出重新驗證", toErrorMessage(submitError));
-    } finally {
-      setBusyPlatform(null);
+      await Linking.openURL(item.reauthUrl);
+    } catch {
+      Alert.alert(
+        `無法開啟${item.displayName}`,
+        reauthUnavailableMessage(item.displayName),
+      );
     }
   };
 
@@ -1022,16 +730,8 @@ export default function PlatformPresenceScreen() {
         </Text>
       ) : null}
 
-      {hasPlatforms ? (
-        <>
-          <View style={styles.kpiRow}>
-            <KPI theme={THEME} label="可接單" value={String(availableCount)} />
-            <KPI theme={THEME} label="需重授權" value={String(reauthCount)} />
-            <KPI theme={THEME} label="同步異常" value={String(degradedCount)} />
-          </View>
-
-          <PresenceFilterTabs activeFilter={filter} onChange={setFilter} />
-        </>
+      {showFilters ? (
+        <PresenceFilterTabs activeFilter={activeFilter} onChange={setFilter} />
       ) : null}
 
       {error && summary ? (
@@ -1043,22 +743,6 @@ export default function PlatformPresenceScreen() {
           icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
         />
       ) : null}
-
-      {manualReauth ? (
-        <ManualReauthCard
-          state={manualReauth}
-          busy={busyPlatform === manualReauth.platformCode}
-          onChange={(next) =>
-            setManualReauth((current) =>
-              current ? { ...current, tokenExpiresAt: next } : current,
-            )
-          }
-          onCancel={() => setManualReauth(null)}
-          onSubmit={() => void submitManualReauth()}
-        />
-      ) : null}
-
-      {reauthCount > 0 ? <MechanismLegend /> : null}
 
       {emptyState ? (
         <Banner
@@ -1085,47 +769,21 @@ export default function PlatformPresenceScreen() {
               }
             />
           }
-          actions={
-            emptyState.cta?.route ? (
-              <Btn
-                theme={THEME}
-                variant="primary"
-                size="sm"
-                onPress={openBindingSettings}
-              >
-                {emptyState.cta.label}
-              </Btn>
-            ) : undefined
-          }
         />
-      ) : (
+      ) : null}
+
+      {/* A warning about every platform still lists them, so the driver can
+          see which one and why. Summary notes are never shown to drivers. */}
+      {showPlatformList ? (
         <View style={styles.platformList}>
           {filteredPresences.map((item) => (
             <PlatformCard
               key={item.record.platformCode}
               item={item}
-              busy={busyPlatform === item.record.platformCode}
-              onToggle={(next) => void handleTogglePresence(next)}
               onReauth={(next) => void handleReauth(next)}
-              onOpenBinding={openBindingSettings}
             />
           ))}
         </View>
-      )}
-
-      {summary?.notes?.length ? (
-        <Card theme={THEME} title={driverStrings.platformPresence.notesTitle}>
-          <View style={styles.notesList}>
-            {summary.notes.map((note: string) => (
-              <Text
-                key={note}
-                style={[styles.noteText, { color: THEME.textMuted }]}
-              >
-                • {note}
-              </Text>
-            ))}
-          </View>
-        </Card>
       ) : null}
     </Shell>
   );
@@ -1149,10 +807,6 @@ const styles = StyleSheet.create({
   },
   loadingLabel: {
     fontSize: 14,
-  },
-  kpiRow: {
-    flexDirection: "row",
-    gap: 8,
   },
   refreshLine: {
     fontSize: 12,
@@ -1240,65 +894,15 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
   },
-  bucketRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+  reauthNote: {
     marginTop: 12,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   platformActions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     marginTop: 14,
-  },
-  legendList: {
-    gap: 8,
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  legendText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: "right",
-  },
-  manualCardBody: {
-    gap: 12,
-  },
-  manualHint: {
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
-  fieldBlock: {
-    gap: 6,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  textInput: {
-    minHeight: 42,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-  },
-  manualActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  notesList: {
-    gap: 8,
-  },
-  noteText: {
-    fontSize: 12.5,
-    lineHeight: 18,
   },
 });

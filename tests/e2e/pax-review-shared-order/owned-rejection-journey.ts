@@ -50,10 +50,7 @@ export async function ownedRejectionJourney(
   driver.on("request", observeReject);
   await step("G Driver opens the assigned same-order task", async () => {
     await driver.goto(`${driverBase}/jobs`);
-    await driver
-      .getByRole("button")
-      .filter({ has: driver.getByText(first.taskId, { exact: true }) })
-      .click();
+    await driver.getByTestId(`driver-job-task-${first.taskId}`).click();
     await expect(driver).toHaveURL(
       (url) =>
         url.pathname === new URL(`${driverBase}/trip`).pathname &&

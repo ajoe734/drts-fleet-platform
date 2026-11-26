@@ -37,10 +37,6 @@ const JUSTIFIED_ABSOLUTE_POSITIONING: Record<
   ],
   "app/onboarding.tsx": [
     {
-      selector: "cockpitBellBadge",
-      justification: "Interactive action button notification badge dot positioned in bell button corner.",
-    },
-    {
       selector: "provisionHeroGlow",
       justification: "Non-interactive decorative background ambient lighting glow.",
     },
