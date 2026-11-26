@@ -13,13 +13,10 @@ export const PROTECTED_DRIVER_ROUTES = [
   "trip",
   "platform-presence",
   "settings",
-  "leave",
   "academy",
   "earnings",
   "shift",
   "sos",
-  "incident",
-  "safety-operator",
 ] as const;
 
 export type PublicDriverRoute = (typeof PUBLIC_DRIVER_ROUTES)[number];

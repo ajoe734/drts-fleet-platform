@@ -6,14 +6,12 @@ export const driverRouteTitles = {
   jobs: "任務收件匣",
   trip: "行程作業台",
   sos: "安全求援",
-  incident: "SOS 緊急通報",
   earnings: "收益儀表板",
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
   leave: "請假",
   academy: "學院",
-  safetyOperator: "安全員模式",
 } as const;
 
 export const driverWorkforceStrings = {
@@ -234,26 +232,6 @@ export const driverStrings = {
       compliance: "合規檢查",
       completionProof: "完單佐證",
     },
-  },
-  incident: {
-    title: "安全求援",
-    subtitle: "開啟頁面後長按 2 秒送出，會同步通知派車台與安全主管",
-    loadingTitle: "準備中",
-    disabledTitle: "未啟用",
-    urgentTitle: "高風險",
-    heroEyebrow: "司機安全",
-    heroTitle: "緊急求援",
-    sections: {
-      situation: "情況",
-      context: "當前訂單情境",
-      details: "補充說明",
-      review: "送出前確認",
-    },
-    orderContextForwarded: "外部訂單",
-    orderContextOwned: "一般安全事件",
-    primaryAction: "開啟 SOS 緊急通報",
-    cancelAction: "取消",
-    confirmAction: "長按 2 秒送出",
   },
   platformPresence: {
     title: "平台連線",

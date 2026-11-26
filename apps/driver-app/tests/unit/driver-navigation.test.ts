@@ -410,16 +410,12 @@ describe("driver root tab bar navigation", () => {
     expect(resolveActiveDriverTab("/settings")).toBe("settings");
 
     // Sub-screens
-    expect(resolveActiveDriverTab("incident")).toBe("trip");
-    expect(resolveActiveDriverTab("/incident")).toBe("trip");
     expect(resolveActiveDriverTab("sos")).toBe("trip");
     expect(resolveActiveDriverTab("/sos")).toBe("trip");
     expect(resolveActiveDriverTab("earnings")).toBe("settings");
     expect(resolveActiveDriverTab("/earnings")).toBe("settings");
     expect(resolveActiveDriverTab("shift")).toBe("workbench");
     expect(resolveActiveDriverTab("/shift")).toBe("workbench");
-    expect(resolveActiveDriverTab("safety-operator")).toBe("settings");
-    expect(resolveActiveDriverTab("/safety-operator")).toBe("settings");
     expect(resolveActiveDriverTab("onboarding")).toBe("workbench");
     expect(resolveActiveDriverTab("/onboarding")).toBe("workbench");
   });
@@ -429,7 +425,7 @@ describe("driver root tab bar navigation", () => {
       await import("../../lib/driver-navigation");
 
     expect(resolveActiveDriverTab("earnings", "workbench")).toBe("workbench");
-    expect(resolveActiveDriverTab("incident", "workbench")).toBe("workbench");
+    expect(resolveActiveDriverTab("sos", "workbench")).toBe("workbench");
   });
 
   it("identifies whether a route is a top-level tab route", async () => {
@@ -442,8 +438,6 @@ describe("driver root tab bar navigation", () => {
     expect(isDriverTabRoute("settings")).toBe(true);
 
     expect(isDriverTabRoute("earnings")).toBe(false);
-    expect(isDriverTabRoute("incident")).toBe(false);
     expect(isDriverTabRoute("sos")).toBe(false);
-    expect(isDriverTabRoute("safety-operator")).toBe(false);
   });
 });
