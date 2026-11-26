@@ -232,7 +232,7 @@ describe("Driver Auth States & Device Flow (IAM-UI-DRV-001)", () => {
       expect(driverAuthStrings.states.driver_suspended.badge).toBe("帳號停權");
       expect(driverAuthStrings.devices.rebindAction).toContain("重新綁定裝置");
       expect(driverAuthStrings.devices.revokeAction).toContain("登出並撤銷裝置");
-      expect(driverAuthStrings.devices.offlineProofNotice).toContain("不會刪除未同步的離線完單佐證");
+      expect(driverAuthStrings.devices.offlineProofNotice).toContain("不會刪除還沒上傳的完單照片");
     });
 
     it("never leaks a PascalCase type name or snake_case identifier through driverAuthStrings", () => {

@@ -67,6 +67,9 @@ describe("SR-QA-DISPATCH-001 / C041: multi-platform busy state IS wired into dis
     const presence = new PlatformPresenceService();
     await presence.setOffline("driver-busy-elsewhere", "uber" as never);
     await presence.setOffline("driver-busy-elsewhere", "line-taxi" as never);
+    // Only bound accounts count; nothing in the product writes one yet.
+    for (const record of await presence.listForDriver("driver-busy-elsewhere"))
+      record.accountId = `${record.platformCode}-account`;
 
     const allOffline = (
       await presence.listForDriver("driver-busy-elsewhere")

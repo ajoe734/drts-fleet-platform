@@ -27,6 +27,7 @@ import {
   tokens,
 } from "@/components/ui";
 import { assessPlatformHealth } from "@/components/platform-status-card";
+import { isRealPlatformPresence } from "@/lib/platform-presence-view";
 import {
   formatDriverError,
   formatDriverRegistrationError,
@@ -49,6 +50,7 @@ import {
   driverActivationSteps,
   driverAuthStrings,
   driverStrings,
+  getTaipeiGreeting,
 } from "@/lib/strings";
 
 type WorkspaceRoute =
@@ -58,7 +60,6 @@ type WorkspaceRoute =
   | "/earnings"
   | "/shift"
   | "/sos"
-  | "/incident"
   | "/settings";
 
 type StepState = "active" | "pending" | "done";
@@ -73,8 +74,10 @@ const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 
 const REVIEW_LEGACY_REGISTRATION =
   process.env.EXPO_PUBLIC_REVIEW_BASE_PATH === "/review-driver";
+// Empty unless a test build sets one, so each phone is not registered under
+// the same made-up name.
 const DEFAULT_TEST_DEVICE_LABEL =
-  process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
+  process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "";
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -328,40 +331,27 @@ function ReauthAlert({
   );
 }
 
-type PlatformPreviewRowProps = {
-  record: PlatformPresenceRecord;
-  displayName: string;
-  subtitle: string;
-  statusLabel: string;
-  statusVariant: "success" | "warning" | "danger" | "default";
-  secondaryLabel?: string | null;
-  isLast: boolean;
-  onPress: () => void;
-};
-
 function PlatformRow({
   record,
   displayName,
   subtitle,
   statusLabel,
   statusVariant,
-  secondaryLabel,
   isLast,
   onPress,
 }: {
-  record: PlatformPreviewRowProps["record"];
+  record: PlatformPresenceRecord;
   displayName: string;
   subtitle: string;
   statusLabel: string;
-  statusVariant: PlatformPreviewRowProps["statusVariant"];
-  secondaryLabel?: string | null;
+  statusVariant: "success" | "warning" | "danger" | "default";
   isLast: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`查看 ${record.platformCode} 平台狀態`}
+      accessibilityLabel={`查看${displayName}平台狀態`}
       onPress={onPress}
       style={[styles.platformRow, isLast ? null : styles.platformRowDivider]}
     >
@@ -369,19 +359,15 @@ function PlatformRow({
         <View style={styles.platformNameRow}>
           <PlatformBadge
             code={record.platformCode}
-            name={record.platformCode.toUpperCase()}
+            name={displayName}
             forwarded
             size="sm"
           />
-          <Text style={styles.platformName}>{displayName}</Text>
         </View>
         <Text style={styles.platformSub}>{subtitle}</Text>
       </View>
       <View style={styles.platformControls}>
         <StatusChip label={statusLabel} variant={statusVariant} />
-        {secondaryLabel ? (
-          <StatusChip label={secondaryLabel} variant="info" />
-        ) : null}
         <Ionicons
           name="chevron-forward"
           size={16}
@@ -432,6 +418,10 @@ function QuickTile({
 
 type StatusTone = "success" | "warning" | "danger" | "neutral";
 
+function taskSourceLabel(task: UnifiedDriverTaskView): string {
+  return isOwnedUnifiedTask(task) ? "車隊派單" : task.platformDisplayName;
+}
+
 function toErrorMessage(error: unknown, fallback: string) {
   return formatDriverError(error, fallback);
 }
@@ -467,19 +457,14 @@ function toneToStatusVariant(tone: StatusTone) {
   }
 }
 
-function resolveWorkspaceIssue(flagsOk: boolean, identityOk: boolean): string {
-  if (!identityOk && !flagsOk) {
-    return "目前無法驗證司機身份，也無法取得工作台功能設定。請確認網路與登入狀態後重新檢查。";
-  }
-
+// The degraded screen's title already says the connection is unstable; only
+// an identity problem needs its own explanation.
+function resolveWorkspaceIssue(identityOk: boolean): string | null {
   if (!identityOk) {
-    return (
-      getDriverIdentityIssue() ??
-      "目前無法驗證司機身份。請確認裝置綁定仍有效，或重新回到配置流程。"
-    );
+    return getDriverIdentityIssue() ?? "目前無法確認您的司機身份。";
   }
 
-  return "功能旗標服務暫時不可用。核心資料仍可能可讀，但部分入口會維持降級。";
+  return null;
 }
 
 export default function OnboardingScreen() {
@@ -614,9 +599,7 @@ export default function OnboardingScreen() {
           setIdentityOk(nextIdentityOk);
 
           if (!nextFlagsOk || !nextIdentityOk) {
-            setWorkspaceIssue(
-              resolveWorkspaceIssue(nextFlagsOk, nextIdentityOk),
-            );
+            setWorkspaceIssue(resolveWorkspaceIssue(nextIdentityOk));
           }
 
           if (tasksResult.status === "fulfilled") {
@@ -685,7 +668,7 @@ export default function OnboardingScreen() {
 
         setFlagsOk(false);
         setIdentityOk(false);
-        setWorkspaceIssue(resolveWorkspaceIssue(false, false));
+        setWorkspaceIssue(resolveWorkspaceIssue(false));
         setShiftFeatureEnabled(false);
         setLoadingShiftData(false);
         console.error(
@@ -704,7 +687,11 @@ export default function OnboardingScreen() {
     () => summarizeWorkspaceTasks(taskViews),
     [taskViews],
   );
-  const externalPresences = platformSummary?.presences ?? [];
+  // Unbound leftovers from the old in-app bind form are not platforms.
+  const externalPresences = useMemo(
+    () => (platformSummary?.presences ?? []).filter(isRealPlatformPresence),
+    [platformSummary],
+  );
   const reauthPlatforms = useMemo(
     () => externalPresences.filter((record) => record.reauthRequired),
     [externalPresences],
@@ -730,7 +717,12 @@ export default function OnboardingScreen() {
         ).length;
 
         let tone: StatusTone = "neutral";
-        let statusLabel = record.status === "online" ? "待命" : "離線";
+        let statusLabel =
+          record.status === "online"
+            ? "待命"
+            : record.status === "busy"
+              ? "載客中"
+              : "離線";
 
         if (record.reauthRequired) {
           tone = "warning";
@@ -769,7 +761,6 @@ export default function OnboardingScreen() {
           subtitle,
           statusLabel,
           tone,
-          secondaryLabel: record.status === "online" ? "上線" : "離線",
           isReady:
             record.status === "online" &&
             assessment.canReceiveOrders &&
@@ -826,7 +817,7 @@ export default function OnboardingScreen() {
       return {
         tone: "warning" as StatusTone,
         label: "班次同步中",
-        description: "正在確認班次與自營派單可用性。",
+        description: "正在確認班次，稍後就會顯示能不能接車隊派單。",
       };
     }
 
@@ -849,17 +840,17 @@ export default function OnboardingScreen() {
     if (isDriverOnShift) {
       return {
         tone: "success" as StatusTone,
-        label: "可接自營派單",
+        label: "可接車隊派單",
         description: activeShift?.clockedInAt
           ? `本次班次已於 ${formatCompactDateTime(activeShift.clockedInAt)} 開始。`
-          : "司機已上班，可執行 DRTS 自營任務。",
+          : "您已上班，可以接車隊派單。",
       };
     }
 
     return {
       tone: "warning" as StatusTone,
       label: "尚未上班",
-      description: "開始班次前，DRTS 自營派單會維持待命。",
+      description: "上班打卡後才會收到車隊派單。",
     };
   }, [
     activeShift,
@@ -881,8 +872,8 @@ export default function OnboardingScreen() {
     if (externalPresences.length === 0) {
       return {
         tone: "neutral" as StatusTone,
-        label: "尚未連接平台",
-        description: "目前沒有外部平台連線，請到平台中心或設定確認綁定。",
+        label: "沒有綁定外部平台",
+        description: driverStrings.platformPresence.noInAppBinding,
       };
     }
 
@@ -967,8 +958,8 @@ export default function OnboardingScreen() {
         dotColor: tokens.colors.success,
         text:
           readyExternalCount > 0
-            ? "上班中 · 自營與平台均可接單"
-            : "上班中 · 自營可接單",
+            ? "上班中 · 車隊派單與平台都能接單"
+            : "上班中 · 可接車隊派單",
       };
     }
 
@@ -1061,11 +1052,6 @@ export default function OnboardingScreen() {
           : isDriverOnShift
             ? "上班中"
             : "未上班";
-  const helperHint = taskFallbackMode
-    ? "任務清單目前使用舊版鏡像資料；來源平台原生狀態可能有延遲。"
-    : externalPresences.length > 0
-      ? "工作台會優先提醒授權、同步與平台確認中的任務。"
-      : "目前尚未連接外部平台，可前往平台中心或設定確認綁定。";
 
   const nextAction = useMemo(() => {
     if (taskSummary.activeTripTask) {
@@ -1078,8 +1064,8 @@ export default function OnboardingScreen() {
             "打開行程作業查看下一步";
 
       return {
-        title: `返回行程 · ${task.taskId}`,
-        meta: `${task.platformDisplayName} · ${routeSummary}`,
+        title: "返回目前行程",
+        meta: `${taskSourceLabel(task)} · ${routeSummary}`,
         primaryLabel: "前往行程",
         primaryRoute: "/trip" as WorkspaceRoute,
         secondaryLabel: "查看任務",
@@ -1116,7 +1102,7 @@ export default function OnboardingScreen() {
       const task = taskSummary.actionRequiredTask;
       return {
         title: "優先處理待回應任務",
-        meta: `${task.platformDisplayName} · ${task.taskId} 等待司機操作。`,
+        meta: `${taskSourceLabel(task)}有一筆任務等您處理。`,
         primaryLabel: "打開任務收件匣",
         primaryRoute: "/jobs" as WorkspaceRoute,
         secondaryLabel: "查看平台",
@@ -1143,7 +1129,7 @@ export default function OnboardingScreen() {
     ) {
       return {
         title: "開始班次",
-        meta: "先完成上班打卡，DRTS 自營派單才會進入可接單狀態。",
+        meta: "上班打卡後就能接車隊派單。",
         primaryLabel: "前往班次",
         primaryRoute: "/shift" as WorkspaceRoute,
         secondaryLabel: "查看平台",
@@ -1151,25 +1137,16 @@ export default function OnboardingScreen() {
       };
     }
 
-    if (externalPresences.length === 0) {
+    // Without bound platforms there is nothing to check here: fleet
+    // dispatch needs no binding.
+    if (externalPresences.length > 0 && readyExternalCount === 0) {
       return {
-        title: "連接外部平台",
-        meta: "目前尚未看到任何外部平台連線，請先確認綁定或上線狀態。",
-        primaryLabel: "打開平台中心",
+        title: "檢查平台狀態",
+        meta: "外部平台目前都不能接單，請查看原因。",
+        primaryLabel: "查看平台",
         primaryRoute: "/platform-presence" as WorkspaceRoute,
-        secondaryLabel: "查看設定",
-        secondaryRoute: "/settings" as WorkspaceRoute,
-      };
-    }
-
-    if (readyExternalCount === 0) {
-      return {
-        title: "檢查平台就緒狀態",
-        meta: "外部平台目前沒有可接單通道，請檢查離線、資格或授權狀態。",
-        primaryLabel: "查看平台中心",
-        primaryRoute: "/platform-presence" as WorkspaceRoute,
-        secondaryLabel: "查看設定",
-        secondaryRoute: "/settings" as WorkspaceRoute,
+        secondaryLabel: "查看任務",
+        secondaryRoute: "/jobs" as WorkspaceRoute,
       };
     }
 
@@ -1185,12 +1162,12 @@ export default function OnboardingScreen() {
     }
 
     return {
-      title: "檢查多平台就緒狀態",
-      meta: "工作台已初始化完成，可查看平台健康、班次與設定。",
-      primaryLabel: "平台中心",
-      primaryRoute: "/platform-presence" as WorkspaceRoute,
-      secondaryLabel: "查看設定",
-      secondaryRoute: "/settings" as WorkspaceRoute,
+      title: "目前沒有待處理任務",
+      meta: "有新派單時會出現在任務頁。",
+      primaryLabel: "查看任務",
+      primaryRoute: "/jobs" as WorkspaceRoute,
+      secondaryLabel: "查看班次",
+      secondaryRoute: "/shift" as WorkspaceRoute,
     };
   }, [
     externalPresences.length,
@@ -1265,36 +1242,7 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
-        {isExpired ? (
-          <AuthorityBanner
-            authorityLabel="連線憑證已失效"
-            description="當前連線憑證已失效或被系統撤銷。請輸入車隊發放的新註冊代碼重新綁定此裝置。"
-            icon="key-outline"
-            title="請重新綁定裝置"
-            tone="warning"
-          />
-        ) : null}
-
-        {isRevoked ? (
-          <AuthorityBanner
-            authorityLabel="裝置憑證已撤銷"
-            description="系統已安全撤銷無效或遭異常重播之憑證。本機已儲存之未同步離線完單佐證不會刪除，請重新註冊綁定。"
-            icon="shield-outline"
-            title="憑證已撤銷並完成安全離線保存"
-            tone="danger"
-          />
-        ) : null}
-
-        {isSuspended ? (
-          <AuthorityBanner
-            authorityLabel="帳號目前無法使用"
-            description="您的司機帳號目前處於停權或證件審核無效狀態，無法接單。若有疑問請聯絡車隊營運團隊管理員。"
-            icon="lock-closed-outline"
-            title="帳號暫時無法存取派遣"
-            tone="danger"
-          />
-        ) : null}
-
+        {/* The lead above already says what happened and what to do. */}
         <View style={styles.stepPanel}>
           <StepTimeline steps={ACTIVATION_STEPS} />
         </View>
@@ -1341,7 +1289,7 @@ export default function OnboardingScreen() {
             helpText="選填，方便平台與營運端辨識此裝置。"
             label="裝置名稱"
             onChangeText={setDeviceLabel}
-            placeholder="例如：Driver Pixel 01"
+            placeholder={driverStrings.onboarding.deviceNamePlaceholder}
             value={deviceLabel}
           />
           <ActionButton
@@ -1379,14 +1327,16 @@ export default function OnboardingScreen() {
           )}
         </View>
 
-        <WarningCallout
-          message={
-            isRevoked || isExpired
-              ? "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。"
-              : "點開核可簡訊或 Email 中的啟用連結，可直接完成裝置註冊。"
-          }
-          tone={isRevoked ? "danger" : isExpired ? "warning" : "info"}
-        />
+        {isRevoked ? null : (
+          <WarningCallout
+            message={
+              isExpired
+                ? "重新綁定不會刪除還沒上傳的完單照片。"
+                : "點開核可簡訊或 Email 中的啟用連結，可直接完成裝置註冊。"
+            }
+            tone={isExpired ? "warning" : "info"}
+          />
+        )}
       </AppScreen>
     );
   }
@@ -1407,20 +1357,12 @@ export default function OnboardingScreen() {
             />
           </View>
           <View style={styles.degradeHeader}>
-            <Text style={styles.degradeTitle}>工作台暫時降級</Text>
-            <Text style={styles.degradeSubtitle}>
-              身份或功能設定尚未完成同步
+            <Text style={styles.degradeTitle}>
+              連線不穩，部分功能暫時無法使用
             </Text>
-          </View>
-          <View style={styles.degradeChipRow}>
-            <StatusChip
-              label={identityOk ? "身份正常" : "身份失敗"}
-              variant={identityOk ? "success" : "danger"}
-            />
-            <StatusChip
-              label={flagsOk ? "旗標正常" : "旗標降級"}
-              variant={flagsOk ? "success" : "warning"}
-            />
+            <Text style={styles.degradeSubtitle}>
+              請確認網路後按「重新連線」。
+            </Text>
           </View>
         </View>
 
@@ -1429,7 +1371,7 @@ export default function OnboardingScreen() {
           <ActionButton
             icon="refresh-outline"
             onPress={() => setRefreshSeed((current) => current + 1)}
-            title="重新檢查連線"
+            title="重新連線"
           />
           <ActionButton
             icon={identityOk ? "list-outline" : "person-circle-outline"}
@@ -1442,7 +1384,7 @@ export default function OnboardingScreen() {
               handleReinitializeIdentity();
             }}
             style={styles.degradeSecondaryAction}
-            title={identityOk ? "先查看任務收件匣" : "重新初始化身份"}
+            title={identityOk ? "先查看任務" : "重新確認身份"}
             variant="secondary"
           />
         </View>
@@ -1457,7 +1399,9 @@ export default function OnboardingScreen() {
     <AppScreen contentContainerStyle={styles.cockpitContent}>
       <View style={styles.cockpitHeader}>
         <View style={styles.cockpitGreetingBlock}>
-          <Text style={styles.cockpitGreetingEyebrow}>早安，司機</Text>
+          <Text style={styles.cockpitGreetingEyebrow}>
+            {getTaipeiGreeting()}
+          </Text>
           <Text style={styles.cockpitGreetingLabel}>工作台</Text>
           <View style={styles.cockpitStatusRow}>
             <View
@@ -1469,24 +1413,7 @@ export default function OnboardingScreen() {
             <Text style={styles.cockpitStatusText}>{cockpitStatus.text}</Text>
           </View>
         </View>
-        <Pressable
-          accessibilityLabel="安全事件"
-          accessibilityRole="button"
-          onPress={navigate("/sos")}
-          style={({ pressed }) => [
-            styles.cockpitBellButton,
-            pressed ? styles.cockpitBellButtonPressed : null,
-          ]}
-        >
-          <Ionicons
-            name="notifications-outline"
-            size={18}
-            color={tokens.colors.text}
-          />
-          {notificationCount > 0 ? (
-            <View style={styles.cockpitBellBadge} />
-          ) : null}
-        </Pressable>
+        {/* No bell: it only opened SOS, which the footer link already does. */}
       </View>
 
       <HeroCard
@@ -1529,7 +1456,7 @@ export default function OnboardingScreen() {
           authorityLabel={ownedReadiness.label}
           description={ownedReadiness.description}
           icon="shield-checkmark-outline"
-          title="DRTS 自營派單"
+          title="車隊派單"
           tone={ownedReadiness.tone === "success" ? "owned" : "warning"}
         />
         <AuthorityBanner
@@ -1575,7 +1502,7 @@ export default function OnboardingScreen() {
       {taskFallbackMode ? (
         <WarningCallout
           iconName="cloud-offline-outline"
-          message="任務卡目前使用舊版鏡像資料；外部平台原生狀態與可執行操作可能有延遲。"
+          message="任務資料可能延遲，請以平台 App 為準。"
           tone="info"
         />
       ) : null}
@@ -1633,7 +1560,6 @@ export default function OnboardingScreen() {
                 isLast={index === platformRows.length - 1}
                 onPress={navigate("/platform-presence")}
                 record={platformRow.record}
-                secondaryLabel={platformRow.secondaryLabel}
                 statusLabel={platformRow.statusLabel}
                 statusVariant={toneToStatusVariant(platformRow.tone)}
                 subtitle={platformRow.subtitle}
@@ -1643,19 +1569,10 @@ export default function OnboardingScreen() {
         ) : (
           <WarningCallout
             iconName="swap-horizontal-outline"
-            message="目前尚未看到外部平台連線資料，可先前往平台中心或設定確認綁定。"
+            message={driverStrings.platformPresence.noInAppBinding}
             tone="info"
           />
         )}
-      </View>
-
-      <View style={styles.helperHint}>
-        <Ionicons
-          name="information-circle-outline"
-          size={14}
-          color={tokens.colors.textMuted}
-        />
-        <Text style={styles.helperHintText}>{helperHint}</Text>
       </View>
 
       <View style={styles.quickSection}>
@@ -1989,28 +1906,6 @@ const styles = StyleSheet.create({
     ...tokens.type.small,
     color: tokens.colors.textMuted,
   },
-  cockpitBellButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cockpitBellButtonPressed: {
-    backgroundColor: tokens.colors.surfaceLo,
-  },
-  cockpitBellBadge: {
-    position: "absolute",
-    top: 9,
-    right: 10,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: tokens.colors.danger,
-  },
 
   heroCard: {
     backgroundColor: tokens.colors.brand,
@@ -2238,11 +2133,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: tokens.spacing[8],
   },
-  platformName: {
-    ...tokens.type.bodyStrong,
-    color: tokens.colors.textStrong,
-    flexShrink: 1,
-  },
   platformSub: {
     ...tokens.type.small,
     color: tokens.colors.textMuted,
@@ -2254,19 +2144,6 @@ const styles = StyleSheet.create({
     gap: tokens.spacing[8],
     flexWrap: "wrap",
     justifyContent: "flex-end",
-  },
-
-  helperHint: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 6,
-    paddingHorizontal: tokens.spacing[4],
-  },
-  helperHintText: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-    flex: 1,
-    lineHeight: 18,
   },
 
   quickGrid: {
@@ -2374,11 +2251,6 @@ const styles = StyleSheet.create({
   degradeSubtitle: {
     ...tokens.type.body,
     color: tokens.colors.textMuted,
-  },
-  degradeChipRow: {
-    flexDirection: "row",
-    gap: tokens.spacing[8],
-    flexWrap: "wrap",
   },
   degradePanel: {
     backgroundColor: tokens.colors.surface,

@@ -1617,10 +1617,10 @@ describe("ForwarderService", () => {
       driverActionState: "blocked",
       requiresManualFallback: true,
       requiresReauth: true,
-      syncIssueSummary:
-        "Dispatch must confirm platform acceptance manually before continuing.",
-      blockingReason:
-        "Dispatch must confirm platform acceptance manually before continuing.",
+      // Driver-facing copy is fixed Chinese; the English ops reason stays on
+      // manualFallback.reason and never reaches the driver.
+      syncIssueSummary: "需由派車台協助處理。",
+      blockingReason: "已改由派車台人工處理，請等候通知。",
     });
     expect(service.listAdapterHealth()).toEqual([
       expect.objectContaining({
