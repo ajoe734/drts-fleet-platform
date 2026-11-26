@@ -579,7 +579,7 @@ it.each([true, false])(
     await press(
       one(
         jobs().findAll(
-          (node) => node.type === "NativeButton" && text(node) === "佇列",
+          (node) => node.type === "NativeButton" && text(node) === "清單檢視",
         ),
         "actual dense-layout toggle",
       ),

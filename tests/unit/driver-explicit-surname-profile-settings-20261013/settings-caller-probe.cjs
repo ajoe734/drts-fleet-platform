@@ -344,7 +344,8 @@ async function press(r) {
       } else if (scenario === "legacy") {
         assert.equal(initial.props.value, "");
         assert.equal(save(r).props.disabled, true);
-        assert.ok(text(r).includes("尚未提供"));
+        // The empty legacy surname is announced by the field's own placeholder.
+        assert.equal(initial.props.placeholder, "尚未提供；請自行輸入姓氏");
         await enter(field(r, "driver@example.com"), "legacy@example.com");
         await press(r);
         assert.ok(!Object.hasOwn(patches()[0].body, "driverSurname"));

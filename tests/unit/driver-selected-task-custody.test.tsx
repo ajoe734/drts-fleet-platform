@@ -451,7 +451,7 @@ describe("Driver selected task custody through normal screens and SDK", () => {
       render(<h.Jobs />);
       await screen.findByText("selected-history");
       if (layout === "dense")
-        fireEvent.click(screen.getByRole("button", { name: "佇列" }));
+        fireEvent.click(screen.getByRole("button", { name: "清單檢視" }));
       const row = screen
         .getAllByText(/pickup-selected-history/)[0]!
         .closest("button");

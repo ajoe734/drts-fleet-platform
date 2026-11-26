@@ -250,8 +250,7 @@ export function PlatformBinding({
         <Text style={styles.sectionTitle}>平台帳號綁定</Text>
       ) : null}
       <Text style={styles.sectionDescription}>
-        已綁定 {presences.length}{" "}
-        個平台，可在此檢視綁定、重新驗證、平台憑證與接單資格狀態，與「平台健康中心」即時同步。
+        已綁定 {presences.length} 個平台。
       </Text>
 
       {enrichedPresences.length > 0 ? (

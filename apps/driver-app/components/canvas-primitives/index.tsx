@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Ionicons } from "@expo/vector-icons";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
   KeyboardAvoidingView,
@@ -134,48 +133,6 @@ export interface ShellProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
-function ShellStatusBar({
-  theme,
-  insets,
-}: {
-  theme: DriverCanvasTheme;
-  insets?: { top?: number };
-}) {
-  const topInset = Math.max(insets?.top ?? 0, 0);
-  return (
-    <View
-      style={[
-        styles.statusBar,
-        {
-          backgroundColor: theme.bg,
-          paddingTop: topInset > 0 ? topInset : 8,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          styles.statusBarTime,
-          { color: theme.text, fontFamily: theme.monoFamily },
-        ]}
-      >
-        9:30
-      </Text>
-      <View style={styles.statusBarIcons}>
-        <Ionicons name="wifi-outline" size={13} color={theme.text} />
-        <Text
-          style={[
-            styles.statusBarBatteryText,
-            { color: theme.text, fontFamily: theme.monoFamily },
-          ]}
-        >
-          87%
-        </Text>
-        <Ionicons name="battery-half-outline" size={15} color={theme.text} />
-      </View>
-    </View>
-  );
-}
-
 export function Shell({
   theme: providedTheme,
   children,
@@ -191,10 +148,11 @@ export function Shell({
         styles.shellFrame,
         {
           backgroundColor: theme.bg,
+          // The phone draws its own status bar; only keep clear of it.
+          paddingTop: Math.max(insets?.top ?? 0, 8),
         },
       ]}
     >
-      <ShellStatusBar theme={theme} insets={insets} />
       <KeyboardAvoidingView
         style={styles.shellScroll}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -210,7 +168,9 @@ export function Shell({
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          keyboardDismissMode={
+            Platform.OS === "ios" ? "interactive" : "on-drag"
+          }
         >
           {children}
         </ScrollView>
@@ -926,27 +886,6 @@ const styles = StyleSheet.create({
   },
   shellFooter: {
     flexShrink: 0,
-  },
-  statusBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingBottom: 8,
-  },
-  statusBarTime: {
-    fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: 0.2,
-  },
-  statusBarIcons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  statusBarBatteryText: {
-    fontSize: 11,
-    fontWeight: "500",
   },
   pageHeader: {
     gap: 12,

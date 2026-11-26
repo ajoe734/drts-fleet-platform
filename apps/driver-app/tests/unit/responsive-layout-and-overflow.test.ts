@@ -138,7 +138,9 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
       expect(source).toMatch(/deviceField:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
       expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*flex:\s*1/);
       expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*minWidth:\s*160/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
+      expect(source).toMatch(
+        /deviceFieldValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/,
+      );
 
       // Verify selectable prop on DeviceId, BindingId, and driverId
       expect(source).toMatch(
@@ -202,7 +204,9 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
         renderer = create(
           React.createElement(ListCard, {
             title: "非常長的班次任務名稱需要自動彈性換行",
-            statusElement: React.createElement("View", { testID: "status-chip" }),
+            statusElement: React.createElement("View", {
+              testID: "status-chip",
+            }),
           }),
         );
       });
@@ -330,6 +334,26 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
       const scrollView = root.findByType("ScrollView");
       const contentStyle = flattenStyle(scrollView.props.contentContainerStyle);
       expect(contentStyle.paddingBottom).toBe(34); // Math.max(34, 24)
+    });
+
+    it("Shell draws no clock or battery of its own; the phone shows the real status bar", () => {
+      mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+      let renderer: any;
+      act(() => {
+        renderer = create(
+          React.createElement(
+            Shell,
+            { theme: driverCanvasTheme },
+            React.createElement("Text", null, "Inner"),
+          ),
+        );
+      });
+
+      const texts = renderer.root
+        .findAllByType("Text")
+        .map((node: any) => String(node.props.children));
+      expect(texts).toEqual(["Inner"]);
+      expect(renderer.root.findAllByType("Ionicons")).toHaveLength(0);
     });
 
     it("Shell primitive enforces minimum padding floor when safe area insets are zero", () => {
@@ -476,7 +500,9 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
 
       const root = cardRenderer.root;
       const texts = root.findAllByType("Text");
-      const title = texts.find((t: any) => t.props.children === "目前尚無待處理任務");
+      const title = texts.find(
+        (t: any) => t.props.children === "目前尚無待處理任務",
+      );
       expect(title).toBeDefined();
     });
   });

@@ -1943,11 +1943,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
             .isVisible()
             .catch(() => null)
         : null;
-    const [loading, empty, openCurrentTrip] = await Promise.all([
-      visible("載入任務中…"),
-      visible("此篩選條件下沒有任務"),
-      visible("開啟目前行程"),
-    ]);
+    const [loading, noTasks, filteredEmpty, openCurrentTrip] =
+      await Promise.all([
+        visible("載入任務中…"),
+        visible("目前沒有任務"),
+        visible("此篩選條件下沒有任務"),
+        visible("開啟目前行程"),
+      ]);
+    const empty = noTasks || filteredEmpty;
     await info
       .attach("driver-failure-state", {
         body: JSON.stringify({

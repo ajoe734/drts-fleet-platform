@@ -276,6 +276,16 @@ it.each([
     },
   },
   {
+    path: "jobs",
+    visibleLabels: ["目前沒有任務"],
+    state: {
+      route: "jobs",
+      loading: false,
+      empty: true,
+      openCurrentTrip: false,
+    },
+  },
+  {
     path: "jobs/",
     visibleLabels: ["此篩選條件下沒有任務"],
     state: {

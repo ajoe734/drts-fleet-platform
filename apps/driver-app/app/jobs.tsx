@@ -879,11 +879,13 @@ function LayoutToggle({
   onRefresh,
   refreshing,
   onToggle,
+  showToggle,
 }: {
   layout: LayoutVariant;
   onRefresh: () => void;
   refreshing: boolean;
   onToggle: () => void;
+  showToggle: boolean;
 }) {
   return (
     <View style={styles.headerActions}>
@@ -898,20 +900,22 @@ function LayoutToggle({
       >
         同步
       </Btn>
-      <Btn
-        variant="secondary"
-        size="sm"
-        icon={
-          <Ionicons
-            name={layout === "A" ? "reorder-three-outline" : "grid-outline"}
-            size={14}
-            color={THEME.text}
-          />
-        }
-        onPress={onToggle}
-      >
-        {layout === "A" ? "佇列" : "卡片"}
-      </Btn>
+      {showToggle ? (
+        <Btn
+          variant="secondary"
+          size="sm"
+          icon={
+            <Ionicons
+              name={layout === "A" ? "reorder-three-outline" : "grid-outline"}
+              size={14}
+              color={THEME.text}
+            />
+          }
+          onPress={onToggle}
+        >
+          {layout === "A" ? "清單檢視" : "卡片檢視"}
+        </Btn>
+      ) : null}
     </View>
   );
 }
@@ -1535,6 +1539,18 @@ export default function JobsScreen() {
       );
     }
 
+    if (tasks.length === 0) {
+      // A failed load is already explained by the error banner above.
+      return error ? null : (
+        <Card style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>目前沒有任務</Text>
+          <Text style={styles.emptyBody}>
+            派車台派單，或已綁定的平台有新單時，會出現在這裡。
+          </Text>
+        </Card>
+      );
+    }
+
     if (layoutVariant === "A") {
       return (
         <>
@@ -1582,7 +1598,7 @@ export default function JobsScreen() {
               <Card style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>此篩選條件下沒有任務</Text>
                 <Text style={styles.emptyBody}>
-                  請切換其他篩選條件，或重新整理任務清單。
+                  切換到「全部」可以看到其他任務。
                 </Text>
               </Card>
             ) : (
@@ -1612,7 +1628,7 @@ export default function JobsScreen() {
             {needsActionCount} 需動作
           </Text>
           <View style={styles.variantSummarySpacer} />
-          <Text style={styles.variantSummaryMeta}>排序：時效 ▾</Text>
+          <Text style={styles.variantSummaryMeta}>依急迫程度排序</Text>
         </View>
 
         <Card style={styles.denseListCard} padding={0}>
@@ -1620,7 +1636,7 @@ export default function JobsScreen() {
             <View style={styles.emptyDenseState}>
               <Text style={styles.emptyTitle}>此篩選條件下沒有任務</Text>
               <Text style={styles.emptyBody}>
-                請切換其他篩選條件或重新整理。
+                切換到「全部」可以看到其他任務。
               </Text>
             </View>
           ) : (
@@ -1648,13 +1664,9 @@ export default function JobsScreen() {
   return (
     <Shell contentContainerStyle={styles.shellContent}>
       <PageHeader
-        title={layoutVariant === "A" ? driverStrings.jobs.title : "任務佇列"}
+        title={driverStrings.jobs.title}
         subtitle={
-          layoutVariant === "B"
-            ? lastSyncedAt
-              ? `最近同步 ${formatTimestamp(lastSyncedAt)}`
-              : "高密度任務佇列"
-            : undefined
+          lastSyncedAt ? `最近同步 ${formatTimestamp(lastSyncedAt)}` : undefined
         }
         actions={
           <LayoutToggle
@@ -1664,6 +1676,7 @@ export default function JobsScreen() {
             onToggle={() =>
               setLayoutVariant((current) => (current === "A" ? "B" : "A"))
             }
+            showToggle={tasksEnabled && tasks.length > 0}
           />
         }
       />
@@ -1671,7 +1684,7 @@ export default function JobsScreen() {
       {renderNoticeBanner()}
       {renderContent()}
 
-      {layoutVariant === "B" && selectedFilter !== "all" ? (
+      {layoutVariant === "B" && selectedFilter !== "all" && tasks.length > 0 ? (
         <Text style={styles.activeFilterHint}>
           目前篩選：
           {FILTER_OPTIONS.find((item) => item.value === selectedFilter)?.label}

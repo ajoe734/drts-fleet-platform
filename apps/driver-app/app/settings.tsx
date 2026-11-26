@@ -539,6 +539,15 @@ export default function SettingsScreen() {
           ) : null}
           {saveError ? <ErrorBanner message={saveError} /> : null}
 
+          {/* First: without a bound platform the driver cannot take external
+              work, and the platform screen sends drivers here to bind one. */}
+          <FormSection
+            title="平台帳號綁定"
+            description="綁定外部平台帳號後才能接那個平台的單；授權過期時也在這裡重新驗證。"
+          >
+            <PlatformBinding showSectionTitle={false} />
+          </FormSection>
+
           <FormSection
             title={driverWorkforceStrings.sectionTitle}
             description={driverWorkforceStrings.sectionDescription}
@@ -661,19 +670,7 @@ export default function SettingsScreen() {
             />
           </FormSection>
 
-          <FormSection
-            title="偏好設定"
-            description="調整系統介面語言、接單範圍與通知行為。"
-          >
-            <FormField
-              label="介面語言"
-              value={settingsValues.language}
-              onChangeText={(value) => updateSettings({ language: value })}
-              placeholder="zh-TW"
-              autoCapitalize="none"
-              error={settingsErrors.language}
-              editable={settingsLoaded && !saving}
-            />
+          <FormSection title="偏好設定" description="調整接單範圍與通知。">
             <FormField
               label="最大接單範圍（公里）"
               value={settingsValues.maxAcceptRadius}
@@ -699,7 +696,7 @@ export default function SettingsScreen() {
               <View style={styles.switchDivider} />
               <SwitchRow
                 label="自動接單（全平台）"
-                description="開啟後會對所有已綁定平台的合格派遣自動接單；目前尚未提供逐平台覆寫，外部平台仍以該平台的接單規則為準。"
+                description="開啟後，所有已綁定平台符合條件的派單都會自動接受；外部平台仍依該平台自己的接單規則。"
                 value={settingsValues.autoAcceptEnabled}
                 onValueChange={(value) =>
                   updateSettings({ autoAcceptEnabled: value })
@@ -726,8 +723,7 @@ export default function SettingsScreen() {
                     {driverAuthStrings.devices.deviceIdLabel}
                   </Text>
                   <Text style={styles.deviceFieldValue} selectable>
-                    {getProvisionedSession()?.deviceId ??
-                      (driverId ? `device-${driverId}` : "unknown-device")}
+                    {getProvisionedSession()?.deviceId ?? "—"}
                   </Text>
                 </View>
                 <View style={styles.deviceField}>
@@ -735,7 +731,7 @@ export default function SettingsScreen() {
                     {driverAuthStrings.devices.bindingIdLabel}
                   </Text>
                   <Text style={styles.deviceFieldValue} selectable>
-                    {getProvisionedSession()?.bindingId ?? "bnd-active-001"}
+                    {getProvisionedSession()?.bindingId ?? "—"}
                   </Text>
                 </View>
                 <View style={styles.deviceField}>
@@ -774,13 +770,6 @@ export default function SettingsScreen() {
               title="安全合規保證"
               tone="owned"
             />
-          </FormSection>
-
-          <FormSection
-            title="平台帳號綁定"
-            description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
-          >
-            <PlatformBinding showSectionTitle={false} />
           </FormSection>
 
           <FormSection

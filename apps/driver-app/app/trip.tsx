@@ -2623,13 +2623,12 @@ export default function TripScreen() {
       ) : (
         <Card theme={driverCanvasTheme} padding={18}>
           <Text style={styles.emptyTitle}>目前沒有進行中的行程</Text>
-          <Text style={styles.emptyBody}>
-            重新整理後可再次檢查是否有新任務同步進來。
-          </Text>
+          <Text style={styles.emptyBody}>接了任務後，行程會顯示在這裡。</Text>
           <View style={styles.inlineActionRow}>
+            {/* Refresh already sits in the header; offer the next step instead. */}
             <ActionButton
-              label={driverStrings.common.refresh}
-              onPress={() => void loadTrip(true)}
+              label="查看任務"
+              onPress={() => router.push("/jobs")}
               disabled={submittingAction !== null}
             />
           </View>

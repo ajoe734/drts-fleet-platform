@@ -1685,7 +1685,7 @@ export default function OnboardingScreen() {
             onPress={navigate("/trip")}
           />
           <QuickTile
-            helper="平台健康中心"
+            helper="平台接單狀態"
             iconName="swap-horizontal-outline"
             label="平台"
             tone="brand"
