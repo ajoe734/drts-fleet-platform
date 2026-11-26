@@ -18,6 +18,7 @@ vi.hoisted(() => {
 const state = vi.hoisted(() => ({
   push: vi.fn(),
   tasks: [] as unknown[],
+  tasksError: null as Error | null,
   presence: {
     driverId: "drv-test-001",
     presences: [],
@@ -94,8 +95,14 @@ vi.mock("@/components/canvas-primitives", () => {
 
 vi.mock("@/lib/api-client", () => {
   const client = {
-    listUnifiedDriverTasks: vi.fn(async () => state.tasks),
-    listDriverTasks: vi.fn(async () => []),
+    listUnifiedDriverTasks: vi.fn(async () => {
+      if (state.tasksError) throw state.tasksError;
+      return state.tasks;
+    }),
+    listDriverTasks: vi.fn(async () => {
+      if (state.tasksError) throw state.tasksError;
+      return [];
+    }),
     getPlatformPresence: vi.fn(async () => state.presence),
     isFeatureEnabled: vi.fn(async () => state.shiftEnabled),
     listShifts: vi.fn(async () => state.shifts),
@@ -126,7 +133,12 @@ vi.mock("@/lib/api-client", () => {
       state.clearHandlers.add(fn);
       return () => state.clearHandlers.delete(fn);
     },
-    formatDriverError: (_error: unknown, fallback: string) => fallback,
+    // Like the real helper, pass a plain error message through and fall back
+    // only for "API error ..." text.
+    formatDriverError: (error: unknown, fallback: string) =>
+      error instanceof Error && !error.message.startsWith("API error ")
+        ? error.message
+        : fallback,
   };
 });
 
@@ -163,6 +175,24 @@ function pressableAround(pattern: RegExp) {
     current = current.parent;
   }
   return current;
+}
+
+// Text of the card that contains a Text node matching the pattern.
+function cardTextAround(pattern: RegExp) {
+  const label = renderer!.root
+    .findAllByType("Text" as never)
+    .find((node: any) => pattern.test(collectText(node.props.children)));
+  let current = label?.parent ?? null;
+  while (current && current.type !== "Card") {
+    current = current.parent;
+  }
+  return current ? collectText(current.children) : "";
+}
+
+async function openInbox() {
+  const inboxToggle = pressableAround(/則待讀通知|通知已清空/);
+  expect(inboxToggle).toBeTruthy();
+  await act(async () => inboxToggle!.props.onPress());
 }
 
 function bellHasDot() {
@@ -260,6 +290,7 @@ beforeEach(() => {
   state.push.mockReset();
   state.post.mockReset();
   state.tasks = [];
+  state.tasksError = null;
   state.presence = {
     driverId: "drv-test-001",
     presences: [],
@@ -343,7 +374,67 @@ describe("driver home: no raw codes, English or IDs", () => {
     expect(text).not.toContain("task-secret-123");
     expect(text).not.toContain("task-trip-456");
     expect(text).toContain("新任務");
-    expect(text).toContain("松山機場");
+    // The trip card (not the shortcut tile) names the trip by its address.
+    const tripCard = cardTextAround(/^目前行程$/);
+    expect(tripCard).toContain("松山機場");
+    expect(tripCard).not.toContain("task-trip-456");
+  });
+});
+
+describe("driver home: no raw error text or platform codes", () => {
+  it("shows a fixed sentence when tasks cannot be loaded", async () => {
+    state.tasksError = new TypeError("Network request failed");
+    await mount(React.createElement(WorkspaceIndex));
+    const text = screenText();
+
+    expect(text).toContain("資料讀取失敗");
+    expect(text).toContain("讀取失敗，請檢查網路後重新整理。");
+    expect(text).not.toContain("Network");
+  });
+
+  it("names an unknown platform 外部平台 instead of its code, and says 更新於", async () => {
+    state.shifts = [activeShift];
+    state.presence = {
+      driverId: "drv-test-001",
+      presences: [
+        presence({
+          platformCode: "mystery-platform",
+          status: "offline",
+          reauthRequired: true,
+        }),
+      ],
+      adapterStatuses: [],
+    };
+    await mount(React.createElement(WorkspaceIndex));
+    const text = screenText();
+
+    expect(text).toContain("先恢復 外部平台 授權");
+    expect(text).not.toContain("mystery-platform");
+    expect(text).not.toContain("最後同步");
+  });
+
+  it("names the source platform in the top card for an external trip", async () => {
+    state.shifts = [activeShift];
+    state.tasks = [
+      task({
+        taskId: "task-uber-1",
+        orderId: "order-uber-1",
+        orderDomain: "forwarded",
+        sourcePlatform: "uber",
+        platformDisplayName: "Uber",
+        driverActionState: "in_progress",
+        localStatus: "confirmed_by_platform",
+        allowedActions: [],
+        pickupSummary: "台北車站",
+        dropoffSummary: "松山機場",
+      }),
+    ];
+    await mount(React.createElement(WorkspaceIndex));
+
+    // The top card is the trip, so the separate trip card is hidden and the
+    // top card must carry the platform name.
+    expect(cardTextAround(/^目前行程$/)).toBe("");
+    expect(screenText()).toMatch(/Uber · 車資待確認 · 更新於/);
   });
 });
 
@@ -420,12 +511,23 @@ describe("driver home: rows of zeros", () => {
           quotedFare: { currency: "TWD", amountMinor: 25000 },
         },
       }),
+      // Completed today but with no known fare: not part of the total, so it
+      // must not be counted next to it either.
+      task({
+        taskId: "task-done-2",
+        orderId: "order-done-2",
+        driverActionState: "completed",
+        localStatus: "completed",
+        allowedActions: [],
+        orderSummary: null,
+      }),
     ];
     await mount(React.createElement(WorkspaceIndex));
     const text = screenText();
 
     expect(text).toContain("今日預估車資");
     expect(text).toContain("250");
+    expect(text).toContain("已完成 1 趟");
     expect(text).not.toContain("今日淨收");
   });
 });
@@ -443,6 +545,42 @@ describe("driver home: one button per destination", () => {
     expect(screenText()).toContain("工作台待命中");
     expect(buttons("查看任務")).toHaveLength(1);
     expect(buttons("查看收入")).toHaveLength(1);
+  });
+});
+
+describe("driver home: buttons about different tasks", () => {
+  it("keeps 查看任務 on a sync-issue card for another task under an urgent-task top card", async () => {
+    state.shifts = [activeShift];
+    state.tasks = [
+      task({ taskId: "task-urgent-a", orderId: "order-urgent-a" }),
+      task({
+        taskId: "task-sync-b",
+        orderId: "order-sync-b",
+        orderDomain: "forwarded",
+        sourcePlatform: "uber",
+        platformDisplayName: "Uber",
+        driverActionState: "blocked",
+        localStatus: "sync_failed",
+        allowedActions: [],
+        requiresManualFallback: true,
+        syncIssueSummary: "需由派車台協助處理。",
+      }),
+    ];
+    await mount(React.createElement(WorkspaceIndex));
+
+    expect(screenText()).toContain("Uber 同步異常");
+    // The top card's 接受任務 / 婉拒任務 are about task A; the sync card is
+    // about task B and keeps its own button.
+    expect(buttons("接受任務")).toHaveLength(1);
+    expect(buttons("查看任務")).toHaveLength(1);
+  });
+
+  it("offers no 查看班次 in the top card when the shift feature is off", async () => {
+    state.shiftEnabled = false;
+    await mount(React.createElement(WorkspaceIndex));
+
+    expect(screenText()).toContain("讓至少一個平台上線");
+    expect(buttons("查看班次")).toHaveLength(0);
   });
 });
 
@@ -464,6 +602,37 @@ describe("driver home: notifications", () => {
     await act(async () => openButtons[0].props.onPress());
     expect(state.push).toHaveBeenCalledWith("/jobs");
     expect(state.push).not.toHaveBeenCalledWith("/sos");
+  });
+
+  it("does not treat a 緊急 maintenance notice as an SOS", async () => {
+    state.notifications = [
+      notification("n-urgent", "緊急維護通知", "今晚 23:00 至 23:30 系統維護"),
+    ];
+    await mount(React.createElement(WorkspaceIndex));
+
+    expect(buttons("查看 SOS")).toHaveLength(0);
+    await openInbox();
+    expect(buttons("開啟")).toHaveLength(0);
+  });
+
+  it("routes an SOS notice to /sos and a platform notice to the platform page", async () => {
+    state.notifications = [
+      notification("n-sos", "SOS 已送達", "派車台已收到你的求救"),
+      notification("n-platform", "平台公告", "今晚調整連線設定"),
+    ];
+    await mount(React.createElement(WorkspaceIndex));
+
+    expect(buttons("查看 SOS")).toHaveLength(1);
+    await openInbox();
+    const openButtons = buttons("開啟");
+    expect(openButtons).toHaveLength(2);
+    for (const button of openButtons) {
+      await act(async () => button.props.onPress());
+    }
+    expect(state.push.mock.calls.map(([route]) => route).sort()).toEqual([
+      "/platform-presence",
+      "/sos",
+    ]);
   });
 
   it("lights the bell for unread notifications only, not for urgent cards", async () => {
@@ -494,6 +663,35 @@ describe("driver home: notifications", () => {
 });
 
 describe("platform notice banner", () => {
+  it("keeps the notices on screen when a refresh fails", async () => {
+    state.notices = [
+      {
+        noticeId: "notice-1",
+        title: "道路封閉",
+        body: "市府路今晚封閉",
+        severity: "info",
+        outcome: { outcomeId: "o-1", notificationId: "n-1", readAt: null },
+      },
+    ];
+    state.post.mockImplementation(async () => ({
+      outcomeId: "o-1",
+      readAt: new Date().toISOString(),
+    }));
+    await mount(React.createElement(PlatformNoticeBanner));
+    expect(screenText()).toContain("道路封閉");
+
+    // The read succeeds, but the refresh that follows it fails.
+    state.noticesError = new TypeError("Network request failed");
+    const markRead = pressableAround(/^標示已讀$/);
+    await act(async () => markRead!.props.onPress());
+    await flush();
+
+    const text = screenText();
+    expect(text).toContain("道路封閉");
+    expect(text).not.toContain("Network");
+    expect(text).not.toContain("無法標示已讀");
+  });
+
   it.each([
     Object.assign(new Error('API error 500: {"error":"INTERNAL"}'), {
       statusCode: 500,

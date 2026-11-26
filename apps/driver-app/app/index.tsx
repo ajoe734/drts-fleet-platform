@@ -101,7 +101,7 @@ type HeroActionModel = {
   detail: string;
   meta: string;
   primaryAction: WorkspaceActionModel;
-  secondaryAction: WorkspaceActionModel;
+  secondaryAction: WorkspaceActionModel | null;
 };
 
 type EmptyStateModel = {
@@ -175,6 +175,9 @@ type DeepLinkTileModel = {
 type WorkspaceActionModel = {
   route: WorkspaceRoute;
   descriptor: ResourceActionDescriptor;
+  // What the button is about (a task or a platform). Buttons are only
+  // treated as repeats when they open the same screen for the same subject.
+  subject?: string;
 };
 
 const THEME = driverCanvasTheme;
@@ -185,6 +188,10 @@ const TAIWAN_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 const NOTICE_RECEIPT_MISSING_MESSAGE =
   "無法標示已讀，請按右上角重新整理後再試。";
 const NOTICE_READ_FAILED_MESSAGE = "無法標示已讀，請稍後再試。";
+const TASK_LOAD_FAILED_MESSAGE = "讀取失敗，請檢查網路後重新整理。";
+const TASK_LOAD_DENIED_MESSAGE =
+  "目前無法讀取任務資料，請確認帳號權限或聯繫管理員。";
+const UNKNOWN_PLATFORM_NAME = "外部平台";
 const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
   urgent: 5_000,
   fast: 3_000,
@@ -230,6 +237,24 @@ function createWorkspaceAction(
       riskLevel,
     },
   };
+}
+
+function withSubject(
+  action: WorkspaceActionModel,
+  subject: string,
+): WorkspaceActionModel {
+  return { ...action, subject };
+}
+
+function getActionSubjectKey(action: WorkspaceActionModel) {
+  return `${action.route}|${action.subject ?? ""}`;
+}
+
+function getPlatformName(platformCode: string) {
+  return (
+    PLATFORM_CODE_REGISTRY[platformCode as keyof typeof PLATFORM_CODE_REGISTRY]
+      ?.displayName ?? UNKNOWN_PLATFORM_NAME
+  );
 }
 
 function getActionLabel(action: string) {
@@ -307,6 +332,24 @@ function getRefreshTierIntervalMs(tier: RefreshTier) {
   return REFRESH_TIER_INTERVAL_MS[tier];
 }
 
+// The task-load error is shown on the home screen, so it is always one of two
+// fixed sentences; the raw text ("Network request failed", HTTP codes) is
+// only used to tell a permission problem from everything else.
+function describeTaskLoadError(error: unknown) {
+  const statusCode =
+    typeof error === "object" && error !== null && "statusCode" in error
+      ? String((error as { statusCode?: unknown }).statusCode ?? "")
+      : "";
+  const raw = [
+    error instanceof Error ? error.message : String(error ?? ""),
+    toErrorMessage(error, ""),
+    statusCode,
+  ].join(" ");
+  return classifyErrorReason(raw) === "permission_denied"
+    ? TASK_LOAD_DENIED_MESSAGE
+    : TASK_LOAD_FAILED_MESSAGE;
+}
+
 function classifyErrorReason(message: string | null): EmptyReason {
   const normalized = message?.trim().toLowerCase() ?? "";
   if (
@@ -323,37 +366,39 @@ function classifyErrorReason(message: string | null): EmptyReason {
   return "fetch_failed";
 }
 
+function getNotificationHaystack(notification: NotificationRecord) {
+  return `${notification.title} ${notification.message}`.trim().toLowerCase();
+}
+
+// NotificationRecord has no type or category field, so a notice counts as an
+// SOS notice only when it says "SOS". Words such as 緊急 or incident also
+// appear in ordinary notices (「緊急維護通知」) and must not open the SOS screen.
 function isSosNotification(notification: NotificationRecord) {
-  const haystack = `${notification.title} ${notification.message}`
-    .trim()
-    .toLowerCase();
-  return (
-    haystack.includes("sos") ||
-    haystack.includes("緊急") ||
-    haystack.includes("incident")
-  );
+  return /\bsos\b/.test(getNotificationHaystack(notification));
+}
+
+function mentionsPlatformAuthorization(haystack: string) {
+  return haystack.includes("授權") || haystack.includes("reauth");
 }
 
 function getNotificationRoute(
   notification: NotificationRecord,
 ): WorkspaceRoute | null {
-  const haystack = `${notification.title} ${notification.message}`
-    .trim()
-    .toLowerCase();
+  const haystack = getNotificationHaystack(notification);
   if (isSosNotification(notification)) {
     return "/sos";
   }
 
-  if (haystack.includes("授權") || haystack.includes("reauth")) {
+  if (mentionsPlatformAuthorization(haystack)) {
     return "/platform-presence";
   }
 
-  if (
-    haystack.includes("任務") ||
-    haystack.includes("task") ||
-    haystack.includes("平台")
-  ) {
+  if (haystack.includes("任務") || haystack.includes("task")) {
     return "/jobs";
+  }
+
+  if (haystack.includes("平台")) {
+    return "/platform-presence";
   }
 
   // A notification that names no task, platform or authorisation has no
@@ -365,9 +410,7 @@ function getNotificationRoute(
 function getNotificationTone(
   notification: NotificationRecord,
 ): Exclude<CanvasTone, "neutral"> {
-  const haystack = `${notification.title} ${notification.message}`
-    .trim()
-    .toLowerCase();
+  const haystack = getNotificationHaystack(notification);
   if (isSosNotification(notification)) {
     return "danger";
   }
@@ -375,6 +418,7 @@ function getNotificationTone(
   if (
     haystack.includes("失敗") ||
     haystack.includes("異常") ||
+    haystack.includes("緊急") ||
     haystack.includes("warning")
   ) {
     return "warn";
@@ -392,7 +436,9 @@ function getNotificationIconName(
 
   const route = getNotificationRoute(notification);
   if (route === "/platform-presence") {
-    return "lock-closed-outline";
+    return mentionsPlatformAuthorization(getNotificationHaystack(notification))
+      ? "lock-closed-outline"
+      : "layers-outline";
   }
 
   if (route === "/jobs") {
@@ -525,6 +571,10 @@ function formatTaskHeadline(task: UnifiedDriverTaskView): string | null {
   return task.dropoffSummary ?? task.pickupSummary ?? null;
 }
 
+function getTaskPlatformLabel(task: UnifiedDriverTaskView) {
+  return task.platformDisplayName?.trim() || UNKNOWN_PLATFORM_NAME;
+}
+
 function formatTaskRouteSummary(task: UnifiedDriverTaskView) {
   if (task.pickupSummary && task.dropoffSummary) {
     return `${task.pickupSummary} → ${task.dropoffSummary}`;
@@ -569,9 +619,12 @@ function getTaskActionRoute(task: UnifiedDriverTaskView): WorkspaceRoute {
 }
 
 function getTaskOpenAction(task: UnifiedDriverTaskView): WorkspaceActionModel {
-  return createWorkspaceAction(
-    getTaskActionRoute(task),
-    task.driverActionState === "in_progress" ? "return_to_trip" : "open_jobs",
+  return withSubject(
+    createWorkspaceAction(
+      getTaskActionRoute(task),
+      task.driverActionState === "in_progress" ? "return_to_trip" : "open_jobs",
+    ),
+    `task:${task.taskId}`,
   );
 }
 
@@ -590,12 +643,15 @@ function getTaskActionRiskLevel(
 
 function getTaskAvailableActions(task: UnifiedDriverTaskView) {
   const taskActions = task.allowedActions.map((action) =>
-    createWorkspaceAction(
-      getTaskActionRoute(task),
-      action,
-      true,
-      undefined,
-      getTaskActionRiskLevel(action),
+    withSubject(
+      createWorkspaceAction(
+        getTaskActionRoute(task),
+        action,
+        true,
+        undefined,
+        getTaskActionRiskLevel(action),
+      ),
+      `task:${task.taskId}`,
     ),
   );
 
@@ -687,10 +743,7 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
       tasksResult.value.tasks,
     );
   } else {
-    next.taskLoadError = toErrorMessage(
-      tasksResult.reason,
-      "任務狀態暫時無法同步。",
-    );
+    next.taskLoadError = describeTaskLoadError(tasksResult.reason);
   }
 
   // Platform and notification failures are shown as fixed copy: the raw
@@ -863,16 +916,18 @@ function HeroActionCard({
           >
             {getActionLabel(model.primaryAction.descriptor.action)}
           </Btn>
-          <Btn
-            theme={THEME}
-            variant="secondary"
-            size="md"
-            onPress={onSecondaryPress}
-            disabled={!model.secondaryAction.descriptor.enabled}
-            style={styles.heroSecondaryButton}
-          >
-            {getActionLabel(model.secondaryAction.descriptor.action)}
-          </Btn>
+          {model.secondaryAction ? (
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="md"
+              onPress={onSecondaryPress}
+              disabled={!model.secondaryAction.descriptor.enabled}
+              style={styles.heroSecondaryButton}
+            >
+              {getActionLabel(model.secondaryAction.descriptor.action)}
+            </Btn>
+          ) : null}
         </View>
       </View>
     </Card>
@@ -1482,7 +1537,7 @@ export default function WorkspaceIndex() {
 
         setWorkspace({
           ...INITIAL_WORKSPACE,
-          taskLoadError: toErrorMessage(error, "工作台資料載入失敗。"),
+          taskLoadError: describeTaskLoadError(error),
           platformLoadError: "平台狀態暫時無法更新，請稍後再試。",
           loadedAt: new Date().toISOString(),
         });
@@ -1548,9 +1603,7 @@ export default function WorkspaceIndex() {
             : record.lastOfflineAt;
         return {
           key: `platform-${record.platformCode}`,
-          name:
-            PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
-            record.platformCode,
+          name: getPlatformName(record.platformCode),
           summary: record.reauthRequired
             ? "需重新授權"
             : record.eligibility === "pending"
@@ -1630,9 +1683,10 @@ export default function WorkspaceIndex() {
       .map((task) => workspace.orderMap[task.orderId]?.quotedFare ?? null)
       .filter((fare) => fare !== null);
 
+    // Only trips with a known fare are counted, so the trip count matches
+    // the amount next to it; without any known fare there is nothing to show.
     return {
-      count: completedTodayTasks.length,
-      // Without any known fare the total would be a made-up NT$ 0.
+      pricedTripCount: quotedFares.length,
       hasFare: quotedFares.length > 0,
       amount: sumMoneyAmounts(quotedFares),
     };
@@ -1644,10 +1698,8 @@ export default function WorkspaceIndex() {
       return {
         tone: reason === "permission_denied" ? "warn" : "danger",
         title: reason === "permission_denied" ? "權限不足" : "資料讀取失敗",
-        body:
-          reason === "permission_denied"
-            ? "目前無法讀取工作台任務資料，請確認司機帳號權限或聯繫管理員。"
-            : workspace.taskLoadError,
+        // taskLoadError is already one of two fixed sentences.
+        body: workspace.taskLoadError,
         action: createWorkspaceAction(
           "/settings",
           "open_settings",
@@ -1835,21 +1887,22 @@ export default function WorkspaceIndex() {
     const items: UrgentItem[] = [];
 
     for (const platform of reauthPlatforms) {
-      const name =
-        PLATFORM_CODE_REGISTRY[platform.platformCode]?.displayName ??
-        platform.platformCode;
+      const name = getPlatformName(platform.platformCode);
 
       items.push({
         key: `reauth-${platform.platformCode}`,
         tone: "warn",
         title: `${name} 需重新授權`,
         body: `授權已過期 · 更新於 ${formatCompactDateTime(platform.updatedAt)}`,
-        action: createWorkspaceAction(
-          "/platform-presence",
-          "resolve_reauth",
-          true,
-          undefined,
-          "medium",
+        action: withSubject(
+          createWorkspaceAction(
+            "/platform-presence",
+            "resolve_reauth",
+            true,
+            undefined,
+            "medium",
+          ),
+          `platform:${platform.platformCode}`,
         ),
         iconName: "lock-closed-outline",
       });
@@ -1948,9 +2001,7 @@ export default function WorkspaceIndex() {
   const heroAction = useMemo<HeroActionModel>(() => {
     if (reauthPlatforms.length > 0) {
       const platform = reauthPlatforms[0];
-      const name =
-        PLATFORM_CODE_REGISTRY[platform.platformCode]?.displayName ??
-        platform.platformCode;
+      const name = getPlatformName(platform.platformCode);
 
       return {
         state: "reauth",
@@ -1958,13 +2009,16 @@ export default function WorkspaceIndex() {
         eyebrow: "建議動作",
         title: `先恢復 ${name} 授權`,
         detail: "任何需重新授權的平台都應優先處理，否則該平台接單能力暫停。",
-        meta: `最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
-        primaryAction: createWorkspaceAction(
-          "/platform-presence",
-          "resolve_reauth",
-          true,
-          undefined,
-          "medium",
+        meta: `更新於 ${formatCompactDateTime(platform.updatedAt)}`,
+        primaryAction: withSubject(
+          createWorkspaceAction(
+            "/platform-presence",
+            "resolve_reauth",
+            true,
+            undefined,
+            "medium",
+          ),
+          `platform:${platform.platformCode}`,
         ),
         secondaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       };
@@ -2004,7 +2058,15 @@ export default function WorkspaceIndex() {
             ? `下一步：${getActionLabel(primaryAction.descriptor.action)}`
             : "返回進行中的行程",
         detail: formatTaskRouteSummary(task),
-        meta: `${fareLabel} · 更新於 ${formatCompactDateTime(task.updatedAt)}`,
+        // The trip card is hidden while the top card shows the trip, so the
+        // top card carries the source platform for external trips.
+        meta: [
+          isOwnedUnifiedTask(task) ? null : getTaskPlatformLabel(task),
+          fareLabel,
+          `更新於 ${formatCompactDateTime(task.updatedAt)}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
         primaryAction,
         secondaryAction,
       };
@@ -2045,7 +2107,10 @@ export default function WorkspaceIndex() {
           externalPresences.length > 0 ? undefined : "no_platform_binding",
           "medium",
         ),
-        secondaryAction: createWorkspaceAction("/shift", "open_shift"),
+        // No shift button when the shift feature is off, matching the tiles.
+        secondaryAction: workspace.shiftFeatureEnabled
+          ? createWorkspaceAction("/shift", "open_shift")
+          : null,
       };
     }
 
@@ -2057,7 +2122,7 @@ export default function WorkspaceIndex() {
         title: "等待平台確認",
         detail: formatTaskRouteSummary(taskSummary.awaitingPlatformTask),
         meta: "來源平台尚未回覆前，請不要提前前往接送點。",
-        primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
+        primaryAction: getTaskOpenAction(taskSummary.awaitingPlatformTask),
         secondaryAction: createWorkspaceAction(
           "/platform-presence",
           "open_platform_presence",
@@ -2102,7 +2167,7 @@ export default function WorkspaceIndex() {
       routeSummary: formatTaskRouteSummary(task),
       meta: `更新於 ${formatCompactDateTime(task.updatedAt)}`,
       fareLabel: quotedFare ? formatMoney(quotedFare) : "車資待確認",
-      platformLabel: task.platformDisplayName || task.sourcePlatform,
+      platformLabel: getTaskPlatformLabel(task),
       primaryAction,
       secondaryAction,
     };
@@ -2210,15 +2275,20 @@ export default function WorkspaceIndex() {
     (item) => item.readAt === null,
   ).length;
 
-  // Buttons below the top card skip any screen the top card already opens,
-  // so the same 查看任務 / 查看收入 button does not repeat down the page.
-  const heroRoutes = new Set<WorkspaceRoute>(
+  // A button below the top card is hidden only when the top card already
+  // opens the same screen for the same subject (the same task, the same
+  // platform, or the same general screen), so 查看任務 / 查看收入 do not
+  // repeat down the page while a card about another task keeps its button.
+  const heroSubjectKeys = new Set<string>(
     [heroAction.primaryAction, heroAction.secondaryAction]
-      .filter((action) => action.descriptor.enabled)
-      .map((action) => action.route),
+      .filter(
+        (action): action is WorkspaceActionModel =>
+          action !== null && action.descriptor.enabled,
+      )
+      .map(getActionSubjectKey),
   );
-  const repeatsHeroRoute = (action: WorkspaceActionModel) =>
-    heroRoutes.has(action.route);
+  const repeatsHeroAction = (action: WorkspaceActionModel) =>
+    heroSubjectKeys.has(getActionSubjectKey(action));
   // When the top card is already the trip, the trip card would repeat it.
   const showActiveTripCard =
     activeTripCard !== null && heroAction.state !== "trip";
@@ -2438,15 +2508,19 @@ export default function WorkspaceIndex() {
       <HeroActionCard
         model={heroAction}
         onPrimaryPress={navigate(heroAction.primaryAction.route)}
-        onSecondaryPress={navigate(heroAction.secondaryAction.route)}
+        onSecondaryPress={() => {
+          if (heroAction.secondaryAction) {
+            navigateTo(heroAction.secondaryAction.route);
+          }
+        }}
       />
 
       {showActiveTripCard && activeTripCard ? (
         <ActiveTripSummaryCard
           model={activeTripCard}
-          showPrimary={!repeatsHeroRoute(activeTripCard.primaryAction)}
+          showPrimary={!repeatsHeroAction(activeTripCard.primaryAction)}
           showSecondary={
-            !repeatsHeroRoute(activeTripCard.secondaryAction) &&
+            !repeatsHeroAction(activeTripCard.secondaryAction) &&
             activeTripCard.secondaryAction.route !==
               activeTripCard.primaryAction.route
           }
@@ -2481,7 +2555,7 @@ export default function WorkspaceIndex() {
                 } ${formatAmountNumber(todayFareEstimate.amount, {
                   fractionDigits: 0,
                 })}`}
-                sub={`已完成 ${todayFareEstimate.count} 趟`}
+                sub={`已完成 ${todayFareEstimate.pricedTripCount} 趟`}
               />
             </View>
           ) : null}
@@ -2491,7 +2565,7 @@ export default function WorkspaceIndex() {
       {showFocusEmptyState && focusEmptyState ? (
         <FocusEmptyStateCard
           state={focusEmptyState}
-          showAction={!repeatsHeroRoute(focusEmptyState.action)}
+          showAction={!repeatsHeroAction(focusEmptyState.action)}
           onPress={navigate(focusEmptyState.action.route)}
         />
       ) : null}
@@ -2500,7 +2574,7 @@ export default function WorkspaceIndex() {
         <UrgentSignalCard
           key={item.key}
           item={item}
-          showAction={!repeatsHeroRoute(item.action)}
+          showAction={!repeatsHeroAction(item.action)}
           onPress={navigate(item.action.route)}
         />
       ))}

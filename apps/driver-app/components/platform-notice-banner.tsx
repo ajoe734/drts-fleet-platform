@@ -16,9 +16,11 @@ type Notice = {
     readAt: string | null;
   };
 };
-// Shown when marking a notice as read fails. A failed notice fetch shows
-// nothing: the raw error ("API error 500: {...}", "Network request failed")
-// is not something a driver can act on, and the next poll retries anyway.
+// Shown when marking a notice as read fails. A failed notice fetch shows no
+// error and keeps the notices already on screen: the raw error ("API error
+// 500: {...}", "Network request failed") is not something a driver can act on,
+// and the next poll retries anyway. Notices are cleared only when the driver
+// identity is cleared.
 const READ_FAILED_MESSAGE = "無法標示已讀，請稍後再試";
 
 export function PlatformNoticeBanner() {
@@ -47,9 +49,7 @@ export function PlatformNoticeBanner() {
           setReadError(null);
         }
       } catch {
-        if (!disposed && !request.signal.aborted && generation === current) {
-          setNotices([]);
-        }
+        // Keep the last known notices; see the comment above.
       } finally {
         if (generation === current) active = null;
       }
