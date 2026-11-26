@@ -10,7 +10,6 @@ export const driverRouteTitles = {
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
-  leave: "請假",
   academy: "學院",
 } as const;
 
