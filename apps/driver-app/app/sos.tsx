@@ -318,12 +318,24 @@ function markSendFailed(
   return markDriverSosCaseFailed(baseCase, message);
 }
 
+/**
+ * Supplement photos still to upload. Only photos are ever uploaded: there is
+ * no API for supplement notes, so a note-only supplement stored by an older
+ * app version is kept silently and never counts as pending.
+ */
+function hasPendingSupplementPhotos(activeCase: DriverSosActiveCase): boolean {
+  return activeCase.supplements.some(
+    (supplement) =>
+      supplement.attachments.length > 0 && supplement.state !== "complete",
+  );
+}
+
 /** A supplement added during the send still needs its own upload. */
 function keepPendingSupplementsVisible(
   activeCase: DriverSosActiveCase,
 ): DriverSosActiveCase {
   return activeCase.syncState === "complete" &&
-    activeCase.supplements.some((supplement) => supplement.state !== "complete")
+    hasPendingSupplementPhotos(activeCase)
     ? { ...activeCase, syncState: "attachment_pending" }
     : activeCase;
 }
@@ -714,7 +726,6 @@ export default function DriverSosScreen() {
   const [draftAttachments, setDraftAttachments] = useState<
     DriverSosAttachmentDraft[]
   >([]);
-  const [supplementNote, setSupplementNote] = useState("");
   const [supplementAttachments, setSupplementAttachments] = useState<
     DriverSosAttachmentDraft[]
   >([]);
@@ -1201,27 +1212,38 @@ export default function DriverSosScreen() {
     await syncActiveCase(latest, true);
   }
 
+  // Supplements are photos only. The server has no endpoint for supplement
+  // notes, so a typed note would never reach ops; drivers are told to phone
+  // the dispatcher instead.
   async function handleQueueSupplement() {
     if (!activeCase) {
-      setScreenError("請先建立 SOS，再加入補充資料。");
+      setScreenError("請先建立 SOS，再加入補充照片。");
       return;
     }
-    if (!supplementNote.trim() && supplementAttachments.length === 0) {
-      setScreenError("請先輸入補充說明或加入附件。");
+    if (supplementAttachments.length === 0) {
+      setScreenError("請先加入照片。");
       return;
     }
 
-    const nextCase = queueDriverSosSupplement(latestCopyOf(activeCase), {
-      note: supplementNote,
+    const queuedCase = queueDriverSosSupplement(latestCopyOf(activeCase), {
+      note: "",
       attachments: supplementAttachments,
     });
+    // On a delivered SOS the new photos are owed: show 重新送出 for them.
+    const nextCase =
+      queuedCase.receipt &&
+      (queuedCase.syncState === "submitted" ||
+        queuedCase.syncState === "complete")
+        ? { ...queuedCase, syncState: "attachment_pending" as const }
+        : queuedCase;
     await persistActiveCase(nextCase);
-    setSupplementNote("");
     setSupplementAttachments([]);
     setUiNotice(
-      browserOnline !== false
-        ? "補充資料已加入本次事件紀錄，正在送出。"
-        : "補充資料已加入本次事件紀錄，等待連線後送出。",
+      !nextCase.receipt
+        ? "補充照片已存在手機，SOS 送達後會一起上傳。"
+        : browserOnline !== false
+          ? "補充照片已加入，正在上傳。"
+          : "補充照片已存在手機，連線後按「重新送出」上傳。",
     );
     setScreenError(null);
     if (browserOnline !== false && nextCase.receipt) {
@@ -1654,19 +1676,12 @@ export default function DriverSosScreen() {
 
           <Card
             theme={THEME}
-            title="補充說明 / 附件"
-            subtitle="補充資料會先存在手機，連線後自動送出。"
+            title="補充照片"
+            subtitle="照片會先存在手機，再上傳給車隊。"
           >
-            <Field theme={THEME} label="補充說明">
-              <TextInput
-                multiline
-                onChangeText={setSupplementNote}
-                placeholder="可補充車內狀況、現場照片說明…"
-                placeholderTextColor={THEME.textDim}
-                style={styles.multilineInput}
-                value={supplementNote}
-              />
-            </Field>
+            <Text style={styles.callDispatchCopy}>
+              要補充說明請直接打電話給派車台。
+            </Text>
             <View style={styles.sectionActions}>
               <Btn
                 theme={THEME}
@@ -1676,20 +1691,21 @@ export default function DriverSosScreen() {
                   void pickAttachments("supplement", supplementAttachments)
                 }
               >
-                加入補充附件
+                加入照片
               </Btn>
               <Btn
                 theme={THEME}
                 variant="primary"
                 size="sm"
+                disabled={supplementAttachments.length === 0}
                 onPress={() => void handleQueueSupplement()}
               >
-                加入本機紀錄
+                送出照片
               </Btn>
             </View>
             <AttachmentList
               attachments={supplementAttachments}
-              emptyLabel="尚未附上補充附件。"
+              emptyLabel="尚未加入照片。"
               onRemove={(attachmentId) =>
                 setSupplementAttachments((current) =>
                   current.filter(
@@ -1698,19 +1714,23 @@ export default function DriverSosScreen() {
                 )
               }
             />
-            {activeCase.supplements.length > 0 ? (
+            {activeCase.supplements.some(
+              (supplement) => supplement.attachments.length > 0,
+            ) ? (
               <View style={styles.supplementHistory}>
-                {activeCase.supplements.map((supplement) => (
-                  <View key={supplement.id} style={styles.supplementRow}>
-                    <Text style={styles.supplementTitle}>
-                      {supplement.note || "附件補件"}
-                    </Text>
-                    <Text style={styles.supplementMeta}>
-                      {formatAt(supplement.createdAt)} ·{" "}
-                      {supplement.state === "complete" ? "已完成" : "待處理"}
-                    </Text>
-                  </View>
-                ))}
+                {activeCase.supplements
+                  .filter((supplement) => supplement.attachments.length > 0)
+                  .map((supplement) => (
+                    <View key={supplement.id} style={styles.supplementRow}>
+                      <Text style={styles.supplementTitle}>
+                        {`補充照片 ${supplement.attachments.length} 張`}
+                      </Text>
+                      <Text style={styles.supplementMeta}>
+                        {formatAt(supplement.createdAt)} ·{" "}
+                        {supplement.state === "complete" ? "已上傳" : "待上傳"}
+                      </Text>
+                    </View>
+                  ))}
               </View>
             ) : null}
           </Card>
@@ -1822,6 +1842,14 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
     lineHeight: 18,
+  },
+  callDispatchCopy: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginBottom: 4,
   },
   supportingCopy: {
     color: THEME.textMuted,

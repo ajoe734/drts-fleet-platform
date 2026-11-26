@@ -753,14 +753,9 @@ export function queueDriverSosSupplement(
     state: "attachment_pending",
     lastError: null,
   };
+  // Only photos are uploaded (there is no API for supplement notes), so the
+  // progress entry never suggests ops will read a note.
   const itemCount = supplement.attachments.length;
-  const detailParts = [];
-  if (supplement.note) {
-    detailParts.push("已加入補充說明");
-  }
-  if (itemCount > 0) {
-    detailParts.push(`${itemCount} 件附件待補送`);
-  }
 
   return appendTimelineEntry(
     {
@@ -770,7 +765,7 @@ export function queueDriverSosSupplement(
     {
       kind: "supplement_added",
       title: "已加入補充資料",
-      detail: detailParts.join("，") || "補充資料已寫入本機紀錄，待後續補送。",
+      detail: itemCount > 0 ? `${itemCount} 件附件待補送` : "已存在手機。",
       occurredAt: createdAt,
       tone: "info",
     },

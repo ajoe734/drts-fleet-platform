@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     async () => undefined,
   ),
   syncAttachments: vi.fn(),
+  pickImages: vi.fn(),
   recoverSession: vi.fn(async () => false),
   provisioned: true,
   appStateHandlers: [] as Array<(state: string) => void>,
@@ -72,7 +73,8 @@ vi.mock("expo-router", () => ({
 
 vi.mock("expo-image-picker", () => ({
   launchCameraAsync: vi.fn(),
-  launchImageLibraryAsync: vi.fn(),
+  launchImageLibraryAsync: (...args: unknown[]) =>
+    (mocks.pickImages as (...a: unknown[]) => unknown)(...args),
   requestCameraPermissionsAsync: vi.fn(),
   requestMediaLibraryPermissionsAsync: vi.fn(),
   MediaTypeOptions: { Images: "Images" },
@@ -882,6 +884,12 @@ function savedCases(): Array<Record<string, any>> {
   );
 }
 
+function findBtn(renderer: any, label: string) {
+  return renderer.root.find(
+    (node: any) => node.type === "Btn" && node.props.children === label,
+  );
+}
+
 function holdButtonLabel(renderer: any): string {
   return findHoldButton(renderer)
     .findAll((node: any) => node.type === "Text")
@@ -974,7 +982,7 @@ describe("SOS screen · review follow-up (safety)", () => {
     }
   });
 
-  it("keeps a supplement added while a send is running, and sends it afterwards", async () => {
+  it("keeps a supplement photo added while a send is running, and uploads it afterwards", async () => {
     const delivered = storedAcknowledgedCase();
     mocks.secureGetItem.mockResolvedValue(
       JSON.stringify({
@@ -997,38 +1005,44 @@ describe("SOS screen · review follow-up (safety)", () => {
           finishAttachments = resolve;
         }),
       )
-      .mockResolvedValue({
-        attachments: [confirmedAttachment],
-        confirmedCount: 1,
+      .mockImplementation(async ({ attachments }: any) => ({
+        attachments: attachments.map((attachment: any) => ({
+          ...attachment,
+          uploadState: "confirmed",
+          scanStatus: "clean",
+        })),
+        confirmedCount: attachments.length,
         unavailableCount: 0,
         failedCount: 0,
-      });
+      }));
+    mocks.pickImages.mockResolvedValue({
+      canceled: false,
+      assets: [
+        {
+          uri: "file:///supplement-photo.jpg",
+          fileName: "supplement-photo.jpg",
+          mimeType: "image/jpeg",
+          fileSize: 2048,
+        },
+      ],
+    });
 
     const renderer = await renderSosScreen();
     try {
-      // 重新送出 starts a send that is still uploading the photo...
+      // 重新送出 starts a send that is still uploading the first photo...
       await act(async () => {
         findResendButton(renderer).props.onPress();
         await settle();
       });
       expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
 
-      // ...when the driver adds a supplement.
-      const noteInput = renderer.root.find(
-        (node: any) =>
-          node.type === "TextInput" &&
-          node.props.placeholder === "可補充車內狀況、現場照片說明…",
-      );
+      // ...when the driver adds a supplement photo.
       await act(async () => {
-        noteInput.props.onChangeText("後座乘客持刀");
+        findBtn(renderer, "加入照片").props.onPress();
+        await settle();
       });
       await act(async () => {
-        renderer.root
-          .find(
-            (node: any) =>
-              node.type === "Btn" && node.props.children === "加入本機紀錄",
-          )
-          .props.onPress();
+        findBtn(renderer, "送出照片").props.onPress();
         await settle();
       });
 
@@ -1045,13 +1059,60 @@ describe("SOS screen · review follow-up (safety)", () => {
         await settle();
       });
 
-      expect(hostStrings(renderer)).toContain("後座乘客持刀");
+      expect(hostStrings(renderer).join("|")).toContain("補充照片 1 張");
       const lastSaved = savedCases().at(-1)!;
-      expect(
-        lastSaved.supplements.map((supplement: any) => supplement.note),
-      ).toEqual(["後座乘客持刀"]);
-      // The queued sync ran after the first one finished.
+      expect(lastSaved.supplements).toHaveLength(1);
+      expect(lastSaved.supplements[0].attachments[0].uri).toBe(
+        "file:///supplement-photo.jpg",
+      );
+      // The queued sync ran after the first one and uploaded the photo.
       expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+      const uploaded = mocks.syncAttachments.mock.calls
+        .at(-1)![0]
+        .attachments.map((attachment: any) => attachment.uri);
+      expect(uploaded).toContain("file:///supplement-photo.jpg");
+      expect(lastSaved.supplements[0].state).toBe("complete");
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("offers photos only after sending, and points to the dispatcher for anything to say", async () => {
+    const delivered = storedAcknowledgedCase();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify({
+        ...delivered,
+        syncState: "complete",
+        falseAlarm: { dismissed: false, dismissedAt: null, note: null },
+        // Stored by an older app version: a note that never reached ops.
+        supplements: [
+          {
+            id: "sos-supplement-legacy",
+            note: "舊版補充說明",
+            attachments: [],
+            createdAt: STORED_CASE_TRIGGERED_AT,
+            state: "attachment_pending",
+            lastError: null,
+          },
+        ],
+      }),
+    );
+
+    const renderer = await renderSosScreen();
+    try {
+      const section = renderer.root.find(
+        (node: any) => node.type === "Card" && node.props.title === "補充照片",
+      );
+      expect(section.findAll((node: any) => node.type === "TextInput")).toEqual(
+        [],
+      );
+      expect(findBtn(renderer, "送出照片").props.disabled).toBe(true);
+
+      const strings = hostStrings(renderer);
+      expect(strings).toContain("要補充說明請直接打電話給派車台。");
+      // The old note is kept silently: not shown, and not counted as owed.
+      expect(strings.join("|")).not.toContain("舊版補充說明");
+      expect(strings).toContain("已送達");
     } finally {
       act(() => renderer.unmount());
     }
