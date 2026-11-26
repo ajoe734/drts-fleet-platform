@@ -9,7 +9,11 @@ import {
 } from "react-native";
 import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
-import { formatCategoryLabel, type AcademyCourseDetail } from "./types";
+import {
+  ACADEMY_NO_QUIZ_HINT,
+  formatCategoryLabel,
+  type AcademyCourseDetail,
+} from "./types";
 import {
   formatAcademyMaterialError,
   getModuleTypeLabel,
@@ -167,9 +171,11 @@ export function ModuleReader({
         <Text style={styles.courseTitle}>{course.title}</Text>
         <Text style={styles.description}>{course.description}</Text>
 
-        <View style={styles.requirementBanner}>
+        <View style={styles.requirementBanner} testID="academy-completion-rule">
           <Text style={styles.requirementText}>
-            完訓標準：測驗成績需達 {course.passingScore} 分（含）以上方可認證
+            {course.questions.length > 0
+              ? `完訓標準：測驗成績需達 ${course.passingScore} 分（含）以上方可認證`
+              : ACADEMY_NO_QUIZ_HINT}
           </Text>
         </View>
       </View>

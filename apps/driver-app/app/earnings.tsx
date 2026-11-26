@@ -3,7 +3,6 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
 import {
-  PLATFORM_CODE_REGISTRY,
   type DriverStatementRecord,
   type MoneyAmount,
   type PlatformEarningsByPlatformResponse,
@@ -22,10 +21,6 @@ import {
 } from "@/components/canvas-primitives";
 import { DriverStatementRow } from "@/components/earnings/driver-statement-row";
 import {
-  isOwnedPlatformCode,
-  isShadowOnlyPlatformCode,
-} from "@/components/earnings-by-platform";
-import {
   formatDriverError,
   getDriverClient,
   isDriverIdentityProvisioned,
@@ -33,10 +28,17 @@ import {
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
+  formatMoney,
   formatSignedAmountNumber,
   getCurrencyLabel,
   sumMoneyAmounts,
 } from "@/lib/money";
+import {
+  getDriverPlatformName,
+  getDriverPlatformNames,
+  isFleetOwnPlatformCode,
+  isReferenceOnlyPlatformCode,
+} from "@/lib/platform-display-name";
 import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 import { listDriverEarningsStatements } from "@/lib/driver-statement-actions";
 
@@ -134,18 +136,15 @@ function getHeroLabel(period: PeriodKey) {
   return "淨收入 · 本月";
 }
 
-function getPeriodMetricLabel(period: PeriodKey) {
-  return period === "month"
-    ? driverStrings.earnings.metrics.pendingPayout
-    : driverStrings.earnings.metrics.external;
+// Only the fleet's own dispatch is 車隊結算. Any other code, including one the
+// app does not know yet, is another platform whose own payout is final.
+function isOtherPlatformItem(item: PlatformEarningsItem) {
+  return !isFleetOwnPlatformCode(item.platformCode);
 }
 
-function getPlatformDisplayName(platformCode: string) {
-  // Codes outside the platform registry are the fleet's own dispatch (see
-  // isOwnedPlatformCode), so never show the raw code to the driver.
+function isSettledOnOtherPlatform(item: PlatformEarningsItem) {
   return (
-    PLATFORM_CODE_REGISTRY[platformCode as keyof typeof PLATFORM_CODE_REGISTRY]
-      ?.displayName ?? driverStrings.platformPresence.managedByDrts
+    isOtherPlatformItem(item) && !isReferenceOnlyPlatformCode(item.platformCode)
   );
 }
 
@@ -160,11 +159,13 @@ function isEmptyBreakdown(item: PlatformEarningsItem) {
 
 function BreakdownRow({
   item,
+  displayName,
 }: {
   item: PlatformEarningsByPlatformResponse["items"][number];
+  displayName: string;
 }) {
-  const owned = isOwnedPlatformCode(item.platformCode);
-  const shadowOnly = isShadowOnlyPlatformCode(item.platformCode);
+  const owned = !isOtherPlatformItem(item);
+  const shadowOnly = isReferenceOnlyPlatformCode(item.platformCode);
   const forwarded = !owned;
   const empty = isEmptyBreakdown(item);
   const typeLabel = owned
@@ -178,7 +179,6 @@ function BreakdownRow({
   const typeTone = owned ? ("accent" as const) : ("warn" as const);
   const markColor = forwarded ? THEME.warn : THEME.accentHi;
   const markBg = forwarded ? THEME.warnBg : THEME.accentBg;
-  const displayName = getPlatformDisplayName(item.platformCode);
 
   return (
     <View
@@ -504,9 +504,7 @@ export default function EarningsScreen() {
   const forwardedPlatformAmount = sumPlatformAmounts(
     platformItems,
     "netAmount",
-    (item) =>
-      !isOwnedPlatformCode(item.platformCode) &&
-      !isShadowOnlyPlatformCode(item.platformCode),
+    isSettledOnOtherPlatform,
     baseCurrency,
   );
   const pendingPayoutAmount = sumStatementAmounts(
@@ -516,11 +514,13 @@ export default function EarningsScreen() {
   );
   const hasPeriodEarnings = platformItems.length > 0;
   const hasAnyData = hasPeriodEarnings || statements.length > 0;
-  const hasOtherPlatforms = platformItems.some(
-    (item) => !isOwnedPlatformCode(item.platformCode),
+  const hasOtherPlatforms = platformItems.some(isOtherPlatformItem);
+  const platformNames = getDriverPlatformNames(
+    platformItems.map((item) => item.platformCode),
   );
-  const metricAmount =
-    selectedPeriod === "month" ? pendingPayoutAmount : forwardedPlatformAmount;
+  // Unpaid statements are owed regardless of the selected period, so their
+  // total stays visible even when this period has no income yet.
+  const hasPendingPayout = pendingPayoutAmount.amountMinor > 0;
 
   if (error && !hasAnyData) {
     return (
@@ -699,7 +699,7 @@ export default function EarningsScreen() {
                     { color: THEME.textMuted, fontFamily: THEME.fontFamily },
                   ]}
                 >
-                  {getPeriodMetricLabel(selectedPeriod)}
+                  {driverStrings.earnings.metrics.external}
                 </Text>
                 <Text
                   style={[
@@ -707,7 +707,7 @@ export default function EarningsScreen() {
                     { color: THEME.warn, fontFamily: THEME.monoFamily },
                   ]}
                 >
-                  {formatAmountNumber(metricAmount)}
+                  {formatAmountNumber(forwardedPlatformAmount)}
                 </Text>
               </View>
             </View>
@@ -725,7 +725,14 @@ export default function EarningsScreen() {
           >
             <View style={styles.breakdownList}>
               {platformItems.map((item) => (
-                <BreakdownRow key={item.platformCode} item={item} />
+                <BreakdownRow
+                  key={item.platformCode}
+                  item={item}
+                  displayName={
+                    platformNames.get(item.platformCode) ??
+                    getDriverPlatformName(item.platformCode)
+                  }
+                />
               ))}
             </View>
           </Card>
@@ -742,6 +749,32 @@ export default function EarningsScreen() {
           </Text>
         </Card>
       )}
+
+      {hasPendingPayout ? (
+        <Card theme={THEME} padding={14}>
+          <View
+            style={styles.pendingPayoutRow}
+            testID="earnings-pending-payout"
+          >
+            <Text
+              style={[
+                styles.pendingPayoutLabel,
+                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {driverStrings.earnings.metrics.pendingPayout}
+            </Text>
+            <Text
+              style={[
+                styles.pendingPayoutValue,
+                { color: THEME.warn, fontFamily: THEME.monoFamily },
+              ]}
+            >
+              {formatMoney(pendingPayoutAmount)}
+            </Text>
+          </View>
+        </Card>
+      ) : null}
 
       {statements.length > 0 || statementError ? (
         <Card
@@ -959,6 +992,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 18,
     gap: 6,
+  },
+  pendingPayoutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  pendingPayoutLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  pendingPayoutValue: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
   },
   emptyPeriodText: {
     fontSize: 14,

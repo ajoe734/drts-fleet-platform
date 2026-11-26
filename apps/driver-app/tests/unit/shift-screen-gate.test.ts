@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   isFeatureEnabled: vi.fn(),
   listShifts: vi.fn(),
+  getPlatformPresence: vi.fn(),
+  assessPlatformHealth: vi.fn(),
   isDriverIdentityProvisioned: vi.fn(),
   getDriverIdentityIssue: vi.fn(),
   getForegroundPermissionsAsync: vi.fn(),
@@ -44,12 +46,15 @@ vi.mock("expo-location", () => ({
   getBackgroundPermissionsAsync: mocks.getBackgroundPermissionsAsync,
 }));
 
-vi.mock("@drts/contracts", () => ({
-  PLATFORM_CODE_REGISTRY: {},
-}));
+// Only the platform registry is needed; load it without the rest of contracts.
+vi.mock("@drts/contracts", async () => {
+  const codes =
+    await import("../../../../packages/contracts/src/platform-codes");
+  return { PLATFORM_CODE_REGISTRY: codes.PLATFORM_CODE_REGISTRY };
+});
 
 vi.mock("@/components/platform-status-card", () => ({
-  assessPlatformHealth: () => ({}),
+  assessPlatformHealth: mocks.assessPlatformHealth,
   getPlatformHealthSeverity: () => 0,
 }));
 
@@ -59,7 +64,7 @@ vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
     listShifts: mocks.listShifts,
-    getPlatformPresence: vi.fn().mockResolvedValue(null),
+    getPlatformPresence: mocks.getPlatformPresence,
     clockIn: vi.fn(),
     clockOut: vi.fn(),
   }),
@@ -188,6 +193,8 @@ describe("ShiftScreen pre-online gate (unprovisioned)", () => {
     vi.clearAllMocks();
     mocks.isFeatureEnabled.mockResolvedValue(true);
     mocks.listShifts.mockResolvedValue([]);
+    mocks.getPlatformPresence.mockResolvedValue(null);
+    mocks.assessPlatformHealth.mockReturnValue({});
     mocks.getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
     mocks.getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
   });
@@ -234,6 +241,8 @@ describe("ShiftScreen shows only real shift data (provisioned)", () => {
     mocks.getDriverIdentityIssue.mockReturnValue(null);
     mocks.isFeatureEnabled.mockResolvedValue(true);
     mocks.listShifts.mockResolvedValue([]);
+    mocks.getPlatformPresence.mockResolvedValue(null);
+    mocks.assessPlatformHealth.mockReturnValue({});
     mocks.getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
     mocks.getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
   });
@@ -304,16 +313,70 @@ describe("ShiftScreen shows only real shift data (provisioned)", () => {
     // 01:00 UTC is 09:00 in Taiwan.
     expect(visible).toMatch(/自 \S*09:00 起/);
 
-    // With no platform data the section says so once and offers the next step.
+    // With no platform data the section says so once and gives the one true
+    // next step: platforms are bound by the fleet, never by the driver.
     expect(texts).toContain("目前沒有平台資料。");
-    const platformAction = renderer.root
-      .findAllByType("ActionButton")
-      .find((node: any) => node.props.title === "查看平台狀態");
-    expect(platformAction).toBeDefined();
-    await act(async () => {
-      platformAction.props.onPress();
+    expect(texts).toContain("平台狀態有問題時請聯絡派車台。");
+    expect(visible).not.toContain("綁定");
+    expect(visible).not.toContain("查看平台狀態");
+  });
+
+  it("on shift: platform cards use driver-facing names and plain connection wording, with no codes or account IDs", async () => {
+    mocks.listShifts.mockResolvedValue([
+      {
+        shiftId: "shift-1",
+        driverId: "driver-001",
+        vehicleId: null,
+        status: "active",
+        clockedInAt: "2026-11-26T01:00:00.000Z",
+        clockedOutAt: null,
+        startLocation: null,
+        endLocation: null,
+        startOdometer: null,
+        endOdometer: null,
+        notes: null,
+        totalHours: null,
+      },
+    ]);
+    mocks.getPlatformPresence.mockResolvedValue({
+      presences: [
+        {
+          platformCode: "forwarder_sandbox",
+          status: "online",
+          eligibility: "eligible",
+          accountId: "acct-sandbox-123",
+          updatedAt: "2026-11-26T01:00:00.000Z",
+        },
+      ],
+      adapterStatuses: [
+        {
+          platformCode: "forwarder_sandbox",
+          status: "degraded",
+          lastSyncAt: "2026-11-26T01:00:00.000Z",
+        },
+      ],
     });
-    expect(mocks.push).toHaveBeenCalledWith("/platform-presence");
+    // The shared assessment words the adapter problem in operator terms.
+    mocks.assessPlatformHealth.mockReturnValue({
+      canReceiveOrders: false,
+      blockers: ["平台轉接器降級"],
+      statusLabel: "需要處理",
+      statusTone: "warning",
+      readinessLabel: "目前無法接單：平台轉接器降級",
+    });
+
+    const renderer = await renderShift();
+    const visible = visibleStrings(renderer).join("\n");
+
+    expect(visible).toContain("測試平台");
+    expect(visible).not.toContain("Forwarder Sandbox");
+    expect(visible).not.toContain("forwarder_sandbox");
+    expect(renderer.root.findAllByType("PlatformBadge")).toHaveLength(0);
+    expect(visible).not.toContain("acct-sandbox-123");
+    expect(visible).not.toContain("帳號");
+    expect(visible).not.toContain("轉接");
+    expect(visible).toContain("連線不穩");
+    expect(visible).toContain("目前無法接單：連線不穩");
   });
 
   it("feature off: 返回工作台 goes to the home tab, not onboarding", async () => {

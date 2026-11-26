@@ -565,7 +565,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       const { ModuleReader } = runtime.loadCurrentAcademyComponents();
       const course = buildMultiResourceCourse();
       const onStartQuiz = vi.fn();
-      const onBack = vi.fn();
       const openedSessions: Array<Record<string, unknown>> = [];
 
       boundary.openURL.mockImplementation(async (url: string) => {
@@ -588,7 +587,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz,
-          onBack,
           onMaterialOpened: (session: Record<string, unknown>) => {
             openedSessions.push(session);
           },
@@ -746,9 +744,15 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         "【運輸法遵專章】執業登記證應置於車內指定插座，不得超收車資或無故拒載。",
       );
 
-      // Opening materials does not auto-start quiz or navigate back
+      // Opening materials does not auto-start the quiz, and the reader has no
+      // back control of its own (the screen header owns navigation).
       expect(onStartQuiz).not.toHaveBeenCalled();
-      expect(onBack).not.toHaveBeenCalled();
+      expect(
+        renderer.root.findAll(
+          (node) =>
+            node.type === "Pressable" && nodeText(node).includes("返回清單"),
+        ),
+      ).toHaveLength(0);
     });
   });
 
@@ -785,7 +789,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -858,7 +861,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -902,7 +904,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -947,7 +948,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course: courseV2,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -986,7 +986,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
           runtime.React.createElement(ModuleReader, {
             course: courseV3,
             onStartQuiz: vi.fn(),
-            onBack: vi.fn(),
           }),
         );
       });

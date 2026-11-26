@@ -77,9 +77,9 @@ export function TrainingRecordsList({
             disabled={!onSelectCourse}
           >
             <View style={styles.topRow}>
-              <View style={styles.codeWrap}>
-                <Text style={styles.courseCode}>{rec.courseCode}</Text>
-              </View>
+              <Text style={[styles.title, styles.titleInRow]}>
+                {rec.courseTitle}
+              </Text>
               <View
                 style={[
                   styles.statusBadge,
@@ -94,8 +94,6 @@ export function TrainingRecordsList({
                 </Text>
               </View>
             </View>
-
-            <Text style={styles.title}>{rec.courseTitle}</Text>
 
             <View style={styles.scoreRow}>
               <View style={styles.scoreItem}>
@@ -192,17 +190,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  codeWrap: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    paddingHorizontal: Tokens.spacing.xs,
-    paddingVertical: 1,
-    borderRadius: Tokens.radius.xs,
-  },
-  courseCode: {
-    fontSize: 11,
-    fontFamily: Tokens.fonts.mono,
-    color: Tokens.colors.textDim,
+    gap: Tokens.spacing.sm,
   },
   statusBadge: {
     paddingHorizontal: Tokens.spacing.sm,
@@ -219,6 +207,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Tokens.colors.text,
     marginTop: 2,
+  },
+  titleInRow: {
+    flex: 1,
   },
   scoreRow: {
     flexDirection: "row",

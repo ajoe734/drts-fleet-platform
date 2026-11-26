@@ -9,12 +9,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import {
-  PLATFORM_CODE_REGISTRY,
-  type PlatformPresenceRecord,
-  type PlatformPresenceSummary,
-  type ShiftRecord,
-} from "@drts/contracts";
+import type { PlatformPresenceSummary, ShiftRecord } from "@drts/contracts";
 import {
   assessPlatformHealth,
   getPlatformHealthSeverity,
@@ -46,10 +41,10 @@ import {
   FormField,
   IconButton,
   PageHeader,
-  PlatformBadge,
   StatusChip,
   Tokens,
 } from "@/components/ui";
+import { getDriverPlatformName } from "@/lib/platform-display-name";
 import { driverStrings } from "@/lib/strings";
 
 const ODOMETER_PATTERN = /^\d+$/;
@@ -142,22 +137,34 @@ function formatElapsedSentence(shift: ShiftRecord, now: number) {
   return parts.join(" ");
 }
 
-function getPlatformDisplayName(
-  platformCode: PlatformPresenceRecord["platformCode"],
-) {
-  return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
+// The shared health assessment names connection problems in operator terms;
+// drivers see the same plain wording as the home screen.
+const PLAIN_BLOCKER_WORDING: Record<string, string> = {
+  平台轉接器降級: "連線不穩",
+  平台轉接器中斷: "暫時無法連線",
+};
+
+function getReadinessText(assessment: ReturnType<typeof assessPlatformHealth>) {
+  if (assessment.canReceiveOrders) {
+    return assessment.readinessLabel;
+  }
+  const blockers = (assessment.blockers ?? []).map(
+    (blocker) => PLAIN_BLOCKER_WORDING[blocker] ?? blocker,
+  );
+  return `目前無法接單：${blockers.join("、")}`;
 }
 
-function isOwnedPlatform(platformCode: PlatformPresenceRecord["platformCode"]) {
-  const normalizedCode = platformCode.toLowerCase();
-  const displayName = getPlatformDisplayName(platformCode).toLowerCase();
-
-  return (
-    normalizedCode === "drts" ||
-    normalizedCode === "owned" ||
-    normalizedCode.startsWith("drts-") ||
-    displayName.includes("drts")
-  );
+function getConnectionLabel(status: string | undefined) {
+  switch (status) {
+    case "healthy":
+      return "連線正常";
+    case "degraded":
+      return "連線不穩";
+    case "down":
+      return "暫時無法連線";
+    default:
+      return "尚未同步";
+  }
 }
 
 function getAvailabilityVariant(
@@ -810,17 +817,9 @@ export default function ShiftScreen() {
                       style={styles.availabilityCard}
                     >
                       <View style={styles.availabilityTopRow}>
-                        <View style={styles.availabilityTitleBlock}>
-                          <PlatformBadge
-                            code={record.platformCode}
-                            name={getPlatformDisplayName(record.platformCode)}
-                            forwarded={!isOwnedPlatform(record.platformCode)}
-                            size="sm"
-                          />
-                          <Text style={styles.availabilityTitle}>
-                            {getPlatformDisplayName(record.platformCode)}
-                          </Text>
-                        </View>
+                        <Text style={styles.availabilityTitle}>
+                          {getDriverPlatformName(record.platformCode)}
+                        </Text>
                         <StatusChip
                           label={assessment.statusLabel}
                           variant={getAvailabilityVariant(assessment)}
@@ -851,15 +850,7 @@ export default function ShiftScreen() {
                           }
                         />
                         <StatusChip
-                          label={
-                            adapterStatus?.status === "healthy"
-                              ? "轉接正常"
-                              : adapterStatus?.status === "degraded"
-                                ? "轉接降級"
-                                : adapterStatus?.status === "down"
-                                  ? "轉接中斷"
-                                  : "尚未同步"
-                          }
+                          label={getConnectionLabel(adapterStatus?.status)}
                           variant={
                             adapterStatus?.status === "healthy"
                               ? "success"
@@ -873,7 +864,7 @@ export default function ShiftScreen() {
                       </View>
 
                       <Text style={styles.availabilitySummary}>
-                        {assessment.readinessLabel}
+                        {getReadinessText(assessment)}
                       </Text>
 
                       <View style={styles.availabilityMetaRow}>
@@ -883,22 +874,17 @@ export default function ShiftScreen() {
                             adapterStatus?.lastSyncAt ?? record.updatedAt,
                           )}
                         </Text>
-                        <Text style={styles.availabilityMetaDivider}>•</Text>
-                        <Text style={styles.availabilityMetaText}>
-                          帳號 {record.accountId ?? "尚未綁定"}
-                        </Text>
                       </View>
                     </View>
                   ),
                 )}
               </View>
             ) : (
-              <ActionButton
-                title="查看平台狀態"
-                onPress={() => router.push("/platform-presence")}
-                variant="secondary"
-                style={styles.gateAction}
-              />
+              // Platform accounts are bound by the fleet, not in the app, so
+              // the only next step a driver has is to contact dispatch.
+              <Text style={styles.availabilitySummary}>
+                平台狀態有問題時請聯絡派車台。
+              </Text>
             )}
           </SectionCard>
         ) : null}
@@ -1053,12 +1039,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Tokens.spacing.sm,
   },
-  availabilityTitleBlock: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
-    flex: 1,
-  },
   availabilityTitle: {
     ...Tokens.type.bodyStrong,
     color: Tokens.colors.textStrong,
@@ -1080,10 +1060,6 @@ const styles = StyleSheet.create({
     gap: Tokens.spacing.xs,
   },
   availabilityMetaText: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
-  },
-  availabilityMetaDivider: {
     ...Tokens.type.micro,
     color: Tokens.colors.textDim,
   },

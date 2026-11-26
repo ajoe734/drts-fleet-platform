@@ -49,7 +49,11 @@ export default function DriverAcademyScreen() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDetailLoading, setIsDetailLoading] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  // List-view errors (loading courses, opening a course) and quiz-submit
+  // errors are kept apart: a background list refresh that fails after a
+  // successful submit must not show up on the next quiz.
   const [error, setError] = useState<string | null>(null);
+  const [quizError, setQuizError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -106,19 +110,19 @@ export default function DriverAcademyScreen() {
   };
 
   const handleStartQuiz = () => {
-    setError(null);
+    setQuizError(null);
     setViewMode("quiz");
   };
 
   const handleCancelQuiz = () => {
-    setError(null);
+    setQuizError(null);
     setViewMode("detail");
   };
 
   const handleSubmitQuiz = async (command: QuizSubmissionCommand) => {
     if (!selectedCourse) return;
     setIsSubmitting(true);
-    setError(null);
+    setQuizError(null);
     try {
       const client = getDriverClient();
       const result = await client.submitQuiz(selectedCourse.courseId, command);
@@ -127,7 +131,9 @@ export default function DriverAcademyScreen() {
       // Refresh list in background so new score and status are immediately updated
       void loadData();
     } catch (err) {
-      setError(formatDriverError(err, "提交測驗失敗，請檢查答案後再試一次。"));
+      setQuizError(
+        formatDriverError(err, "提交測驗失敗，請檢查答案後再試一次。"),
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -135,7 +141,7 @@ export default function DriverAcademyScreen() {
 
   const handleRetakeQuiz = () => {
     setQuizResult(null);
-    setError(null);
+    setQuizError(null);
     setViewMode("quiz");
   };
 
@@ -180,9 +186,9 @@ export default function DriverAcademyScreen() {
         />
         {/* A failed submit must stay visible here; the list-view banner is not
             rendered while the quiz is open. */}
-        {error ? (
+        {quizError ? (
           <View style={styles.errorWrapper}>
-            <ErrorBanner message={error} />
+            <ErrorBanner message={quizError} />
           </View>
         ) : null}
         <QuizRunner

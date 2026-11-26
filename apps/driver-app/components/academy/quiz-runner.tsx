@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
-import type {
-  AcademyCourseDetail,
-  QuizSubmissionAnswer,
-  QuizSubmissionCommand,
+import {
+  ACADEMY_NO_QUIZ_HINT,
+  type AcademyCourseDetail,
+  type QuizSubmissionAnswer,
+  type QuizSubmissionCommand,
 } from "./types";
 
 interface QuizRunnerProps {
@@ -75,7 +76,7 @@ export function QuizRunner({
   if (!currentQuestion) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>本課程目前無測驗題目</Text>
+        <Text style={styles.emptyText}>{ACADEMY_NO_QUIZ_HINT}</Text>
         <ActionButton title="返回" variant="secondary" onPress={onCancel} />
       </View>
     );

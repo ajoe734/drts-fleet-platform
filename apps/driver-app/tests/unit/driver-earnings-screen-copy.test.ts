@@ -12,7 +12,9 @@ import {
 } from "vitest";
 import {
   PLATFORM_CODE_FORWARDER_SANDBOX,
+  PLATFORM_CODE_GRAB_TAIWAN,
   PLATFORM_CODE_UBER,
+  type DriverStatementRecord,
   type PlatformEarningsItem,
 } from "@drts/contracts";
 
@@ -80,6 +82,28 @@ const item = (platformCode: string, net: number): PlatformEarningsItem =>
     netAmount: money(net),
   }) as PlatformEarningsItem;
 
+const statement = (
+  periodMonth: string,
+  payoutStatus: DriverStatementRecord["payoutStatus"],
+  net: number,
+): DriverStatementRecord =>
+  ({
+    statementId: `statement-${periodMonth}`,
+    driverId: "driver-1",
+    periodMonth,
+    receiptNo: `RECEIPT-${periodMonth}`,
+    feePlanVersion: "plan-1",
+    payoutStatus,
+    grossEarning: money(net),
+    serviceFee: money(0),
+    subsidy: money(0),
+    netAmount: money(net),
+    lines: [],
+    artifactUrl: null,
+    createdAt: `${periodMonth}-28T00:00:00Z`,
+    updatedAt: `${periodMonth}-28T00:00:00Z`,
+  }) as DriverStatementRecord;
+
 const renderers: Renderer[] = [];
 
 beforeAll(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
@@ -101,8 +125,8 @@ beforeEach(() => {
   });
   boundary.getPlatformEarningsByPlatform.mockResolvedValue({
     items: [
-      // Codes outside the platform registry are the fleet's own dispatch.
-      item("drts-owned", 30000),
+      // The fleet's own dispatch source.
+      item("drts", 30000),
       item(PLATFORM_CODE_UBER, 20000),
       item(PLATFORM_CODE_FORWARDER_SANDBOX, 5000),
     ],
@@ -154,10 +178,10 @@ describe("Driver earnings screen copy", () => {
       "財務主導",
       "權威",
       "對帳金額",
-      "drts-owned",
-      "DRTS-",
       "UBER",
       "FORW",
+      "forwarder_sandbox",
+      "Forwarder Sandbox",
       "TWD",
       "Summary totals",
     ]) {
@@ -169,9 +193,63 @@ describe("Driver earnings screen copy", () => {
       driverStrings.earnings.sections.platformSettlement,
     );
     expect(rendered).toContain(driverStrings.earnings.sections.referenceOnly);
-    // The fleet's own dispatch gets a readable name, not its code.
-    expect(rendered).toContain(driverStrings.platformPresence.managedByDrts);
+    // Readable names, never codes or English descriptions.
+    expect(rendered).toContain("自營派單");
     expect(rendered).toContain("Uber");
+    expect(rendered).toContain("測試平台");
+  });
+
+  it("shows platforms the app does not know as other platforms, never as the fleet's own settlement", async () => {
+    boundary.getPlatformEarningsByPlatform.mockResolvedValue({
+      items: [
+        item("drts", 30000),
+        item("zeta-cabs", 7000),
+        item("acme-taxi", 6000),
+        item(PLATFORM_CODE_GRAB_TAIWAN, 4000),
+      ],
+    });
+    const renderer = await mount();
+    const rows = renderer.root.findAll(
+      (node) =>
+        typeof node.type === "function" &&
+        (node.type as { name?: string }).name === "BreakdownRow",
+    );
+    expect(rows).toHaveLength(4);
+    const rowText = (code: string) =>
+      text(
+        rows.find(
+          (row) =>
+            (row.props.item as PlatformEarningsItem).platformCode === code,
+        )!,
+      );
+
+    // Only the fleet's own dispatch is 車隊結算.
+    expect(rowText("drts")).toContain("車隊結算");
+    for (const code of ["zeta-cabs", "acme-taxi"]) {
+      expect(rowText(code)).not.toContain("車隊結算");
+      expect(rowText(code)).not.toContain("自營");
+      expect(rowText(code)).toContain("平台入帳");
+      expect(rowText(code)).not.toContain(code);
+    }
+    // Two unknown platforms stay distinguishable, in a stable order.
+    expect(rowText("acme-taxi")).toContain("其他平台 1");
+    expect(rowText("zeta-cabs")).toContain("其他平台 2");
+    expect(rowText(PLATFORM_CODE_GRAB_TAIWAN)).toContain("Grab 台灣");
+    // Unknown platforms count as other platforms for the note and the total.
+    expect(allText(renderer)).toContain(
+      driverStrings.earnings.sections.platformNote,
+    );
+    expect(allText(renderer)).toContain("130");
+  });
+
+  it("names a single unknown platform 其他平台 without a number", async () => {
+    boundary.getPlatformEarningsByPlatform.mockResolvedValue({
+      items: [item("acme-taxi", 6000)],
+    });
+    const renderer = await mount();
+    expect(textNodes(renderer)).toContain("其他平台");
+    expect(allText(renderer)).not.toContain("其他平台 1");
+    expect(allText(renderer)).not.toContain("車隊結算");
   });
 
   it("shows the other-platforms note exactly once", async () => {
@@ -184,7 +262,7 @@ describe("Driver earnings screen copy", () => {
 
   it("omits the other-platforms note when only the fleet's own dispatch has earnings", async () => {
     boundary.getPlatformEarningsByPlatform.mockResolvedValue({
-      items: [item("drts-owned", 30000)],
+      items: [item("drts", 30000)],
     });
     const renderer = await mount();
     expect(allText(renderer)).not.toContain(
@@ -209,5 +287,39 @@ describe("Driver earnings screen copy", () => {
     await selectPeriod(renderer, "本月");
     expect(texts()).toContain("本月 2026年11月");
     expect(texts()).toContain("淨收入 · 本月");
+  });
+
+  it("keeps an unpaid statement total visible when the period has no income", async () => {
+    boundary.getPlatformEarningsByPlatform.mockResolvedValue({ items: [] });
+    boundary.getList.mockResolvedValue([
+      statement("2026-10", "pending", 14000),
+      statement("2026-09", "pending", 5000),
+      statement("2026-08", "paid", 9000),
+    ]);
+    const renderer = await mount();
+    await selectPeriod(renderer, "本月");
+
+    expect(textNodes(renderer)).toContain(driverStrings.earnings.emptyPeriod);
+    const [pending] = renderer.root.findAll(
+      (node) =>
+        node.props?.testID === "earnings-pending-payout" &&
+        typeof node.type === "string",
+    );
+    expect(pending).toBeDefined();
+    // Both unpaid statements count; the paid one does not.
+    expect(text(pending!)).toBe(
+      `${driverStrings.earnings.metrics.pendingPayout}$190.00`,
+    );
+  });
+
+  it("shows no pending total once every statement is paid", async () => {
+    boundary.getPlatformEarningsByPlatform.mockResolvedValue({ items: [] });
+    boundary.getList.mockResolvedValue([statement("2026-10", "paid", 14000)]);
+    const renderer = await mount();
+    expect(
+      renderer.root.findAll(
+        (node) => node.props?.testID === "earnings-pending-payout",
+      ),
+    ).toHaveLength(0);
   });
 });

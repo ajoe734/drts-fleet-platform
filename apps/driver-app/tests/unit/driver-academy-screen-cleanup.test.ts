@@ -14,6 +14,7 @@ import type {
   AcademyCourseDetail,
   AcademyCourseSummary,
   DriverQuizAttemptDetail,
+  DriverTrainingRecord,
 } from "@drts/contracts";
 
 // Regression guard for the driver academy screens: no internal IDs, versions,
@@ -72,6 +73,7 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 import DriverAcademyScreen from "../../app/academy";
+import { CourseCard } from "../../components/academy/course-card";
 import { ModuleReader } from "../../components/academy/module-reader";
 import { QuizResultView } from "../../components/academy/quiz-result-view";
 import { TrainingRecordsList } from "../../components/academy/training-records-list";
@@ -264,7 +266,7 @@ describe("Driver academy result view", () => {
 });
 
 describe("Driver academy module reader", () => {
-  it("does not offer a quiz when the course has no questions", async () => {
+  it("does not offer a quiz when the course has no questions and says how completion works", async () => {
     const renderer = await mount(
       React.createElement(ModuleReader, {
         course: course({ questions: [] }),
@@ -272,6 +274,13 @@ describe("Driver academy module reader", () => {
       }),
     );
     expect(pressables(renderer, "開始測驗")).toHaveLength(0);
+    // Completion is recorded only by passing the quiz, so the driver is told
+    // this course cannot be completed in the app rather than shown a pass mark.
+    const rendered = allText(renderer);
+    expect(rendered).toContain(
+      "這門課目前沒有測驗，無法在 App 內完訓，請聯絡車行。",
+    );
+    expect(rendered).not.toContain("完訓標準：測驗成績需達");
   });
 
   it("hides course code, version, module ID and resource URL but still opens the right material", async () => {
@@ -332,6 +341,73 @@ describe("Driver academy screen controls", () => {
     expect(boundary.submitQuiz).toHaveBeenCalledTimes(1);
     expect(pressables(renderer, "確認交卷")).toHaveLength(1);
     expect(allText(renderer)).toContain("網路連線中斷");
+  });
+
+  it("does not carry a background list-refresh failure into the next quiz", async () => {
+    boundary.listAcademyCourses
+      .mockResolvedValueOnce({ items: [summary(course())] })
+      .mockRejectedValueOnce(new Error("課程清單暫時無法載入"));
+    boundary.submitQuiz.mockResolvedValueOnce({
+      attemptId: "att_fail_1",
+      courseId: "crs_safety_2026",
+      courseVersion: 2,
+      score: 0,
+      passed: false,
+      attemptedAt: "2026-10-15T17:58:00.000Z",
+    });
+    const renderer = await mount(React.createElement(DriverAcademyScreen));
+    await press(pressables(renderer, course().title)[0]!);
+    await press(pressables(renderer, "開始測驗")[0]!);
+    await press(pressables(renderer, "鳴喇叭加速通過")[0]!);
+    await press(pressables(renderer, "確認交卷")[0]!);
+
+    // The submit succeeded; the background refresh after it failed.
+    expect(boundary.listAcademyCourses).toHaveBeenCalledTimes(2);
+    expect(allText(renderer)).toContain("未通過");
+
+    await press(pressables(renderer, "重新測驗")[0]!);
+    expect(pressables(renderer, "確認交卷")).toHaveLength(1);
+    expect(allText(renderer)).not.toContain("課程清單暫時無法載入");
+
+    // The refresh failure still belongs to, and shows on, the course list.
+    await press(pressables(renderer, "放棄測驗")[0]!);
+    await press(pressables(renderer, "回清單")[0]!);
+    expect(allText(renderer)).toContain("課程清單暫時無法載入");
+  });
+
+  it("shows course and record titles without course codes", async () => {
+    const record: DriverTrainingRecord = {
+      recordId: "rec_safe_1",
+      driverId: "drv_001",
+      courseId: "crs_safety_2026",
+      courseCode: "SAFE-2026",
+      courseTitle: "平台安全防禦駕駛與應變實務",
+      status: "passed",
+      highestScore: 100,
+      attemptsCount: 1,
+      passed: true,
+      lastAttemptAt: "2026-10-15T18:00:00.000Z",
+      completedAt: "2026-10-15T18:00:00.000Z",
+      expiresAt: "2026-11-14T18:00:00.000Z",
+      isOverdue: false,
+    };
+    const records = await mount(
+      React.createElement(TrainingRecordsList, { records: [record] }),
+    );
+    expect(allText(records)).toContain(record.courseTitle);
+    expect(allText(records)).not.toContain("SAFE-2026");
+    // 18:00 UTC on 10/15 is 10/16 in Taiwan.
+    expect(allText(records)).toContain("2026/10/16");
+
+    const card = await mount(
+      React.createElement(CourseCard, {
+        course: summary(course()),
+        onSelect: vi.fn(),
+      }),
+    );
+    expect(allText(card)).toContain(course().title);
+    expect(allText(card)).not.toContain("SAFE-2026");
+    expect(allText(card)).not.toContain("代碼");
   });
 
   it("describes empty training records without jargon", async () => {
