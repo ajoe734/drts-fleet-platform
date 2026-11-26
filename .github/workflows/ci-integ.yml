@@ -1957,7 +1957,7 @@ jobs:
               "$RUNNER_TEMP/four-portal-password/report.json" \
               "$RUNNER_TEMP/four-portal-password.log" || true
             free -m || true
-            sudo dmesg 2>/dev/null | grep -iE 'out of memory|killed process' | tail -n 5 || true
+            sudo -n dmesg 2>/dev/null | grep -iE 'out of memory|killed process' | tail -n 5 || true
             exit 1
           fi
       - name: Upload Agency portal business evidence

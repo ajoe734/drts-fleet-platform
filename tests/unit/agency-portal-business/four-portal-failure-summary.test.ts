@@ -15,7 +15,7 @@ describe("four-portal journey failure summary", () => {
       "\u001b[31mTimeoutError: page.goto: Timeout 30000ms exceeded navigating to " +
         "http://localhost:3212/invite?token=inv_9f8e7d6c5b4a39281706f5e4d3c2b1a0 " +
         "as agency.pwd.1a2b3c4d@bureau-hosted.example with AgencyInit!1a2b3c4d#2026Valid " +
-        `bearer ${JWT}\u001b[39m`,
+        `bearer ${JWT} reset {"token":"pwr_AbCdEfGhIjKlMnOpQrStUv"}\u001b[39m`,
     );
 
     expect(line).toContain("TimeoutError: page.goto: Timeout 30000ms exceeded");
@@ -25,6 +25,7 @@ describe("four-portal journey failure summary", () => {
       "agency.pwd.1a2b3c4d@bureau-hosted.example",
       "AgencyInit!1a2b3c4d#2026Valid",
       JWT,
+      "pwr_AbCdEfGhIjKlMnOpQrStUv",
       "\u001b[",
     ]) {
       expect(line).not.toContain(secret);
