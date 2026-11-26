@@ -255,15 +255,16 @@ function getDriverSosLocationSnapshot(): DriverSosLocationSnapshot | null {
 
 function formatAt(value: string | null) {
   if (!value) {
-    return "尚無更新";
+    return "—";
   }
 
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) {
-    return value;
+    return "—";
   }
 
   return new Date(parsed).toLocaleString("zh-TW", {
+    timeZone: "Asia/Taipei",
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -279,23 +280,23 @@ function getSyncChipModel(
     if (browserOnline === false) {
       return {
         tone: "warn",
-        label: "離線保存",
-        detail: "離線狀態 · 裝置離線，SOS 會先保存在手機，連線後自動送出。",
+        label: "離線",
+        detail: "SOS 會先存在手機，連線後自動送出。",
       };
     }
 
     return {
       tone: "info",
       label: "連線正常",
-      detail: "連線正常 · 可直接送達車隊安全值班。",
+      detail: "SOS 會直接送到車隊值班人員。",
     };
   }
 
   if (activeCase.syncState === "sending") {
     return {
       tone: "info",
-      label: "正在送出",
-      detail: "正在送出 · 正在將 SOS 通報送往車隊值班。",
+      label: "送出中",
+      detail: "正在通知車隊值班人員，請稍候。",
     };
   }
 
@@ -306,26 +307,22 @@ function getSyncChipModel(
     return {
       tone: "success",
       label: "已送達",
-      detail: activeCase.receipt
-        ? `已送達 · 事件編號 ${activeCase.receipt.eventNo} 已送達安全值班。`
-        : "已送達 · 伺服器已確認 SOS 通報。",
+      detail: "SOS 已通報車隊值班。",
     };
   }
 
   if (activeCase.syncState === "attachment_pending") {
     return {
       tone: "warn",
-      label: "附件處理中",
-      detail: activeCase.receipt
-        ? `SOS ${activeCase.receipt.eventNo} 已送達；部分附件等待補送。`
-        : "SOS 已送達；部分附件等待補送。",
+      label: "附件待補送",
+      detail: "SOS 已通報車隊值班，部分附件還沒傳出。",
     };
   }
 
   return {
     tone: "warn",
-    label: "待補送",
-    detail: "尚未送達 · 事件已保存在手機，將於連線後自動補送。",
+    label: "尚未送達",
+    detail: "已存在手機，連線後會自動再送。",
   };
 }
 
@@ -354,7 +351,7 @@ function formatUploadStateLabel(state: string): string {
     case "uploading":
       return "上傳中";
     case "unavailable":
-      return "服務未就緒";
+      return "稍後補送";
     case "failed_retryable":
       return "待重試";
     default:
@@ -396,14 +393,12 @@ function AttachmentList({
           <View style={styles.attachmentCopy}>
             <Text style={styles.attachmentName}>{attachment.fileName}</Text>
             <Text style={styles.attachmentMeta}>
-              {attachment.mimeType || "image/jpeg"} ·{" "}
               {formatAt(attachment.addedAt)}
             </Text>
             {attachment.uploadState !== "local" ? (
               <Text style={styles.attachmentMeta}>
                 上傳狀態：{formatUploadStateLabel(attachment.uploadState)}
                 {formatScanStatusLabel(attachment.scanStatus)}
-                {attachment.lastError ? ` · ${attachment.lastError}` : ""}
               </Text>
             ) : null}
           </View>
@@ -530,9 +525,7 @@ function FalseAlarmSlider({
           },
         ]}
       />
-      <Text style={styles.falseAlarmText}>
-        向右滑動後再二次確認，才會標記誤觸
-      </Text>
+      <Text style={styles.falseAlarmText}>向右滑，標記為誤觸</Text>
       <View
         {...responder.panHandlers}
         style={[
@@ -746,9 +739,7 @@ export default function DriverSosScreen() {
     const sendingCase = markDriverSosCaseSending(targetCase);
     setSubmitting(true);
     setScreenError(null);
-    setUiNotice(
-      manualRetry ? "重新嘗試送出 SOS…" : "正在將 SOS 送往 driver-sos 服務…",
-    );
+    setUiNotice(manualRetry ? "重新送出 SOS…" : "正在送出 SOS…");
     await persistActiveCase(sendingCase);
 
     try {
@@ -828,8 +819,8 @@ export default function DriverSosScreen() {
       await persistActiveCase(completedCase);
       setUiNotice(
         attachmentSync.unavailableCount + attachmentSync.failedCount > 0
-          ? `SOS ${result.receipt.eventNo} 已送達；附件服務未就緒，已保留供重試。`
-          : `SOS ${result.receipt.eventNo} 與附件已由伺服器確認。`,
+          ? `SOS ${result.receipt.eventNo} 已送達；附件暫時傳不出去，已存在手機，可稍後按「重新送出」。`
+          : `SOS ${result.receipt.eventNo} 與附件都已送達。`,
       );
     } catch (error) {
       if (await recoverDriverSessionFromApiError(error)) {
@@ -843,7 +834,7 @@ export default function DriverSosScreen() {
       const failedCase = markDriverSosCaseFailed(sendingCase, sanitizedError);
       await persistActiveCase(failedCase);
       setScreenError(sanitizedError);
-      setUiNotice("SOS 未送達，已保留在本機 outbox。");
+      setUiNotice("SOS 還沒送到，已存在手機，連線後會自動再送。");
     } finally {
       setSubmitting(false);
       resetHoldProgress();
@@ -1050,7 +1041,6 @@ export default function DriverSosScreen() {
   }
 
   const loading = loadingCase || loadingContext;
-  const activeStatus = syncChip.detail;
   const selectedSituationLabel = getSituationLabel(selectedSituation);
   const currentLocation = getDriverSosLocationSnapshot();
 
@@ -1110,7 +1100,7 @@ export default function DriverSosScreen() {
               size="sm"
               onPress={() => void persistActiveCase(null)}
             >
-              清除此 case
+              清除這筆紀錄
             </Btn>
           ) : null
         }
@@ -1152,19 +1142,13 @@ export default function DriverSosScreen() {
 
       {loading ? (
         <Card theme={THEME} title="載入中">
-          <Text style={styles.emptyCopy}>
-            正在準備 SOS 任務資料與本機暫存清單…
-          </Text>
+          <Text style={styles.emptyCopy}>正在讀取目前行程…</Text>
         </Card>
       ) : null}
 
       {!activeCase ? (
         <>
-          <Card
-            theme={THEME}
-            title="情況"
-            subtitle="視覺與文字皆標示目前選項，避免只靠顏色辨識"
-          >
+          <Card theme={THEME} title="情況" subtitle="請選擇目前狀況">
             <View style={styles.situationGrid}>
               {driverIncidentSituations.map((situation) => {
                 const selected = selectedSituation === situation.id;
@@ -1202,11 +1186,7 @@ export default function DriverSosScreen() {
             </View>
           </Card>
 
-          <Card
-            theme={THEME}
-            title="當前訂單情境"
-            subtitle="安全求援為獨立頁面，不會併入一般事故回報流程"
-          >
+          <Card theme={THEME} title="當前訂單情境">
             {context ? (
               <View style={styles.contextStack}>
                 <View style={styles.contextPills}>
@@ -1247,7 +1227,7 @@ export default function DriverSosScreen() {
                       label: "目前位置",
                       value: currentLocation
                         ? `${currentLocation.lat.toFixed(5)}, ${currentLocation.lng.toFixed(5)}`
-                        : "尚無定位快照",
+                        : "—",
                       mono: true,
                     },
                     // S3-FIX-DRIVER-SOS-VOCAB-001: aggregation rows are SPREAD IN
@@ -1283,17 +1263,12 @@ export default function DriverSosScreen() {
               </View>
             ) : (
               <Text style={styles.emptyCopy}>
-                目前沒有可帶入的行程脈絡，SOS 仍可建立為一般 driver safety
-                事件。
+                目前沒有進行中的行程，仍可直接送出 SOS。
               </Text>
             )}
           </Card>
 
-          <Card
-            theme={THEME}
-            title="補充說明與附件"
-            subtitle={`目前狀態：${activeStatus}`}
-          >
+          <Card theme={THEME} title="補充說明與附件">
             <Field
               theme={THEME}
               label="補充說明"
@@ -1343,13 +1318,12 @@ export default function DriverSosScreen() {
         <>
           <Card
             theme={THEME}
-            title={activeCase.receipt?.eventNo ?? "本機 SOS 事件"}
-            subtitle={`狀態 · ${activeCase.syncState === "submitted" || activeCase.syncState === "complete" ? "已送達" : activeCase.syncState === "attachment_pending" ? "附件處理中" : activeCase.syncState === "sending" ? "送出中" : "待補送"}`}
+            title="本次 SOS"
             actions={
               activeCase.receipt ? (
                 <>
                   <Pill theme={THEME} tone="success" dot>
-                    事件編號 {activeCase.receipt.incidentId}
+                    事件編號 {activeCase.receipt.eventNo}
                   </Pill>
                   <Pill
                     theme={THEME}
@@ -1361,8 +1335,8 @@ export default function DriverSosScreen() {
                     dot
                   >
                     {activeCase.dutyAcknowledgement.acknowledgedByActorId
-                      ? `值班已認領 · ${activeCase.dutyAcknowledgement.acknowledgedByActorId}`
-                      : "等待值班認領"}
+                      ? "值班人員已收到"
+                      : "等待值班人員回應"}
                   </Pill>
                 </>
               ) : null
@@ -1376,20 +1350,6 @@ export default function DriverSosScreen() {
                   label: "觸發時間",
                   value: formatAt(activeCase.originalTriggeredAt),
                   mono: true,
-                },
-                {
-                  label: "下次重試",
-                  value: formatAt(activeCase.nextAttemptAt),
-                  mono: true,
-                },
-                {
-                  label: "嘗試次數",
-                  value: String(activeCase.attemptCount),
-                  mono: true,
-                },
-                {
-                  label: "離線觸發",
-                  value: activeCase.offlineAtTrigger ? "是" : "否",
                 },
                 {
                   label: "任務編號",
@@ -1417,7 +1377,7 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="補充說明 / 附件"
-            subtitle="補充資料先寫入本機紀錄，連線時使用同一附件驗證流程補送"
+            subtitle="補充資料會先存在手機，連線後自動送出。"
           >
             <Field theme={THEME} label="補充說明">
               <TextInput
@@ -1480,7 +1440,7 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="誤觸處理"
-            subtitle="slide 解鎖後仍需第二次確認，避免單擊誤關閉"
+            subtitle="向右滑到底，再按一次確認。"
           >
             <Field
               theme={THEME}
@@ -1506,13 +1466,9 @@ export default function DriverSosScreen() {
             ) : null}
           </Card>
 
-          <Card
-            theme={THEME}
-            title="求援進度紀錄"
-            subtitle="通報進度與時間線紀錄"
-          >
+          <Card theme={THEME} title="求援進度紀錄">
             {activeCase.timeline.length === 0 ? (
-              <Text style={styles.emptyCopy}>目前尚無 timeline。</Text>
+              <Text style={styles.emptyCopy}>目前還沒有進度。</Text>
             ) : (
               <View style={styles.timelineList}>
                 {activeCase.timeline.map((entry) => (

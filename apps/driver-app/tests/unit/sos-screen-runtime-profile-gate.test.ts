@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
+  submitDriverSosEvent: vi.fn(),
+  getSosEvent: vi.fn(),
+  secureGetItem: vi.fn(),
 }));
 
 vi.mock("react-native", () => ({
@@ -54,7 +57,7 @@ vi.mock("expo-image-picker", () => ({
 }));
 
 vi.mock("expo-secure-store", () => ({
-  getItemAsync: vi.fn().mockResolvedValue(null),
+  getItemAsync: (...args: unknown[]) => mocks.secureGetItem(...args),
   setItemAsync: vi.fn().mockResolvedValue(undefined),
   deleteItemAsync: vi.fn().mockResolvedValue(undefined),
 }));
@@ -65,14 +68,21 @@ vi.mock("expo-secure-store", () => ({
 // not aliased for this app's vitest resolver. The screen only reads scalar
 // colour/font tokens off THEME at module scope, so a flat object is sufficient
 // — this test asserts on copy and row structure, never on rendered colour.
+// Element-valued slots (Card/PageHeader `actions`, Shell `footer`) are rendered
+// as extra children so the SOS hold button and status pills are in the tree.
 vi.mock("@/components/canvas-primitives", () => {
-  const stub =
-    (name: string) => (props: Record<string, unknown>) =>
-      React.createElement(
-        name,
-        props,
-        (props as { children?: React.ReactNode }).children,
-      );
+  type StubProps = Record<string, unknown> & {
+    children?: React.ReactNode;
+    actions?: React.ReactNode;
+    footer?: React.ReactNode;
+  };
+  const stub = (name: string) => (props: StubProps) =>
+    React.createElement(
+      name,
+      props,
+      props.children,
+      ...[props.actions, props.footer].filter((slot) => slot != null),
+    );
   return {
     driverCanvasTheme: {
       bgRaised: "#111827",
@@ -105,7 +115,10 @@ vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
     listDriverTasks: mocks.listDriverTasks,
+    submitDriverSosEvent: mocks.submitDriverSosEvent,
+    get: mocks.getSosEvent,
   }),
+  formatDriverError: (_error: unknown, fallback: string) => fallback,
   isDriverIdentityProvisioned: vi.fn().mockReturnValue(true),
   registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
   recoverDriverSessionFromApiError: vi.fn(),
@@ -189,8 +202,7 @@ async function renderSosScreen() {
 
 function findContextCard(renderer: any) {
   return renderer.root.find(
-    (node: any) =>
-      node.type === "Card" && node.props.title === "當前訂單情境",
+    (node: any) => node.type === "Card" && node.props.title === "當前訂單情境",
   );
 }
 
@@ -235,6 +247,7 @@ describe("SOS screen · runtime profile capability gate", () => {
 
   beforeEach(() => {
     delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
+    mocks.secureGetItem.mockReset().mockResolvedValue(null);
     mocks.listUnifiedDriverTasks
       .mockReset()
       .mockResolvedValue([AGGREGATED_TASK, OWNED_TASK]);
@@ -272,12 +285,7 @@ describe("SOS screen · runtime profile capability gate", () => {
 
     const labels = contextRows(renderer).map((row) => row.label);
 
-    expect(labels).toEqual([
-      "行程編號",
-      "任務編號",
-      "目前狀態",
-      "目前位置",
-    ]);
+    expect(labels).toEqual(["行程編號", "任務編號", "目前狀態", "目前位置"]);
     expect(labels).not.toContain("來源平台");
     expect(labels).not.toContain("平台狀態");
     expect(labels).not.toContain("平台訂單編號");
@@ -332,5 +340,258 @@ describe("SOS screen · runtime profile capability gate", () => {
     const labels = contextRows(renderer).map((row) => row.label);
 
     expect(labels).not.toContain("來源平台");
+  });
+});
+
+// DRIVER-SOS-CLEANUP-20261126: the owner read this screen on a phone during a
+// test and saw developer wording: "outbox", "driver-sos 服務", "timeline", the
+// on-duty staff principal id, an invented "image/jpeg" MIME type, retry
+// counters, and the same status repeated three times. These render the real
+// screen and check what reaches the tree.
+const DEVELOPER_COPY = [
+  "outbox",
+  "driver-sos",
+  "timeline",
+  "driver safety",
+  "slide",
+  "清除此 case",
+  "image/jpeg",
+  "ops-duty-01",
+  "INC-000042",
+  "尚無更新",
+  "下次重試",
+  "嘗試次數",
+  "離線觸發",
+  "避免只靠顏色",
+  "不會併入一般事故",
+  "同一附件驗證",
+  "目前狀態：",
+  "狀態 · ",
+];
+
+function developerCopyIn(strings: string[]): string[] {
+  return strings.filter((text) =>
+    DEVELOPER_COPY.some((term) =>
+      text.toLowerCase().includes(term.toLowerCase()),
+    ),
+  );
+}
+
+const STORED_CASE_TRIGGERED_AT = "2026-11-26T01:05:00.000Z";
+
+function storedAcknowledgedCase() {
+  return {
+    clientEventId: "client-event-cleanup-1",
+    incidentId: "INC-000042",
+    eventNo: "SOS-20261126010500-AB12CD",
+    eventType: "security_incident",
+    situation: "passenger_conflict",
+    severity: "major",
+    description: "事件情況：乘客衝突",
+    attachments: [
+      {
+        id: "sos-attachment-1",
+        uri: "file:///photo-1.jpg",
+        fileName: "photo-1.jpg",
+        mimeType: null,
+        fileSize: 1024,
+        addedAt: STORED_CASE_TRIGGERED_AT,
+        uploadState: "failed_retryable",
+        serverAttachmentId: null,
+        scanStatus: null,
+        lastError: "Attachment upload failed.",
+      },
+    ],
+    originalTriggeredAt: STORED_CASE_TRIGGERED_AT,
+    offlineAtTrigger: true,
+    location: null,
+    orderId: null,
+    taskId: null,
+    syncState: "submitted",
+    attemptCount: 3,
+    nextAttemptAt: "2026-11-26T01:35:00.000Z",
+    lastError: null,
+    receipt: {
+      sosEventId: "sos-event-cleanup-1",
+      incidentId: "INC-000042",
+      clientEventId: "client-event-cleanup-1",
+      eventNo: "SOS-20261126010500-AB12CD",
+      duplicate: false,
+      serverReceivedAt: STORED_CASE_TRIGGERED_AT,
+      fleetReportConfirmedAt: STORED_CASE_TRIGGERED_AT,
+    },
+    supplements: [],
+    dialRecords: [],
+    falseAlarm: {
+      dismissed: true,
+      dismissedAt: "2026-11-26T01:10:00.000Z",
+      note: null,
+    },
+    dutyAcknowledgement: {
+      acknowledgedAt: STORED_CASE_TRIGGERED_AT,
+      acknowledgedByActorId: "ops-duty-01",
+    },
+    status: "acknowledged",
+    timeline: [],
+  };
+}
+
+/**
+ * Strings on host elements only (what the stubs actually render), so a raw
+ * value carried in a composite component's props (for example an attachment's
+ * stored lastError) is not mistaken for rendered copy.
+ */
+function hostStrings(renderer: any): string[] {
+  const out: string[] = [];
+  const hosts = renderer.root.findAll(
+    (node: any) => typeof node.type === "string",
+  );
+  for (const node of hosts) {
+    for (const [key, value] of Object.entries(node.props ?? {})) {
+      if (key !== "children" && typeof value === "string") out.push(value);
+    }
+    if (node.type === "DL") {
+      for (const item of node.props.items ?? []) {
+        out.push(item.label, item.value);
+      }
+    }
+    for (const child of node.children ?? []) {
+      if (typeof child === "string") out.push(child);
+    }
+  }
+  return out;
+}
+
+function findHoldButton(renderer: any) {
+  return renderer.root.find(
+    (node: any) =>
+      node.type === "Pressable" &&
+      node.props.accessibilityLabel === "長按確認求援",
+  );
+}
+
+function bannerBodies(renderer: any): string[] {
+  return renderer.root
+    .findAll((node: any) => node.type === "Banner")
+    .map((node: any) => node.props.body);
+}
+
+describe("SOS screen · driver-facing copy", () => {
+  const originalTz = process.env.TZ;
+
+  beforeEach(() => {
+    delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
+    mocks.secureGetItem.mockReset().mockResolvedValue(null);
+    mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.submitDriverSosEvent.mockReset();
+    mocks.getSosEvent.mockReset().mockRejectedValue(new Error("offline"));
+  });
+
+  afterEach(() => {
+    if (originalTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTz;
+    }
+  });
+
+  it("shows a plain empty context and a single connection status before an SOS exists", async () => {
+    const renderer = await renderSosScreen();
+    const strings = hostStrings(renderer);
+
+    expect(strings).toContain("目前沒有進行中的行程，仍可直接送出 SOS。");
+    expect(strings).toContain("請選擇目前狀況");
+    expect(developerCopyIn(strings)).toEqual([]);
+    // The chip label used to be repeated as the prefix of its own detail line
+    // ("連線正常 · 可直接送達…") and again in a card subtitle ("目前狀態：…").
+    expect(strings).toContain("連線正常");
+    expect(strings).toContain("SOS 會直接送到車隊值班人員。");
+    expect(
+      strings.filter(
+        (text) => text.includes("連線正常") && text !== "連線正常",
+      ),
+    ).toEqual([]);
+
+    act(() => renderer.unmount());
+  });
+
+  it("keeps sending and failure notices free of service names and outbox wording", async () => {
+    let rejectSubmit: (error: Error) => void = () => {};
+    mocks.submitDriverSosEvent.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectSubmit = reject;
+      }),
+    );
+
+    const renderer = await renderSosScreen();
+
+    await act(async () => {
+      findHoldButton(renderer).props.onLongPress();
+      await flushEffects();
+    });
+
+    // The send path itself is unchanged: one submit, idempotency-keyed.
+    expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+    const [, options] = mocks.submitDriverSosEvent.mock.calls[0];
+    expect(options.headers["Idempotency-Key"]).toEqual(expect.any(String));
+    expect(bannerBodies(renderer)).toContain("正在送出 SOS…");
+    expect(developerCopyIn(hostStrings(renderer))).toEqual([]);
+
+    await act(async () => {
+      rejectSubmit(new Error("network down"));
+      await flushEffects();
+    });
+
+    expect(bannerBodies(renderer)).toContain(
+      "SOS 還沒送到，已存在手機，連線後會自動再送。",
+    );
+    const strings = hostStrings(renderer);
+    expect(developerCopyIn(strings)).toEqual([]);
+    // The failed case is still stored locally and offered for a resend.
+    const retry = renderer.root.find(
+      (node: any) => node.type === "Btn" && node.props.children === "重新送出",
+    );
+    expect(retry).toBeTruthy();
+
+    act(() => renderer.unmount());
+  });
+
+  it("shows an acknowledged SOS without staff ids, retry counters or invented file types, in Taiwan time", async () => {
+    // Prove the time does not depend on the phone's own time zone.
+    process.env.TZ = "America/Los_Angeles";
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(storedAcknowledgedCase()),
+    );
+
+    const renderer = await renderSosScreen();
+    const strings = hostStrings(renderer);
+
+    expect(strings).toContain("值班人員已收到");
+    expect(strings).toContain("清除這筆紀錄");
+    expect(strings).toContain("目前還沒有進度。");
+    expect(strings).toContain("SOS-20261126010500-AB12CD");
+    expect(developerCopyIn(strings)).toEqual([]);
+    expect(
+      strings.some((text) => text.includes("Attachment upload failed")),
+    ).toBe(false);
+
+    const caseCard = renderer.root.find(
+      (node: any) => node.type === "Card" && node.props.title === "本次 SOS",
+    );
+    expect(caseCard.props.subtitle).toBeUndefined();
+    expect(
+      caseCard.findByType("DL").props.items.map((row: any) => row.label),
+    ).toEqual(["觸發時間", "任務編號", "行程編號"]);
+
+    // 01:05 UTC is 09:05 in Taiwan.
+    const triggeredAt = caseCard
+      .findByType("DL")
+      .props.items.find((row: any) => row.label === "觸發時間").value;
+    expect(triggeredAt).toContain("09:05");
+    expect(strings.filter((text) => text.includes("01:05"))).toEqual([]);
+    expect(strings.filter((text) => text.includes("09:05")).length).toBe(2);
+
+    act(() => renderer.unmount());
   });
 });
