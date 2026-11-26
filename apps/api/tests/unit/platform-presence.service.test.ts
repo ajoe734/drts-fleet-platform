@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PlatformPresenceService } from "../../src/modules/platform-presence/platform-presence.service";
 
 describe("PlatformPresenceService", () => {
-  it("returns Traditional Chinese summary notes and adapter health status", async () => {
+  it("returns no developer notes and reports adapter health status", async () => {
     const forwarderService = {
       listAdapterHealth: vi.fn(() => [
         {
@@ -41,10 +41,8 @@ describe("PlatformPresenceService", () => {
 
     const summary = await service.summary("driver-001");
 
-    expect(summary.notes).toEqual([
-      "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
-      "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
-    ]);
+    // The driver app shows this summary; no storage or endpoint notes.
+    expect(summary.notes).toEqual([]);
     expect(summary.adapterStatuses).toEqual([
       expect.objectContaining({
         platformCode: "grab_taiwan",

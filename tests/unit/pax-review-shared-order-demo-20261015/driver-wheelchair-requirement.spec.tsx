@@ -574,7 +574,9 @@ it.each([true, false])(
         "actual Jobs outlet",
       );
     }
-    await waitForState(() => expect(text(jobs())).toContain(h.record.taskId));
+    await waitForState(() =>
+      expect(text(jobs())).toContain(`pickup-${h.record.taskId}`),
+    );
     expect(text(jobs()).includes("輪椅需求")).toBe(accessible);
     await press(
       one(
@@ -591,7 +593,7 @@ it.each([true, false])(
           (node) =>
             node.type === "Pressable" &&
             node.props.accessibilityRole === "button" &&
-            text(node).includes(h.record.taskId),
+            text(node).includes(`pickup-${h.record.taskId}`),
         ),
         "same task real Jobs row",
       ),

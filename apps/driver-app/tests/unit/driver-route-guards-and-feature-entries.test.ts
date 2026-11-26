@@ -595,9 +595,56 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(page).not.toContain("任務佇列");
     });
 
-    it("Platforms with nothing bound shows only the way to bind one", async () => {
+    it("Job cards show a short order code and plain ownership copy", async () => {
       mocks.isDriverIdentityProvisioned.mockReturnValue(true);
-      mocks.getPlatformPresence.mockResolvedValue({ presences: [] });
+      mocks.listUnifiedDriverTasks.mockResolvedValue([
+        {
+          ...buildMockTask("3f6c1b2a-7d4e-4a10-9b8c-0d1e2f3a4b5c"),
+          orderId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        },
+      ]);
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(JobsScreen));
+        await flushAsync();
+      });
+
+      const page = rendered(renderer);
+      expect(page).toContain("#8b7c6d");
+      expect(page).not.toContain("3f6c1b2a-7d4e-4a10-9b8c-0d1e2f3a4b5c");
+      expect(page).not.toContain("9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d");
+      const banner = renderer.root.findByType("AuthorityBanner");
+      expect(banner.props.authorityLabel).toBe("車隊派單");
+      for (const jargon of ["主控", "鏡像", "生命周期", "DRTS"]) {
+        expect(
+          `${banner.props.title}${banner.props.authorityLabel}${banner.props.description}`,
+        ).not.toContain(jargon);
+      }
+
+      // The dense layout drops the full identifiers too.
+      const toggle = button(headerActions(renderer), "清單檢視");
+      await act(async () => {
+        toggle.props.onPress();
+        await flushAsync();
+      });
+      const dense = rendered(renderer);
+      expect(dense).toContain("#8b7c6d");
+      expect(dense).not.toContain("3f6c1b2a-7d4e-4a10-9b8c-0d1e2f3a4b5c");
+
+      act(() => renderer.unmount());
+    });
+
+    it("Platforms with nothing bound explains that the fleet binds them", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      // Older APIs still send developer notes; the driver must not see them.
+      mocks.getPlatformPresence.mockResolvedValue({
+        presences: [],
+        notes: [
+          "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
+          "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
+        ],
+      });
 
       let renderer: any;
       await act(async () => {
@@ -606,24 +653,112 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       });
 
       const page = rendered(renderer);
-      expect(page).toContain("還沒有綁定任何平台");
+      expect(page).toContain("還沒有綁定外部平台");
+      expect(page).toContain("車隊派單不用綁定，上班打卡後就能接單。");
       for (const noise of [
         "平台健康中心",
         "測試環境",
         "更新頻率",
         "重新授權方式",
         "個平台 ·",
+        "同步說明",
+        "資料庫",
+        "POST",
+        "/api/",
+        "去綁定平台",
       ]) {
         expect(page).not.toContain(noise);
       }
       expect(renderer.root.findAllByType("KPI")).toHaveLength(0);
 
+      // Drivers cannot bind a platform, so nothing offers to.
       const banner = renderer.root
         .findAllByType("Banner")
-        .find((node: any) => node.props.title === "還沒有綁定任何平台");
-      expect(banner.props.actions.props.children).toBe("去綁定平台");
-      banner.props.actions.props.onPress();
-      expect(mocks.push).toHaveBeenCalledWith("/settings");
+        .find((node: any) => node.props.title === "還沒有綁定外部平台");
+      expect(banner.props.actions).toBeUndefined();
+      // The mocked PageHeader drops its refresh action, so any Btn here
+      // would be an offer to bind.
+      expect(renderer.root.findAllByType("Btn")).toHaveLength(0);
+      expect(mocks.push).not.toHaveBeenCalled();
+
+      act(() => renderer.unmount());
+    });
+
+    it("Platforms with bindings lists them read-only without raw codes", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      const base = {
+        driverId: "drv-001",
+        accountId: "acct-001",
+        eligibility: "eligible",
+        tokenExpiresAt: null,
+        lastOnlineAt: "2026-11-26T01:00:00Z",
+        lastOfflineAt: null,
+        lastHeartbeatAt: "2026-11-26T01:00:00Z",
+        updatedAt: "2026-11-26T01:00:00Z",
+      };
+      mocks.getPlatformPresence.mockResolvedValue({
+        presences: [
+          {
+            ...base,
+            platformCode: "uber",
+            status: "online",
+            reauthRequired: false,
+          },
+          {
+            ...base,
+            platformCode: "line-taxi",
+            status: "offline",
+            eligibility: "pending",
+            reauthRequired: true,
+          },
+        ],
+        adapterStatuses: [],
+      });
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(PlatformPresenceScreen));
+        await flushAsync();
+      });
+
+      // Healthy bindings used to be hidden behind "no data to show".
+      const page = rendered(renderer);
+      expect(page).not.toContain("目前沒有可顯示的平台資料");
+      expect(page).toContain("Uber");
+      expect(page).toContain("LINE Taxi");
+      expect(page).toContain(
+        "暫時無法在 App 內重新登入LINE Taxi，請聯絡派車台。",
+      );
+      for (const noise of [
+        "uber ·",
+        "line-taxi",
+        "OAuth",
+        "深連結",
+        "手動憑證",
+        "Token",
+        "重新授權方式",
+      ]) {
+        expect(page).not.toContain(noise);
+      }
+      const facts = renderer.root
+        .findAllByType("DL")
+        .flatMap((node: any) => node.props.items);
+      expect(facts.map((item: any) => item.label)).not.toContain("Token");
+      expect(facts.map((item: any) => item.value)).toEqual(
+        expect.arrayContaining(["可接單", "審核中"]),
+      );
+      expect(
+        facts.some((item: any) =>
+          ["eligible", "pending", "ineligible"].includes(item.value),
+        ),
+      ).toBe(false);
+
+      // Read-only: going on or off line here would leave a status nobody
+      // keeps fresh, which then blocks the driver's own fleet dispatch.
+      // No on/off line toggle, no account-details hop to Settings, and no
+      // sign-in button without a target (the header refresh is not mounted).
+      expect(renderer.root.findAllByType("Btn")).toHaveLength(0);
+      expect(renderer.root.findAllByType("TextInput")).toHaveLength(0);
 
       act(() => renderer.unmount());
     });
@@ -642,7 +777,7 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       });
 
       const page = rendered(renderer);
-      expect(page).toContain("還沒有綁定任何平台");
+      expect(page).toContain("還沒有綁定外部平台");
       expect(page).toContain("測試環境");
       expect(renderer.root.findAllByType("KPI")).toHaveLength(0);
 

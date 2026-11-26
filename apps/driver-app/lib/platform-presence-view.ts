@@ -64,29 +64,31 @@ export function getPlatformReauthMechanism(
   }
 }
 
-export function getMechanismLabel(mechanism: ReauthMechanism): string {
-  switch (mechanism) {
-    case "external_browser_oauth":
-      return "外部瀏覽器 OAuth";
+// Where the driver can sign in to the platform again, when the API sends a
+// target. Without one the screen tells the driver to contact dispatch.
+export function getPlatformReauthUrl(
+  record: PlatformPresenceViewRecord,
+): string | null {
+  switch (getPlatformReauthMechanism(record)) {
     case "native_app_deeplink":
-      return "平台 App 深連結";
-    case "manual_credential":
-      return "手動憑證輸入";
-    case "ops_managed":
-      return "派車台協助處理";
+      return record.nativeAppUrl?.trim() || null;
+    case "external_browser_oauth":
+      return record.reauthUrl?.trim() || null;
+    default:
+      return null;
   }
 }
 
-export function getMechanismActionLabel(mechanism: ReauthMechanism): string {
-  switch (mechanism) {
-    case "external_browser_oauth":
-      return "打開授權頁";
-    case "native_app_deeplink":
-      return "開啟平台 App";
-    case "manual_credential":
-      return "輸入驗證資料";
-    case "ops_managed":
-      return "聯絡派車台";
+export function getEligibilityLabel(
+  eligibility: PlatformPresenceRecord["eligibility"],
+): string {
+  switch (eligibility) {
+    case "eligible":
+      return "可接單";
+    case "pending":
+      return "審核中";
+    default:
+      return "不符資格";
   }
 }
 
@@ -141,14 +143,16 @@ export function deriveBlockingReasons(
   if (!record.accountId) {
     reasons.push("尚未綁定平台帳號");
   }
-  if (record.status !== "online") {
+  if (record.status === "busy") {
+    reasons.push("正在這個平台載客");
+  } else if (record.status !== "online") {
     reasons.push("平台目前為離線");
   }
   if (record.reauthRequired) {
     reasons.push("需要重新授權");
   }
   if (expired) {
-    reasons.push("Token 已過期");
+    reasons.push("授權已過期");
   }
   if (record.eligibility === "pending") {
     reasons.push("資格審核中");
@@ -229,5 +233,6 @@ export function resolveEmptyReason(input: {
     return "driver_not_eligible";
   }
 
-  return "no_data";
+  // There are platforms to show, so nothing is empty.
+  return null;
 }

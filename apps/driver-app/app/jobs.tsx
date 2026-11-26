@@ -96,6 +96,7 @@ type TaskAuthorityDescriptor = {
 };
 
 const THEME = driverCanvasTheme;
+const OWNED_TASK_LABEL = "車隊派單";
 const FILTER_OPTIONS = driverJobFilterOptions;
 const ACTION_LABELS: Record<DriverTaskAction, string> = driverTaskActionLabels;
 const SWIPE_LIMIT = 124;
@@ -357,7 +358,7 @@ function buildFallbackUnifiedTaskView(
     requiresManualFallback: forwarded,
     requiresReauth: false,
     syncIssueSummary: forwarded
-      ? "來源平台原生狀態暫不可用，目前先以本地鏡像資料呈現；若內容異常請聯繫派車台。"
+      ? "任務資料可能延遲，請以平台 App 為準；有問題請聯絡派車台。"
       : null,
     blockingReason: null,
     pickupSummary: null,
@@ -476,7 +477,14 @@ function buildTaskTitle(task: UnifiedDriverTaskView) {
     return `${task.platformDisplayName} 平台訂單`;
   }
 
-  return `訂單 ${task.orderId}`;
+  return "派車台訂單";
+}
+
+// The last six characters are enough for dispatch to find the order; the
+// full identifier is noise on a phone screen.
+function formatShortReference(id: string | null | undefined): string | null {
+  const trimmed = id?.trim();
+  return trimmed ? `#${trimmed.slice(-6)}` : null;
 }
 
 function buildTaskSubtitle(task: UnifiedDriverTaskView) {
@@ -511,9 +519,7 @@ function buildTaskSubtitle(task: UnifiedDriverTaskView) {
 }
 
 function buildCardMeta(task: UnifiedDriverTaskView) {
-  return [task.orderId, formatTimestamp(task.updatedAt)]
-    .filter((value): value is string => Boolean(value))
-    .join(" · ");
+  return formatTimestamp(task.updatedAt);
 }
 
 function buildDenseStatusText(task: UnifiedDriverTaskView) {
@@ -552,7 +558,7 @@ function buildDenseStatusText(task: UnifiedDriverTaskView) {
     case "blocked":
       return "需派車台處理";
     case "read_only":
-      return "唯讀鏡像";
+      return driverStrings.jobs.actionStateLabels.read_only;
     default:
       return formatActionStateLabel(task.driverActionState);
   }
@@ -583,7 +589,7 @@ function buildCardStatusLabel(task: UnifiedDriverTaskView) {
     case "blocked":
       return "需派車台處理";
     case "read_only":
-      return "唯讀鏡像";
+      return driverStrings.jobs.actionStateLabels.read_only;
     default:
       return formatActionStateLabel(task.driverActionState);
   }
@@ -621,7 +627,7 @@ function buildTypeLabel(order: DriverTaskOrderSummary | null) {
 
 function getTaskPlatformCode(task: UnifiedDriverTaskView) {
   if (isOwnedTask(task)) {
-    return "DR";
+    return "車隊";
   }
 
   switch (task.sourcePlatform) {
@@ -645,7 +651,7 @@ function getTaskPlatformCode(task: UnifiedDriverTaskView) {
 
 function getTaskPlatformName(task: UnifiedDriverTaskView) {
   return isOwnedTask(task)
-    ? "自營派單"
+    ? OWNED_TASK_LABEL
     : task.platformDisplayName || getPlatformDisplayLabel(task.sourcePlatform);
 }
 
@@ -692,113 +698,106 @@ function getTaskVisualState(task: UnifiedDriverTaskView): TaskVisualState {
 function buildTaskAuthorityDescriptor(
   task: UnifiedDriverTaskView,
 ): TaskAuthorityDescriptor {
-  const platformLabel = isOwnedTask(task)
-    ? "DRTS"
-    : getPlatformDisplayLabel(task.sourcePlatform);
+  const owned = isOwnedTask(task);
+  const platformLabel = getPlatformDisplayLabel(task.sourcePlatform);
+  const authorityLabel = owned ? OWNED_TASK_LABEL : platformLabel;
+  const managedByPlatform = `這張單由${platformLabel}管理，請在${platformLabel} App 操作。`;
 
   switch (getTaskVisualState(task)) {
     case "sync_failed":
       return {
-        title: "平台同步異常",
-        authorityLabel: `平台 ${platformLabel}`,
-        description:
-          "平台同步或授權失敗；派車台接手前，司機端不開放本地生命周期變更。",
+        title: "同步異常",
+        authorityLabel,
+        description: "這張單暫時無法同步，請聯絡派車台處理。",
         tone: "danger",
         icon: "alert-circle-outline",
       };
     case "offered":
       return {
-        title: "來源平台派單",
-        authorityLabel: `平台 ${platformLabel}`,
-        description:
-          "此訂單由來源平台主導。接受後只會送出平台請求，仍可能被其他司機搶先確認。",
+        title: "平台派單",
+        authorityLabel,
+        description: `按「接受」後要等${platformLabel}確認，可能會被其他司機先接走。`,
         tone: "platform",
         icon: "swap-horizontal-outline",
       };
     case "accept_pending":
       return {
-        title: "等待來源平台確認",
-        authorityLabel: `平台 ${platformLabel}`,
-        description:
-          "已送出接單要求。平台回應前，本地只保留安全鏡像與查閱能力。",
+        title: "等待平台確認",
+        authorityLabel,
+        description: `已送出接單，${platformLabel}確認前請先不要出車。`,
         tone: "warning",
         icon: "time-outline",
       };
     case "confirmed":
       return {
-        title: "來源平台已確認",
-        authorityLabel: `平台 ${platformLabel}`,
-        description:
-          "平台已確認此單。後續節點仍需遵守來源平台規則，本地僅同步顯示安全資訊。",
+        title: "平台已確認",
+        authorityLabel,
+        description: managedByPlatform,
         tone: "platform",
         icon: "checkmark-circle-outline",
       };
     case "completed":
-      return isOwnedTask(task)
+      return owned
         ? {
             title: "任務已完成",
-            authorityLabel: "DRTS 任務主控",
-            description:
-              "本地任務已結案，畫面保留完成結果與最後同步資訊供查閱。",
+            authorityLabel,
+            description: "這趟已完成，可以在這裡查看結果。",
             tone: "owned",
             icon: "checkmark-done-outline",
           }
         : {
-            title: "來源平台已完成",
-            authorityLabel: `平台 ${platformLabel}`,
-            description:
-              "來源平台已完成此訂單。本地只保留最終同步結果，不再開放操作。",
+            title: "平台已完成",
+            authorityLabel,
+            description: `這張單已在${platformLabel}完成。`,
             tone: "platform",
             icon: "checkmark-done-outline",
           };
     case "lost_race":
       return {
-        title: "平台已分配給其他司機",
-        authorityLabel: `平台 ${platformLabel}`,
-        description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
+        title: "已由其他司機接走",
+        authorityLabel,
+        description: `${platformLabel}已把這張單給其他司機，不用再處理。`,
         tone: "warning",
         icon: "close-circle-outline",
       };
     case "cancelled":
       return {
-        title: "來源平台已取消",
-        authorityLabel: `平台 ${platformLabel}`,
-        description: "來源平台已取消此訂單。本地不再提供任何後續任務操作。",
+        title: "平台已取消",
+        authorityLabel,
+        description: `${platformLabel}已取消這張單，不用再處理。`,
         tone: "warning",
         icon: "ban-outline",
       };
     case "read_only":
       return {
-        title: "平台鏡像任務",
-        authorityLabel: `平台 ${platformLabel}`,
-        description: "來源平台仍是此任務的權限來源，本地僅提供同步鏡像供查閱。",
+        title: driverStrings.jobs.actionStateLabels.read_only,
+        authorityLabel,
+        description: managedByPlatform,
         tone: "platform",
         icon: "eye-outline",
       };
     case "needs_action":
       return {
         title: "待司機處理",
-        authorityLabel: "DRTS 任務主控",
-        description: "完整本地操作權限維持開放，請直接從行程作業台接手下一步。",
+        authorityLabel,
+        description: "點開這張單，處理下一步。",
         tone: "owned",
         icon: "alert-circle-outline",
       };
     case "in_progress":
     default:
-      return isOwnedTask(task)
+      return owned
         ? {
-            title: "自營派單",
-            authorityLabel: "DRTS 任務主控",
-            description:
-              "完整本地任務操作權限。請依任務節點完成出發、抵達、接送與完單佐證。",
+            title: "進行中",
+            authorityLabel,
+            description: "請依序完成出發、抵達、接客與完單。",
             tone: "owned",
             icon: "shield-checkmark",
           }
         : {
-            title: "來源平台鏡像進行中",
-            authorityLabel: `平台 ${platformLabel}`,
-            description:
-              "來源平台仍是此任務的權限來源。本地保留安全同步鏡像與查閱資訊。",
+            title: "平台行程進行中",
+            authorityLabel,
+            description: managedByPlatform,
             tone: "platform",
             icon: "navigate-outline",
           };
@@ -957,6 +956,7 @@ function TaskCard({
       : null;
   const nextStepText = buildAllowedActionSummary(task);
   const showFooter = Boolean(fareLabel || deadlineLabel || actionLabel);
+  const shortReference = formatShortReference(task.orderId);
 
   return (
     <Card
@@ -988,7 +988,9 @@ function TaskCard({
                 </Text>
               )}
             </View>
-            <Text style={styles.cardTaskCode}>{task.taskId}</Text>
+            {shortReference ? (
+              <Text style={styles.cardTaskCode}>{shortReference}</Text>
+            ) : null}
           </View>
 
           <View style={styles.cardCopy}>
@@ -1093,6 +1095,7 @@ function DenseTaskRow({
   const forwarded = !isOwnedTask(task);
   const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
   const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
+  const shortReference = formatShortReference(task.orderId);
 
   const resetSwipe = () => {
     Animated.spring(translateX, {
@@ -1211,8 +1214,12 @@ function DenseTaskRow({
               >
                 {getTaskPlatformCode(task)}
               </Text>
-              <View style={styles.denseMetaDot} />
-              <Text style={styles.denseTaskCode}>{task.taskId}</Text>
+              {shortReference ? (
+                <>
+                  <View style={styles.denseMetaDot} />
+                  <Text style={styles.denseTaskCode}>{shortReference}</Text>
+                </>
+              ) : null}
             </View>
             <Text style={styles.denseTitle} numberOfLines={1}>
               {buildTaskTitle(task)}
@@ -1483,8 +1490,7 @@ export default function JobsScreen() {
               color={THEME.warn}
             />
           }
-          title="目前使用本地鏡像備援"
-          body="已退回舊任務資料來源；轉單任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+          title="任務資料可能延遲，請以平台 App 為準。"
         />
       );
     }
@@ -1500,8 +1506,8 @@ export default function JobsScreen() {
               color={THEME.info}
             />
           }
-          title="離線佇列待重送"
-          body={`任務 ${queuedCompletionTaskId} 的完單資料仍在本機佇列，恢復連線後會自動重送。`}
+          title="完單資料等待上傳"
+          body="有一筆完單資料還在手機裡，恢復連線後會自動上傳。"
         />
       );
     }

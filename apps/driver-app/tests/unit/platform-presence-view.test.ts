@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   canReceiveOrders,
   deriveBlockingReasons,
-  getMechanismActionLabel,
+  getEligibilityLabel,
   getPlatformReauthMechanism,
+  getPlatformReauthUrl,
   resolveEmptyReason,
   type PlatformPresenceViewSummary,
 } from "../../lib/platform-presence-view";
@@ -40,7 +41,41 @@ describe("platform-presence-view helpers", () => {
         platformCode: "grab_taiwan",
       }),
     ).toBe("ops_managed");
-    expect(getMechanismActionLabel("ops_managed")).toBe("聯絡派車台");
+  });
+
+  it("offers a sign-in target only when the API sends one", () => {
+    // The API sends no targets today, so every platform falls back to
+    // telling the driver to contact dispatch.
+    expect(getPlatformReauthUrl(baseRecord)).toBeNull();
+    expect(
+      getPlatformReauthUrl({ ...baseRecord, platformCode: "grab" }),
+    ).toBeNull();
+    expect(
+      getPlatformReauthUrl({
+        ...baseRecord,
+        reauthUrl: "https://auth.example.test/uber",
+      }),
+    ).toBe("https://auth.example.test/uber");
+    expect(
+      getPlatformReauthUrl({
+        ...baseRecord,
+        platformCode: "grab",
+        nativeAppUrl: "grab://reauth",
+      }),
+    ).toBe("grab://reauth");
+    expect(
+      getPlatformReauthUrl({
+        ...baseRecord,
+        platformCode: "line-taxi",
+        reauthUrl: "https://auth.example.test/line",
+      }),
+    ).toBeNull();
+  });
+
+  it("labels eligibility in plain words", () => {
+    expect(getEligibilityLabel("eligible")).toBe("可接單");
+    expect(getEligibilityLabel("pending")).toBe("審核中");
+    expect(getEligibilityLabel("ineligible")).toBe("不符資格");
   });
 
   it("derives blocking reasons from legacy presence fields", () => {
@@ -71,6 +106,15 @@ describe("platform-presence-view helpers", () => {
         "平台同步延遲",
       ]),
     );
+    expect(
+      deriveBlockingReasons({
+        ...baseRecord,
+        tokenExpiresAt: "2020-01-01T00:00:00.000Z",
+      }),
+    ).toEqual(["授權已過期"]);
+    expect(deriveBlockingReasons({ ...baseRecord, status: "busy" })).toEqual([
+      "正在這個平台載客",
+    ]);
   });
 
   it("prefers explicit canReceiveOrders and otherwise infers from presence status", () => {
@@ -175,5 +219,14 @@ describe("platform-presence-view helpers", () => {
         filteredCount: 1,
       }),
     ).toBe("driver_not_eligible");
+
+    // Healthy bindings are not an empty state; the screen lists them.
+    expect(
+      resolveEmptyReason({
+        isProvisioned: true,
+        summary: { ...summary, presences: [baseRecord] },
+        filteredCount: 1,
+      }),
+    ).toBeNull();
   });
 });

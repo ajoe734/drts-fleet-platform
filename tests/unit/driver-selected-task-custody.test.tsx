@@ -449,7 +449,9 @@ describe("Driver selected task custody through normal screens and SDK", () => {
         task("selected-history", "completed"),
       ]);
       render(<h.Jobs />);
-      await screen.findByText("selected-history");
+      // Cards show the route and a short order code, not the full task id.
+      await screen.findAllByText(/pickup-selected-history/);
+      expect(screen.queryByText("selected-history")).toBeNull();
       if (layout === "dense")
         fireEvent.click(screen.getByRole("button", { name: "清單檢視" }));
       const row = screen
