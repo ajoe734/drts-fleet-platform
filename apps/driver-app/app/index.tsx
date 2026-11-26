@@ -193,6 +193,10 @@ const TASK_LOAD_FAILED_MESSAGE = "讀取失敗，請檢查網路後重新整理�
 const TASK_LOAD_DENIED_MESSAGE =
   "目前無法讀取任務資料，請確認帳號權限或聯繫管理員。";
 const UNKNOWN_PLATFORM_NAME = "外部平台";
+// Same wording as the platform page (PR #3451). Nothing in the system writes a
+// platform account binding, so the copy must not promise that anyone will.
+const PLATFORM_BINDING_UNAVAILABLE_MESSAGE =
+  "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。";
 const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
   urgent: 5_000,
   fast: 3_000,
@@ -1778,10 +1782,11 @@ export default function WorkspaceIndex() {
     if (externalPresences.length === 0) {
       return {
         tone: "info",
-        // Drivers cannot bind external platforms in the app; the fleet does
-        // it. So this card explains that and offers no button.
+        // Nothing can bind an external platform account today (not the app,
+        // not the fleet), so this card only says so and offers no button.
+        // Same copy as the platform page.
         title: "尚未綁定外部平台",
-        body: "車隊派單不用綁定，上班打卡後就能接單。外部平台帳號由車隊幫您綁定，需要請聯絡派車台。",
+        body: PLATFORM_BINDING_UNAVAILABLE_MESSAGE,
         action: null,
         envelope: createEmptyStateEnvelope("not_provisioned"),
       };
@@ -2082,12 +2087,13 @@ export default function WorkspaceIndex() {
         state: "go_online",
         tone: "info",
         eyebrow: "建議動作",
-        // Drivers cannot bind platforms or switch them online in the app
-        // (the fleet manages them), so this only explains and links to the
-        // read-only platform page.
+        // Drivers cannot bind platforms or switch them online in the app, so
+        // this only explains and links to the read-only platform page. The
+        // 打卡 sentence is left out when the shift feature is off.
         title: "目前沒有可接單的平台",
-        detail:
-          "新的派單暫時不會送達。外部平台由車隊幫您綁定與管理，需要協助請聯絡派車台。",
+        detail: workspace.shiftFeatureEnabled
+          ? `新的派單暫時不會送達。${PLATFORM_BINDING_UNAVAILABLE_MESSAGE}`
+          : "新的派單暫時不會送達。目前無法在 App 內綁定外部平台。",
         meta: "",
         primaryAction: createWorkspaceAction(
           "/platform-presence",
@@ -2284,6 +2290,11 @@ export default function WorkspaceIndex() {
       heroAction.state === "standing_by" &&
       (focusEmptyState.envelope.reason === "no_data" ||
         focusEmptyState.envelope.reason === "filtered_empty")
+    ) &&
+    // The no-platform top card already says binding is not possible.
+    !(
+      heroAction.state === "go_online" &&
+      focusEmptyState.envelope.reason === "not_provisioned"
     );
 
   const markNotificationsRead = async (notificationIds: string[]) => {

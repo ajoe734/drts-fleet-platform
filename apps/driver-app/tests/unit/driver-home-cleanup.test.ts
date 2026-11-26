@@ -352,12 +352,17 @@ describe("driver home: no raw codes, English or IDs", () => {
       "前往平台連線",
       "保持平台在線",
       "維持平台在線",
+      // Nothing writes a platform binding, so no one may promise one.
+      "車隊幫您綁定",
+      "由車隊幫您",
     ]) {
       expect(text).not.toContain(leak);
     }
 
     expect(text).toContain("尚未綁定外部平台");
-    expect(text).toContain("外部平台帳號由車隊幫您綁定，需要請聯絡派車台。");
+    expect(text).toContain(
+      "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",
+    );
     // The card has nothing to do in the app, so it offers no button.
     expect(buttons("管理平台")).toHaveLength(0);
     expect(text).toContain("捷徑");
@@ -591,7 +596,11 @@ describe("driver home: buttons about different tasks", () => {
 
     const text = screenText();
     expect(text).toContain("目前沒有可接單的平台");
-    expect(text).toContain("請聯絡派車台");
+    // Said once, in the top card; the no-bindings card would only repeat it.
+    expect(text.split("目前無法在 App 內綁定外部平台").length - 1).toBe(1);
+    expect(text).not.toContain("車隊幫您");
+    // The shift feature is off here, so no 打卡 promise either.
+    expect(text).not.toContain("上班打卡");
     expect(text).not.toContain("讓至少一個平台上線");
     expect(buttons("前往平台連線")).toHaveLength(0);
     expect(buttons("平台中心")).toHaveLength(1);
