@@ -170,6 +170,8 @@ export interface DriverSosActiveCase {
    * works.
    */
   autoResendBlocked?: boolean;
+  /** Local only: dismissed with 不用了 (not 誤觸) from the 30-minute prompt. */
+  cancelledByDriver?: boolean;
   vehicleId?: string | null;
   plateNo?: string | null;
   attachments: DriverSosAttachmentDraft[];

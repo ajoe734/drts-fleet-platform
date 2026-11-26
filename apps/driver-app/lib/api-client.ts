@@ -410,6 +410,8 @@ export function registerProtectedCacheClearHandler(
 
 type StoredSosCaseOwnership = {
   delivered: boolean;
+  /** Marked 誤觸 or 不用了: it will never be sent, so nothing to keep. */
+  dismissed: boolean;
   ownerDriverId: string | null;
 };
 
@@ -425,21 +427,23 @@ async function readStoredSosCaseOwnership(): Promise<StoredSosCaseOwnership | nu
     const parsed = JSON.parse(raw) as {
       receipt?: unknown;
       ownerDriverId?: unknown;
+      falseAlarm?: { dismissed?: unknown };
     };
     return {
       delivered: Boolean(parsed?.receipt),
+      dismissed: parsed?.falseAlarm?.dismissed === true,
       ownerDriverId:
         typeof parsed?.ownerDriverId === "string" ? parsed.ownerDriverId : null,
     };
   } catch {
-    return { delivered: true, ownerDriverId: null };
+    return { delivered: true, dismissed: false, ownerDriverId: null };
   }
 }
 
 async function shouldKeepUndeliveredSosCase(): Promise<boolean> {
   try {
     const stored = await readStoredSosCaseOwnership();
-    return stored !== null && !stored.delivered;
+    return stored !== null && !stored.delivered && !stored.dismissed;
   } catch {
     // Cannot tell: never risk deleting an SOS that has not reached the server.
     return true;

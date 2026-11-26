@@ -378,6 +378,17 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
       expect(mockStore.has(SOS_KEY)).toBe(false);
     });
 
+    it("does not keep an SOS marked 誤觸 or 不用了 through a sign-out", async () => {
+      storeSosCase({
+        falseAlarm: { dismissed: true, dismissedAt: null, note: null },
+      });
+
+      await recoverDriverSessionFromApiError(AUTH_ERROR);
+
+      expect(mockStore.has(SOS_KEY)).toBe(false);
+      expect(hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+    });
+
     it("clears even an undelivered SOS on an explicit logout", async () => {
       storeSosCase({});
 
