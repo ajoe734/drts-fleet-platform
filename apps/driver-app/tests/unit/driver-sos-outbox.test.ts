@@ -6,6 +6,8 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: vi.fn(),
 }));
 
+import * as SecureStore from "expo-secure-store";
+
 import {
   buildDriverSosSubmitCommand,
   applyDriverSosAttachmentSyncResult,
@@ -18,6 +20,7 @@ import {
   markDriverSosCaseFailed,
   markDriverSosCaseSubmitted,
   queueDriverSosSupplement,
+  saveDriverSosActiveCase,
   type DriverSosAttachmentDraft,
 } from "@/lib/driver-sos-outbox";
 
@@ -285,6 +288,8 @@ describe("driver-sos-outbox", () => {
     });
 
     const forbiddenPhrases = [
+      // The internal incident id stays server-side; drivers see the event no.
+      "inc-999",
       "driver-sos domain",
       "passenger_conflict",
       "incident_category",
@@ -511,6 +516,71 @@ describe("driver-sos-outbox", () => {
       expect(
         afterP3.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
       ).toHaveLength(1);
+    });
+  });
+
+  describe("DRIVER-SOS-CLEANUP-20261126: resend timing and stored state", () => {
+    function newCase() {
+      return createDriverSosActiveCase({
+        situation: "passenger_conflict",
+        description: "乘客衝突",
+        offlineAtTrigger: false,
+        location: null,
+        orderId: null,
+        taskId: null,
+      });
+    }
+
+    function deliveredCopyOf(activeCase: ReturnType<typeof newCase>) {
+      return markDriverSosCaseSubmitted(activeCase, {
+        event: {
+          status: "submitted",
+          dutyAcknowledgement: {
+            acknowledgedAt: null,
+            acknowledgedByActorId: null,
+          },
+        } as any,
+        receipt: {
+          sosEventId: "sos-1",
+          incidentId: "INC-1",
+          clientEventId: activeCase.clientEventId,
+          eventNo: "SOS-20261126-001",
+          duplicate: false,
+          serverReceivedAt: "2026-07-20T09:00:00.000Z",
+          fleetReportConfirmedAt: "2026-07-20T09:00:00.000Z",
+        },
+      });
+    }
+
+    it("retries an undelivered SOS after 15 s, 30 s, then at most every 60 s", () => {
+      let activeCase = newCase();
+      const delaysMs: number[] = [];
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        activeCase = markDriverSosCaseFailed(activeCase, "網路連線中斷");
+        delaysMs.push(Date.parse(activeCase.nextAttemptAt) - Date.now());
+      }
+
+      expect(delaysMs).toEqual([15_000, 30_000, 60_000, 60_000, 60_000]);
+    });
+
+    it("never stores an undelivered copy over a delivered copy of the same SOS", async () => {
+      const pending = newCase();
+      const delivered = deliveredCopyOf(pending);
+      vi.mocked(SecureStore.getItemAsync).mockResolvedValue(
+        JSON.stringify(delivered),
+      );
+      vi.mocked(SecureStore.setItemAsync).mockClear();
+
+      // A stale screen finishing a failed send late.
+      await saveDriverSosActiveCase(
+        markDriverSosCaseFailed(pending, "網路連線中斷"),
+      );
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+
+      // Newer delivered state and a different SOS are still written.
+      await saveDriverSosActiveCase(delivered);
+      await saveDriverSosActiveCase(markDriverSosCaseFailed(newCase(), "x"));
+      expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(2);
     });
   });
 });

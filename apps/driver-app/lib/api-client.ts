@@ -57,6 +57,7 @@ const DEV_DRIVER_ID: string | undefined =
 const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
+const DRIVER_SOS_ACTIVE_CASE_KEY = "drts.driver.sos.activeCase";
 
 // Expo SecureStore has no web implementation. Keep device-bound credentials
 // in this browser tab; native retains its existing secure storage. Orders and
@@ -395,9 +396,72 @@ export function registerProtectedCacheClearHandler(
   };
 }
 
-async function clearProtectedCachedData(): Promise<void> {
+type StoredSosCaseOwnership = {
+  delivered: boolean;
+  ownerDriverId: string | null;
+};
+
+// Reads only what session handling needs from the stored SOS case
+// (lib/driver-sos-outbox owns the format): whether the server has a receipt,
+// and which driver raised it.
+async function readStoredSosCaseOwnership(): Promise<StoredSosCaseOwnership | null> {
+  const raw = await driverStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      receipt?: unknown;
+      ownerDriverId?: unknown;
+    };
+    return {
+      delivered: Boolean(parsed?.receipt),
+      ownerDriverId:
+        typeof parsed?.ownerDriverId === "string" ? parsed.ownerDriverId : null,
+    };
+  } catch {
+    return { delivered: true, ownerDriverId: null };
+  }
+}
+
+async function shouldKeepUndeliveredSosCase(): Promise<boolean> {
+  try {
+    const stored = await readStoredSosCaseOwnership();
+    return stored !== null && !stored.delivered;
+  } catch {
+    // Cannot tell: never risk deleting an SOS that has not reached the server.
+    return true;
+  }
+}
+
+// After a sign-in: an SOS kept through an automatic sign-out belongs to the
+// driver who raised it. Discard it when someone else signs in on this device.
+async function discardSosCaseOfOtherDriver(driverId: string): Promise<void> {
+  try {
+    const stored = await readStoredSosCaseOwnership();
+    if (stored && stored.ownerDriverId !== driverId) {
+      await driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    }
+  } catch {
+    // Best effort; the SOS screen only resends a case it can load.
+  }
+}
+
+/**
+ * `keepUndeliveredSos` is for automatic sign-outs (expired or revoked
+ * session): an SOS that has not reached the server stays on the device and
+ * is resent when the same driver signs back in. An explicit logout clears it.
+ */
+async function clearProtectedCachedData(
+  options: { keepUndeliveredSos?: boolean } = {},
+): Promise<void> {
+  const keepSosCase = options.keepUndeliveredSos
+    ? await shouldKeepUndeliveredSosCase()
+    : false;
   await Promise.allSettled([
-    driverStorage.deleteItemAsync("drts.driver.sos.activeCase"),
+    ...(keepSosCase
+      ? []
+      : [driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY)]),
     driverStorage.deleteItemAsync("drts.safetyOperator.queue"),
     driverStorage.deleteItemAsync("drts.driver.trackingSessionMarker"),
   ]);
@@ -456,7 +520,7 @@ export async function recoverDriverSessionFromApiError(
   }
 
   setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
-  await clearStoredSession();
+  await clearStoredSession({ keepUndeliveredSos: true });
   hydrated = true;
   return true;
 }
@@ -476,11 +540,13 @@ export async function getDriverDeviceId(): Promise<string> {
   return getOrCreateDeviceId();
 }
 
-async function clearStoredSession() {
+async function clearStoredSession(
+  options: { keepUndeliveredSos?: boolean } = {},
+) {
   provisionedSession = null;
   await driverStorage.deleteItemAsync(DRIVER_SESSION_KEY);
   applySession(null);
-  await clearProtectedCachedData();
+  await clearProtectedCachedData(options);
 }
 
 async function persistPendingDriverTaskCompletion(
@@ -564,7 +630,7 @@ export async function initializeDriverIdentity(): Promise<void> {
       ) as DriverDeviceProvisioningSession;
     } catch {
       setDriverIdentityIssue("裝置登入資料已失效，請重新註冊。");
-      await clearStoredSession();
+      await clearStoredSession({ keepUndeliveredSos: true });
       hydrated = true;
       return;
     }
@@ -608,7 +674,7 @@ export async function refreshDriverSessionSingleFlight(): Promise<DriverDevicePr
     } catch (error) {
       if (isDriverSessionAuthFailure(error)) {
         setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
-        await clearStoredSession();
+        await clearStoredSession({ keepUndeliveredSos: true });
       }
       throw error;
     }
@@ -637,6 +703,7 @@ async function registerDriverDeviceWithProof(
   });
   setDriverIdentityIssue(null);
   await persistSession(session);
+  await discardSosCaseOfOtherDriver(session.driverId);
   hydrated = true;
   return session;
 }
@@ -880,7 +947,7 @@ function createDriverClientProxy(): ApiClient {
                 setDriverIdentityIssue(
                   getDriverIdentityIssueMessage(retryError),
                 );
-                await clearStoredSession();
+                await clearStoredSession({ keepUndeliveredSos: true });
               }
               throw retryError;
             }

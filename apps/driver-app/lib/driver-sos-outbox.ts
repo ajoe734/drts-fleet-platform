@@ -16,8 +16,36 @@ import type {
 import { driverIncidentSituations } from "./strings";
 
 const DRIVER_SOS_ACTIVE_CASE_KEY = "drts.driver.sos.activeCase";
-const DRIVER_SOS_RETRY_BASE_MS = 60_000;
-const DRIVER_SOS_RETRY_MAX_MS = 30 * 60_000;
+// An undelivered SOS is an emergency: retry quickly and never back off past a
+// minute (15 s, 30 s, then every 60 s). 重新送出 always sends at once.
+const DRIVER_SOS_RETRY_BASE_MS = 15_000;
+const DRIVER_SOS_RETRY_MAX_MS = 60_000;
+
+// Expo SecureStore has no web implementation (its web module is empty, so
+// every call rejects). Match lib/api-client's driverStorage: this browser
+// tab's sessionStorage on web, SecureStore in the phone app. api-client clears
+// and inspects the SOS case through driverStorage, so both must agree.
+const sosStorage = {
+  async getItemAsync(key: string): Promise<string | null> {
+    return typeof window !== "undefined" && typeof document !== "undefined"
+      ? window.sessionStorage.getItem(key)
+      : SecureStore.getItemAsync(key);
+  },
+  async setItemAsync(key: string, value: string): Promise<void> {
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      window.sessionStorage.setItem(key, value);
+      return;
+    }
+    await SecureStore.setItemAsync(key, value);
+  },
+  async deleteItemAsync(key: string): Promise<void> {
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    await SecureStore.deleteItemAsync(key);
+  },
+};
 
 export type SosSituationId = (typeof driverIncidentSituations)[number]["id"];
 
@@ -74,6 +102,12 @@ export interface DriverSosActiveCase {
   severity?: DriverSosSeverity | null;
   description: string;
   driverId?: string | null;
+  /**
+   * Local only, never sent: the signed-in driver who raised this SOS. An
+   * undelivered case survives an automatic sign-out so it can be resent; it
+   * is discarded only if a different driver signs in on this device.
+   */
+  ownerDriverId?: string | null;
   vehicleId?: string | null;
   plateNo?: string | null;
   attachments: DriverSosAttachmentDraft[];
@@ -296,6 +330,7 @@ export function createDriverSosActiveCase(params: {
   severity?: DriverSosSeverity | null;
   description: string;
   driverId?: string | null;
+  ownerDriverId?: string | null;
   vehicleId?: string | null;
   plateNo?: string | null;
   attachments?: DriverSosAttachmentDraft[];
@@ -322,6 +357,7 @@ export function createDriverSosActiveCase(params: {
     severity: params.severity ?? (eventType ? "major" : "normal"),
     description: params.description.trim(),
     driverId: params.driverId ?? null,
+    ownerDriverId: params.ownerDriverId ?? null,
     vehicleId: params.vehicleId ?? null,
     plateNo: params.plateNo ?? null,
     attachments,
@@ -766,7 +802,7 @@ export function markDriverSosFalseAlarm(
 }
 
 export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | null> {
-  const raw = await SecureStore.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+  const raw = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
   if (!raw) {
     return null;
   }
@@ -800,7 +836,36 @@ export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | n
       },
     };
   } catch {
-    await SecureStore.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    await sosStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    return null;
+  }
+}
+
+/**
+ * True when writing `next` would make the stored copy of the same SOS look
+ * undelivered again: the stored copy has a server receipt and `next` does
+ * not (for example a stale screen finishing a failed send late).
+ */
+export function wouldRegressDeliveredSos(
+  stored: Pick<DriverSosActiveCase, "clientEventId" | "receipt"> | null,
+  next: Pick<DriverSosActiveCase, "clientEventId" | "receipt">,
+): boolean {
+  return Boolean(
+    stored &&
+    stored.clientEventId === next.clientEventId &&
+    stored.receipt &&
+    !next.receipt,
+  );
+}
+
+async function readStoredCaseForGuard(): Promise<Pick<
+  DriverSosActiveCase,
+  "clientEventId" | "receipt"
+> | null> {
+  try {
+    const raw = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    return raw ? (JSON.parse(raw) as DriverSosActiveCase) : null;
+  } catch {
     return null;
   }
 }
@@ -809,11 +874,18 @@ export async function saveDriverSosActiveCase(
   activeCase: DriverSosActiveCase | null,
 ): Promise<void> {
   if (!activeCase) {
-    await SecureStore.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    await sosStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
     return;
   }
 
-  await SecureStore.setItemAsync(
+  if (
+    !activeCase.receipt &&
+    wouldRegressDeliveredSos(await readStoredCaseForGuard(), activeCase)
+  ) {
+    return;
+  }
+
+  await sosStorage.setItemAsync(
     DRIVER_SOS_ACTIVE_CASE_KEY,
     JSON.stringify(activeCase),
   );

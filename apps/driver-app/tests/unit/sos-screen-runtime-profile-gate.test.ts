@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => ({
   submitDriverSosEvent: vi.fn(),
   getSosEvent: vi.fn(),
   secureGetItem: vi.fn(),
+  secureSetItem: vi.fn<(key: string, value: string) => Promise<void>>(
+    async () => undefined,
+  ),
+  syncAttachments: vi.fn(),
+  recoverSession: vi.fn(async () => false),
+  provisioned: true,
   appStateHandlers: [] as Array<(state: string) => void>,
 }));
 
@@ -53,10 +59,14 @@ vi.mock("@expo/vector-icons", () => ({
 }));
 
 vi.mock("expo-router", () => ({
+  Redirect: (props: Record<string, unknown>) =>
+    React.createElement("Redirect", props),
   useRouter: () => ({
     push: mocks.push,
     back: mocks.back,
     replace: mocks.replace,
+    canDismiss: () => false,
+    dismissAll: vi.fn(),
   }),
 }));
 
@@ -70,7 +80,7 @@ vi.mock("expo-image-picker", () => ({
 
 vi.mock("expo-secure-store", () => ({
   getItemAsync: (...args: unknown[]) => mocks.secureGetItem(...args),
-  setItemAsync: vi.fn().mockResolvedValue(undefined),
+  setItemAsync: (key: string, value: string) => mocks.secureSetItem(key, value),
   deleteItemAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -131,13 +141,16 @@ vi.mock("@/lib/api-client", () => ({
     get: mocks.getSosEvent,
   }),
   formatDriverError: (_error: unknown, fallback: string) => fallback,
-  isDriverIdentityProvisioned: vi.fn().mockReturnValue(true),
+  getDriverId: () => "driver-001",
+  isDriverIdentityProvisioned: () => mocks.provisioned,
   registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
-  recoverDriverSessionFromApiError: vi.fn(),
+  recoverDriverSessionFromApiError: (...args: unknown[]) =>
+    (mocks.recoverSession as (...a: unknown[]) => Promise<boolean>)(...args),
 }));
 
 vi.mock("@/lib/driver-sos-attachment-upload", () => ({
-  syncDriverSosAttachments: vi.fn(),
+  syncDriverSosAttachments: (...args: unknown[]) =>
+    (mocks.syncAttachments as (...a: unknown[]) => unknown)(...args),
 }));
 
 vi.mock("@/lib/driver-location-heartbeat", () => ({
@@ -558,7 +571,7 @@ describe("SOS screen · driver-facing copy", () => {
     });
 
     expect(bannerBodies(renderer)).toContain(
-      "SOS 還沒送到，已存在手機，連線後會自動再送。",
+      "SOS 還沒送到，已存在手機，會自動再送，也可按「重新送出」。",
     );
     const strings = hostStrings(renderer);
     expect(developerCopyIn(strings)).toEqual([]);
@@ -617,7 +630,7 @@ describe("SOS screen · driver-facing copy", () => {
 // - where the browser did report online, a failed send was re-sent
 //   immediately on every state change, ignoring the case's nextAttemptAt.
 const SEND_NOW = new Date("2026-11-26T01:00:00.000Z");
-const RETRY_BACKOFF_MS = 60_000; // first backoff step in driver-sos-outbox
+const RETRY_BACKOFF_MS = 15_000; // first backoff step in driver-sos-outbox
 
 /** Enough microtask turns for one full send/fail cycle to settle. */
 async function settle() {
@@ -830,6 +843,355 @@ describe("SOS screen · resend safety", () => {
       ).toBe("client-event-cleanup-1");
     } finally {
       act(() => renderer.unmount());
+    }
+  });
+});
+
+// DRIVER-SOS-CLEANUP-20261126, review follow-up. Before this change:
+// - a failed local write of the "sending" case threw before the send's
+//   try/finally, so the single-send guard stayed set and the SOS was stuck;
+// - a supplement added while a send ran was dropped by that guard and then
+//   overwritten by the running send's older copy of the case;
+// - the backoff grew to 30 minutes for an undelivered SOS;
+// - an expired session during the send deleted the SOS and sent the driver
+//   to sign-in without telling them it was not delivered.
+function submitResultFor(command: { clientEventId: string }) {
+  return {
+    event: {
+      status: "submitted",
+      dutyAcknowledgement: {
+        acknowledgedAt: null,
+        acknowledgedByActorId: null,
+      },
+    },
+    receipt: {
+      sosEventId: "sos-event-new",
+      incidentId: "INC-000077",
+      clientEventId: command.clientEventId,
+      eventNo: "SOS-20261126010000-NEW001",
+      duplicate: false,
+      serverReceivedAt: SEND_NOW.toISOString(),
+      fleetReportConfirmedAt: SEND_NOW.toISOString(),
+    },
+  };
+}
+
+function savedCases(): Array<Record<string, any>> {
+  return mocks.secureSetItem.mock.calls.map((call: unknown[]) =>
+    JSON.parse(call[1] as string),
+  );
+}
+
+function holdButtonLabel(renderer: any): string {
+  return findHoldButton(renderer)
+    .findAll((node: any) => node.type === "Text")
+    .map((node: any) => node.children.join(""))[0];
+}
+
+describe("SOS screen · review follow-up (safety)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+      now: SEND_NOW,
+    });
+    delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
+    mocks.provisioned = true;
+    mocks.appStateHandlers.length = 0;
+    mocks.replace.mockReset();
+    mocks.secureGetItem.mockReset().mockResolvedValue(null);
+    mocks.secureSetItem.mockReset().mockResolvedValue(undefined);
+    mocks.recoverSession.mockReset().mockResolvedValue(false);
+    mocks.syncAttachments.mockReset();
+    mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.getSosEvent.mockReset().mockRejectedValue(new Error("offline"));
+    mocks.submitDriverSosEvent
+      .mockReset()
+      .mockImplementation(async (command: { clientEventId: string }) =>
+        submitResultFor(command),
+      );
+    useNativeConnectivity();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("still sends the SOS when saving the sending state on the phone fails", async () => {
+    mocks.secureSetItem.mockImplementation(
+      async (_key: string, value: string) => {
+        if (JSON.parse(value).syncState === "sending") {
+          throw new Error("keychain is locked");
+        }
+      },
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      await act(async () => {
+        await settle();
+      });
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      const strings = hostStrings(renderer);
+      expect(strings).toContain("已送達");
+      expect(holdButtonLabel(renderer)).not.toBe("送出中…");
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("still sends a backoff resend when the phone refuses every save", async () => {
+    mocks.secureSetItem.mockRejectedValue(new Error("keychain is locked"));
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "failed_retryable",
+          attemptCount: 1,
+          nextAttemptAt: new Date(
+            SEND_NOW.getTime() + RETRY_BACKOFF_MS,
+          ).toISOString(),
+        }),
+      ),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+
+      await advance(RETRY_BACKOFF_MS);
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(
+        mocks.submitDriverSosEvent.mock.calls[0][1].headers["Idempotency-Key"],
+      ).toBe("client-event-cleanup-1");
+      expect(hostStrings(renderer)).toContain("已送達");
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("keeps a supplement added while a send is running, and sends it afterwards", async () => {
+    const delivered = storedAcknowledgedCase();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify({
+        ...delivered,
+        syncState: "attachment_pending",
+        falseAlarm: { dismissed: false, dismissedAt: null, note: null },
+      }),
+    );
+    let finishAttachments: (value: unknown) => void = () => {};
+    const confirmedAttachment = {
+      ...delivered.attachments[0],
+      uploadState: "confirmed",
+      serverAttachmentId: "att-1",
+      scanStatus: "clean",
+      lastError: null,
+    };
+    mocks.syncAttachments
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishAttachments = resolve;
+        }),
+      )
+      .mockResolvedValue({
+        attachments: [confirmedAttachment],
+        confirmedCount: 1,
+        unavailableCount: 0,
+        failedCount: 0,
+      });
+
+    const renderer = await renderSosScreen();
+    try {
+      // 重新送出 starts a send that is still uploading the photo...
+      await act(async () => {
+        findResendButton(renderer).props.onPress();
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      // ...when the driver adds a supplement.
+      const noteInput = renderer.root.find(
+        (node: any) =>
+          node.type === "TextInput" &&
+          node.props.placeholder === "可補充車內狀況、現場照片說明…",
+      );
+      await act(async () => {
+        noteInput.props.onChangeText("後座乘客持刀");
+      });
+      await act(async () => {
+        renderer.root
+          .find(
+            (node: any) =>
+              node.type === "Btn" && node.props.children === "加入本機紀錄",
+          )
+          .props.onPress();
+        await settle();
+      });
+
+      await act(async () => {
+        finishAttachments({
+          attachments: [confirmedAttachment],
+          confirmedCount: 1,
+          unavailableCount: 0,
+          failedCount: 0,
+        });
+        await settle();
+      });
+      await act(async () => {
+        await settle();
+      });
+
+      expect(hostStrings(renderer)).toContain("後座乘客持刀");
+      const lastSaved = savedCases().at(-1)!;
+      expect(
+        lastSaved.supplements.map((supplement: any) => supplement.note),
+      ).toEqual(["後座乘客持刀"]);
+      // The queued sync ran after the first one finished.
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("gives up on a photo read that never finishes, so the SOS is not held in 送出中", async () => {
+    const delivered = storedAcknowledgedCase();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify({
+        ...delivered,
+        syncState: "attachment_pending",
+        falseAlarm: { dismissed: false, dismissedAt: null, note: null },
+      }),
+    );
+    const stalledFetch = vi.fn<
+      (input: unknown, init?: { signal?: AbortSignal }) => Promise<never>
+    >(() => new Promise<never>(() => {}));
+    vi.stubGlobal("fetch", stalledFetch);
+    let prepareError: unknown = null;
+    mocks.syncAttachments.mockImplementation(
+      async ({ transport, attachments }: any) => {
+        try {
+          await transport.prepare(attachments[0]);
+        } catch (error) {
+          prepareError = error;
+        }
+        return {
+          attachments: attachments.map((attachment: any) => ({
+            ...attachment,
+            uploadState: "failed_retryable",
+          })),
+          confirmedCount: 0,
+          unavailableCount: 0,
+          failedCount: 1,
+        };
+      },
+    );
+
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        findResendButton(renderer).props.onPress();
+        await settle();
+      });
+      expect(holdButtonLabel(renderer)).toBe("送出中…");
+
+      await advance(30_000);
+
+      expect(stalledFetch.mock.calls[0][1]?.signal).toBeDefined();
+      expect(String(prepareError)).toContain("逾時");
+      expect(findResendButton(renderer).props.disabled).toBe(false);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("retries an undelivered SOS at most a minute apart and shows the next attempt in Taiwan time", async () => {
+    mocks.submitDriverSosEvent.mockReset().mockRejectedValue(new Error("down"));
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      // 01:00:00 UTC failed; next try 15 s later, 09:00:15 in Taiwan.
+      expect(hostStrings(renderer)).toContain(
+        "下次自動重送：09:00:15，也可按「重新送出」。",
+      );
+
+      await advance(15_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+      await advance(30_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(3);
+      await advance(60_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(4);
+      await advance(60_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(5);
+      expect(findResendButton(renderer).props.disabled).toBe(false);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("keeps an SOS through an expired session, tells the driver to call, and resends it after sign-in", async () => {
+    const authError = new Error("API error 401: session expired");
+    mocks.submitDriverSosEvent.mockReset().mockRejectedValueOnce(authError);
+    mocks.recoverSession.mockImplementation(async () => {
+      mocks.provisioned = false;
+      return true;
+    });
+
+    const first = await renderSosScreen();
+    let firstKey: string;
+    try {
+      await pressHoldToSend(first);
+      await act(async () => {
+        await settle();
+      });
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      firstKey =
+        mocks.submitDriverSosEvent.mock.calls[0][1].headers["Idempotency-Key"];
+
+      // The driver is told plainly, and is not silently sent to sign-in.
+      const banner = first.root.find(
+        (node: any) =>
+          node.type === "Banner" && node.props.title === "SOS 還沒送到",
+      );
+      expect(banner.props.body).toContain("請直接打電話聯絡派車台");
+      expect(banner.props.body).toContain("110 或 119");
+      expect(mocks.replace).not.toHaveBeenCalled();
+      expect(
+        first.root.findAll((node: any) => node.type === "Redirect"),
+      ).toEqual([]);
+
+      // The SOS is kept on the device for this driver, due at once.
+      const kept = savedCases().at(-1)!;
+      expect(kept.clientEventId).toBe(firstKey);
+      expect(kept.receipt).toBeNull();
+      expect(kept.ownerDriverId).toBe("driver-001");
+      expect(Date.parse(kept.nextAttemptAt)).toBeLessThanOrEqual(Date.now());
+    } finally {
+      act(() => first.unmount());
+    }
+
+    // The same driver signs back in and opens the SOS screen.
+    mocks.provisioned = true;
+    mocks.secureGetItem.mockResolvedValue(JSON.stringify(savedCases().at(-1)));
+    mocks.submitDriverSosEvent.mockImplementation(
+      async (command: { clientEventId: string }) => submitResultFor(command),
+    );
+    const second = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+      expect(
+        mocks.submitDriverSosEvent.mock.calls[1][1].headers["Idempotency-Key"],
+      ).toBe(firstKey!);
+    } finally {
+      act(() => second.unmount());
     }
   });
 });
