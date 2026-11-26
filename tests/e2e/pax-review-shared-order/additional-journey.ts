@@ -341,8 +341,7 @@ export async function readAssignedTripAndAccept(
   await step("Driver open the assigned task from jobs", async () => {
     if (taskId) {
       await driver
-        .getByRole("button")
-        .filter({ has: driver.getByText(taskId, { exact: true }) })
+        .getByTestId(`driver-job-task-${taskId}`)
         .click({ timeout: 30_000 });
     } else {
       await driver

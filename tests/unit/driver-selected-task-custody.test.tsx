@@ -47,6 +47,7 @@ function nativeView(tag: string) {
         disabled,
         value,
         "data-icon": props.name,
+        "data-testid": props.testID,
       },
       children,
     );
@@ -449,14 +450,16 @@ describe("Driver selected task custody through normal screens and SDK", () => {
         task("selected-history", "completed"),
       ]);
       render(<h.Jobs />);
-      await screen.findByText("selected-history");
+      // Rows carry the full task id only as a testID; cards show the route
+      // and a short order code instead.
+      const rowTestId = "driver-job-task-selected-history";
+      await screen.findByTestId(rowTestId);
+      expect(screen.queryByText("selected-history")).toBeNull();
       if (layout === "dense")
         fireEvent.click(screen.getByRole("button", { name: "清單檢視" }));
-      const row = screen
-        .getAllByText(/pickup-selected-history/)[0]!
-        .closest("button");
-      expect(row).not.toBeNull();
-      fireEvent.click(row!);
+      const row = screen.getByTestId(rowTestId);
+      expect(row.tagName).toBe("BUTTON");
+      fireEvent.click(row);
       expect(h.push).toHaveBeenLastCalledWith({
         pathname: "/trip",
         params: { taskId: "selected-history" },
