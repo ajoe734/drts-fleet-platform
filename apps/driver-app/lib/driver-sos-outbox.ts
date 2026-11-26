@@ -16,8 +16,87 @@ import type {
 import { driverIncidentSituations } from "./strings";
 
 const DRIVER_SOS_ACTIVE_CASE_KEY = "drts.driver.sos.activeCase";
-const DRIVER_SOS_RETRY_BASE_MS = 60_000;
-const DRIVER_SOS_RETRY_MAX_MS = 30 * 60_000;
+// An undelivered SOS is an emergency: retry quickly and never back off past a
+// minute (15 s, 30 s, then every 60 s). 重新送出 always sends at once.
+const DRIVER_SOS_RETRY_BASE_MS = 15_000;
+const DRIVER_SOS_RETRY_MAX_MS = 60_000;
+
+function isWebStorage(): boolean {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+/**
+ * Where an unsent SOS is kept, in driver words: on the phone in the app, in
+ * this browser tab on the web build (sessionStorage, lost when it closes).
+ */
+export function sosSavedHereLabel(): string {
+  return isWebStorage() ? "已暫存在這個瀏覽器分頁" : "已存在手機";
+}
+
+// Session events that the SOS screen must react to even when it is not
+// mounted. lib/api-client reports them; the screen reads them synchronously.
+let explicitLogoutGeneration = 0;
+let undeliveredSosKeptThroughSignOut = false;
+
+/** Called by lib/api-client whenever the stored session is cleared. */
+export function noteDriverSosSessionCleared(event: {
+  explicitLogout: boolean;
+  keptUndeliveredSos: boolean;
+}): void {
+  if (event.explicitLogout) {
+    explicitLogoutGeneration += 1;
+    undeliveredSosKeptThroughSignOut = false;
+    return;
+  }
+  undeliveredSosKeptThroughSignOut =
+    undeliveredSosKeptThroughSignOut || event.keptUndeliveredSos;
+}
+
+/** Called by lib/api-client after a driver signs in. */
+export function noteDriverSosSignedIn(): void {
+  undeliveredSosKeptThroughSignOut = false;
+}
+
+/** Called by the SOS screen when the kept SOS reaches the server after all. */
+export function noteDriverSosDelivered(): void {
+  undeliveredSosKeptThroughSignOut = false;
+}
+
+/** Increases on every explicit logout; a send started before must not save. */
+export function getDriverSosLogoutGeneration(): number {
+  return explicitLogoutGeneration;
+}
+
+/** True while signed out after an automatic sign-out kept an unsent SOS. */
+export function hasUndeliveredSosKeptThroughSignOut(): boolean {
+  return undeliveredSosKeptThroughSignOut;
+}
+
+// Expo SecureStore has no web implementation (its web module is empty, so
+// every call rejects). Match lib/api-client's driverStorage: this browser
+// tab's sessionStorage on web, SecureStore in the phone app. api-client clears
+// and inspects the SOS case through driverStorage, so both must agree.
+const sosStorage = {
+  async getItemAsync(key: string): Promise<string | null> {
+    return isWebStorage()
+      ? window.sessionStorage.getItem(key)
+      : SecureStore.getItemAsync(key);
+  },
+  async setItemAsync(key: string, value: string): Promise<void> {
+    if (isWebStorage()) {
+      window.sessionStorage.setItem(key, value);
+      return;
+    }
+    await SecureStore.setItemAsync(key, value);
+  },
+  async deleteItemAsync(key: string): Promise<void> {
+    if (isWebStorage()) {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    await SecureStore.deleteItemAsync(key);
+  },
+};
 
 export type SosSituationId = (typeof driverIncidentSituations)[number]["id"];
 
@@ -74,6 +153,25 @@ export interface DriverSosActiveCase {
   severity?: DriverSosSeverity | null;
   description: string;
   driverId?: string | null;
+  /**
+   * Local only, never sent: the signed-in driver who raised this SOS. An
+   * undelivered case survives an automatic sign-out so it can be resent; it
+   * is discarded only if a different driver signs in on this device.
+   */
+  ownerDriverId?: string | null;
+  /**
+   * Local only: when the session ended (expired or revoked) while this SOS
+   * was undelivered. The SOS screen keeps warning the driver until it lands.
+   */
+  sessionLostAt?: string | null;
+  /**
+   * Local only: the server refused this SOS in a way a retry cannot fix
+   * (a 4xx other than 401/408/409/429). No automatic resend; 重新送出 still
+   * works.
+   */
+  autoResendBlocked?: boolean;
+  /** Local only: dismissed with 不用了 (not 誤觸) from the 30-minute prompt. */
+  cancelledByDriver?: boolean;
   vehicleId?: string | null;
   plateNo?: string | null;
   attachments: DriverSosAttachmentDraft[];
@@ -296,6 +394,7 @@ export function createDriverSosActiveCase(params: {
   severity?: DriverSosSeverity | null;
   description: string;
   driverId?: string | null;
+  ownerDriverId?: string | null;
   vehicleId?: string | null;
   plateNo?: string | null;
   attachments?: DriverSosAttachmentDraft[];
@@ -322,6 +421,7 @@ export function createDriverSosActiveCase(params: {
     severity: params.severity ?? (eventType ? "major" : "normal"),
     description: params.description.trim(),
     driverId: params.driverId ?? null,
+    ownerDriverId: params.ownerDriverId ?? null,
     vehicleId: params.vehicleId ?? null,
     plateNo: params.plateNo ?? null,
     attachments,
@@ -442,7 +542,7 @@ export function markDriverSosCaseSubmitted(
     title: result.receipt.duplicate ? "伺服器已確認既有 SOS" : "已送達安全值班",
     detail: result.receipt.duplicate
       ? `伺服器已確認既有通報，事件編號 ${result.receipt.eventNo}。`
-      : `事件編號 ${result.receipt.eventNo} 已送達車隊安全值班，等待值班人員認領（安全事件：${result.receipt.incidentId}）。`,
+      : `事件編號 ${result.receipt.eventNo} 已送達車隊安全值班，等待值班人員回應。`,
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -450,7 +550,7 @@ export function markDriverSosCaseSubmitted(
   nextCase = appendTimelineEntry(nextCase, {
     kind: "incident_created",
     title: "已建立安全事件",
-    detail: `安全事件 ${result.receipt.incidentId} 已由系統建立。`,
+    detail: "系統已建立安全事件。",
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -694,7 +794,7 @@ export function markDriverSosCaseFailed(
     {
       kind: "sync_failed",
       title: "送出失敗",
-      detail: `${errorMessage} 系統已保留本機資料，將於連線後重試。`,
+      detail: `${errorMessage} ${sosSavedHereLabel()}，稍後會自動再送。`,
       occurredAt: now,
       tone: "warn",
     },
@@ -717,14 +817,9 @@ export function queueDriverSosSupplement(
     state: "attachment_pending",
     lastError: null,
   };
+  // Only photos are uploaded (there is no API for supplement notes), so the
+  // progress entry never suggests ops will read a note.
   const itemCount = supplement.attachments.length;
-  const detailParts = [];
-  if (supplement.note) {
-    detailParts.push("已加入補充說明");
-  }
-  if (itemCount > 0) {
-    detailParts.push(`${itemCount} 件附件待補送`);
-  }
 
   return appendTimelineEntry(
     {
@@ -734,7 +829,7 @@ export function queueDriverSosSupplement(
     {
       kind: "supplement_added",
       title: "已加入補充資料",
-      detail: detailParts.join("，") || "補充資料已寫入本機紀錄，待後續補送。",
+      detail: itemCount > 0 ? `${itemCount} 件附件待補送` : "已存在手機。",
       occurredAt: createdAt,
       tone: "info",
     },
@@ -766,7 +861,7 @@ export function markDriverSosFalseAlarm(
 }
 
 export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | null> {
-  const raw = await SecureStore.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+  const raw = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
   if (!raw) {
     return null;
   }
@@ -800,7 +895,64 @@ export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | n
       },
     };
   } catch {
-    await SecureStore.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    await sosStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    return null;
+  }
+}
+
+/**
+ * True when writing `next` would make the stored copy of the same SOS look
+ * undelivered again: the stored copy has a server receipt and `next` does
+ * not (for example a stale screen finishing a failed send late).
+ */
+export function wouldRegressDeliveredSos(
+  stored: Pick<DriverSosActiveCase, "clientEventId" | "receipt"> | null,
+  next: Pick<DriverSosActiveCase, "clientEventId" | "receipt">,
+): boolean {
+  return Boolean(
+    stored &&
+    stored.clientEventId === next.clientEventId &&
+    stored.receipt &&
+    !next.receipt,
+  );
+}
+
+/**
+ * Photos are never removed from an SOS once queued, so a write of the same
+ * SOS keeps any attachment or supplement the stored copy has and `next` lacks
+ * (for example photos added on a reopened screen while an older screen was
+ * still finishing its send).
+ */
+export function mergeStoredSosAttachments(
+  stored: DriverSosActiveCase | null,
+  next: DriverSosActiveCase,
+): DriverSosActiveCase {
+  if (!stored || stored.clientEventId !== next.clientEventId) {
+    return next;
+  }
+  const attachmentIds = new Set(next.attachments.map((item) => item.id));
+  const supplementIds = new Set(next.supplements.map((item) => item.id));
+  const missingAttachments = (stored.attachments ?? []).filter(
+    (item) => !attachmentIds.has(item.id),
+  );
+  const missingSupplements = (stored.supplements ?? []).filter(
+    (item) => !supplementIds.has(item.id),
+  );
+  if (missingAttachments.length === 0 && missingSupplements.length === 0) {
+    return next;
+  }
+  return {
+    ...next,
+    attachments: [...next.attachments, ...missingAttachments],
+    supplements: [...missingSupplements, ...next.supplements],
+  };
+}
+
+async function readStoredCase(): Promise<DriverSosActiveCase | null> {
+  try {
+    const raw = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    return raw ? (JSON.parse(raw) as DriverSosActiveCase) : null;
+  } catch {
     return null;
   }
 }
@@ -809,12 +961,17 @@ export async function saveDriverSosActiveCase(
   activeCase: DriverSosActiveCase | null,
 ): Promise<void> {
   if (!activeCase) {
-    await SecureStore.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    await sosStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
     return;
   }
 
-  await SecureStore.setItemAsync(
+  const stored = await readStoredCase();
+  if (!activeCase.receipt && wouldRegressDeliveredSos(stored, activeCase)) {
+    return;
+  }
+
+  await sosStorage.setItemAsync(
     DRIVER_SOS_ACTIVE_CASE_KEY,
-    JSON.stringify(activeCase),
+    JSON.stringify(mergeStoredSosAttachments(stored, activeCase)),
   );
 }
