@@ -2288,9 +2288,7 @@ export class ForwarderService implements OnModuleInit {
     const requiresReauth = this.resolveForwardedRequiresReauth(order);
     const blockingReason =
       this.resolveForwardedBlockingReason(order) ??
-      (requiresReauth
-        ? "Platform re-authentication is required before driver actions can resume."
-        : null);
+      (requiresReauth ? "需重新授權平台後才能繼續操作。" : null);
 
     return {
       taskId: order.mirrorOrderId,
@@ -2487,33 +2485,37 @@ export class ForwarderService implements OnModuleInit {
     }
   }
 
+  // syncIssueSummary and blockingReason are shown to drivers as-is in the
+  // driver app, so they are fixed Traditional Chinese sentences. They do not
+  // pass through manualFallback.reason: that is ops text and can hold a raw
+  // adapter error ("platform timeout") or English dispatch instructions.
   private resolveForwardedSyncIssueSummary(order: ForwardedOrderRecord) {
     if (order.manualFallback.required) {
-      return order.manualFallback.reason ?? "Dispatch follow-up is required.";
+      return "需由派車台協助處理。";
     }
     if (order.lastSyncError) {
       return order.lastSyncError.retryable
-        ? "Platform sync failed and is waiting for dispatch follow-up."
-        : "Platform sync failed and requires manual dispatch resolution.";
+        ? "平台同步失敗，等待派車台處理。"
+        : "平台同步失敗，需由派車台人工處理。";
     }
     if (order.reconciliationJob?.status === "queued") {
-      return "Order is waiting for reconciliation with the platform.";
+      return "訂單正在與平台核對中。";
     }
     return null;
   }
 
   private resolveForwardedBlockingReason(order: ForwardedOrderRecord) {
     if (order.manualFallback.required) {
-      return order.manualFallback.reason ?? "Manual fallback has been engaged.";
+      return "已改由派車台人工處理，請等候通知。";
     }
     if (order.status === "lost_race") {
-      return "Another driver was confirmed by the platform.";
+      return "平台已指派給其他司機。";
     }
     if (order.status === "cancelled_by_platform") {
-      return "The external platform cancelled this order.";
+      return "外部平台已取消此訂單。";
     }
     if (order.status === "sync_failed") {
-      return "Dispatch must verify platform confirmation before continuing.";
+      return "派車台確認平台結果前，請先不要繼續。";
     }
     return null;
   }
