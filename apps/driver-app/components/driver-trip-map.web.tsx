@@ -12,6 +12,7 @@ import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
 import { driverCanvasTheme } from "@/components/canvas-primitives";
 import {
+  DRIVER_MISSING_COORDINATE_COPY,
   buildDriverTripNavigationModel,
   getDriverLocationFixState,
   openDriverNavigation,
@@ -101,22 +102,17 @@ function StopCoordinateCard({
         </View>
       </View>
       <Text style={styles.addressText}>{stop.address}</Text>
-      <Text style={styles.coordinateText}>{stop.coordinateLabel}</Text>
-      <Text style={styles.metaText}>
-        {stop.geocodeProvider
-          ? `Provider ${stop.geocodeProvider}`
-          : "Provider 待同步"}
-        {stop.coordinateSource ? ` · Source ${stop.coordinateSource}` : ""}
-        {stop.coordinateAccuracyM != null
-          ? ` · Accuracy ${Math.round(stop.coordinateAccuracyM)}m`
-          : ""}
-      </Text>
+      {hasCoordinate ? (
+        <Text selectable style={styles.coordinateText}>
+          {stop.coordinateLabel}
+        </Text>
+      ) : null}
 
       {hasCoordinate ? (
         <View style={styles.navigationRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Google navigation to ${stop.target}`}
+            accessibilityLabel={`用 Google 導航到${stop.label}`}
             onPress={() => onOpenNavigation(stop, "google")}
             style={({ pressed }) => [
               styles.navButton,
@@ -127,7 +123,7 @@ function StopCoordinateCard({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`System navigation to ${stop.target}`}
+            accessibilityLabel={`用${systemLabel}導航到${stop.label}`}
             onPress={() => onOpenNavigation(stop, "system")}
             style={({ pressed }) => [
               styles.navButtonSecondary,
@@ -141,7 +137,7 @@ function StopCoordinateCard({
         </View>
       ) : (
         <Text style={styles.degradedText}>
-          無有效座標時不使用地址猜測導航；請聯絡派車台確認座標。
+          {DRIVER_MISSING_COORDINATE_COPY}
         </Text>
       )}
     </View>
@@ -159,7 +155,6 @@ export default function DriverTripMap({
   order,
   driverLocation,
   sourcePlatformOffline = false,
-  nativeMapAvailable = false,
   now = Date.now(),
   onNavigationResult,
 }: DriverTripMapProps) {
@@ -201,50 +196,21 @@ export default function DriverTripMap({
 
   return (
     <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Trip Map & Navigation Handoff</Text>
-          <Text style={styles.title}>座標導航交接</Text>
-          <Text style={styles.subtitle}>
-            以後端同步的上下車座標交接外部導航，不以地址文字推測路線。
-          </Text>
-        </View>
-        <View
-          style={[
-            styles.authorityBadge,
-            model.authority.kind === "drts_owned"
-              ? styles.authorityBadgeOwned
-              : styles.authorityBadgeForwarded,
-          ]}
-        >
-          <Text style={styles.authorityBadgeText}>{model.authority.badge}</Text>
-        </View>
-      </View>
+      <Text style={styles.title}>導航</Text>
 
-      <View
-        style={[
-          styles.notice,
-          model.authority.kind === "drts_owned"
-            ? styles.noticeOwned
-            : styles.noticeForwarded,
-        ]}
-      >
-        <Text style={styles.noticeTitle}>{model.authority.title}</Text>
-        <Text style={styles.noticeBody}>{model.authority.description}</Text>
-        {model.authority.degradedHint ? (
-          <Text style={styles.noticeMeta}>{model.authority.degradedHint}</Text>
-        ) : null}
-      </View>
+      {model.authority.notice ? (
+        <View style={[styles.notice, styles.noticeForwarded]}>
+          <Text style={styles.noticeBody}>{model.authority.notice}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.previewPanel}>
         <View style={styles.previewHeader}>
-          <Text style={styles.previewTitle}>
-            {nativeMapAvailable
-              ? "Native map adapter"
-              : "Coordinate handoff mode"}
-          </Text>
+          <Text style={styles.previewTitle}>行程地圖</Text>
           <Text style={styles.previewStatus}>
-            此 build 未 bundled native map SDK；不宣稱原生地圖渲染。
+            {model.hasPickupCoordinate || model.hasDropoffCoordinate
+              ? "請用下方按鈕開啟導航"
+              : "上下車點還沒有座標"}
           </Text>
         </View>
         <View style={styles.pinRow}>
@@ -252,11 +218,6 @@ export default function DriverTripMap({
           <View style={styles.pinConnector} />
           <View style={[styles.pin, styles.dropoffPin]} />
         </View>
-        <Text style={styles.previewMeta}>
-          {model.hasNavigableRoute
-            ? "Pickup/dropoff pins use synced coordinates and can open external navigation."
-            : "座標資料不完整；畫面保留地址與 fallback 指引，導航按鈕僅在座標有效時啟用。"}
-        </Text>
       </View>
 
       <View
@@ -272,20 +233,11 @@ export default function DriverTripMap({
           {fixState.label}
         </Text>
         <Text style={styles.noticeBody}>{fixState.detail}</Text>
-        {fixState.coordinateLabel ? (
-          <Text style={styles.noticeMeta}>
-            {fixState.state === "stopped"
-              ? "Last driver coordinate"
-              : "Driver coordinate"}{" "}
-            {fixState.coordinateLabel}
-          </Text>
-        ) : null}
       </View>
 
       {sourcePlatformOffline ? (
         <Text style={styles.degradedText}>
-          來源平台離線：使用最後同步的座標與權責文案。不得自行解除 route
-          lock，請聯絡派車台確認後再改道。
+          平台目前離線，地點是最後一次同步的資料。要改路線請先聯絡派車台。
         </Text>
       ) : null}
 
@@ -301,12 +253,6 @@ export default function DriverTripMap({
           void handleOpenNavigation(stop, provider)
         }
       />
-
-      <Text style={styles.fallbackCopy}>
-        Offline fallback: 若地圖 provider、GPS 或導航 App
-        不可用，請保留此頁座標、 地址與任務
-        ID，聯絡派車台協助導航；司機端不會以地址文字替代座標權威。
-      </Text>
     </View>
   );
 }
@@ -320,55 +266,10 @@ const styles = StyleSheet.create({
     borderColor: driverCanvasTheme.border,
     backgroundColor: driverCanvasTheme.surface,
   },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  headerCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  eyebrow: {
-    fontSize: 10,
-    lineHeight: 13,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    color: driverCanvasTheme.textMuted,
-    fontFamily: driverCanvasTheme.monoFamily,
-  },
   title: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: "800",
-    color: driverCanvasTheme.text,
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
-  subtitle: {
-    fontSize: 12,
-    lineHeight: 17,
-    color: driverCanvasTheme.textMuted,
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
-  authorityBadge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  authorityBadgeOwned: {
-    borderColor: driverCanvasTheme.accentBorder,
-    backgroundColor: driverCanvasTheme.accentBg,
-  },
-  authorityBadgeForwarded: {
-    borderColor: driverCanvasTheme.warnBorder,
-    backgroundColor: driverCanvasTheme.warnBg,
-  },
-  authorityBadgeText: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "700",
     color: driverCanvasTheme.text,
     fontFamily: driverCanvasTheme.fontFamily,
   },
@@ -377,10 +278,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     padding: 10,
-  },
-  noticeOwned: {
-    borderColor: driverCanvasTheme.accentBorder,
-    backgroundColor: driverCanvasTheme.accentBg,
   },
   noticeForwarded: {
     borderColor: driverCanvasTheme.infoBorder,
@@ -398,12 +295,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: driverCanvasTheme.text,
     fontFamily: driverCanvasTheme.fontFamily,
-  },
-  noticeMeta: {
-    fontSize: 11,
-    lineHeight: 15,
-    color: driverCanvasTheme.textMuted,
-    fontFamily: driverCanvasTheme.monoFamily,
   },
   previewPanel: {
     gap: 10,
@@ -462,13 +353,6 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: driverCanvasTheme.borderStrong,
   },
-  previewMeta: {
-    fontSize: 11.5,
-    lineHeight: 16,
-    color: driverCanvasTheme.textMuted,
-    textAlign: "center",
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
   stopCard: {
     gap: 7,
     borderRadius: 12,
@@ -513,12 +397,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "800",
     color: driverCanvasTheme.accentHi,
-    fontFamily: driverCanvasTheme.monoFamily,
-  },
-  metaText: {
-    fontSize: 10.5,
-    lineHeight: 14,
-    color: driverCanvasTheme.textMuted,
     fontFamily: driverCanvasTheme.monoFamily,
   },
   navigationRow: {
@@ -568,12 +446,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     color: driverCanvasTheme.warn,
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
-  fallbackCopy: {
-    fontSize: 11.5,
-    lineHeight: 16,
-    color: driverCanvasTheme.textMuted,
     fontFamily: driverCanvasTheme.fontFamily,
   },
 });

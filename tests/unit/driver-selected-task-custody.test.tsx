@@ -47,6 +47,7 @@ function nativeView(tag: string) {
         disabled,
         value,
         "data-icon": props.name,
+        "data-testid": props.testID,
       },
       children,
     );
@@ -429,10 +430,13 @@ function createHarness(initial: DriverTaskRecord[], requestedTaskId?: string) {
     },
   };
 }
+// Trip no longer prints internal task/order IDs; it carries them as testIDs.
+const shownTrip = (taskId: string) =>
+  screen.queryByTestId(`driver-trip-task-${taskId}`);
 async function expectSelectedTask(taskId: string) {
-  await waitFor(() =>
-    expect(screen.getAllByText(taskId).length).toBeGreaterThan(0),
-  );
+  await waitFor(() => expect(shownTrip(taskId)).not.toBeNull());
+  expect(screen.getByTestId(`driver-trip-order-order-${taskId}`)).toBeTruthy();
+  expect(screen.queryByText(taskId)).toBeNull();
 }
 afterEach(() => {
   cleanup();
@@ -474,7 +478,7 @@ describe("Driver selected task custody through normal screens and SDK", () => {
     );
     render(<h.Trip />);
     await expectSelectedTask("selected-active");
-    expect(screen.queryByText("other-terminal")).toBeNull();
+    expect(shownTrip("other-terminal")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "抵達上車點" }));
     await waitFor(() =>
       expect(
@@ -521,7 +525,7 @@ describe("Driver selected task custody through normal screens and SDK", () => {
     ]);
     render(<h.Trip />);
     await expectSelectedTask("original-first");
-    expect(screen.queryByText("other-history")).toBeNull();
+    expect(shownTrip("other-history")).toBeNull();
   });
 
   it("does not replace a missing selected task with a different actionable task", async () => {
@@ -531,7 +535,7 @@ describe("Driver selected task custody through normal screens and SDK", () => {
     );
     render(<h.Trip />);
     await screen.findByText("找不到所選任務，請返回任務清單重新整理。");
-    expect(screen.queryByText("other-active")).toBeNull();
+    expect(shownTrip("other-active")).toBeNull();
     expect(
       h.requests.some((request) => request.pathname.endsWith("/order")),
     ).toBe(false);
@@ -575,13 +579,11 @@ describe("Driver selected task custody through normal screens and SDK", () => {
     await act(async () => {
       held.release();
     });
-    expect(screen.queryByText("first-history")).toBeNull();
+    expect(shownTrip("first-history")).toBeNull();
     await expectSelectedTask("second-history");
     h.failList();
     fireEvent.click(screen.getByRole("button", { name: "重新整理" }));
-    await waitFor(() =>
-      expect(screen.queryByText("second-history")).toBeNull(),
-    );
+    await waitFor(() => expect(shownTrip("second-history")).toBeNull());
     expect(h.requests.some((request) => request.method === "POST")).toBe(false);
   });
 });

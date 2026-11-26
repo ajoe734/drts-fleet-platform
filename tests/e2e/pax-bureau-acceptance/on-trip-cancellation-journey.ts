@@ -401,7 +401,7 @@ export async function onTripCancellationRejectionJourney(
           pax.getByRole("button", { name: "取消行程", exact: true }).first(),
         ).toBeDisabled();
         await expect(
-          driver.getByText(bookedOrderId, { exact: false }).first(),
+          driver.getByTestId(`driver-trip-order-${bookedOrderId}`),
         ).toBeVisible();
         await expect(
           driver.getByRole("button", { name: "完成行程", exact: true }),
@@ -455,10 +455,11 @@ export async function onTripCancellationRejectionJourney(
         const livePosition = pax.getByTestId("passenger-live-driver-position");
         await expect(livePosition).toHaveCount(0);
         await expect(driver).toHaveURL(/\/trip(?:[?#]|$)/);
-        const driverOrder = driver.getByText(`${taskId} · ${bookedOrderId}`, {
-          exact: true,
-        });
-        const driverTask = driver.getByText(taskId, { exact: true }).first();
+        // Trip no longer prints internal IDs; its route card carries them.
+        const driverOrder = driver.getByTestId(
+          `driver-trip-order-${bookedOrderId}`,
+        );
+        const driverTask = driver.getByTestId(`driver-trip-task-${taskId}`);
         await expect(driverOrder).toBeVisible();
         await expect(driverTask).toBeVisible();
         const trackingStatus = driver.getByText("追蹤 · 已結束", {
@@ -485,8 +486,9 @@ export async function onTripCancellationRejectionJourney(
             passengerStatus: await passengerStatus.innerText(),
             liveDriverPositionCount: await livePosition.count(),
             driverUrl: driver.url(),
-            driverTaskOrderReference: await driverOrder.innerText(),
-            driverTaskId: await driverTask.innerText(),
+            driverTaskOrderReference:
+              await driverOrder.getAttribute("data-testid"),
+            driverTaskId: await driverTask.getAttribute("data-testid"),
             driverTrackingStatus: await trackingStatus.innerText(),
             driverTrackingDetail: await trackingDetail.innerText(),
             driverMapStatus: await mapStatus.innerText(),

@@ -60,7 +60,7 @@ export async function ownedRejectionJourney(
         url.searchParams.get("taskId") === first.taskId,
     );
     await expect(
-      driver.getByText(orderId, { exact: false }).first(),
+      driver.getByTestId(`driver-trip-order-${orderId}`),
     ).toBeVisible();
   });
   const rejectedTask = await step(

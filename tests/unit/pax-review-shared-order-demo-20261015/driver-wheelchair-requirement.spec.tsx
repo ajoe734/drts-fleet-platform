@@ -218,6 +218,25 @@ function trip(mounted: Mounted) {
     "persistent Trip outlet",
   );
 }
+// Trip no longer prints internal task/order IDs; it carries them as testIDs on
+// the route card. Assert both hooks and that neither ID is visible text.
+function expectTripShows(
+  mounted: Mounted,
+  record: { taskId: string; orderId: string },
+) {
+  const hooks = (testID: string) =>
+    trip(mounted).findAll(
+      (node) => node.type === "View" && node.props.testID === testID,
+    );
+  expect(hooks(`driver-trip-task-${record.taskId}`)).toHaveLength(1);
+  expect(hooks(`driver-trip-order-${record.orderId}`)).toHaveLength(1);
+  // Fixture addresses embed the task ID ("pickup-task-A"); only a standalone
+  // ID would be the old header/pill.
+  const standalone = (id: string) => new RegExp(`(?<![\\w-])${id}(?![\\w-])`);
+  const visible = text(trip(mounted));
+  expect(visible).not.toMatch(standalone(record.taskId));
+  expect(visible).not.toMatch(standalone(record.orderId));
+}
 async function press(node: NativeNode) {
   expect(node.props.disabled).not.toBe(true);
   const onPress = node.props.onPress;
@@ -515,7 +534,7 @@ function createRequirementHarness(accessible: boolean) {
       });
       mountedScreens.push(mounted);
       await waitForState(() =>
-        expect(text(trip(mounted))).toContain("task-A · order-task-A"),
+        expectTripShows(mounted, { taskId: "task-A", orderId: "order-task-A" }),
       );
       await waitForState(() =>
         expect(paths).toContain(`/api/driver/tasks/${record.taskId}/order`),
@@ -606,9 +625,7 @@ it.each([true, false])(
         "same persistent Trip",
       ),
     ).toBe(sameTrip);
-    expect(text(trip(mounted))).toContain(
-      `${h.record.taskId} · ${h.record.orderId}`,
-    );
+    expectTripShows(mounted, h.record);
     expect(text(trip(mounted)).includes("輪椅需求")).toBe(accessible);
     expect(h.unexpected).toEqual([]);
     expect(ports.alerts).not.toHaveBeenCalled();
@@ -698,6 +715,66 @@ it("normal multi-taxi metered Trip explains the required fare before completing 
   });
   expect(h.record.orderId).toBe(h.owned.orderId);
   await waitForState(() => expect(h.record.status).toBe("completed"));
+  expect(h.unexpected).toEqual([]);
+});
+
+function photoRequirement(mounted: Mounted) {
+  const summaries = trip(mounted).findAll(
+    (node) => node.type === visual && Array.isArray(node.props.items),
+  );
+  const items = one(summaries, "completion proof summary").props.items as {
+    label: string;
+    value: string;
+  }[];
+  return items.find((item) => item.label === "照片需求")?.value;
+}
+
+it.each([
+  [0, "免附"],
+  [2, "0/2 張"],
+])(
+  "normal Trip shows the order's own photo requirement (minimum %i) instead of a made-up 0/1",
+  async (minPhotoCount, expected) => {
+    const h = normalMultiTaxiCompletionHarness(false);
+    h.owned.proofRequirements.minPhotoCount = minPhotoCount;
+    const mounted = await h.mount();
+    await waitForState(() => expect(photoRequirement(mounted)).toBe(expected));
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal pending Trip shows its status once and its own next step in the footer", async () => {
+  const h = createRequirementHarness(false);
+  const mounted = await h.mount();
+  const visible = text(trip(mounted));
+  expect(visible.split("待確認接單").length - 1).toBe(1);
+  expect(visible).not.toContain("待接受");
+  // The footer explains the owned accept step, not a platform-offer blocker.
+  expect(visible).toContain("確認後才會進入接送流程，避免錯過派遣時效。");
+  expect(visible).not.toContain("不能在 App 接單");
+  expect(visible).not.toContain("DRTS");
+  expect(
+    trip(mounted)
+      .findAll((node) => node.type === "NativeButton")
+      .map((node) => text(node)),
+  ).toEqual(expect.arrayContaining(["婉拒任務", "接受任務"]));
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal completed Trip states the result once in the footer without a dead button", async () => {
+  const h = createRequirementHarness(false);
+  h.record.status = "completed";
+  Object.assign(h.view, taskView(h.record));
+  h.owned.status = "completed";
+  const mounted = await h.mount();
+  const buttons = trip(mounted)
+    .findAll((node) => node.type === "NativeButton")
+    .map((node) => text(node));
+  expect(buttons).not.toContain("行程已完成");
+  expect(buttons).not.toContain("接受任務");
+  expect(buttons).not.toContain("完成行程");
+  expect(text(trip(mounted))).toContain("行程已完成");
   expect(h.unexpected).toEqual([]);
 });
 
@@ -817,8 +894,9 @@ it.each([
       "SIM-CLAIM-36",
       "SIM代步使用人",
       "SIM中型代步車",
-      "代步起始（UTC） 2199-11-12 01:30",
-      "代步結束（UTC） 2199-11-14 09:00",
+      // Taiwan local time (UTC+8), not the raw UTC instant.
+      "代步起始 2199-11-12 09:30",
+      "代步結束 2199-11-14 17:00",
       "SIM理賠聯絡員",
     ],
   },
@@ -833,9 +911,8 @@ it.each([
     );
     const panel = fulfillmentPanel(mounted);
     for (const value of expected) expect(text(panel)).toContain(value);
-    expect(text(trip(mounted))).toContain(
-      `${h.record.taskId} · ${h.record.orderId}`,
-    );
+    expect(text(panel)).not.toContain("UTC");
+    expectTripShows(mounted, h.record);
     expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
     expect(h.record.orderId).toBe(h.owned.orderId);
     expect(h.completionRequests).toEqual([]);
@@ -851,7 +928,7 @@ it("normal Driver Trip marks missing insurance fulfillment facts as unavailable 
   );
   const information = text(fulfillmentPanel(mounted));
   expect(information).toContain("代步車型 未提供");
-  expect(information).toContain("代步起始（UTC） 未提供");
+  expect(information).toContain("代步起始 未提供");
   expect(information).not.toContain("SIM中型代步車");
   expect(information).not.toContain("undefined");
   expect(h.completionRequests).toEqual([]);
@@ -880,9 +957,7 @@ it("normal Driver Trip clears the previous program details when selecting a diff
   // this ordinary task must not advertise it as a program's current facts.
   ports.selectedTaskId = next.taskId;
   await renderer.act(async () => ports.navigate?.("trip"));
-  await waitForState(() =>
-    expect(text(trip(mounted))).toContain(`${next.taskId} · ${next.orderId}`),
-  );
+  await waitForState(() => expectTripShows(mounted, next));
   await waitForState(() =>
     expect(h.paths).toContain(`/api/driver/tasks/${next.taskId}/order`),
   );
