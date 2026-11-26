@@ -346,17 +346,10 @@ export const driverStrings = {
       editRoute: "編輯路線",
     },
     platformTaskBadge: {
-      ownedTitle: "自營派單 · DRTS",
+      ownedTitle: "車隊派單",
       ownedAuthority: "本地可操作",
       forwardedTitlePrefix: "平台主導 · ",
       forwardedAuthority: "來源平台規則生效",
-    },
-    earningsByPlatform: {
-      emptyTitle: "這段期間還沒有平台收益",
-      emptyDescription: "切換到其他期間，或稍後再查看最新對帳彙整。",
-      gross: "毛收",
-      serviceFee: "抽成",
-      subsidy: "補助",
     },
   },
 } as const;

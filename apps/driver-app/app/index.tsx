@@ -1,6 +1,6 @@
 import { PlatformNoticeBanner } from "../components/platform-notice-banner";
 import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -47,6 +47,7 @@ import {
   formatDriverError,
   getDriverClient,
   getDriverId,
+  hasUndeliveredSosOfSignedInDriver,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerProtectedCacheClearHandler,
@@ -66,7 +67,6 @@ type WorkspaceRoute =
   | "/earnings"
   | "/shift"
   | "/sos"
-  | "/incident"
   | "/settings";
 
 type WorkspaceLoadResult = {
@@ -775,9 +775,44 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
   return next;
 }
 
-function LoadingState({ label }: { label: string }) {
+/** Read only; any failure counts as "no undelivered SOS". */
+async function checkUndeliveredSos(): Promise<boolean> {
+  try {
+    return await hasUndeliveredSosOfSignedInDriver();
+  } catch {
+    return false;
+  }
+}
+
+/** This driver's SOS is stored on the phone but has not reached the fleet. */
+function UndeliveredSosCard({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Banner
+      theme={THEME}
+      tone="danger"
+      title="SOS 尚未送達"
+      body="請直接打電話聯絡派車台；有立即危險請撥 110 或 119。打開 SOS 頁面會再送出。"
+      actions={
+        <View style={styles.bannerActionRow}>
+          <Btn theme={THEME} variant="primary" size="sm" onPress={onOpen}>
+            打開 SOS
+          </Btn>
+        </View>
+      }
+    />
+  );
+}
+
+function LoadingState({
+  label,
+  notice = null,
+}: {
+  label: string;
+  notice?: ReactNode;
+}) {
   return (
     <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+      {notice}
       <Card theme={THEME}>
         <View style={styles.loadingCard}>
           <ActivityIndicator color={THEME.accent} size="large" />
@@ -1162,15 +1197,12 @@ function PlatformHealthCard({
               <View style={styles.platformRowCopy}>
                 <View style={styles.platformRowHeadline}>
                   <Text style={styles.platformRowName}>{row.name}</Text>
+                  {/* A fleet row's name already says 車隊派單. */}
                   {row.forwarded ? (
                     <Pill theme={THEME} tone="info">
                       外部
                     </Pill>
-                  ) : (
-                    <Pill theme={THEME} tone="accent">
-                      自營
-                    </Pill>
-                  )}
+                  ) : null}
                 </View>
                 <Text style={styles.platformRowSummary}>{row.summary}</Text>
                 <Text style={styles.platformRowMeta}>{row.meta}</Text>
@@ -1453,6 +1485,7 @@ export default function WorkspaceIndex() {
   const notificationReadRequest = useRef<AbortController | null>(null);
   const [dismissedSosNotificationIds, setDismissedSosNotificationIds] =
     useState<string[]>([]);
+  const [undeliveredSos, setUndeliveredSos] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1487,6 +1520,7 @@ export default function WorkspaceIndex() {
       notificationReadRequest.current = null;
       setMarkingNotificationsRead(false);
       setWorkspace(INITIAL_WORKSPACE);
+      setUndeliveredSos(false);
       setProvisioned(false);
     });
     return () => {
@@ -1552,6 +1586,26 @@ export default function WorkspaceIndex() {
     };
   }, [provisioned, ready, refreshSeed]);
 
+  // The SOS stored on this phone, read again with every refresh. Read only:
+  // the SOS screen alone sends it.
+  useEffect(() => {
+    if (!ready || !provisioned) {
+      setUndeliveredSos(false);
+      return;
+    }
+
+    let cancelled = false;
+    void checkUndeliveredSos().then((undelivered) => {
+      if (!cancelled) {
+        setUndeliveredSos(undelivered);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provisioned, ready, refreshSeed]);
+
   const navigate = (route: WorkspaceRoute) => () => router.push(route);
   const navigateTo = (route: WorkspaceRoute) => router.push(route);
 
@@ -1580,7 +1634,7 @@ export default function WorkspaceIndex() {
   const platformRows = useMemo(() => {
     const ownedRow: PlatformWorkspaceRow = {
       key: "owned-drts",
-      name: "自營派單",
+      name: "車隊派單",
       summary: isDriverOnShift
         ? `已上線 · ${formatClockLabel(workspace.activeShift?.clockedInAt)} 起`
         : "離線 · 尚未上班",
@@ -1933,7 +1987,7 @@ export default function WorkspaceIndex() {
         key: "off-shift-pending",
         tone: "info",
         title: "尚未上班",
-        body: "仍有待處理任務，但自營派單尚未切成可接單狀態。",
+        body: "還有待處理的任務。上班打卡後才能接車隊派單。",
         action: createWorkspaceAction("/shift", "open_shift"),
         iconName: "time-outline",
       });
@@ -2073,7 +2127,7 @@ export default function WorkspaceIndex() {
         eyebrow: "建議動作",
         title: "先開始班次",
         detail: "尚未開始班次時，最優先要做的是先啟動班次。",
-        meta: "班次啟動後，自營派單會切換為可接單狀態。",
+        meta: "上班打卡後就能接車隊派單。",
         primaryAction: createWorkspaceAction("/shift", "start_shift"),
         secondaryAction: createWorkspaceAction(
           "/platform-presence",
@@ -2386,11 +2440,23 @@ export default function WorkspaceIndex() {
     !workspace.taskLoadError &&
     workspace.taskViews.length === 0
   ) {
-    return <LoadingState label="正在載入工作台…" />;
+    return (
+      <LoadingState
+        label="正在載入工作台…"
+        notice={
+          undeliveredSos ? (
+            <UndeliveredSosCard onOpen={() => navigateTo("/sos")} />
+          ) : null
+        }
+      />
+    );
   }
 
   return (
     <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+      {undeliveredSos ? (
+        <UndeliveredSosCard onOpen={() => navigateTo("/sos")} />
+      ) : null}
       <PlatformNoticeBanner />
       <PageHeader
         title={

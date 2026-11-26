@@ -6,7 +6,7 @@ import { PLATFORM_CODE_REGISTRY, type PlatformCode } from "@drts/contracts";
 // Chinese name for everything else, and never a raw platform code.
 
 export const OTHER_PLATFORM_NAME = "其他平台";
-export const FLEET_OWN_PLATFORM_NAME = "自營派單";
+export const FLEET_OWN_PLATFORM_NAME = "車隊派單";
 
 const DRIVER_PLATFORM_NAMES: Partial<Record<PlatformCode, string>> = {
   grab_taiwan: "Grab 台灣",

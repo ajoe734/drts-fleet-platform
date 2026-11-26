@@ -36,6 +36,7 @@ import {
   getDriverId,
   getDriverIdentityIssue,
   hasDriverDevOverride,
+  hasUndeliveredSosAfterSessionLost,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerDriverDevice,
@@ -78,6 +79,19 @@ const REVIEW_LEGACY_REGISTRATION =
 // the same made-up name.
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "";
+// Shown while signed out when the session ended before an SOS reached the
+// server. The SOS screen sends it again once the same driver signs back in.
+const SESSION_LOST_SOS_NOTICE =
+  "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面就會再送出。";
+
+/** Read only; any failure counts as "no undelivered SOS". */
+async function checkSessionLostSos(): Promise<boolean> {
+  try {
+    return await hasUndeliveredSosAfterSessionLost();
+  } catch {
+    return false;
+  }
+}
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -531,6 +545,25 @@ export default function OnboardingScreen() {
   }, []);
 
   const provisioned = ready && isDriverIdentityProvisioned();
+  const [sessionLostSos, setSessionLostSos] = useState(false);
+
+  useEffect(() => {
+    if (!ready || provisioned) {
+      setSessionLostSos(false);
+      return;
+    }
+
+    let cancelled = false;
+    void checkSessionLostSos().then((kept) => {
+      if (!cancelled) {
+        setSessionLostSos(kept);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provisioned, ready]);
 
   useEffect(() => {
     if (!provisioned) {
@@ -1225,6 +1258,13 @@ export default function OnboardingScreen() {
 
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>
+        {sessionLostSos ? (
+          <WarningCallout
+            tone="danger"
+            iconName="warning"
+            message={SESSION_LOST_SOS_NOTICE}
+          />
+        ) : null}
         <View style={styles.provisionHero}>
           <View style={styles.provisionHeroGlow} />
           <View style={styles.provisionHeader}>

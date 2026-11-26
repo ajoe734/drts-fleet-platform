@@ -194,7 +194,7 @@ describe("Driver earnings screen copy", () => {
     );
     expect(rendered).toContain(driverStrings.earnings.sections.referenceOnly);
     // Readable names, never codes or English descriptions.
-    expect(rendered).toContain("自營派單");
+    expect(rendered).toContain("車隊派單");
     expect(rendered).toContain("Uber");
     expect(rendered).toContain("測試平台");
   });
@@ -227,7 +227,7 @@ describe("Driver earnings screen copy", () => {
     expect(rowText("drts")).toContain("車隊結算");
     for (const code of ["zeta-cabs", "acme-taxi"]) {
       expect(rowText(code)).not.toContain("車隊結算");
-      expect(rowText(code)).not.toContain("自營");
+      expect(rowText(code)).not.toContain("車隊派單");
       expect(rowText(code)).toContain("平台入帳");
       expect(rowText(code)).not.toContain(code);
     }

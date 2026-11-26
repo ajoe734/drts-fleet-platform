@@ -21,6 +21,7 @@ import type {
 } from "@drts/contracts";
 
 import {
+  hasUndeliveredSosKeptThroughSignOut,
   noteDriverSosSessionCleared,
   noteDriverSosSignedIn,
 } from "./driver-sos-outbox";
@@ -413,7 +414,15 @@ type StoredSosCaseOwnership = {
   /** Marked 誤觸 or 不用了: it will never be sent, so nothing to keep. */
   dismissed: boolean;
   ownerDriverId: string | null;
+  /** The SOS screen noted that the session ended while it was undelivered. */
+  sessionLost: boolean;
+  /** Has what the SOS screen needs to load and send it again. */
+  complete: boolean;
 };
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
 // Reads only what session handling needs from the stored SOS case
 // (lib/driver-sos-outbox owns the format): whether the server has a receipt,
@@ -425,8 +434,11 @@ async function readStoredSosCaseOwnership(): Promise<StoredSosCaseOwnership | nu
   }
   try {
     const parsed = JSON.parse(raw) as {
+      clientEventId?: unknown;
+      originalTriggeredAt?: unknown;
       receipt?: unknown;
       ownerDriverId?: unknown;
+      sessionLostAt?: unknown;
       falseAlarm?: { dismissed?: unknown };
     };
     return {
@@ -434,9 +446,87 @@ async function readStoredSosCaseOwnership(): Promise<StoredSosCaseOwnership | nu
       dismissed: parsed?.falseAlarm?.dismissed === true,
       ownerDriverId:
         typeof parsed?.ownerDriverId === "string" ? parsed.ownerDriverId : null,
+      sessionLost: isNonEmptyString(parsed?.sessionLostAt),
+      complete:
+        isNonEmptyString(parsed?.clientEventId) &&
+        isNonEmptyString(parsed?.originalTriggeredAt),
     };
   } catch {
-    return { delivered: true, dismissed: false, ownerDriverId: null };
+    return {
+      delivered: true,
+      dismissed: false,
+      ownerDriverId: null,
+      sessionLost: false,
+      complete: false,
+    };
+  }
+}
+
+/** An SOS the SOS screen would still send: no receipt, not 誤觸 / 不用了. */
+function isUndeliveredSosCase(
+  stored: StoredSosCaseOwnership | null,
+): stored is StoredSosCaseOwnership {
+  return Boolean(
+    stored && stored.complete && !stored.delivered && !stored.dismissed,
+  );
+}
+
+function signedInDriverId(): string | null {
+  return DEV_DRIVER_ID || provisionedSession?.driverId || null;
+}
+
+/**
+ * For screens other than SOS while signed in (home, settings): true when this
+ * device holds an SOS raised by the signed-in driver that has not reached the
+ * server. Never another driver's SOS. One saved without an owner (an older
+ * app version) counts, because the SOS screen sends it under this sign-in.
+ * Read only: never changes the stored SOS, and a storage error counts as
+ * "no SOS" instead of throwing.
+ */
+export async function hasUndeliveredSosOfSignedInDriver(): Promise<boolean> {
+  try {
+    const driverId = isDriverIdentityProvisioned() ? signedInDriverId() : null;
+    if (!driverId) {
+      return false;
+    }
+    const stored = await readStoredSosCaseOwnership();
+    return (
+      isUndeliveredSosCase(stored) &&
+      (stored.ownerDriverId === null || stored.ownerDriverId === driverId)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sosKeptThroughSignOutNoted(): boolean {
+  try {
+    return hasUndeliveredSosKeptThroughSignOut();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * For the sign-in screen while signed out: true when an SOS that has not
+ * reached the server was kept through an automatic sign-out (the session
+ * expired or was revoked). No one is signed in, so there is no driver to
+ * compare with; the next sign-in discards it if another driver signs in.
+ * Read only and never throws; if the stored SOS cannot be read, this relies
+ * on what the sign-out itself noted.
+ */
+export async function hasUndeliveredSosAfterSessionLost(): Promise<boolean> {
+  try {
+    if (isDriverIdentityProvisioned()) {
+      return false;
+    }
+    const stored = await readStoredSosCaseOwnership();
+    return (
+      isUndeliveredSosCase(stored) &&
+      (stored.sessionLost || sosKeptThroughSignOutNoted())
+    );
+  } catch {
+    return sosKeptThroughSignOutNoted();
   }
 }
 

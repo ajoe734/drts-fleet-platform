@@ -24,6 +24,7 @@ import {
   formatDriverError,
   getDriverClient,
   getDriverId,
+  hasUndeliveredSosOfSignedInDriver,
   initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
@@ -56,6 +57,21 @@ import {
   type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
+
+const LOGOUT_CONFIRM_MESSAGE = "登出後需要重新完成裝置配置，確定要繼續嗎？";
+// Logging out deletes an SOS that has not reached the server (see
+// lib/api-client), so the driver is told before confirming.
+const LOGOUT_UNDELIVERED_SOS_WARNING =
+  "還有一筆 SOS 沒有送到派車台。登出後這筆 SOS 會被刪除。請先直接打電話聯絡派車台；有立即危險請撥 110 或 119。";
+
+/** Read only; any failure counts as "no undelivered SOS". */
+async function checkUndeliveredSos(): Promise<boolean> {
+  try {
+    return await hasUndeliveredSosOfSignedInDriver();
+  } catch {
+    return false;
+  }
+}
 
 function toErrorMessage(error: unknown): string {
   return formatDriverError(error, "要求失敗");
@@ -455,18 +471,25 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert("登出裝置", "登出後需要重新完成裝置配置，確定要繼續嗎？", [
-      { text: "取消", style: "cancel" },
-      {
-        text: "登出",
-        style: "destructive",
-        onPress: async () => {
-          await revokeDriverDeviceBinding();
-          router.replace("/onboarding");
+  const handleLogout = async () => {
+    const undeliveredSos = await checkUndeliveredSos();
+    Alert.alert(
+      undeliveredSos ? "SOS 尚未送達" : "登出裝置",
+      undeliveredSos
+        ? `${LOGOUT_UNDELIVERED_SOS_WARNING}\n\n${LOGOUT_CONFIRM_MESSAGE}`
+        : LOGOUT_CONFIRM_MESSAGE,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "登出",
+          style: "destructive",
+          onPress: async () => {
+            await revokeDriverDeviceBinding();
+            router.replace("/onboarding");
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   if (identityReady && !isProvisioned) {
