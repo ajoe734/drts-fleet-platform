@@ -1684,7 +1684,7 @@ export default function JobsScreen() {
       {renderNoticeBanner()}
       {renderContent()}
 
-      {layoutVariant === "B" && selectedFilter !== "all" ? (
+      {layoutVariant === "B" && selectedFilter !== "all" && tasks.length > 0 ? (
         <Text style={styles.activeFilterHint}>
           目前篩選：
           {FILTER_OPTIONS.find((item) => item.value === selectedFilter)?.label}

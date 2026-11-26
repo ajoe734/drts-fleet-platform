@@ -609,6 +609,7 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(page).toContain("還沒有綁定任何平台");
       for (const noise of [
         "平台健康中心",
+        "測試環境",
         "更新頻率",
         "重新授權方式",
         "個平台 ·",
@@ -623,6 +624,27 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       expect(banner.props.actions.props.children).toBe("去綁定平台");
       banner.props.actions.props.onPress();
       expect(mocks.push).toHaveBeenCalledWith("/settings");
+
+      act(() => renderer.unmount());
+    });
+
+    it("Platforms with nothing bound still says when the data is not live", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      mocks.getPlatformPresence.mockResolvedValue({
+        presences: [],
+        refreshMeta: { source: "sandbox" },
+      });
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(PlatformPresenceScreen));
+        await flushAsync();
+      });
+
+      const page = rendered(renderer);
+      expect(page).toContain("還沒有綁定任何平台");
+      expect(page).toContain("測試環境");
+      expect(renderer.root.findAllByType("KPI")).toHaveLength(0);
 
       act(() => renderer.unmount());
     });

@@ -142,7 +142,7 @@ export const driverStrings = {
     },
     quickLinkHelpers: {
       trip: "目前行程",
-      platform: "平台健康中心",
+      platform: "平台接單狀態",
       shift: "班次與出勤",
       earnings: "今日收益",
       settings: "帳號與綁定",

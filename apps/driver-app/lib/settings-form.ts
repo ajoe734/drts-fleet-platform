@@ -53,9 +53,7 @@ export function settingsValuesFromRecord(
   record: DriverSettings,
 ): SettingsFormValues {
   return {
-    // Not editable on screen any more, so a blank stored value must not
-    // leave the driver with a validation error they cannot fix.
-    language: record.language?.trim() || "zh-TW",
+    language: record.language ?? "zh-TW",
     notificationsEnabled: record.notificationsEnabled ?? true,
     autoAcceptEnabled: record.autoAcceptEnabled ?? false,
     maxAcceptRadius:
@@ -108,10 +106,6 @@ export function validateSettingsValues(
   values: SettingsFormValues,
 ): SettingsFieldErrors {
   const errors: SettingsFieldErrors = {};
-
-  if (!values.language.trim()) {
-    errors.language = "請選擇介面語言。";
-  }
 
   const radius = values.maxAcceptRadius.trim();
   if (radius.length > 0) {
@@ -184,8 +178,8 @@ export function buildSettingsCommand(
   values: SettingsFormValues,
 ): UpdateDriverSettingsCommand {
   const radius = values.maxAcceptRadius.trim();
+  // language is not editable on screen; leave the stored value alone.
   return {
-    language: values.language.trim(),
     notificationsEnabled: values.notificationsEnabled,
     autoAcceptEnabled: values.autoAcceptEnabled,
     maxAcceptRadius: radius ? Number(radius) : null,

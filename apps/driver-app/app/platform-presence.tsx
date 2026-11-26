@@ -988,7 +988,7 @@ export default function PlatformPresenceScreen() {
         <View style={styles.loadingCard}>
           <ActivityIndicator size="large" color={THEME.accent} />
           <Text style={[styles.loadingLabel, { color: THEME.textMuted }]}>
-            載入平台健康中心…
+            載入平台連線中…
           </Text>
         </View>
       </Shell>
@@ -1015,12 +1015,15 @@ export default function PlatformPresenceScreen() {
         }
       />
 
+      {/* Still say so when test or cached data shows no platforms. */}
+      {hasPlatforms || dataSource !== "live" ? (
+        <Text style={[styles.refreshLine, { color: THEME.textMuted }]}>
+          {refreshLine}
+        </Text>
+      ) : null}
+
       {hasPlatforms ? (
         <>
-          <Text style={[styles.refreshLine, { color: THEME.textMuted }]}>
-            {refreshLine}
-          </Text>
-
           <View style={styles.kpiRow}>
             <KPI theme={THEME} label="可接單" value={String(availableCount)} />
             <KPI theme={THEME} label="需重授權" value={String(reauthCount)} />
