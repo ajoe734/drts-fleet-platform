@@ -20,6 +20,11 @@ import type {
   ForwardedDriverActionResponse,
 } from "@drts/contracts";
 
+import {
+  noteDriverSosSessionCleared,
+  noteDriverSosSignedIn,
+} from "./driver-sos-outbox";
+
 type DriverExpoExtra = {
   apiBaseUrl?: string;
   driverActorId?: string;
@@ -90,7 +95,14 @@ let refreshPromise: Promise<DriverDeviceProvisioningSession> | null = null;
 let provisionedSession: DriverDeviceProvisioningSession | null = null;
 let driverIdentityIssue: string | null = null;
 
-export type ProtectedCacheClearCallback = () => void | Promise<void>;
+/**
+ * `session_ended`: the session expired or was revoked (automatic sign-out);
+ * an undelivered SOS is kept. `logout`: the driver logged out on purpose.
+ */
+export type ProtectedCacheClearEvent = { reason: "session_ended" | "logout" };
+export type ProtectedCacheClearCallback = (
+  event: ProtectedCacheClearEvent,
+) => void | Promise<void>;
 const protectedCacheClearHandlers = new Set<ProtectedCacheClearCallback>();
 
 export type PendingDriverTaskCompletion = {
@@ -458,6 +470,10 @@ async function clearProtectedCachedData(
   const keepSosCase = options.keepUndeliveredSos
     ? await shouldKeepUndeliveredSosCase()
     : false;
+  noteDriverSosSessionCleared({
+    explicitLogout: !options.keepUndeliveredSos,
+    keptUndeliveredSos: keepSosCase,
+  });
   await Promise.allSettled([
     ...(keepSosCase
       ? []
@@ -466,9 +482,12 @@ async function clearProtectedCachedData(
     driverStorage.deleteItemAsync("drts.driver.trackingSessionMarker"),
   ]);
 
+  const event: ProtectedCacheClearEvent = {
+    reason: options.keepUndeliveredSos ? "session_ended" : "logout",
+  };
   for (const handler of Array.from(protectedCacheClearHandlers)) {
     try {
-      await handler();
+      await handler(event);
     } catch {
       // Swallow error during cache invalidation
     }
@@ -704,6 +723,7 @@ async function registerDriverDeviceWithProof(
   setDriverIdentityIssue(null);
   await persistSession(session);
   await discardSosCaseOfOtherDriver(session.driverId);
+  noteDriverSosSignedIn();
   hydrated = true;
   return session;
 }

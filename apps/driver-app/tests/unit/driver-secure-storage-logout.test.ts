@@ -10,9 +10,14 @@ import {
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
   registerDriverDevice,
+  registerProtectedCacheClearHandler,
   revokeDriverDeviceBinding,
   sanitizeLogMessage,
 } from "../../lib/api-client";
+import {
+  getDriverSosLogoutGeneration,
+  hasUndeliveredSosKeptThroughSignOut,
+} from "../../lib/driver-sos-outbox";
 
 // Mock expo-secure-store in-memory store
 const mockStore = new Map<string, string>();
@@ -401,6 +406,29 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
 
       expect(isDriverIdentityProvisioned()).toBe(true);
       expect(mockStore.has(SOS_KEY)).toBe(false);
+    });
+
+    it("tells screens whether a sign-out was automatic or a logout, and counts logouts", async () => {
+      const events: Array<{ reason: string }> = [];
+      const unregister = registerProtectedCacheClearHandler((event) => {
+        events.push(event);
+      });
+      try {
+        storeSosCase({});
+        const logoutsBefore = getDriverSosLogoutGeneration();
+
+        await recoverDriverSessionFromApiError(AUTH_ERROR);
+        expect(events.at(-1)).toEqual({ reason: "session_ended" });
+        expect(getDriverSosLogoutGeneration()).toBe(logoutsBefore);
+        expect(hasUndeliveredSosKeptThroughSignOut()).toBe(true);
+
+        await revokeDriverDeviceBinding();
+        expect(events.at(-1)).toEqual({ reason: "logout" });
+        expect(getDriverSosLogoutGeneration()).toBe(logoutsBefore + 1);
+        expect(hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+      } finally {
+        unregister();
+      }
     });
   });
 });

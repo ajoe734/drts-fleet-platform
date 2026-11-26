@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   pickImages: vi.fn(),
   recoverSession: vi.fn(async () => false),
   provisioned: true,
+  driverId: "driver-001",
+  cacheClearHandlers: new Set<(event: { reason: string }) => unknown>(),
   appStateHandlers: [] as Array<(state: string) => void>,
 }));
 
@@ -143,9 +145,16 @@ vi.mock("@/lib/api-client", () => ({
     get: mocks.getSosEvent,
   }),
   formatDriverError: (_error: unknown, fallback: string) => fallback,
-  getDriverId: () => "driver-001",
+  getDriverId: () => mocks.driverId,
   isDriverIdentityProvisioned: () => mocks.provisioned,
-  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
+  registerProtectedCacheClearHandler: (
+    handler: (event: { reason: string }) => unknown,
+  ) => {
+    mocks.cacheClearHandlers.add(handler);
+    return () => {
+      mocks.cacheClearHandlers.delete(handler);
+    };
+  },
   recoverDriverSessionFromApiError: (...args: unknown[]) =>
     (mocks.recoverSession as (...a: unknown[]) => Promise<boolean>)(...args),
 }));
@@ -159,6 +168,11 @@ vi.mock("@/lib/driver-location-heartbeat", () => ({
   getLatestDriverLocationUpdate: () => null,
 }));
 
+import { Alert } from "react-native";
+import {
+  noteDriverSosSessionCleared,
+  noteDriverSosSignedIn,
+} from "@/lib/driver-sos-outbox";
 import SosScreen from "../../app/sos";
 
 // §1.3 禁止出現 — the subset that a driver order-context card could plausibly
@@ -572,8 +586,9 @@ describe("SOS screen · driver-facing copy", () => {
       await flushEffects();
     });
 
+    // From the first failure: phone now, stay here for the automatic resend.
     expect(bannerBodies(renderer)).toContain(
-      "SOS 還沒送到，已存在手機，會自動再送，也可按「重新送出」。",
+      "請直接打電話聯絡派車台；有立即危險請撥 110 或 119。請留在這個畫面，App 會自動再送；離開後不會自動送出。",
     );
     const strings = hostStrings(renderer);
     expect(developerCopyIn(strings)).toEqual([]);
@@ -890,6 +905,26 @@ function findBtn(renderer: any, label: string) {
   );
 }
 
+/** An automatic sign-out, as lib/api-client reports it to the screen. */
+function endSessionAutomatically() {
+  mocks.provisioned = false;
+  for (const handler of Array.from(mocks.cacheClearHandlers)) {
+    handler({ reason: "session_ended" });
+  }
+}
+
+/** An explicit logout, as lib/api-client reports it. */
+function logOutExplicitly() {
+  mocks.provisioned = false;
+  noteDriverSosSessionCleared({
+    explicitLogout: true,
+    keptUndeliveredSos: false,
+  });
+  for (const handler of Array.from(mocks.cacheClearHandlers)) {
+    handler({ reason: "logout" });
+  }
+}
+
 function holdButtonLabel(renderer: any): string {
   return findHoldButton(renderer)
     .findAll((node: any) => node.type === "Text")
@@ -904,7 +939,10 @@ describe("SOS screen · review follow-up (safety)", () => {
     });
     delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
     mocks.provisioned = true;
+    mocks.driverId = "driver-001";
     mocks.appStateHandlers.length = 0;
+    noteDriverSosSignedIn();
+    vi.mocked(Alert.alert).mockClear();
     mocks.replace.mockReset();
     mocks.secureGetItem.mockReset().mockResolvedValue(null);
     mocks.secureSetItem.mockReset().mockResolvedValue(undefined);
@@ -1197,8 +1235,9 @@ describe("SOS screen · review follow-up (safety)", () => {
   it("keeps an SOS through an expired session, tells the driver to call, and resends it after sign-in", async () => {
     const authError = new Error("API error 401: session expired");
     mocks.submitDriverSosEvent.mockReset().mockRejectedValueOnce(authError);
+    // As lib/api-client does: clear the session, then run the cache handlers.
     mocks.recoverSession.mockImplementation(async () => {
-      mocks.provisioned = false;
+      endSessionAutomatically();
       return true;
     });
 
@@ -1214,13 +1253,15 @@ describe("SOS screen · review follow-up (safety)", () => {
       firstKey =
         mocks.submitDriverSosEvent.mock.calls[0][1].headers["Idempotency-Key"];
 
-      // The driver is told plainly, and is not silently sent to sign-in.
+      // The driver is told plainly, once, and is not silently sent to sign-in.
       const banner = first.root.find(
         (node: any) =>
-          node.type === "Banner" && node.props.title === "SOS 還沒送到",
+          node.type === "Banner" && node.props.title === "SOS 尚未送達",
       );
       expect(banner.props.body).toContain("請直接打電話聯絡派車台");
       expect(banner.props.body).toContain("110 或 119");
+      expect(vi.mocked(Alert.alert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(Alert.alert).mock.calls[0][0]).toBe("SOS 尚未送達");
       expect(mocks.replace).not.toHaveBeenCalled();
       expect(
         first.root.findAll((node: any) => node.type === "Redirect"),
@@ -1231,6 +1272,7 @@ describe("SOS screen · review follow-up (safety)", () => {
       expect(kept.clientEventId).toBe(firstKey);
       expect(kept.receipt).toBeNull();
       expect(kept.ownerDriverId).toBe("driver-001");
+      expect(kept.sessionLostAt).toBeTruthy();
       expect(Date.parse(kept.nextAttemptAt)).toBeLessThanOrEqual(Date.now());
     } finally {
       act(() => first.unmount());
@@ -1253,6 +1295,426 @@ describe("SOS screen · review follow-up (safety)", () => {
       ).toBe(firstKey!);
     } finally {
       act(() => second.unmount());
+    }
+  });
+});
+
+// DRIVER-SOS-CLEANUP-20261126, second safety review.
+function httpError(statusCode: number) {
+  return Object.assign(new Error(`API error ${statusCode}`), { statusCode });
+}
+
+function findFalseAlarmSlider(renderer: any) {
+  return renderer.root.find(
+    (node: any) =>
+      typeof node.type === "function" &&
+      typeof node.props.onComplete === "function",
+  );
+}
+
+describe("SOS screen · second safety review", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+      now: SEND_NOW,
+    });
+    delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
+    mocks.provisioned = true;
+    mocks.driverId = "driver-001";
+    mocks.appStateHandlers.length = 0;
+    noteDriverSosSignedIn();
+    vi.mocked(Alert.alert).mockClear();
+    mocks.replace.mockReset();
+    mocks.secureGetItem.mockReset().mockResolvedValue(null);
+    mocks.secureSetItem.mockReset().mockResolvedValue(undefined);
+    mocks.recoverSession.mockReset().mockResolvedValue(false);
+    mocks.syncAttachments.mockReset();
+    mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.getSosEvent.mockReset().mockRejectedValue(new Error("offline"));
+    mocks.submitDriverSosEvent
+      .mockReset()
+      .mockRejectedValue(new Error("network down"));
+    useNativeConnectivity();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps an SOS sent while the trip list is still loading, and its resend timer", async () => {
+    let finishTasks: (tasks: unknown[]) => void = () => {};
+    mocks.listUnifiedDriverTasks.mockReturnValue(
+      new Promise((resolve) => {
+        finishTasks = resolve;
+      }),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      // The slow trip list arrives after the SOS was raised.
+      await act(async () => {
+        finishTasks([]);
+        await settle();
+      });
+
+      const caseCard = renderer.root.findAll(
+        (node: any) => node.type === "Card" && node.props.title === "本次 SOS",
+      );
+      expect(caseCard).toHaveLength(1);
+      expect(findResendButton(renderer)).toBeTruthy();
+
+      await advance(RETRY_BACKOFF_MS);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+      const keys = mocks.submitDriverSosEvent.mock.calls.map(
+        ([, options]) => options.headers["Idempotency-Key"],
+      );
+      expect(new Set(keys).size).toBe(1);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("keeps an undelivered SOS and warns when another request signs the driver out", async () => {
+    const first = await renderSosScreen();
+    try {
+      await pressHoldToSend(first);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      // e.g. the location queue gets a 401 and api-client signs out.
+      await act(async () => {
+        endSessionAutomatically();
+        await settle();
+      });
+
+      expect(vi.mocked(Alert.alert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(Alert.alert).mock.calls[0][1]).toContain(
+        "請直接打電話聯絡派車台；有立即危險請撥 110 或 119。",
+      );
+      expect(
+        first.root.findAll((node: any) => node.type === "Redirect"),
+      ).toEqual([]);
+      expect(
+        first.root.find(
+          (node: any) =>
+            node.type === "Banner" && node.props.title === "SOS 尚未送達",
+        ),
+      ).toBeTruthy();
+      expect(savedCases().at(-1)!.sessionLostAt).toBeTruthy();
+    } finally {
+      act(() => first.unmount());
+    }
+
+    // Opened again while still signed out: the warning is still there.
+    const signedOut = await renderSosScreen();
+    try {
+      expect(
+        signedOut.root.findAll((node: any) => node.type === "Redirect"),
+      ).toEqual([]);
+      expect(hostStrings(signedOut)).toContain("SOS 尚未送達");
+    } finally {
+      act(() => signedOut.unmount());
+    }
+
+    // After signing back in, the flagged SOS still says what happened.
+    mocks.provisioned = true;
+    noteDriverSosSignedIn();
+    mocks.secureGetItem.mockResolvedValue(JSON.stringify(savedCases().at(-1)));
+    const again = await renderSosScreen();
+    try {
+      const banner = again.root.find(
+        (node: any) =>
+          node.type === "Banner" && node.props.title === "SOS 尚未送達",
+      );
+      expect(banner.props.body).toContain("登入曾失效");
+    } finally {
+      act(() => again.unmount());
+    }
+  });
+
+  it("stops warning if the SOS lands after another request signed the driver out", async () => {
+    let finishSubmit: () => void = () => {};
+    mocks.submitDriverSosEvent.mockReset().mockImplementation(
+      (command: { clientEventId: string }) =>
+        new Promise((resolve) => {
+          finishSubmit = () => resolve(submitResultFor(command));
+        }),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      await act(async () => {
+        endSessionAutomatically();
+        await settle();
+      });
+      expect(hostStrings(renderer)).toContain("SOS 尚未送達");
+
+      await act(async () => {
+        finishSubmit();
+        await settle();
+      });
+
+      expect(hostStrings(renderer)).not.toContain("SOS 尚未送達");
+      expect(savedCases().at(-1)!.receipt).not.toBeNull();
+      expect(savedCases().at(-1)!.sessionLostAt).toBeNull();
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("never loads or sends another driver's SOS", async () => {
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "failed_retryable",
+          attemptCount: 1,
+          nextAttemptAt: SEND_NOW.toISOString(),
+          ownerDriverId: "driver-someone-else",
+        }),
+      ),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+      expect(
+        renderer.root.findAll(
+          (node: any) =>
+            node.type === "Card" && node.props.title === "本次 SOS",
+        ),
+      ).toEqual([]);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("does not write the SOS back when the driver logs out during a send", async () => {
+    let finishSubmit: (value: unknown) => void = () => {};
+    mocks.submitDriverSosEvent.mockReset().mockImplementation(
+      (command: { clientEventId: string }) =>
+        new Promise((resolve) => {
+          finishSubmit = () => resolve(submitResultFor(command));
+        }),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        logOutExplicitly();
+        await settle();
+      });
+      const savesBeforeLateResult = mocks.secureSetItem.mock.calls.length;
+
+      await act(async () => {
+        finishSubmit(undefined);
+        await settle();
+      });
+
+      expect(mocks.secureSetItem.mock.calls.length).toBe(savesBeforeLateResult);
+      expect(vi.mocked(Alert.alert)).not.toHaveBeenCalled();
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("never resends an SOS marked 誤觸, and offers a new SOS instead", async () => {
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        findFalseAlarmSlider(renderer).props.onComplete();
+      });
+      const buttons = vi.mocked(Alert.alert).mock.calls.at(-1)![2] as Array<{
+        text: string;
+        onPress?: () => void;
+      }>;
+      await act(async () => {
+        buttons.find((button) => button.text === "確認標記誤觸")!.onPress!();
+        await settle();
+      });
+
+      await advance(5 * 60_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(
+        renderer.root.findAll(
+          (node: any) =>
+            node.type === "Btn" && node.props.children === "重新送出",
+        ),
+      ).toEqual([]);
+      expect(findHoldButton(renderer).props.disabled).toBe(false);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("asks before sending an undelivered SOS older than 30 minutes", async () => {
+    const createdAt = new Date(SEND_NOW.getTime() - 31 * 60_000).toISOString();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "failed_retryable",
+          attemptCount: 3,
+          originalTriggeredAt: createdAt,
+          nextAttemptAt: createdAt,
+        }),
+      ),
+    );
+    mocks.submitDriverSosEvent
+      .mockReset()
+      .mockImplementation(async (command: { clientEventId: string }) =>
+        submitResultFor(command),
+      );
+    const renderer = await renderSosScreen();
+    try {
+      await advance(2 * 60_000);
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+      // 00:29 UTC is 08:29 in Taiwan (ICU puts a thin space before the time).
+      expect(
+        hostStrings(renderer).some((text) =>
+          /^這筆 SOS 是 11\/26\s上午08:29 建立的，還沒送達。仍要送出嗎？$/.test(
+            text,
+          ),
+        ),
+      ).toBe(true);
+
+      await act(async () => {
+        findBtn(renderer, "送出").props.onPress();
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(
+        mocks.submitDriverSosEvent.mock.calls[0][1].headers["Idempotency-Key"],
+      ).toBe("client-event-cleanup-1");
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("drops an old undelivered SOS when the driver answers 不用了", async () => {
+    const createdAt = new Date(SEND_NOW.getTime() - 45 * 60_000).toISOString();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "pending",
+          originalTriggeredAt: createdAt,
+          nextAttemptAt: createdAt,
+        }),
+      ),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        findBtn(renderer, "不用了").props.onPress();
+        await settle();
+      });
+      await advance(2 * 60_000);
+
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+      expect(savedCases().at(-1)!.falseAlarm.dismissed).toBe(true);
+      expect(findHoldButton(renderer).props.disabled).toBe(false);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("stops automatic resends after a refusal that a retry cannot fix, but keeps 重新送出", async () => {
+    mocks.submitDriverSosEvent.mockReset().mockRejectedValue(httpError(400));
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      await advance(5 * 60_000);
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(bannerBodies(renderer)).toContain(
+        "這筆 SOS 送不出去。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。可以按「重新送出」再試一次。",
+      );
+      expect(findResendButton(renderer).props.disabled).toBe(false);
+
+      await act(async () => {
+        findResendButton(renderer).props.onPress();
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("keeps retrying a rate-limited (429) SOS automatically", async () => {
+    mocks.submitDriverSosEvent.mockReset().mockRejectedValue(httpError(429));
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      await advance(RETRY_BACKOFF_MS);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("says 'this browser tab' rather than 'the phone' on the web build", async () => {
+    const tabStorage = new Map<string, string>();
+    const browser = Object.assign(new EventTarget(), {
+      sessionStorage: {
+        getItem: (key: string) => tabStorage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          tabStorage.set(key, value);
+        },
+        removeItem: (key: string) => {
+          tabStorage.delete(key);
+        },
+      },
+    });
+    vi.stubGlobal("window", browser);
+    vi.stubGlobal("document", {});
+    vi.stubGlobal("navigator", { onLine: false });
+
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+
+      const strings = hostStrings(renderer);
+      expect(strings).toContain("已暫存在這個瀏覽器分頁，連線後會自動送出。");
+      expect(strings.join("|")).not.toContain("手機");
+      // Kept in this tab's sessionStorage, not in SecureStore.
+      expect(
+        JSON.parse(tabStorage.get("drts.driver.sos.activeCase")!).syncState,
+      ).toBe("pending");
+      expect(mocks.secureSetItem).not.toHaveBeenCalled();
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("keeps a delivered SOS that was mid-photo-upload as delivered when reopened", async () => {
+    const delivered = storedAcknowledgedCase();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify({
+        ...delivered,
+        syncState: "sending",
+        falseAlarm: { dismissed: false, dismissedAt: null, note: null },
+      }),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      const strings = hostStrings(renderer);
+      expect(strings).toContain("附件待補送");
+      expect(strings).not.toContain("尚未送達");
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+    } finally {
+      act(() => renderer.unmount());
     }
   });
 });

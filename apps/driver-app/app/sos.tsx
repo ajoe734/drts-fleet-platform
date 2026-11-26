@@ -51,6 +51,11 @@ import {
   createDriverSosActiveCase,
   createDriverSosAttachmentDraft,
   formatSosDescription,
+  getDriverSosLogoutGeneration,
+  hasUndeliveredSosKeptThroughSignOut,
+  noteDriverSosDelivered,
+  noteDriverSosSessionCleared,
+  sosSavedHereLabel,
   getSituationLabel,
   isDriverSosStatusTerminal,
   loadDriverSosActiveCase,
@@ -87,9 +92,15 @@ const MAX_ATTACHMENTS = 4;
 // A stalled photo read or upload must not hold the single SOS send slot.
 const ATTACHMENT_READ_TIMEOUT_MS = 30_000;
 const ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
-const SESSION_LOST_SOS_TITLE = "SOS 還沒送到";
-const SESSION_LOST_SOS_BODY =
-  "登入已失效，這筆 SOS 沒有送到車隊。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後打開 SOS 頁面，會自動再送。";
+const CALL_NOW_ADVICE = "請直接打電話聯絡派車台；有立即危險請撥 110 或 119。";
+// Automatic resend runs only while this screen is open in the foreground.
+const STAY_ON_SCREEN_ADVICE =
+  "請留在這個畫面，App 會自動再送；離開後不會自動送出。";
+const SESSION_LOST_SOS_TITLE = "SOS 尚未送達";
+const SESSION_LOST_SOS_BODY = `登入已失效，這筆 SOS 沒有送到車隊。${CALL_NOW_ADVICE}重新登入後打開 SOS 頁面，會再送出。`;
+// An undelivered SOS older than this is not sent automatically: the driver
+// is asked first (送出 / 不用了).
+const STALE_SOS_AGE_MS = 30 * 60_000;
 // S3-FIX-DRIVER-SOS-VOCAB-001: the cross-platform fields live in their own
 // optional group rather than inline on the context, so the multi_taxi_direct
 // gate can drop them as a unit. When `crossPlatform` is null there is nothing
@@ -293,7 +304,7 @@ async function withTimeout<T>(
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
-      reject(new Error("附件處理逾時，已保留於手機等待重試。"));
+      reject(new Error("附件處理逾時。"));
     }, timeoutMs);
   });
   try {
@@ -303,19 +314,99 @@ async function withTimeout<T>(
   }
 }
 
+/** The HTTP status of a failed request, or null (network error, timeout). */
+function httpStatusOf(error: unknown): number | null {
+  if (error && typeof error === "object") {
+    const { statusCode, status } = error as {
+      statusCode?: unknown;
+      status?: unknown;
+    };
+    if (typeof statusCode === "number") return statusCode;
+    if (typeof status === "number") return status;
+  }
+  const match =
+    error instanceof Error ? /API error (\d{3})/.exec(error.message) : null;
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Whether resending can help. A 4xx means the server refused this request
+ * as sent, except 401 (handled as a sign-out), 408, 409 and 429.
+ */
+function isRetryableSendFailure(status: number | null): boolean {
+  if (status === null || status < 400 || status >= 500) {
+    return true;
+  }
+  return status === 401 || status === 408 || status === 409 || status === 429;
+}
+
 /**
  * A failed send. An SOS the server has already received (it has a receipt)
  * never goes back to "not delivered": only its attachments or supplements are
  * still owed, so it stays `attachment_pending` and 重新送出 stays available.
+ * `blocked`: the server refused it for good; no automatic resend.
  */
 function markSendFailed(
   baseCase: DriverSosActiveCase,
   message: string,
+  options: { blocked?: boolean } = {},
 ): DriverSosActiveCase {
   if (baseCase.receipt) {
     return { ...baseCase, syncState: "attachment_pending", lastError: message };
   }
-  return markDriverSosCaseFailed(baseCase, message);
+  const failed = markDriverSosCaseFailed(baseCase, message);
+  if (!options.blocked) {
+    return { ...failed, autoResendBlocked: false };
+  }
+  const [newestEntry, ...olderEntries] = failed.timeline;
+  return {
+    ...failed,
+    autoResendBlocked: true,
+    timeline: newestEntry
+      ? [
+          { ...newestEntry, detail: `${message} 不會自動再送。` },
+          ...olderEntries,
+        ]
+      : failed.timeline,
+  };
+}
+
+function isUndelivered(activeCase: DriverSosActiveCase): boolean {
+  return !activeCase.receipt && !activeCase.falseAlarm.dismissed;
+}
+
+function isStaleUndelivered(activeCase: DriverSosActiveCase): boolean {
+  const triggeredAt = Date.parse(activeCase.originalTriggeredAt);
+  return (
+    isUndelivered(activeCase) &&
+    !Number.isNaN(triggeredAt) &&
+    Date.now() - triggeredAt > STALE_SOS_AGE_MS
+  );
+}
+
+/** Never for a delivered, dismissed (誤觸), refused or 30-minute-old SOS. */
+function canAutoResend(activeCase: DriverSosActiveCase): boolean {
+  return (
+    isUndelivered(activeCase) &&
+    !activeCase.autoResendBlocked &&
+    (activeCase.syncState === "pending" ||
+      activeCase.syncState === "failed_retryable") &&
+    !isStaleUndelivered(activeCase)
+  );
+}
+
+/**
+ * A case belongs to the driver who raised it. Cases saved before the owner
+ * was recorded predate this check; old versions deleted them at every
+ * sign-out, so they can only belong to the current driver.
+ */
+function isOwnedBy(
+  activeCase: DriverSosActiveCase,
+  driverId: string | null,
+): boolean {
+  return activeCase.ownerDriverId
+    ? activeCase.ownerDriverId === driverId
+    : true;
 }
 
 /**
@@ -376,13 +467,26 @@ function describeNextResend(activeCase: DriverSosActiveCase): string | null {
 
 // A case stored as "sending" means the app stopped mid-send (closed, killed or
 // crashed). Nothing is in flight on a fresh screen, so offer it for resend;
-// the server dedupes on the case's idempotency key.
-function recoverInterruptedSend(
-  storedCase: DriverSosActiveCase | null,
-): DriverSosActiveCase | null {
-  return storedCase?.syncState === "sending"
-    ? { ...storedCase, syncState: "pending" }
-    : storedCase;
+// the server dedupes on the case's idempotency key. A delivered case that was
+// mid-photo-upload stays delivered with its photos pending.
+function normalizeLoadedCase(
+  storedCase: DriverSosActiveCase,
+): DriverSosActiveCase {
+  let loaded = storedCase;
+  if (loaded.syncState === "sending") {
+    loaded = {
+      ...loaded,
+      syncState: loaded.receipt ? "attachment_pending" : "pending",
+    };
+  }
+  if (
+    loaded.receipt &&
+    (loaded.syncState === "submitted" || loaded.syncState === "complete") &&
+    hasPendingSupplementPhotos(loaded)
+  ) {
+    loaded = { ...loaded, syncState: "attachment_pending" };
+  }
+  return loaded;
 }
 
 function getSyncChipModel(
@@ -394,7 +498,7 @@ function getSyncChipModel(
       return {
         tone: "warn",
         label: "離線",
-        detail: "SOS 會先存在手機，連線後自動送出。",
+        detail: "SOS 會先保存起來，連線後自動送出。",
       };
     }
 
@@ -411,7 +515,17 @@ function getSyncChipModel(
     return {
       tone: "info",
       label: "可送出 SOS",
-      detail: "沒有網路時會先存在手機，稍後自動再送。",
+      detail: "沒有網路時會先保存起來，稍後自動再送。",
+    };
+  }
+
+  if (activeCase.falseAlarm.dismissed) {
+    return {
+      tone: "info",
+      label: "已標記誤觸",
+      detail: activeCase.receipt
+        ? "車隊不會自動收到這個標記，請打電話告知派車台。"
+        : "這筆 SOS 不會再送出。",
     };
   }
 
@@ -442,11 +556,27 @@ function getSyncChipModel(
     };
   }
 
+  if (activeCase.autoResendBlocked) {
+    return {
+      tone: "danger",
+      label: "無法送出",
+      detail: "不會自動再送，可按「重新送出」再試。",
+    };
+  }
+
+  if (isStaleUndelivered(activeCase)) {
+    return {
+      tone: "warn",
+      label: "尚未送達",
+      detail: "已超過 30 分鐘，不會自動送出。",
+    };
+  }
+
   if (browserOnline === false) {
     return {
       tone: "warn",
       label: "尚未送達",
-      detail: "已存在手機，連線後會自動送出。",
+      detail: `${sosSavedHereLabel()}，連線後會自動送出。`,
     };
   }
 
@@ -456,7 +586,7 @@ function getSyncChipModel(
     label: "尚未送達",
     detail: nextResend
       ? `${nextResend}，也可按「重新送出」。`
-      : "已存在手機，正在自動再送，也可按「重新送出」。",
+      : `${sosSavedHereLabel()}，正在自動再送，也可按「重新送出」。`,
   };
 }
 
@@ -695,6 +825,9 @@ export default function DriverSosScreen() {
   // Set when the session ended while an SOS was undelivered (see the catch
   // in syncActiveCase); the screen then explains that instead of redirecting.
   const [sessionLostWithSos, setSessionLostWithSos] = useState(false);
+  const sessionLostAlertedRef = useRef(false);
+  // Re-renders when a waiting resend turns out to be too old to send.
+  const [, setStaleCheckTick] = useState(0);
   // Bumped when the app returns to the foreground so a resend that came due
   // while JS timers were paused is attempted straight away.
   const [foregroundTick, setForegroundTick] = useState(0);
@@ -738,12 +871,23 @@ export default function DriverSosScreen() {
   const isProvisioned = isDriverIdentityProvisioned();
 
   useEffect(() => {
-    const unregister = registerProtectedCacheClearHandler(() => {
-      latestCaseRef.current = null;
-      setActiveCase(null);
+    const unregister = registerProtectedCacheClearHandler((event) => {
       setContext(null);
       setDraftAttachments([]);
       setSupplementAttachments([]);
+      const latest = latestCaseRef.current;
+      // Any automatic sign-out (this send's 401, the location queue, a
+      // failed token refresh) keeps an undelivered SOS and warns the driver.
+      if (
+        event?.reason === "session_ended" &&
+        latest &&
+        isUndelivered(latest)
+      ) {
+        keepThroughSignOut(latest);
+        return;
+      }
+      latestCaseRef.current = null;
+      setActiveCase(null);
     });
     return () => unregister();
   }, []);
@@ -756,21 +900,24 @@ export default function DriverSosScreen() {
     }
 
     let cancelled = false;
+    // The stored SOS loads on its own: it is local and quick, and it must not
+    // wait for the task list (up to about a minute with the fallback), nor be
+    // replaced by it.
     void (async () => {
-      const [storedCase, taskContext] = await Promise.all([
-        // A storage failure must not leave the screen loading forever.
-        loadDriverSosActiveCase().catch(() => null),
-        resolveSosTaskContext(),
-      ]);
+      // A storage failure must not leave the screen loading forever.
+      const storedCase = await loadDriverSosActiveCase().catch(() => null);
       if (cancelled) {
         return;
       }
-
-      const restoredCase = recoverInterruptedSend(storedCase);
-      latestCaseRef.current = restoredCase;
-      setActiveCase(restoredCase);
-      setContext(taskContext);
+      adoptStoredCase(storedCase);
       setLoadingCase(false);
+    })();
+    void (async () => {
+      const taskContext = await resolveSosTaskContext();
+      if (cancelled) {
+        return;
+      }
+      setContext(taskContext);
       setLoadingContext(false);
     })();
 
@@ -822,10 +969,7 @@ export default function DriverSosScreen() {
     if (browserOnline === false) {
       return;
     }
-    if (
-      activeCase.syncState !== "pending" &&
-      activeCase.syncState !== "failed_retryable"
-    ) {
+    if (!canAutoResend(activeCase)) {
       return;
     }
 
@@ -839,7 +983,12 @@ export default function DriverSosScreen() {
     }
 
     const timer = setTimeout(() => {
-      void syncActiveCase(activeCase, false);
+      // It may have become too old (or been dismissed) while waiting.
+      if (canAutoResend(latestCopyOf(activeCase))) {
+        void syncActiveCase(latestCopyOf(activeCase), false);
+      } else {
+        setStaleCheckTick((tick) => tick + 1);
+      }
     }, waitMs);
     return () => clearTimeout(timer);
   }, [activeCase, browserOnline, foregroundTick, isProvisioned]);
@@ -859,6 +1008,7 @@ export default function DriverSosScreen() {
     }
 
     let cancelled = false;
+    const logoutGeneration = getDriverSosLogoutGeneration();
 
     async function pollDutyReadback() {
       try {
@@ -876,6 +1026,7 @@ export default function DriverSosScreen() {
         }
         await persistActiveCase(
           applyDriverSosDutyReadback(current, readback.event),
+          logoutGeneration,
         );
       } catch {
         // Best-effort background readback; local outbox state is unaffected
@@ -894,10 +1045,8 @@ export default function DriverSosScreen() {
     };
   }, [sosEventIdForReadback, sosReadbackIsTerminal]);
 
-  const syncChip = useMemo(
-    () => getSyncChipModel(activeCase, browserOnline),
-    [activeCase, browserOnline],
-  );
+  // Not memoised: it depends on the clock (next resend, 30-minute limit).
+  const syncChip = getSyncChipModel(activeCase, browserOnline);
 
   function resetHoldProgress() {
     if (progressIntervalRef.current) {
@@ -913,7 +1062,19 @@ export default function DriverSosScreen() {
   // writes just after the phone locks; Android Keystore errors; the web
   // build's storage) must never stop or skip sending the SOS: the case stays
   // in memory and the send goes ahead.
-  async function persistActiveCase(nextCase: DriverSosActiveCase | null) {
+  // `logoutGeneration`: from when an async step started. If the driver has
+  // logged out since, nothing is written back, so a late result cannot bring
+  // the SOS back for the next driver.
+  async function persistActiveCase(
+    nextCase: DriverSosActiveCase | null,
+    logoutGeneration?: number,
+  ) {
+    if (
+      logoutGeneration !== undefined &&
+      logoutGeneration !== getDriverSosLogoutGeneration()
+    ) {
+      return;
+    }
     latestCaseRef.current = nextCase;
     setActiveCase(nextCase);
     try {
@@ -923,6 +1084,63 @@ export default function DriverSosScreen() {
         "Driver SOS case could not be saved on this device",
         formatDriverError(error, "儲存失敗"),
       );
+    }
+  }
+
+  /**
+   * Adopts the SOS stored on this device, unless a case was created or
+   * changed on this screen after it opened (that one is newer), and never one
+   * raised by a different driver.
+   */
+  function adoptStoredCase(storedCase: DriverSosActiveCase | null) {
+    const driverId = currentDriverId();
+    const latest = latestCaseRef.current;
+    if (latest) {
+      if (!isOwnedBy(latest, driverId)) {
+        latestCaseRef.current = null;
+        setActiveCase(null);
+      }
+      return;
+    }
+    if (!storedCase) {
+      return;
+    }
+    if (!isOwnedBy(storedCase, driverId)) {
+      // Another driver's SOS (a late save after logout, a failed delete):
+      // never send it with this driver's sign-in.
+      void saveDriverSosActiveCase(null).catch(() => undefined);
+      return;
+    }
+    const restored = normalizeLoadedCase({
+      ...storedCase,
+      ownerDriverId: storedCase.ownerDriverId ?? driverId,
+    });
+    latestCaseRef.current = restored;
+    setActiveCase(restored);
+  }
+
+  /**
+   * The session ended while this SOS was undelivered: keep it (flagged, so
+   * the screen keeps warning, also after signing back in) and tell the driver
+   * once, before anything moves them to sign-in.
+   */
+  function keepThroughSignOut(
+    baseCase: DriverSosActiveCase,
+    logoutGeneration?: number,
+  ) {
+    const kept: DriverSosActiveCase = {
+      ...baseCase,
+      sessionLostAt: baseCase.sessionLostAt ?? new Date().toISOString(),
+    };
+    void persistActiveCase(kept, logoutGeneration);
+    noteDriverSosSessionCleared({
+      explicitLogout: false,
+      keptUndeliveredSos: true,
+    });
+    setSessionLostWithSos(true);
+    if (!sessionLostAlertedRef.current) {
+      sessionLostAlertedRef.current = true;
+      Alert.alert(SESSION_LOST_SOS_TITLE, SESSION_LOST_SOS_BODY);
     }
   }
 
@@ -939,6 +1157,18 @@ export default function DriverSosScreen() {
     manualRetry: boolean,
     options: { queueIfBusy?: boolean } = {},
   ) {
+    if (targetCase.falseAlarm.dismissed) {
+      // Marked 誤觸 or 不用了: never sent again.
+      return;
+    }
+    if (!isOwnedBy(targetCase, currentDriverId())) {
+      // Raised by a different driver: never send it with this sign-in.
+      if (latestCaseRef.current?.clientEventId === targetCase.clientEventId) {
+        latestCaseRef.current = null;
+        setActiveCase(null);
+      }
+      return;
+    }
     if (sendInFlightRef.current) {
       if (options.queueIfBusy) {
         syncQueuedRef.current = true;
@@ -946,14 +1176,19 @@ export default function DriverSosScreen() {
       return;
     }
     sendInFlightRef.current = true;
+    const logoutGeneration = getDriverSosLogoutGeneration();
+    const save = (nextCase: DriverSosActiveCase) =>
+      persistActiveCase(nextCase, logoutGeneration);
     let sendingCase = targetCase;
 
     try {
-      sendingCase = markDriverSosCaseSending(targetCase);
+      sendingCase = markDriverSosCaseSending(
+        manualRetry ? { ...targetCase, autoResendBlocked: false } : targetCase,
+      );
       setSubmitting(true);
       setScreenError(null);
       setUiNotice(manualRetry ? "重新送出 SOS…" : "正在送出 SOS…");
-      await persistActiveCase(sendingCase);
+      await save(sendingCase);
 
       const result = await getDriverClient().submitDriverSosEvent(
         buildDriverSosSubmitCommand(sendingCase),
@@ -964,11 +1199,18 @@ export default function DriverSosScreen() {
           },
         },
       );
-      const submittedCase = markDriverSosCaseSubmitted(
-        latestCopyOf(sendingCase),
-        result,
-      );
-      await persistActiveCase(submittedCase);
+      const submittedCase: DriverSosActiveCase = {
+        ...markDriverSosCaseSubmitted(latestCopyOf(sendingCase), result),
+        sessionLostAt: null,
+        autoResendBlocked: false,
+      };
+      await save(submittedCase);
+      if (logoutGeneration === getDriverSosLogoutGeneration()) {
+        // Delivered after all (e.g. another request signed the driver out
+        // while this send was already on its way): stop warning.
+        noteDriverSosDelivered();
+        setSessionLostWithSos(false);
+      }
       const attachments = [
         ...submittedCase.attachments,
         ...submittedCase.supplements.flatMap(
@@ -1038,10 +1280,10 @@ export default function DriverSosScreen() {
           attachmentSync.attachments,
         ),
       );
-      await persistActiveCase(completedCase);
+      await save(completedCase);
       setUiNotice(
         attachmentSync.unavailableCount + attachmentSync.failedCount > 0
-          ? `SOS ${result.receipt.eventNo} 已送達；附件暫時傳不出去，已存在手機，可稍後按「重新送出」。`
+          ? `SOS ${result.receipt.eventNo} 已送達；附件暫時傳不出去，${sosSavedHereLabel()}，可稍後按「重新送出」。`
           : `SOS ${result.receipt.eventNo} 與附件都已送達。`,
       );
     } catch (error) {
@@ -1063,11 +1305,12 @@ export default function DriverSosScreen() {
           ),
           nextAttemptAt: new Date().toISOString(),
         };
-        await persistActiveCase(keptCase);
-        setSessionLostWithSos(!keptCase.receipt);
-        if (!keptCase.receipt) {
-          Alert.alert(SESSION_LOST_SOS_TITLE, SESSION_LOST_SOS_BODY);
+        if (keptCase.receipt) {
+          await save(keptCase);
+        } else {
+          keepThroughSignOut(keptCase, logoutGeneration);
         }
+        setUiNotice(null);
         return;
       }
       const sanitizedError = formatDriverError(
@@ -1077,13 +1320,15 @@ export default function DriverSosScreen() {
       const failedCase = markSendFailed(
         latestCopyOf(sendingCase),
         sanitizedError,
+        { blocked: !isRetryableSendFailure(httpStatusOf(error)) },
       );
-      await persistActiveCase(failedCase);
-      setScreenError(sanitizedError);
+      await save(failedCase);
+      // An undelivered SOS gets the "SOS 尚未送達" banner (call-now advice,
+      // retry status); the reason stays in the progress list.
       setUiNotice(
         failedCase.receipt
-          ? "附件還沒傳出，已存在手機，可稍後按「重新送出」。"
-          : "SOS 還沒送到，已存在手機，會自動再送，也可按「重新送出」。",
+          ? `附件還沒傳出，${sosSavedHereLabel()}，可稍後按「重新送出」。`
+          : null,
       );
     } finally {
       sendInFlightRef.current = false;
@@ -1092,7 +1337,10 @@ export default function DriverSosScreen() {
       if (syncQueuedRef.current) {
         syncQueuedRef.current = false;
         const latest = latestCaseRef.current;
-        if (latest?.receipt) {
+        if (
+          latest?.receipt &&
+          logoutGeneration === getDriverSosLogoutGeneration()
+        ) {
           void syncActiveCase(latest, false);
         }
       }
@@ -1149,7 +1397,8 @@ export default function DriverSosScreen() {
       return;
     }
 
-    if (activeCase && !activeCase.falseAlarm.dismissed) {
+    const existingCase = latestCaseRef.current ?? activeCase;
+    if (existingCase && !existingCase.falseAlarm.dismissed) {
       setScreenError("目前已有一筆進行中的 SOS，請改用補充區更新資訊。");
       resetHoldProgress();
       return;
@@ -1187,8 +1436,8 @@ export default function DriverSosScreen() {
     // while it is being saved, and its notices/errors must not be overwritten.
     setUiNotice(
       isOffline
-        ? "裝置離線，SOS 已保存在手機，連線後自動送出。"
-        : "SOS 已保存在本機，正在送往車隊安全值班。",
+        ? `裝置離線，SOS ${sosSavedHereLabel()}，連線後自動送出。`
+        : "正在送出 SOS…",
     );
     setDraftAttachments([]);
     setDetails("");
@@ -1205,11 +1454,33 @@ export default function DriverSosScreen() {
 
   async function handleRetry() {
     const latest = latestCaseRef.current ?? activeCase;
-    if (!latest || browserOnline === false || submitting) {
+    if (
+      !latest ||
+      latest.falseAlarm.dismissed ||
+      browserOnline === false ||
+      submitting
+    ) {
       return;
     }
 
     await syncActiveCase(latest, true);
+  }
+
+  /** 不用了: an old undelivered SOS the driver no longer wants sent. */
+  async function handleDismissStaleSos() {
+    const latest = latestCaseRef.current ?? activeCase;
+    if (!latest) {
+      return;
+    }
+    await persistActiveCase({
+      ...latest,
+      falseAlarm: {
+        dismissed: true,
+        dismissedAt: new Date().toISOString(),
+        note: "司機選擇不送出這筆較早的 SOS。",
+      },
+    });
+    setUiNotice("這筆 SOS 不會再送出。");
   }
 
   // Supplements are photos only. The server has no endpoint for supplement
@@ -1240,10 +1511,10 @@ export default function DriverSosScreen() {
     setSupplementAttachments([]);
     setUiNotice(
       !nextCase.receipt
-        ? "補充照片已存在手機，SOS 送達後會一起上傳。"
+        ? `補充照片${sosSavedHereLabel()}，SOS 送達後會一起上傳。`
         : browserOnline !== false
           ? "補充照片已加入，正在上傳。"
-          : "補充照片已存在手機，連線後按「重新送出」上傳。",
+          : `補充照片${sosSavedHereLabel()}，連線後按「重新送出」上傳。`,
     );
     setScreenError(null);
     if (browserOnline !== false && nextCase.receipt) {
@@ -1258,7 +1529,7 @@ export default function DriverSosScreen() {
 
     Alert.alert(
       "二次確認誤觸",
-      "這會把目前 SOS 標記成誤觸並留下時間線紀錄。確定要繼續嗎？",
+      "標記誤觸後，這筆 SOS 不會再自動送出。車隊不會自動收到這個標記，若 SOS 已送達，請打電話告知派車台。確定要繼續嗎？",
       [
         { text: "取消", style: "cancel" },
         {
@@ -1272,7 +1543,11 @@ export default function DriverSosScreen() {
               );
               await persistActiveCase(nextCase);
               setFalseAlarmNote("");
-              setUiNotice("本次 SOS 已標記為誤觸。");
+              setUiNotice(
+                nextCase.receipt
+                  ? "已標記誤觸。車隊不會自動收到這個標記，請打電話告知派車台。"
+                  : "已標記誤觸，這筆 SOS 不會再送出。",
+              );
             })();
           },
         },
@@ -1316,9 +1591,34 @@ export default function DriverSosScreen() {
   const loading = loadingCase || loadingContext;
   const selectedSituationLabel = getSituationLabel(selectedSituation);
   const currentLocation = getDriverSosLocationSnapshot();
+  const undeliveredCase =
+    activeCase && isUndelivered(activeCase) ? activeCase : null;
+  const staleCase =
+    undeliveredCase && isStaleUndelivered(undeliveredCase)
+      ? undeliveredCase
+      : null;
+  // From the first failed send on, the driver is told to phone as well.
+  let undeliveredAdvice: string | null = null;
+  if (undeliveredCase && !staleCase) {
+    if (undeliveredCase.autoResendBlocked) {
+      undeliveredAdvice = `這筆 SOS 送不出去。${CALL_NOW_ADVICE}可以按「重新送出」再試一次。`;
+    } else if (undeliveredCase.sessionLostAt) {
+      undeliveredAdvice = `登入曾失效，這筆 SOS 還沒送到。${CALL_NOW_ADVICE}${STAY_ON_SCREEN_ADVICE}`;
+    } else if (undeliveredCase.attemptCount > 0) {
+      undeliveredAdvice = `${CALL_NOW_ADVICE}${STAY_ON_SCREEN_ADVICE}`;
+    }
+  }
+  const showResendButton = Boolean(
+    activeCase &&
+    !activeCase.falseAlarm.dismissed &&
+    !staleCase &&
+    (activeCase.syncState === "pending" ||
+      activeCase.syncState === "failed_retryable" ||
+      activeCase.syncState === "attachment_pending"),
+  );
 
   if (!isProvisioned) {
-    if (sessionLostWithSos) {
+    if (sessionLostWithSos || hasUndeliveredSosKeptThroughSignOut()) {
       return (
         <Shell
           theme={THEME}
@@ -1361,10 +1661,7 @@ export default function DriverSosScreen() {
           >
             返回
           </Btn>
-          {activeCase &&
-          (activeCase.syncState === "pending" ||
-            activeCase.syncState === "failed_retryable" ||
-            activeCase.syncState === "attachment_pending") ? (
+          {showResendButton ? (
             <Btn
               theme={THEME}
               variant="primary"
@@ -1408,6 +1705,15 @@ export default function DriverSosScreen() {
 
       <StatusChip activeCase={activeCase} browserOnline={browserOnline} />
 
+      {undeliveredAdvice ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title={SESSION_LOST_SOS_TITLE}
+          body={undeliveredAdvice}
+        />
+      ) : null}
+
       {uiNotice ? (
         <Banner
           theme={THEME}
@@ -1415,6 +1721,35 @@ export default function DriverSosScreen() {
           title="狀態"
           body={uiNotice}
         />
+      ) : null}
+
+      {staleCase ? (
+        <Card theme={THEME} title="尚未送達的 SOS">
+          <Text style={styles.staleCopy}>
+            {`這筆 SOS 是 ${formatAt(staleCase.originalTriggeredAt)} 建立的，還沒送達。仍要送出嗎？`}
+          </Text>
+          <View style={styles.sectionActions}>
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              danger
+              disabled={browserOnline === false || submitting}
+              onPress={() => void handleRetry()}
+            >
+              送出
+            </Btn>
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              disabled={submitting}
+              onPress={() => void handleDismissStaleSos()}
+            >
+              不用了
+            </Btn>
+          </View>
+        </Card>
       ) : null}
 
       {screenError ? (
@@ -1677,7 +2012,7 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="補充照片"
-            subtitle="照片會先存在手機，再上傳給車隊。"
+            subtitle="照片會先保存起來，再上傳給車隊。"
           >
             <Text style={styles.callDispatchCopy}>
               要補充說明請直接打電話給派車台。
@@ -1842,6 +2177,12 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
     lineHeight: 18,
+  },
+  staleCopy: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 14,
+    lineHeight: 20,
   },
   callDispatchCopy: {
     color: THEME.text,
