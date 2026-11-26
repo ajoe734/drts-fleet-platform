@@ -176,7 +176,7 @@ export async function onTripCancellationRejectionJourney(
           .first()
           .click({ timeout: 15_000 });
         await expect(
-          previousDriver.getByText(bookedOrderId, { exact: false }).first(),
+          previousDriver.getByTestId(`driver-trip-order-${bookedOrderId}`),
         ).toBeVisible();
         await expect(
           previousDriver.getByText(/已取消|平台取消/).first(),
@@ -401,7 +401,7 @@ export async function onTripCancellationRejectionJourney(
           pax.getByRole("button", { name: "取消行程", exact: true }).first(),
         ).toBeDisabled();
         await expect(
-          driver.getByText(bookedOrderId, { exact: false }).first(),
+          driver.getByTestId(`driver-trip-order-${bookedOrderId}`),
         ).toBeVisible();
         await expect(
           driver.getByRole("button", { name: "完成行程", exact: true }),
@@ -455,17 +455,27 @@ export async function onTripCancellationRejectionJourney(
         const livePosition = pax.getByTestId("passenger-live-driver-position");
         await expect(livePosition).toHaveCount(0);
         await expect(driver).toHaveURL(/\/trip(?:[?#]|$)/);
-        const driverOrder = driver.getByText(`${taskId} · ${bookedOrderId}`, {
-          exact: true,
-        });
-        const driverTask = driver.getByText(taskId, { exact: true }).first();
+        // Trip no longer prints internal IDs; its route card carries them as
+        // testIDs. Read whichever trip is shown and prove it is this one.
+        const driverOrder = driver.locator(
+          '[data-testid^="driver-trip-order-"]',
+        );
+        const driverTask = driver.locator('[data-testid^="driver-trip-task-"]');
         await expect(driverOrder).toBeVisible();
         await expect(driverTask).toBeVisible();
+        const renderedOrderId = (
+          (await driverOrder.getAttribute("data-testid")) ?? ""
+        ).replace(/^driver-trip-order-/, "");
+        const renderedTaskId = (
+          (await driverTask.getAttribute("data-testid")) ?? ""
+        ).replace(/^driver-trip-task-/, "");
+        expect(renderedOrderId).toBe(bookedOrderId);
+        expect(renderedTaskId).toBe(taskId);
         const trackingStatus = driver.getByText("追蹤 · 已結束", {
           exact: true,
         });
         const trackingDetail = driver.getByText(
-          "行程已完成，追蹤已結束，不再更新里程與時長。",
+          "追蹤已結束，不再更新里程與時長。",
           { exact: true },
         );
         const mapStatus = driver.getByText("本任務定位已停止", {
@@ -485,8 +495,8 @@ export async function onTripCancellationRejectionJourney(
             passengerStatus: await passengerStatus.innerText(),
             liveDriverPositionCount: await livePosition.count(),
             driverUrl: driver.url(),
-            driverTaskOrderReference: await driverOrder.innerText(),
-            driverTaskId: await driverTask.innerText(),
+            driverTaskOrderReference: renderedOrderId,
+            driverTaskId: renderedTaskId,
             driverTrackingStatus: await trackingStatus.innerText(),
             driverTrackingDetail: await trackingDetail.innerText(),
             driverMapStatus: await mapStatus.innerText(),

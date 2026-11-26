@@ -209,8 +209,8 @@ export const driverStrings = {
       claimNumber: "理賠案件編號",
       claimantName: "代步使用人",
       replacementVehicleClass: "代步車型",
-      replacementStart: "代步起始（UTC）",
-      replacementEnd: "代步結束（UTC）",
+      replacementStart: "代步起始",
+      replacementEnd: "代步結束",
       caseHandler: "案件聯絡人",
     },
     actualFare: {

@@ -357,7 +357,7 @@ export async function readAssignedTripAndAccept(
         (taskId === undefined || url.searchParams.get("taskId") === taskId),
     );
     await expect(
-      driver.getByText(orderId, { exact: false }).first(),
+      driver.getByTestId(`driver-trip-order-${orderId}`),
     ).toBeVisible();
   });
   await step(

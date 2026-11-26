@@ -157,7 +157,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
                 url.searchParams.get("taskId") === assigned.taskId,
             );
             await expect(
-              driver.getByText(orderId, { exact: false }).first(),
+              driver.getByTestId(`driver-trip-order-${orderId}`),
             ).toBeVisible();
             await expect(
               driver
@@ -271,7 +271,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
                   .first()
                   .click({ timeout: 15_000 });
                 await expect(
-                  driver.getByText(orderId, { exact: false }).first(),
+                  driver.getByTestId(`driver-trip-order-${orderId}`),
                 ).toBeVisible();
                 await expect(
                   driver.getByText(/已取消|平台取消/).first(),
@@ -371,7 +371,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
             .first()
             .click({ timeout: 15_000 });
           await expect(
-            driver.getByText(orderId, { exact: false }).first(),
+            driver.getByTestId(`driver-trip-order-${orderId}`),
           ).toBeVisible();
           await expect(
             driver.getByText(/已取消|平台取消/).first(),

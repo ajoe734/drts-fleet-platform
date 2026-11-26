@@ -2449,7 +2449,7 @@ export class ForwarderService implements OnModuleInit {
     return {
       action,
       outcome,
-      driverMessage: this.resolveForwardedDriverActionMessage(outcome, order),
+      driverMessage: this.resolveForwardedDriverActionMessage(outcome),
       taskView:
         outcome === "rejected" ? null : this.mapForwardedOrderToView(order),
       managementCorrelationIds: {
@@ -2460,28 +2460,27 @@ export class ForwarderService implements OnModuleInit {
     };
   }
 
+  // The driver app shows driverMessage as-is, so it is short Traditional
+  // Chinese. sync_failed does not pass manualFallback.reason through: that is
+  // ops text and can hold a raw adapter error or English dispatch notes.
   private resolveForwardedDriverActionMessage(
     outcome: ForwardedDriverActionOutcome,
-    order: ForwardedOrderRecord,
   ) {
     switch (outcome) {
       case "accept_pending":
-        return "Waiting for platform confirmation.";
+        return "已送出接單，平台確認前請先不要出發。";
       case "confirmed_by_platform":
-        return "Platform confirmed this order.";
+        return "平台已確認，可以前往上車點。";
       case "completed_synced":
-        return "Platform marked this order completed.";
+        return "平台已完成這筆訂單，不需要再操作。";
       case "lost_race":
-        return "Another driver was confirmed by the platform.";
+        return "平台已交給其他司機，不需要再操作。";
       case "cancelled_by_platform":
-        return "The external platform cancelled this order.";
+        return "平台已取消這筆訂單，請勿前往接送。";
       case "sync_failed":
-        return (
-          order.manualFallback.reason ??
-          "Dispatch is verifying the platform result before more driver actions."
-        );
+        return "派車台正在確認平台結果，請先不要操作。";
       case "rejected":
-        return "Offer declined.";
+        return "已婉拒這筆訂單。";
     }
   }
 

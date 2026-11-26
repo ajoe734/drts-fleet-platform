@@ -225,7 +225,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
         );
         await driver.reload();
         await expect(
-          driver.getByText(cancelled, { exact: false }).first(),
+          driver.getByTestId(`driver-trip-order-${cancelled}`),
         ).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
         for (const name of ["接受任務", "開始行程", "完成行程"]) {

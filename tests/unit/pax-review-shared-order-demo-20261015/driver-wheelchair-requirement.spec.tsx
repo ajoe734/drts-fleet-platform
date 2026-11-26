@@ -218,6 +218,25 @@ function trip(mounted: Mounted) {
     "persistent Trip outlet",
   );
 }
+// Trip no longer prints internal task/order IDs; it carries them as testIDs on
+// the route card. Assert both hooks and that neither ID is visible text.
+function expectTripShows(
+  mounted: Mounted,
+  record: { taskId: string; orderId: string },
+) {
+  const hooks = (testID: string) =>
+    trip(mounted).findAll(
+      (node) => node.type === "View" && node.props.testID === testID,
+    );
+  expect(hooks(`driver-trip-task-${record.taskId}`)).toHaveLength(1);
+  expect(hooks(`driver-trip-order-${record.orderId}`)).toHaveLength(1);
+  // Fixture addresses embed the task ID ("pickup-task-A"); only a standalone
+  // ID would be the old header/pill.
+  const standalone = (id: string) => new RegExp(`(?<![\\w-])${id}(?![\\w-])`);
+  const visible = text(trip(mounted));
+  expect(visible).not.toMatch(standalone(record.taskId));
+  expect(visible).not.toMatch(standalone(record.orderId));
+}
 async function press(node: NativeNode) {
   expect(node.props.disabled).not.toBe(true);
   const onPress = node.props.onPress;
@@ -507,7 +526,9 @@ function createRequirementHarness(accessible: boolean) {
     completionRequests,
     paths,
     unexpected,
-    async mount() {
+    // Owned trips read their order through the task; forwarded trips read
+    // /api/orders/<orderId>.
+    async mount(orderPath = `/api/driver/tasks/${record.taskId}/order`) {
       await initializeDriverIdentity();
       let mounted!: Mounted;
       await renderer.act(async () => {
@@ -515,11 +536,9 @@ function createRequirementHarness(accessible: boolean) {
       });
       mountedScreens.push(mounted);
       await waitForState(() =>
-        expect(text(trip(mounted))).toContain("task-A · order-task-A"),
+        expectTripShows(mounted, { taskId: "task-A", orderId: "order-task-A" }),
       );
-      await waitForState(() =>
-        expect(paths).toContain(`/api/driver/tasks/${record.taskId}/order`),
-      );
+      await waitForState(() => expect(paths).toContain(orderPath));
       expect(unexpected).toEqual([]);
       return mounted;
     },
@@ -607,9 +626,7 @@ it.each([true, false])(
         "same persistent Trip",
       ),
     ).toBe(sameTrip);
-    expect(text(trip(mounted))).toContain(
-      `${h.record.taskId} · ${h.record.orderId}`,
-    );
+    expectTripShows(mounted, h.record);
     expect(text(trip(mounted)).includes("輪椅需求")).toBe(accessible);
     expect(h.unexpected).toEqual([]);
     expect(ports.alerts).not.toHaveBeenCalled();
@@ -699,6 +716,202 @@ it("normal multi-taxi metered Trip explains the required fare before completing 
   });
   expect(h.record.orderId).toBe(h.owned.orderId);
   await waitForState(() => expect(h.record.status).toBe("completed"));
+  expect(h.unexpected).toEqual([]);
+});
+
+function photoRequirement(mounted: Mounted) {
+  const summaries = trip(mounted).findAll(
+    (node) => node.type === visual && Array.isArray(node.props.items),
+  );
+  const items = one(summaries, "completion proof summary").props.items as {
+    label: string;
+    value: string;
+  }[];
+  return items.find((item) => item.label === "照片需求")?.value;
+}
+
+it.each([
+  [0, "免附"],
+  [2, "0/2 張"],
+])(
+  "normal Trip shows the order's own photo requirement (minimum %i) instead of a made-up 0/1",
+  async (minPhotoCount, expected) => {
+    const h = normalMultiTaxiCompletionHarness(false);
+    h.owned.proofRequirements.minPhotoCount = minPhotoCount;
+    const mounted = await h.mount();
+    await waitForState(() => expect(photoRequirement(mounted)).toBe(expected));
+    expect(h.completionRequests).toEqual([]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal pending Trip shows its status once and its own next step in the footer", async () => {
+  const h = createRequirementHarness(false);
+  const mounted = await h.mount();
+  const visible = text(trip(mounted));
+  expect(visible.split("待確認接單").length - 1).toBe(1);
+  expect(visible).not.toContain("待接受");
+  // The footer explains the owned accept step, not a platform-offer blocker.
+  expect(visible).toContain("確認後才會進入接送流程，避免錯過派遣時效。");
+  expect(visible).not.toContain("不能在 App 接單");
+  expect(visible).not.toContain("DRTS");
+  expect(
+    trip(mounted)
+      .findAll((node) => node.type === "NativeButton")
+      .map((node) => text(node)),
+  ).toEqual(expect.arrayContaining(["婉拒任務", "接受任務"]));
+  expect(h.unexpected).toEqual([]);
+});
+
+// Standalone occurrences only: status sentences such as "此任務已取消，…" do not
+// repeat the status label itself.
+function countStandalone(visible: string, label: string) {
+  return (
+    visible.match(new RegExp(`(?<=^|\\s)${label}(?=\\s|$)`, "g"))?.length ?? 0
+  );
+}
+
+it.each([
+  ["completed", "行程已完成"],
+  ["cancelled", "任務已取消"],
+  ["rejected", "已婉拒任務"],
+] as const)(
+  "normal %s Trip shows its result twice (header and status card) with no footer or dead button",
+  async (status, label) => {
+    const h = createRequirementHarness(false);
+    h.record.status = status;
+    Object.assign(h.view, taskView(h.record), { allowedActions: [] });
+    h.owned.status = status === "completed" ? "completed" : "cancelled";
+    const mounted = await h.mount();
+    const visible = text(trip(mounted));
+    expect(countStandalone(visible, label)).toBe(2);
+    // No action-less footer: neither a repeated status nor filler text.
+    expect(visible).not.toContain("目前沒有可執行動作");
+    expect(countStandalone(visible, "自營派單")).toBeGreaterThan(0);
+    expect(
+      trip(mounted).findAll((node) => node.type === "NativeButton"),
+    ).toEqual(
+      // Only the header refresh and SOS entry remain.
+      [expect.anything(), expect.anything()],
+    );
+    expect(
+      trip(mounted)
+        .findAll((node) => node.type === "NativeButton")
+        .map((node) => text(node)),
+    ).toEqual(["重新整理", "SOS"]);
+    expect(h.unexpected).toEqual([]);
+  },
+);
+
+it("normal Trip shows reservation times in Taiwan local time", async () => {
+  const h = createRequirementHarness(false);
+  h.owned.reservationWindowStart = "2026-11-07T06:30:00.000Z";
+  h.owned.reservationWindowEnd = "2026-11-07T07:10:00.000Z";
+  const mounted = await h.mount();
+  await waitForState(() => expect(text(trip(mounted))).toContain("預計 14:30"));
+  expect(text(trip(mounted))).toContain("預計 15:10");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("normal Trip shows 待載入 for the photo requirement until the order is read", async () => {
+  const h = normalMultiTaxiCompletionHarness(false);
+  const transport = globalThis.fetch;
+  let orderReadable = false;
+  vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+    const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+    if (
+      !orderReadable &&
+      url.endsWith(`/api/driver/tasks/${h.record.taskId}/order`)
+    ) {
+      await transport(...args); // keep the harness's request record
+      return new Response(
+        JSON.stringify({
+          error: { code: "FORBIDDEN", message: "SIM order unavailable" },
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return transport(...args);
+  });
+  const mounted = await h.mount();
+  // The order's proof minimum is unknown, so "免附" would be invented.
+  await waitForState(() => expect(photoRequirement(mounted)).toBe("待載入"));
+  orderReadable = true;
+  await press(
+    one(
+      trip(mounted).findAll(
+        (node) => node.type === "NativeButton" && text(node) === "重新整理",
+      ),
+      "header refresh",
+    ),
+  );
+  await waitForState(() => expect(photoRequirement(mounted)).toBe("免附"));
+  expect(h.unexpected).toEqual([]);
+});
+
+function forwardedHarness(
+  status: DriverTaskRecord["status"],
+  nativeStatus: string | null,
+) {
+  const h = createRequirementHarness(false);
+  Object.assign(h.record, { sourcePlatform: "grab_taiwan", status });
+  if (status === "pending_acceptance")
+    Object.assign(h.record, {
+      acceptedAt: null,
+      departedAt: null,
+      arrivedPickupAt: null,
+      startedAt: null,
+    });
+  Object.assign(h.view, taskView(h.record), {
+    orderDomain: "forwarded",
+    sourcePlatform: "grab_taiwan",
+    platformDisplayName: "Grab",
+    nativeStatus,
+  });
+  return h;
+}
+
+it("forwarded confirmed Trip warns once in plain Chinese when the platform reports a sync problem", async () => {
+  const h = forwardedHarness("accepted", "confirmed_by_platform");
+  h.view.syncIssueSummary =
+    "Platform sync failed and is waiting for dispatch follow-up.";
+  h.view.allowedActions = ["depart"];
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("平台同步有問題，請聯絡派車台。"),
+  );
+  const visible = text(trip(mounted));
+  expect(visible.split("平台同步有問題").length - 1).toBe(1);
+  expect(visible).not.toContain("Platform sync failed");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("forwarded confirmed Trip shows no sync warning when the platform reports none", async () => {
+  const h = forwardedHarness("accepted", "confirmed_by_platform");
+  h.view.allowedActions = ["depart"];
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  expect(text(trip(mounted))).not.toContain("平台同步有問題");
+  expect(h.unexpected).toEqual([]);
+});
+
+it("blocked forwarded offer explains itself with fixed Chinese copy, not the raw platform reason", async () => {
+  const h = forwardedHarness("pending_acceptance", null);
+  h.view.allowedActions = ["reject"];
+  h.view.blockingReason =
+    "Dispatch must verify platform confirmation before continuing.";
+  const mounted = await h.mount(`/api/orders/${h.record.orderId}`);
+  await waitForState(() =>
+    expect(text(trip(mounted))).toContain("平台同步有問題，請聯絡派車台。"),
+  );
+  const visible = text(trip(mounted));
+  expect(visible).not.toContain("Dispatch must verify");
+  const accept = one(
+    trip(mounted).findAll(
+      (node) => node.type === "NativeButton" && text(node) === "接受平台訂單",
+    ),
+    "blocked platform accept",
+  );
+  expect(accept.props.disabled).toBe(true);
   expect(h.unexpected).toEqual([]);
 });
 
@@ -818,8 +1031,9 @@ it.each([
       "SIM-CLAIM-36",
       "SIM代步使用人",
       "SIM中型代步車",
-      "代步起始（UTC） 2199-11-12 01:30",
-      "代步結束（UTC） 2199-11-14 09:00",
+      // Taiwan local time (UTC+8), not the raw UTC instant.
+      "代步起始 2199-11-12 09:30",
+      "代步結束 2199-11-14 17:00",
       "SIM理賠聯絡員",
     ],
   },
@@ -834,9 +1048,8 @@ it.each([
     );
     const panel = fulfillmentPanel(mounted);
     for (const value of expected) expect(text(panel)).toContain(value);
-    expect(text(trip(mounted))).toContain(
-      `${h.record.taskId} · ${h.record.orderId}`,
-    );
+    expect(text(panel)).not.toContain("UTC");
+    expectTripShows(mounted, h.record);
     expect(h.paths).toContain(`/api/driver/tasks/${h.record.taskId}/order`);
     expect(h.record.orderId).toBe(h.owned.orderId);
     expect(h.completionRequests).toEqual([]);
@@ -852,7 +1065,7 @@ it("normal Driver Trip marks missing insurance fulfillment facts as unavailable 
   );
   const information = text(fulfillmentPanel(mounted));
   expect(information).toContain("代步車型 未提供");
-  expect(information).toContain("代步起始（UTC） 未提供");
+  expect(information).toContain("代步起始 未提供");
   expect(information).not.toContain("SIM中型代步車");
   expect(information).not.toContain("undefined");
   expect(h.completionRequests).toEqual([]);
@@ -881,9 +1094,7 @@ it("normal Driver Trip clears the previous program details when selecting a diff
   // this ordinary task must not advertise it as a program's current facts.
   ports.selectedTaskId = next.taskId;
   await renderer.act(async () => ports.navigate?.("trip"));
-  await waitForState(() =>
-    expect(text(trip(mounted))).toContain(`${next.taskId} · ${next.orderId}`),
-  );
+  await waitForState(() => expectTripShows(mounted, next));
   await waitForState(() =>
     expect(h.paths).toContain(`/api/driver/tasks/${next.taskId}/order`),
   );

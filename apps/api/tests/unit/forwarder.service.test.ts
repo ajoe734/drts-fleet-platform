@@ -767,7 +767,7 @@ describe("ForwarderService", () => {
     ).resolves.toEqual({
       action: "accept",
       outcome: "accept_pending",
-      driverMessage: "Waiting for platform confirmation.",
+      driverMessage: "已送出接單，平台確認前請先不要出發。",
       taskView: expect.objectContaining({
         taskId: order.mirrorOrderId,
         localStatus: "accept_pending",
@@ -889,8 +889,8 @@ describe("ForwarderService", () => {
     ).resolves.toEqual({
       action: "accept",
       outcome: "sync_failed",
-      driverMessage:
-        "Dispatch must confirm platform acceptance manually before continuing.",
+      // Fixed driver copy; the ops manual-fallback reason stays internal.
+      driverMessage: "派車台正在確認平台結果，請先不要操作。",
       taskView: expect.objectContaining({
         taskId: order.mirrorOrderId,
         localStatus: "sync_failed",
@@ -1407,7 +1407,7 @@ describe("ForwarderService", () => {
     ).toEqual({
       action: "reject",
       outcome: "rejected",
-      driverMessage: "Offer declined.",
+      driverMessage: "已婉拒這筆訂單。",
       taskView: null,
       managementCorrelationIds: {
         mirrorOrderId: order.mirrorOrderId,
