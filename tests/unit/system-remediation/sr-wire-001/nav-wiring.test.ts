@@ -347,13 +347,15 @@ describe("SR-WIRE-001: active navigation and actor boundaries", () => {
       "onboarding",
       "earnings",
       "shift",
-      "leave",
       "academy",
       "sos",
-      "incident",
-      "safety-operator",
     ]) {
       expect(source).toContain(`name="${name}"`);
+    }
+    // Removed 2026-11-26: drivers no longer file leave in the app, and the
+    // unreachable incident and safety-operator screens were deleted.
+    for (const name of ["leave", "incident", "safety-operator"]) {
+      expect(source).not.toContain(`name="${name}"`);
     }
   });
 });

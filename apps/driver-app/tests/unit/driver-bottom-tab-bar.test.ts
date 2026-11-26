@@ -41,10 +41,7 @@ describe("DriverBottomTabBar", () => {
     const tabs = root.findAllByProps({ accessibilityRole: "tab" });
     expect(tabs.length).toBe(5);
 
-    const labels = tabs.map(
-      (t: any) =>
-        t.findByType("Text").props.children,
-    );
+    const labels = tabs.map((t: any) => t.findByType("Text").props.children);
     expect(labels).toEqual(["工作台", "任務", "行程", "平台", "設定"]);
   });
 
@@ -72,11 +69,9 @@ describe("DriverBottomTabBar", () => {
       route: string;
       expectedActiveTab: string;
     }> = [
-      { route: "incident", expectedActiveTab: "行程" },
       { route: "sos", expectedActiveTab: "行程" },
       { route: "earnings", expectedActiveTab: "設定" },
       { route: "shift", expectedActiveTab: "工作台" },
-      { route: "safety-operator", expectedActiveTab: "設定" },
       { route: "onboarding", expectedActiveTab: "工作台" },
     ];
 

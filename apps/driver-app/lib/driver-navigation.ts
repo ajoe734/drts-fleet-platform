@@ -598,8 +598,6 @@ export const DRIVER_ROUTE_TAB_MAP: Record<string, DriverTabKey> = {
   earnings: "settings",
   shift: "workbench",
   sos: "trip",
-  incident: "trip",
-  "safety-operator": "settings",
 };
 
 export function resolveActiveDriverTab(

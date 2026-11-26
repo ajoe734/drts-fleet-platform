@@ -142,24 +142,6 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
       expect(source).not.toContain("ID ${driverId}");
       expect(source).not.toContain("deviceFieldValue");
     });
-
-    it("verifies safety-operator.tsx DetailRow wraps values and marks detailValue selectable", () => {
-      const source = readFileSync(
-        join(APP_DIR, "app/safety-operator.tsx"),
-        "utf8",
-      );
-
-      // Verify detailRow styles
-      expect(source).toMatch(/detailRow:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*flex:\s*1/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*minWidth:\s*160/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-
-      // Verify DetailRow component renders Text with selectable
-      expect(source).toMatch(
-        /<Text\s+style=\{\[styles\.detailValue[^\]]*\]\}\s+selectable\s*>\s*\{value\}\s*<\/Text>/,
-      );
-    });
   });
 
   describe("Acceptance Criterion 3: Container containment & boundary clipping prevention", () => {

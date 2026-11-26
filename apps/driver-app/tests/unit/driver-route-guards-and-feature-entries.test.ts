@@ -253,7 +253,6 @@ import SettingsScreen from "../../app/settings";
 import EarningsScreen from "../../app/earnings";
 import ShiftScreen from "../../app/shift";
 import SosScreen from "../../app/sos";
-import IncidentScreen from "../../app/incident";
 
 async function flushAsync() {
   await Promise.resolve();
@@ -318,20 +317,17 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
   describe("Acceptance 1 & 2: Single session authority and route protection per route", () => {
     it("strictly allows onboarding and activation and protects every driver workspace screen", () => {
       expect(PUBLIC_DRIVER_ROUTES).toEqual(["onboarding", "driver-activate"]);
-      expect(PROTECTED_DRIVER_ROUTES).toHaveLength(12);
+      expect(PROTECTED_DRIVER_ROUTES).toHaveLength(9);
       expect(PROTECTED_DRIVER_ROUTES).toEqual([
         "index",
         "jobs",
         "trip",
         "platform-presence",
         "settings",
-        "leave",
         "academy",
         "earnings",
         "shift",
         "sos",
-        "incident",
-        "safety-operator",
       ]);
 
       // Public onboarding
@@ -471,20 +467,6 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
       let renderer: any;
       await act(async () => {
         renderer = create(React.createElement(SosScreen));
-        await flushAsync();
-      });
-
-      const redirect = renderer.root.findAllByType("Redirect");
-      expect(redirect).toHaveLength(1);
-      expect(redirect[0].props.href).toBe("/onboarding");
-      expect(mocks.listUnifiedDriverTasks).not.toHaveBeenCalled();
-    });
-
-    it("renders Redirect to /onboarding for unauthenticated session on IncidentScreen without fetching incident context", async () => {
-      mocks.isDriverIdentityProvisioned.mockReturnValue(false);
-      let renderer: any;
-      await act(async () => {
-        renderer = create(React.createElement(IncidentScreen));
         await flushAsync();
       });
 
