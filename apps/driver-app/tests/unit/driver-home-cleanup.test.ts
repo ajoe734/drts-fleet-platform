@@ -345,11 +345,21 @@ describe("driver home: no raw codes, English or IDs", () => {
       "跨平台訊息處理方式",
       "目前沒有需要另外開啟的外部連結",
       "工作台入口與深連結",
+      // Drivers cannot bind platforms or switch them online in the app any
+      // more (PR #3451); nothing may tell them to.
+      "請先完成平台綁定",
+      "平台綁定與授權",
+      "前往平台連線",
+      "保持平台在線",
+      "維持平台在線",
     ]) {
       expect(text).not.toContain(leak);
     }
 
-    expect(text).toContain("尚未綁定平台帳號");
+    expect(text).toContain("尚未綁定外部平台");
+    expect(text).toContain("外部平台帳號由車隊幫您綁定，需要請聯絡派車台。");
+    // The card has nothing to do in the app, so it offers no button.
+    expect(buttons("管理平台")).toHaveLength(0);
     expect(text).toContain("捷徑");
     expect(text).toContain("目前沒有行程");
     expect(text).toMatch(/更新於 \d{2}:\d{2}/);
@@ -579,7 +589,12 @@ describe("driver home: buttons about different tasks", () => {
     state.shiftEnabled = false;
     await mount(React.createElement(WorkspaceIndex));
 
-    expect(screenText()).toContain("讓至少一個平台上線");
+    const text = screenText();
+    expect(text).toContain("目前沒有可接單的平台");
+    expect(text).toContain("請聯絡派車台");
+    expect(text).not.toContain("讓至少一個平台上線");
+    expect(buttons("前往平台連線")).toHaveLength(0);
+    expect(buttons("平台中心")).toHaveLength(1);
     expect(buttons("查看班次")).toHaveLength(0);
   });
 });

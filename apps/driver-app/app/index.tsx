@@ -108,7 +108,8 @@ type EmptyStateModel = {
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body: string;
-  action: WorkspaceActionModel;
+  // null when there is nothing for the driver to do in the app.
+  action: WorkspaceActionModel | null;
   envelope: EmptyStateEnvelope;
 };
 
@@ -273,8 +274,6 @@ function getActionLabel(action: string) {
       return "完成行程";
     case "start_shift":
       return "前往打卡";
-    case "go_online":
-      return "前往平台連線";
     case "resolve_reauth":
       return "處理重新授權";
     case "return_to_trip":
@@ -295,8 +294,6 @@ function getActionLabel(action: string) {
       return "前往設定";
     case "review_eligibility":
       return "檢查資格";
-    case "manage_platform_binding":
-      return "管理平台";
     case "review_sos":
       return "查看 SOS";
     default:
@@ -311,8 +308,6 @@ function getActionDisabledReason(
   switch (reasonCode) {
     case "feature_disabled":
       return "此功能目前未啟用。";
-    case "no_platform_binding":
-      return "尚未綁定任何平台帳號。";
     case "shift_data_unavailable":
       return "班次資料尚未同步完成。";
     case "permission_denied":
@@ -1005,7 +1000,7 @@ function FocusEmptyStateCard({
           <Text style={styles.emptyStateBody}>{state.body}</Text>
         </View>
       </View>
-      {showAction ? (
+      {showAction && state.action ? (
         <View style={styles.emptyStateFooter}>
           <Btn
             theme={THEME}
@@ -1018,7 +1013,7 @@ function FocusEmptyStateCard({
           </Btn>
         </View>
       ) : null}
-      {showAction && !state.action.descriptor.enabled ? (
+      {showAction && state.action && !state.action.descriptor.enabled ? (
         <Text style={styles.emptyStateDisabledHint}>
           {getActionDisabledReason(state.action.descriptor.disabledReasonCode)}
         </Text>
@@ -1783,25 +1778,12 @@ export default function WorkspaceIndex() {
     if (externalPresences.length === 0) {
       return {
         tone: "info",
-        title: "尚未綁定平台帳號",
-        body: "目前只有自營派單資訊，若要接收外部平台任務，請先完成平台綁定與授權。",
-        action: createWorkspaceAction(
-          "/platform-presence",
-          "manage_platform_binding",
-          true,
-          undefined,
-          "medium",
-        ),
-        envelope: createEmptyStateEnvelope(
-          "not_provisioned",
-          createWorkspaceAction(
-            "/platform-presence",
-            "manage_platform_binding",
-            true,
-            undefined,
-            "medium",
-          ),
-        ),
+        // Drivers cannot bind external platforms in the app; the fleet does
+        // it. So this card explains that and offers no button.
+        title: "尚未綁定外部平台",
+        body: "車隊派單不用綁定，上班打卡後就能接單。外部平台帳號由車隊幫您綁定，需要請聯絡派車台。",
+        action: null,
+        envelope: createEmptyStateEnvelope("not_provisioned"),
       };
     }
 
@@ -1812,7 +1794,7 @@ export default function WorkspaceIndex() {
       return {
         tone: "danger",
         title: "目前不具備接單資格",
-        body: "所有外部平台都回報司機資格不符。請先前往平台頁檢查授權、資格或由派車台協助排除。",
+        body: "外部平台目前都無法派單給你，原因可在平台頁查看，需要協助請聯絡派車台。",
         action: createWorkspaceAction(
           "/platform-presence",
           "review_eligibility",
@@ -1841,7 +1823,7 @@ export default function WorkspaceIndex() {
       return {
         tone: "info",
         title: "目前沒有新任務",
-        body: "工作台已待命。保持平台在線與班次正常，新的派單或平台任務會優先出現在這裡。",
+        body: "新的派單會優先出現在這裡。",
         action: createWorkspaceAction("/jobs", "open_jobs"),
         envelope: createEmptyStateEnvelope(
           "no_data",
@@ -1859,7 +1841,7 @@ export default function WorkspaceIndex() {
       return {
         tone: "info",
         title: "目前沒有需立即處理的項目",
-        body: "目前沒有需要優先處理的任務，您可以查看今日收入、班次或維持平台在線待命。",
+        body: "目前沒有需要優先處理的任務。",
         action: createWorkspaceAction("/earnings", "open_earnings"),
         envelope: createEmptyStateEnvelope(
           "filtered_empty",
@@ -2008,7 +1990,10 @@ export default function WorkspaceIndex() {
         tone: "warn",
         eyebrow: "建議動作",
         title: `先恢復 ${name} 授權`,
-        detail: "任何需重新授權的平台都應優先處理，否則該平台接單能力暫停。",
+        // The platform page offers 重新登入 only when the platform supports
+        // it in the app; otherwise dispatch has to help.
+        detail:
+          "重新登入前，這個平台不會派單給你。請到平台頁重新登入，無法登入時請聯絡派車台。",
         meta: `更新於 ${formatCompactDateTime(platform.updatedAt)}`,
         primaryAction: withSubject(
           createWorkspaceAction(
@@ -2097,15 +2082,16 @@ export default function WorkspaceIndex() {
         state: "go_online",
         tone: "info",
         eyebrow: "建議動作",
-        title: "讓至少一個平台上線",
-        detail: "目前沒有任何平台處於可接單狀態，新的派單不會送達。",
-        meta: "平台健康與帳號授權狀態都可以在平台頁處理。",
+        // Drivers cannot bind platforms or switch them online in the app
+        // (the fleet manages them), so this only explains and links to the
+        // read-only platform page.
+        title: "目前沒有可接單的平台",
+        detail:
+          "新的派單暫時不會送達。外部平台由車隊幫您綁定與管理，需要協助請聯絡派車台。",
+        meta: "",
         primaryAction: createWorkspaceAction(
           "/platform-presence",
-          "go_online",
-          externalPresences.length > 0,
-          externalPresences.length > 0 ? undefined : "no_platform_binding",
-          "medium",
+          "open_platform_presence",
         ),
         // No shift button when the shift feature is off, matching the tiles.
         secondaryAction: workspace.shiftFeatureEnabled
@@ -2135,8 +2121,7 @@ export default function WorkspaceIndex() {
       tone: "accent",
       eyebrow: "建議動作",
       title: "工作台待命中",
-      detail:
-        "沒有需要立即處理的任務，保持平台在線並留意新的派單或重新授權提醒。",
+      detail: "沒有需要立即處理的任務，新的派單會出現在這裡。",
       meta: "",
       primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       secondaryAction: createWorkspaceAction("/earnings", "open_earnings"),
@@ -2565,8 +2550,15 @@ export default function WorkspaceIndex() {
       {showFocusEmptyState && focusEmptyState ? (
         <FocusEmptyStateCard
           state={focusEmptyState}
-          showAction={!repeatsHeroAction(focusEmptyState.action)}
-          onPress={navigate(focusEmptyState.action.route)}
+          showAction={
+            focusEmptyState.action !== null &&
+            !repeatsHeroAction(focusEmptyState.action)
+          }
+          onPress={() => {
+            if (focusEmptyState.action) {
+              navigateTo(focusEmptyState.action.route);
+            }
+          }}
         />
       ) : null}
 
