@@ -22,10 +22,22 @@ const mocks = vi.hoisted(() => ({
   submitDriverSosEvent: vi.fn(),
   getSosEvent: vi.fn(),
   secureGetItem: vi.fn(),
+  appStateHandlers: [] as Array<(state: string) => void>,
 }));
 
 vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
+  AppState: {
+    addEventListener: (_type: string, handler: (state: string) => void) => {
+      mocks.appStateHandlers.push(handler);
+      return {
+        remove: () => {
+          const index = mocks.appStateHandlers.indexOf(handler);
+          if (index >= 0) mocks.appStateHandlers.splice(index, 1);
+        },
+      };
+    },
+  },
   Linking: { openURL: vi.fn() },
   PanResponder: { create: () => ({ panHandlers: {} }) },
   Pressable: "Pressable",
@@ -489,6 +501,7 @@ describe("SOS screen · driver-facing copy", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     if (originalTz === undefined) {
       delete process.env.TZ;
     } else {
@@ -497,6 +510,7 @@ describe("SOS screen · driver-facing copy", () => {
   });
 
   it("shows a plain empty context and a single connection status before an SOS exists", async () => {
+    vi.stubGlobal("navigator", { onLine: true });
     const renderer = await renderSosScreen();
     const strings = hostStrings(renderer);
 
@@ -593,5 +607,229 @@ describe("SOS screen · driver-facing copy", () => {
     expect(strings.filter((text) => text.includes("09:05")).length).toBe(2);
 
     act(() => renderer.unmount());
+  });
+});
+
+// DRIVER-SOS-CLEANUP-20261126, send-path fixes. Before this change:
+// - the phone app (React Native) has no navigator.onLine, so connectivity
+//   stayed "unknown" forever and auto-resend, 重新送出 and supplement sends
+//   were all disabled: a failed SOS on the phone was never sent again;
+// - where the browser did report online, a failed send was re-sent
+//   immediately on every state change, ignoring the case's nextAttemptAt.
+const SEND_NOW = new Date("2026-11-26T01:00:00.000Z");
+const RETRY_BACKOFF_MS = 60_000; // first backoff step in driver-sos-outbox
+
+/** Enough microtask turns for one full send/fail cycle to settle. */
+async function settle() {
+  for (let turn = 0; turn < 30; turn += 1) {
+    await Promise.resolve();
+  }
+}
+
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await settle();
+  });
+}
+
+/** React Native: a global `window` with no event methods, no onLine flag. */
+function useNativeConnectivity() {
+  vi.stubGlobal("navigator", {});
+  vi.stubGlobal("window", {});
+}
+
+/** Web build: navigator.onLine plus online/offline events on window. */
+function useWebConnectivity(onLine: boolean) {
+  const target = new EventTarget();
+  vi.stubGlobal("navigator", { onLine });
+  vi.stubGlobal("window", target);
+  return target;
+}
+
+function findResendButton(renderer: any) {
+  return renderer.root.find(
+    (node: any) => node.type === "Btn" && node.props.children === "重新送出",
+  );
+}
+
+async function pressHoldToSend(renderer: any) {
+  await act(async () => {
+    findHoldButton(renderer).props.onLongPress();
+    await settle();
+  });
+}
+
+function storedUnsentCase(overrides: Record<string, unknown>) {
+  return {
+    ...storedAcknowledgedCase(),
+    attachments: [],
+    receipt: null,
+    incidentId: null,
+    eventNo: null,
+    status: null,
+    falseAlarm: { dismissed: false, dismissedAt: null, note: null },
+    dutyAcknowledgement: { acknowledgedAt: null, acknowledgedByActorId: null },
+    ...overrides,
+  };
+}
+
+describe("SOS screen · resend safety", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+      now: SEND_NOW,
+    });
+    delete process.env.EXPO_PUBLIC_DRTS_RUNTIME_PROFILE;
+    mocks.appStateHandlers.length = 0;
+    mocks.secureGetItem.mockReset().mockResolvedValue(null);
+    mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.getSosEvent.mockReset().mockRejectedValue(new Error("offline"));
+    mocks.submitDriverSosEvent
+      .mockReset()
+      .mockRejectedValue(new Error("network down"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("on the phone (no online flag) retries a failed SOS once its backoff is due, and 重新送出 works", async () => {
+    useNativeConnectivity();
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(findResendButton(renderer).props.disabled).toBe(false);
+
+      await advance(RETRY_BACKOFF_MS - 1_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      await advance(1_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+
+      // The same event is re-sent, so the server can dedupe it.
+      const keys = mocks.submitDriverSosEvent.mock.calls.map(
+        ([, options]) => options.headers["Idempotency-Key"],
+      );
+      expect(new Set(keys).size).toBe(1);
+
+      // 重新送出 sends straight away, without waiting for the backoff.
+      await act(async () => {
+        findResendButton(renderer).props.onPress();
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(3);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("where the browser reports online, a failed send is not repeated before nextAttemptAt", async () => {
+    useWebConnectivity(true);
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+      await act(async () => {
+        await settle();
+      });
+
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      await advance(RETRY_BACKOFF_MS - 1_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+
+      await advance(1_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("where the browser reports offline, nothing is sent and 重新送出 is disabled until it is back online", async () => {
+    const browser = useWebConnectivity(false);
+    const renderer = await renderSosScreen();
+    try {
+      await pressHoldToSend(renderer);
+
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+      expect(findResendButton(renderer).props.disabled).toBe(true);
+
+      await act(async () => {
+        browser.dispatchEvent(new Event("online"));
+        await settle();
+      });
+      // Back online: the stored SOS goes out once; the failure then waits
+      // for its backoff instead of looping.
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      await advance(RETRY_BACKOFF_MS - 1_000);
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("returning to the foreground sends a resend that came due while the app was in the background", async () => {
+    useNativeConnectivity();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "failed_retryable",
+          attemptCount: 1,
+          nextAttemptAt: new Date(
+            SEND_NOW.getTime() + RETRY_BACKOFF_MS,
+          ).toISOString(),
+        }),
+      ),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+
+      // Background: the clock moves past nextAttemptAt but JS timers do not
+      // run, as on a suspended phone app.
+      vi.setSystemTime(SEND_NOW.getTime() + RETRY_BACKOFF_MS + 5_000);
+      expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
+
+      expect(mocks.appStateHandlers.length).toBeGreaterThan(0);
+      await act(async () => {
+        mocks.appStateHandlers.forEach((handler) => handler("active"));
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => renderer.unmount());
+    }
+  });
+
+  it("re-sends an SOS that was stored mid-send when the app was closed", async () => {
+    useNativeConnectivity();
+    mocks.secureGetItem.mockResolvedValue(
+      JSON.stringify(
+        storedUnsentCase({
+          syncState: "sending",
+          attemptCount: 0,
+          nextAttemptAt: SEND_NOW.toISOString(),
+        }),
+      ),
+    );
+    const renderer = await renderSosScreen();
+    try {
+      await act(async () => {
+        await settle();
+      });
+      expect(mocks.submitDriverSosEvent).toHaveBeenCalledTimes(1);
+      expect(
+        mocks.submitDriverSosEvent.mock.calls[0][1].headers["Idempotency-Key"],
+      ).toBe("client-event-cleanup-1");
+    } finally {
+      act(() => renderer.unmount());
+    }
   });
 });

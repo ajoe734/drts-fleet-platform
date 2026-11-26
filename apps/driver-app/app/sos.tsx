@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  AppState,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -272,6 +273,17 @@ function formatAt(value: string | null) {
   });
 }
 
+// A case stored as "sending" means the app stopped mid-send (closed, killed or
+// crashed). Nothing is in flight on a fresh screen, so offer it for resend;
+// the server dedupes on the case's idempotency key.
+function recoverInterruptedSend(
+  storedCase: DriverSosActiveCase | null,
+): DriverSosActiveCase | null {
+  return storedCase?.syncState === "sending"
+    ? { ...storedCase, syncState: "pending" }
+    : storedCase;
+}
+
 function getSyncChipModel(
   activeCase: DriverSosActiveCase | null,
   browserOnline: boolean | null,
@@ -285,10 +297,20 @@ function getSyncChipModel(
       };
     }
 
+    if (browserOnline === true) {
+      return {
+        tone: "info",
+        label: "連線正常",
+        detail: "SOS 會直接送到車隊值班人員。",
+      };
+    }
+
+    // Connectivity unknown (the phone app has no online flag): do not claim a
+    // connection, say what happens either way.
     return {
       tone: "info",
-      label: "連線正常",
-      detail: "SOS 會直接送到車隊值班人員。",
+      label: "可送出 SOS",
+      detail: "沒有網路時會先存在手機，稍後自動再送。",
     };
   }
 
@@ -322,7 +344,10 @@ function getSyncChipModel(
   return {
     tone: "warn",
     label: "尚未送達",
-    detail: "已存在手機，連線後會自動再送。",
+    detail:
+      browserOnline === false
+        ? "已存在手機，連線後會自動送出。"
+        : "已存在手機，稍後會自動再送，也可按「重新送出」。",
   };
 }
 
@@ -548,7 +573,19 @@ export default function DriverSosScreen() {
   );
   const holdStartedAtRef = useRef<number | null>(null);
   const holdTriggeredRef = useRef(false);
+  // At most one SOS send may be in flight. A ref, not `submitting`, because
+  // the auto-resend effect and a handler can both start a send before React
+  // has re-rendered with the new state.
+  const sendInFlightRef = useRef(false);
+  // Bumped when the app returns to the foreground so a resend that came due
+  // while JS timers were paused is attempted straight away.
+  const [foregroundTick, setForegroundTick] = useState(0);
 
+  // `true`/`false` only where the platform reports connectivity (the web
+  // build's navigator.onLine and online/offline events). React Native has no
+  // navigator.onLine, so on the phone this stays `null` ("unknown"): the send
+  // itself is the connectivity test, and a failure is retried with backoff.
+  // Only an explicit `false` blocks a send.
   const [browserOnline, setBrowserOnline] = useState<boolean | null>(() => {
     if (
       typeof navigator !== "undefined" &&
@@ -610,7 +647,7 @@ export default function DriverSosScreen() {
         return;
       }
 
-      setActiveCase(storedCase);
+      setActiveCase(recoverInterruptedSend(storedCase));
       setContext(taskContext);
       setLoadingCase(false);
       setLoadingContext(false);
@@ -625,7 +662,11 @@ export default function DriverSosScreen() {
   }, [isProvisioned]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.addEventListener !== "function" ||
+      typeof window.removeEventListener !== "function"
+    ) {
       return;
     }
 
@@ -642,10 +683,22 @@ export default function DriverSosScreen() {
   }, []);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        setForegroundTick((tick) => tick + 1);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // Automatic resend of a stored SOS that has not reached the server. It runs
+  // once the case's backoff (`nextAttemptAt`, set by markDriverSosCaseFailed)
+  // is due; before that it waits on a single timer. 重新送出 skips the wait.
+  useEffect(() => {
     if (!activeCase) {
       return;
     }
-    if (browserOnline !== true) {
+    if (browserOnline === false) {
       return;
     }
     if (
@@ -655,8 +708,20 @@ export default function DriverSosScreen() {
       return;
     }
 
-    void syncActiveCase(activeCase, false);
-  }, [activeCase, browserOnline]);
+    const dueAt = activeCase.nextAttemptAt
+      ? Date.parse(activeCase.nextAttemptAt)
+      : Number.NaN;
+    const waitMs = Number.isNaN(dueAt) ? 0 : dueAt - Date.now();
+    if (waitMs <= 0) {
+      void syncActiveCase(activeCase, false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void syncActiveCase(activeCase, false);
+    }, waitMs);
+    return () => clearTimeout(timer);
+  }, [activeCase, browserOnline, foregroundTick]);
 
   // Honest duty-ack readback: poll the canonical server state rather than
   // ever inferring that a duty person has been assigned from submission
@@ -736,6 +801,10 @@ export default function DriverSosScreen() {
     targetCase: DriverSosActiveCase,
     manualRetry: boolean,
   ) {
+    if (sendInFlightRef.current) {
+      return;
+    }
+    sendInFlightRef.current = true;
     const sendingCase = markDriverSosCaseSending(targetCase);
     setSubmitting(true);
     setScreenError(null);
@@ -836,6 +905,7 @@ export default function DriverSosScreen() {
       setScreenError(sanitizedError);
       setUiNotice("SOS 還沒送到，已存在手機，連線後會自動再送。");
     } finally {
+      sendInFlightRef.current = false;
       setSubmitting(false);
       resetHoldProgress();
     }
@@ -943,7 +1013,7 @@ export default function DriverSosScreen() {
   }
 
   async function handleRetry() {
-    if (!activeCase || browserOnline !== true || submitting) {
+    if (!activeCase || browserOnline === false || submitting) {
       return;
     }
 
@@ -968,12 +1038,12 @@ export default function DriverSosScreen() {
     setSupplementNote("");
     setSupplementAttachments([]);
     setUiNotice(
-      browserOnline === true
+      browserOnline !== false
         ? "補充資料已加入本次事件紀錄，正在送出。"
         : "補充資料已加入本次事件紀錄，等待連線後送出。",
     );
     setScreenError(null);
-    if (browserOnline === true && activeCase.receipt) {
+    if (browserOnline !== false && activeCase.receipt) {
       await syncActiveCase(nextCase, false);
     }
   }
@@ -1070,7 +1140,7 @@ export default function DriverSosScreen() {
               variant="primary"
               size="md"
               danger
-              disabled={browserOnline !== true || submitting}
+              disabled={browserOnline === false || submitting}
               onPress={() => void handleRetry()}
             >
               重新送出

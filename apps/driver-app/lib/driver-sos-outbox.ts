@@ -442,7 +442,7 @@ export function markDriverSosCaseSubmitted(
     title: result.receipt.duplicate ? "伺服器已確認既有 SOS" : "已送達安全值班",
     detail: result.receipt.duplicate
       ? `伺服器已確認既有通報，事件編號 ${result.receipt.eventNo}。`
-      : `事件編號 ${result.receipt.eventNo} 已送達車隊安全值班，等待值班人員認領（安全事件：${result.receipt.incidentId}）。`,
+      : `事件編號 ${result.receipt.eventNo} 已送達車隊安全值班，等待值班人員回應。`,
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -450,7 +450,7 @@ export function markDriverSosCaseSubmitted(
   nextCase = appendTimelineEntry(nextCase, {
     kind: "incident_created",
     title: "已建立安全事件",
-    detail: `安全事件 ${result.receipt.incidentId} 已由系統建立。`,
+    detail: "系統已建立安全事件。",
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -694,7 +694,7 @@ export function markDriverSosCaseFailed(
     {
       kind: "sync_failed",
       title: "送出失敗",
-      detail: `${errorMessage} 系統已保留本機資料，將於連線後重試。`,
+      detail: `${errorMessage} 已存在手機，稍後會自動再送。`,
       occurredAt: now,
       tone: "warn",
     },
