@@ -258,10 +258,10 @@ function emptyStateCopy(reason: EmptyReason): {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "尚未完成平台綁定",
-        body: "先到設定綁定平台帳號後，才能查看各平台是否可接單。",
+        title: "還沒有綁定任何平台",
+        body: "綁定平台帳號後，這裡會顯示每個平台能不能接單。",
         tone: "warn",
-        cta: { label: "前往設定", route: "/settings" },
+        cta: { label: "去綁定平台", route: "/settings" },
       };
     case "fetch_failed":
       return {
@@ -850,7 +850,19 @@ export default function PlatformPresenceScreen() {
       item.adapterStatus?.status === "degraded" ||
       item.adapterStatus?.status === "down",
   ).length;
-  const subtitle = `${enrichedPresences.length} 個平台 · ${availableCount} 可接單 · ${attentionCount} 需處理`;
+  const hasPlatforms = enrichedPresences.length > 0;
+  const subtitle = hasPlatforms
+    ? `${enrichedPresences.length} 個平台 · ${availableCount} 可接單 · ${attentionCount} 需處理`
+    : undefined;
+  const dataSource = summary?.refreshMeta?.source ?? "live";
+  const refreshLine = [
+    `最後更新 ${formatCompactDateTime(summary?.refreshMeta?.generatedAt ?? lastLoadedAt)}`,
+    REFRESH_TIER_LABEL,
+    dataSource === "live" ? null : (DATA_SOURCE_LABELS[dataSource] ?? null),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const openBindingSettings = () => router.push("/settings");
 
   const handleTogglePresence = async (item: EnrichedPresence) => {
     const nextAction = item.record.status === "online" ? "下線" : "上線";
@@ -1003,41 +1015,21 @@ export default function PlatformPresenceScreen() {
         }
       />
 
-      <Card
-        theme={THEME}
-        title="平台健康中心"
-        subtitle="顯示目前可接單平台的即時狀態"
-      >
-        <DL
-          theme={THEME}
-          cols={2}
-          items={[
-            { label: "更新頻率", value: REFRESH_TIER_LABEL },
-            {
-              label: "最後更新",
-              value: formatCompactDateTime(
-                summary?.refreshMeta?.generatedAt ?? lastLoadedAt,
-              ),
-            },
-            {
-              label: "資料來源",
-              value: DATA_SOURCE_LABELS[summary?.refreshMeta?.source ?? "live"] ?? "即時",
-            },
-            {
-              label: "帳號綁定管理",
-              value: "前往設定",
-            },
-          ]}
-        />
-      </Card>
+      {hasPlatforms ? (
+        <>
+          <Text style={[styles.refreshLine, { color: THEME.textMuted }]}>
+            {refreshLine}
+          </Text>
 
-      <View style={styles.kpiRow}>
-        <KPI theme={THEME} label="可接單" value={String(availableCount)} />
-        <KPI theme={THEME} label="需重授權" value={String(reauthCount)} />
-        <KPI theme={THEME} label="同步異常" value={String(degradedCount)} />
-      </View>
+          <View style={styles.kpiRow}>
+            <KPI theme={THEME} label="可接單" value={String(availableCount)} />
+            <KPI theme={THEME} label="需重授權" value={String(reauthCount)} />
+            <KPI theme={THEME} label="同步異常" value={String(degradedCount)} />
+          </View>
 
-      <PresenceFilterTabs activeFilter={filter} onChange={setFilter} />
+          <PresenceFilterTabs activeFilter={filter} onChange={setFilter} />
+        </>
+      ) : null}
 
       {error && summary ? (
         <Banner
@@ -1063,7 +1055,7 @@ export default function PlatformPresenceScreen() {
         />
       ) : null}
 
-      <MechanismLegend />
+      {reauthCount > 0 ? <MechanismLegend /> : null}
 
       {emptyState ? (
         <Banner
@@ -1096,9 +1088,7 @@ export default function PlatformPresenceScreen() {
                 theme={THEME}
                 variant="primary"
                 size="sm"
-                onPress={() =>
-                  router.push(emptyState.cta?.route ?? "/settings")
-                }
+                onPress={openBindingSettings}
               >
                 {emptyState.cta.label}
               </Btn>
@@ -1114,7 +1104,7 @@ export default function PlatformPresenceScreen() {
               busy={busyPlatform === item.record.platformCode}
               onToggle={(next) => void handleTogglePresence(next)}
               onReauth={(next) => void handleReauth(next)}
-              onOpenBinding={() => router.push("/settings")}
+              onOpenBinding={openBindingSettings}
             />
           ))}
         </View>
@@ -1160,6 +1150,9 @@ const styles = StyleSheet.create({
   kpiRow: {
     flexDirection: "row",
     gap: 8,
+  },
+  refreshLine: {
+    fontSize: 12,
   },
   filterRow: {
     flexDirection: "row",

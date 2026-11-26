@@ -53,7 +53,9 @@ export function settingsValuesFromRecord(
   record: DriverSettings,
 ): SettingsFormValues {
   return {
-    language: record.language ?? "zh-TW",
+    // Not editable on screen any more, so a blank stored value must not
+    // leave the driver with a validation error they cannot fix.
+    language: record.language?.trim() || "zh-TW",
     notificationsEnabled: record.notificationsEnabled ?? true,
     autoAcceptEnabled: record.autoAcceptEnabled ?? false,
     maxAcceptRadius:

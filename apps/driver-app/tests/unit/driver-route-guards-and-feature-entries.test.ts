@@ -513,6 +513,121 @@ describe("DRV-AUTH-002: Route guards and feature entries agree with server autho
     });
   });
 
+  describe("Empty workspaces say what is actually going on", () => {
+    // Visible copy: text children plus the title/body/label props that the
+    // mocked primitives receive.
+    function rendered(renderer: any): string {
+      const out: string[] = [];
+      for (const node of renderer.root.findAll(() => true)) {
+        const { children, title, body, label, subtitle } = node.props ?? {};
+        for (const value of [children, title, body, label, subtitle]) {
+          const items = Array.isArray(value) ? value : [value];
+          for (const item of items) {
+            if (typeof item === "string" || typeof item === "number") {
+              out.push(String(item));
+            }
+          }
+        }
+      }
+      return out.join("\n");
+    }
+
+    // The mocked PageHeader does not render its actions; mount them directly.
+    function headerActions(renderer: any): any {
+      const header = renderer.root.findByType("PageHeader");
+      let actions: any;
+      act(() => {
+        actions = create(header.props.actions);
+      });
+      return actions;
+    }
+
+    function button(renderer: any, text: string): any {
+      return renderer.root
+        .findAllByType("Btn")
+        .find((node: any) => node.props.children === text);
+    }
+
+    it("Jobs with no tasks at all says so instead of blaming the filter", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      mocks.listUnifiedDriverTasks.mockResolvedValue([]);
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(JobsScreen));
+        await flushAsync();
+      });
+
+      const page = rendered(renderer);
+      expect(page).toContain("目前沒有任務");
+      expect(page).not.toContain("此篩選條件下沒有任務");
+      // Nothing to count, filter or lay out.
+      expect(renderer.root.findAllByType("KPI")).toHaveLength(0);
+      expect(renderer.root.findAllByType("Pill")).toHaveLength(0);
+      const actions = rendered(headerActions(renderer));
+      expect(actions).toContain("同步");
+      expect(actions).not.toContain("清單檢視");
+      expect(actions).not.toContain("佇列");
+    });
+
+    it("Jobs with tasks offers a plainly named layout switch and no fake sort menu", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      mocks.listUnifiedDriverTasks.mockResolvedValue([
+        buildMockTask("task-200"),
+      ]);
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(JobsScreen));
+        await flushAsync();
+      });
+
+      const toggle = button(headerActions(renderer), "清單檢視");
+      expect(toggle).toBeDefined();
+      await act(async () => {
+        toggle.props.onPress();
+        await flushAsync();
+      });
+      expect(button(headerActions(renderer), "卡片檢視")).toBeDefined();
+      const page = rendered(renderer);
+      expect(page).toContain("依急迫程度排序");
+      expect(page).not.toContain("▾");
+      expect(page).not.toContain("任務佇列");
+    });
+
+    it("Platforms with nothing bound shows only the way to bind one", async () => {
+      mocks.isDriverIdentityProvisioned.mockReturnValue(true);
+      mocks.getPlatformPresence.mockResolvedValue({ presences: [] });
+
+      let renderer: any;
+      await act(async () => {
+        renderer = create(React.createElement(PlatformPresenceScreen));
+        await flushAsync();
+      });
+
+      const page = rendered(renderer);
+      expect(page).toContain("還沒有綁定任何平台");
+      for (const noise of [
+        "平台健康中心",
+        "更新頻率",
+        "重新授權方式",
+        "個平台 ·",
+      ]) {
+        expect(page).not.toContain(noise);
+      }
+      expect(renderer.root.findAllByType("KPI")).toHaveLength(0);
+
+      const banner = renderer.root
+        .findAllByType("Banner")
+        .find((node: any) => node.props.title === "還沒有綁定任何平台");
+      expect(banner.props.actions.props.children).toBe("去綁定平台");
+      banner.props.actions.props.onPress();
+      expect(mocks.push).toHaveBeenCalledWith("/settings");
+
+      act(() => renderer.unmount());
+    });
+  });
+
   describe("Acceptance 4: 403 Forbidden / DRIVER_IDENTITY_MISMATCH enforcement", () => {
     it("never renders unauthorized data when server returns 403 Forbidden / DRIVER_IDENTITY_MISMATCH", async () => {
       mocks.isDriverIdentityProvisioned.mockReturnValue(true);
