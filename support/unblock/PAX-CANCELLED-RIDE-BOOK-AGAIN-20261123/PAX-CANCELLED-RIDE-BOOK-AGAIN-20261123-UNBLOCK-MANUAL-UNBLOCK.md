@@ -130,6 +130,13 @@ scope，不推定本 helper 已取得寫入權。
 `/home/lupin/workspace/drts-fleet-platform/.local/system-release-20261123/pax-cancelled-ride-book-again/unblock-manual-20261127/`。
 `diagnosis.json` 記錄 read-only commands、退出碼、父任務前後身分、被拒 note 及待寫 metadata；
 helper handoff／`delivery.json` 記錄本文件 candidate、remote、PR 與驗證結果。
+`diagnosis.json` 為 11751 bytes，SHA-256
+`f1ccfae21dcdde2f3eba32c551f7bfa44e2ef6db067ffa5d6205bbbf77be7c18`。
+
+文件第一輪內容核對已結束：Prettier check、`git diff --check`、generated-file staged guard
+均 exit 0；6 個相對原始碼連結均存在，與 `origin/dev` 的變更只包含本 artifact。
+最終 commit 的同項檢查、commit trailers 與 push/PR 身分核對記錄於上述增量目錄，
+不將這些文件檢查當作產品 runtime 驗收。
 
 | 既有證據                                                                                                      | bytes | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
