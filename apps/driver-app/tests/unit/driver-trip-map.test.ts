@@ -97,6 +97,7 @@ vi.mock("@/components/canvas-primitives", () => ({
   },
 }));
 
+import { Linking } from "react-native";
 import DriverTripMap from "../../components/driver-trip-map";
 import DriverTripMapWeb from "../../components/driver-trip-map.web";
 import MapView, { Marker } from "react-native-maps";
@@ -217,10 +218,58 @@ function collectText(node: unknown): string[] {
   return [];
 }
 
+function collectPressables(
+  node: unknown,
+): { label: string; onPress: () => void }[] {
+  if (Array.isArray(node)) return node.flatMap(collectPressables);
+  if (!React.isValidElement(node)) return [];
+  const element = node as React.ReactElement<{
+    children?: unknown;
+    accessibilityLabel?: string;
+    onPress?: () => void;
+  }>;
+  if (typeof element.type === "function") {
+    const renderFunction = element.type as (
+      props: typeof element.props,
+    ) => React.ReactNode;
+    return collectPressables(renderFunction(element.props));
+  }
+  const own =
+    element.type === "Pressable" && element.props.onPress
+      ? [
+          {
+            label: element.props.accessibilityLabel ?? "",
+            onPress: element.props.onPress,
+          },
+        ]
+      : [];
+  return [...own, ...collectPressables(element.props.children)];
+}
+
 function renderDriverTripMapText(
   props: React.ComponentProps<typeof DriverTripMap>,
 ): string {
   return collectText(React.createElement(DriverTripMap, props)).join(" ");
+}
+
+// Drivers see map/app brand names and GPS; everything else is Chinese copy,
+// stop addresses and the stop coordinates they can type into a map app.
+function expectNoDeveloperCopy(text: string) {
+  expect(
+    text.replace(/Google|Apple|GPS/g, "").replace(/[\d.,\s-]/g, ""),
+  ).not.toMatch(/[A-Za-z]/);
+  for (const jargon of [
+    "DRTS",
+    "polyline",
+    "provider",
+    "heartbeat",
+    "route lock",
+    "fallback",
+    "權責",
+    "交接",
+    "Driver coordinate",
+  ])
+    expect(text).not.toContain(jargon);
 }
 
 describe("DriverTripMap", () => {
@@ -250,14 +299,17 @@ describe("DriverTripMap", () => {
       now: Date.parse("2026-07-01T00:00:30.000Z"),
     });
 
-    expect(text).toContain("Trip Map & Navigation Handoff");
-    expect(text).toContain("DRTS-owned route");
-    expect(text).toContain("Google 地圖");
+    // Card title, then the map panel; no route notice on an owned trip.
+    expect(text).toMatch(/^導航 行程地圖 Google 地圖 /);
+    expect(text).not.toContain("此單路線由平台決定");
     expect(text).toContain("台北車站");
     expect(text).toContain("25.047800, 121.517000");
     expect(text).toContain("松山機場");
     expect(text).toContain("25.069700, 121.552500");
     expect(text).toContain("GPS 即時回報");
+    // The driver's own position is drawn by the map, not printed as numbers.
+    expect(text).not.toContain("25.050000, 121.520000");
+    expectNoDeveloperCopy(text);
     expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
       provider: "google",
       showsUserLocation: true,
@@ -283,7 +335,7 @@ describe("DriverTripMap", () => {
       os: "ios",
       configured: false,
       managers: ["AIRMap"],
-      label: "可用下方座標開啟外部導航",
+      label: "請用下方按鈕開啟導航",
     },
     {
       os: "android",
@@ -295,13 +347,13 @@ describe("DriverTripMap", () => {
       os: "android",
       configured: false,
       managers: defaultMap,
-      label: "可用下方座標開啟外部導航",
+      label: "請用下方按鈕開啟導航",
     },
     {
       os: "android",
       configured: true,
       managers: ["AIRMap"],
-      label: "可用下方座標開啟外部導航",
+      label: "請用下方按鈕開啟導航",
     },
   ])(
     "uses the packaged map and pins on $os ($configured, $managers)",
@@ -317,7 +369,7 @@ describe("DriverTripMap", () => {
       });
       expect(text).toContain(label);
       expect(text).toContain("25.047800, 121.517000");
-      if (label === "可用下方座標開啟外部導航") {
+      if (label === "請用下方按鈕開啟導航") {
         expect(MapView).not.toHaveBeenCalled();
         expect(Marker).not.toHaveBeenCalled();
       } else {
@@ -334,6 +386,73 @@ describe("DriverTripMap", () => {
     },
   );
 
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "hands the stop coordinate to Google navigation from the %s card",
+    async (_platform, Component) => {
+      vi.mocked(Linking.canOpenURL).mockResolvedValue(true);
+      vi.mocked(Linking.openURL).mockResolvedValue(undefined);
+      const onNavigationResult = vi.fn();
+      const pressables = collectPressables(
+        React.createElement(Component, {
+          task: buildTask(),
+          order: buildOrder(),
+          driverLocation: null,
+          onNavigationResult,
+        }),
+      );
+      expect(pressables.map((item) => item.label)).toEqual([
+        "用 Google 導航到上車點",
+        "用 Apple 導航到上車點",
+        "用 Google 導航到下車點",
+        "用 Apple 導航到下車點",
+      ]);
+
+      pressables[2]!.onPress();
+      await vi.waitFor(() =>
+        expect(onNavigationResult).toHaveBeenCalledWith({
+          status: "opened",
+          provider: "google",
+          url: "comgooglemaps://?daddr=25.0697,121.5525&directionsmode=driving",
+          fallback: false,
+        }),
+      );
+      expect(Linking.openURL).toHaveBeenCalledWith(
+        "comgooglemaps://?daddr=25.0697,121.5525&directionsmode=driving",
+      );
+    },
+  );
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "labels the second navigation button 系統導航 on Android in the %s card",
+    (_platform, Component) => {
+      native.platform.OS = "android";
+      const texts = collectText(
+        React.createElement(Component, {
+          task: buildTask(),
+          order: buildOrder(),
+          driverLocation: null,
+        }),
+      );
+      expect(texts.filter((value) => value === "系統導航")).toHaveLength(2);
+      expect(texts.join(" ")).not.toContain("系統 導航");
+      expect(
+        collectPressables(
+          React.createElement(Component, {
+            task: buildTask(),
+            order: buildOrder(),
+            driverLocation: null,
+          }),
+        ).map((item) => item.label),
+      ).toContain("用系統導航到上車點");
+    },
+  );
+
   it("keeps navigation available in earlier Android builds without packaged capability metadata", () => {
     native.platform.OS = "android";
     delete native.modules.DRTSDriverMapConfig;
@@ -342,14 +461,14 @@ describe("DriverTripMap", () => {
       order: buildOrder(),
       driverLocation: null,
     });
-    expect(text).toContain("可用下方座標開啟外部導航");
+    expect(text).toContain("請用下方按鈕開啟導航");
     expect(MapView).not.toHaveBeenCalled();
   });
 
   it.each([
     ["ios", false, true, "Apple 地圖"],
-    ["ios", true, false, "可用下方座標開啟外部導航"],
-    ["android", false, true, "可用下方座標開啟外部導航"],
+    ["ios", true, false, "請用下方按鈕開啟導航"],
+    ["android", false, true, "請用下方按鈕開啟導航"],
   ] as const)(
     "selects a usable map on %s when NativeModules=%s and UIManager=%s",
     (os, modules, manager, label) => {
@@ -392,18 +511,12 @@ describe("DriverTripMap", () => {
           ).join(" ");
 
           expect(text).toContain("本任務定位已停止");
-          expect(text).not.toContain("heartbeat");
+          expect(text).toContain("任務已結束，不再回報你的位置。");
           expect(text).not.toContain("GPS 即時回報");
           expect(text).toContain("台北車站");
           expect(text).toContain("松山機場");
-          if (driverLocation) {
-            expect(text).toContain("最後已知座標");
-            expect(text).toMatch(
-              /Last driver coordinate\s+25\.050000, 121\.520000/,
-            );
-          } else {
-            expect(text).toContain("沒有可顯示的最後定位");
-          }
+          expect(text).not.toContain("25.050000, 121.520000");
+          expectNoDeveloperCopy(text);
           if (platform === "native") {
             expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
               showsUserLocation: false,
@@ -415,31 +528,47 @@ describe("DriverTripMap", () => {
     },
   );
 
-  it("shows forwarded authority, source offline fallback, and missing-coordinate degraded copy", () => {
-    const text = renderDriverTripMapText({
-      task: buildTask({
-        sourcePlatform: "grab",
-        routeProvided: false,
-        routeIntent: "platform_polyline_locked",
-      } as Partial<DriverTaskRecord>),
-      order: buildOrder({
-        dropoff: {
-          address: "松山機場",
-          lat: null,
-          lng: null,
-        },
-      } as Partial<OwnedOrderRecord>),
-      driverLocation: null,
-      sourcePlatformOffline: true,
-      nativeMapAvailable: false,
-    });
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "shows the forwarded route rule, platform offline note and missing-coordinate copy in the %s component",
+    (_platform, Component) => {
+      const element = React.createElement(Component, {
+        task: buildTask({
+          sourcePlatform: "grab",
+          routeProvided: false,
+          routeIntent: "platform_polyline_locked",
+        } as Partial<DriverTaskRecord>),
+        order: buildOrder({
+          dropoff: {
+            address: "松山機場",
+            lat: null,
+            lng: null,
+          },
+        } as Partial<OwnedOrderRecord>),
+        driverLocation: null,
+        sourcePlatformOffline: true,
+        nativeMapAvailable: false,
+      });
+      const texts = collectText(element);
+      const text = texts.join(" ");
 
-    expect(text).toContain("Forwarded route - source platform authority");
-    expect(text).toContain("來源平台路線鎖定");
-    expect(text).toContain("source platform route intent");
-    expect(text).toContain("來源平台離線");
-    expect(text).toContain("缺少座標");
-    expect(text).toContain("無有效座標時不使用地址猜測導航");
-    expect(text).toContain("Offline fallback");
-  });
+      // Card title, then the one-line forwarded route rule.
+      expect(texts.slice(0, 2)).toEqual([
+        "導航",
+        "此單路線由平台決定，要改路線請先聯絡派車台。",
+      ]);
+      expect(text).toContain("平台目前離線");
+      expect(text).toContain("缺少座標");
+      expect(text).toContain("這個地點沒有座標，請聯絡派車台。");
+      // The raw platform route-intent code is never shown.
+      expect(text).not.toContain("platform_polyline_locked");
+      expect(text).not.toContain("grab");
+      expectNoDeveloperCopy(text);
+      // The stop that has a coordinate still offers both navigation handoffs.
+      expect(text).toContain("25.047800, 121.517000");
+      expect(text.match(/Google 導航/g)).toHaveLength(1);
+    },
+  );
 });

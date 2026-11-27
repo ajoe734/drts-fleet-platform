@@ -9,7 +9,11 @@ import {
 } from "react-native";
 import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
-import { formatCategoryLabel, type AcademyCourseDetail } from "./types";
+import {
+  ACADEMY_NO_QUIZ_HINT,
+  formatCategoryLabel,
+  type AcademyCourseDetail,
+} from "./types";
 import {
   formatAcademyMaterialError,
   getModuleTypeLabel,
@@ -24,7 +28,6 @@ export * from "./material-resource";
 export interface ModuleReaderProps {
   course: AcademyCourseDetail;
   onStartQuiz: () => void;
-  onBack: () => void;
   onOpenMaterial?: AcademyMaterialOpener;
   onMaterialOpened?: (session: AcademyMaterialOpenedSession) => void;
 }
@@ -32,7 +35,6 @@ export interface ModuleReaderProps {
 export function ModuleReader({
   course,
   onStartQuiz,
-  onBack,
   onOpenMaterial,
   onMaterialOpened,
 }: ModuleReaderProps) {
@@ -152,14 +154,6 @@ export function ModuleReader({
       {/* Course Overview Card */}
       <View style={styles.headerCard}>
         <View style={styles.topRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="返回清單"
-            onPress={onBack}
-            style={styles.backButton}
-          >
-            <Text style={styles.backButtonText}>← 返回清單</Text>
-          </Pressable>
           <View style={styles.badgeRow}>
             <View style={styles.categoryBadge}>
               <Text style={styles.categoryText}>
@@ -175,14 +169,13 @@ export function ModuleReader({
         </View>
 
         <Text style={styles.courseTitle}>{course.title}</Text>
-        <Text style={styles.courseCode}>
-          代碼：{course.courseCode} · 版本：v{course.version}
-        </Text>
         <Text style={styles.description}>{course.description}</Text>
 
-        <View style={styles.requirementBanner}>
+        <View style={styles.requirementBanner} testID="academy-completion-rule">
           <Text style={styles.requirementText}>
-            完訓標準：測驗成績需達 {course.passingScore} 分（含）以上方可認證
+            {course.questions.length > 0
+              ? `完訓標準：測驗成績需達 ${course.passingScore} 分（含）以上方可認證`
+              : ACADEMY_NO_QUIZ_HINT}
           </Text>
         </View>
       </View>
@@ -244,19 +237,6 @@ export function ModuleReader({
             </Text>
           </View>
 
-          <View
-            style={styles.materialIdentityCard}
-            testID="academy-material-identity"
-          >
-            <Text style={styles.materialIdentityText}>
-              課程：{course.title} ({course.courseCode} · v{course.version})
-            </Text>
-            <Text style={styles.materialIdentityText}>
-              單元代碼：{selectedModule.moduleId} · 預計時長：
-              {selectedModule.durationMinutes} 分鐘
-            </Text>
-          </View>
-
           {resolution.state !== "ready" ? (
             <View
               style={styles.unavailableCard}
@@ -298,9 +278,6 @@ export function ModuleReader({
                   ? `教學影片資源（時長 ${selectedModule.durationMinutes} 分鐘）`
                   : `${getModuleTypeLabel(selectedModule.type)}資源（時長 ${selectedModule.durationMinutes} 分鐘）`}
               </Text>
-              <Text style={styles.resourceUrlText}>
-                教材資源位址：{resolution.url}
-              </Text>
 
               {isCurrentModuleOpened && activeSession ? (
                 <View
@@ -309,17 +286,6 @@ export function ModuleReader({
                 >
                   <Text style={styles.activeSessionStatus}>
                     {activeSession.statusLabel}
-                  </Text>
-                  <Text style={styles.activeSessionDetail}>
-                    已開啟單元：{activeSession.moduleTitle} (
-                    {activeSession.moduleId})
-                  </Text>
-                  <Text style={styles.activeSessionDetail}>
-                    所屬課程：{activeSession.courseTitle} (
-                    {activeSession.courseCode} · v{activeSession.courseVersion})
-                  </Text>
-                  <Text style={styles.activeSessionDetail}>
-                    已連線資源：{activeSession.contentUrl}
                   </Text>
                   {activeSession.contentBody ? (
                     <Text
@@ -399,14 +365,16 @@ export function ModuleReader({
         </View>
       )}
 
-      {/* Start Quiz Action */}
-      <View style={styles.actionContainer}>
-        <ActionButton
-          title={`開始測驗 (${course.questions.length} 題)`}
-          variant="primary"
-          onPress={onStartQuiz}
-        />
-      </View>
+      {/* Start Quiz Action: only when the course actually has questions. */}
+      {course.questions.length > 0 ? (
+        <View style={styles.actionContainer}>
+          <ActionButton
+            title={`開始測驗 (${course.questions.length} 題)`}
+            variant="primary"
+            onPress={onStartQuiz}
+          />
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -428,15 +396,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  backButton: {
-    paddingVertical: Tokens.spacing.xs,
-    paddingHorizontal: Tokens.spacing.sm,
-  },
-  backButtonText: {
-    fontSize: 13,
-    color: Tokens.colors.brandHi,
-    fontWeight: "600",
   },
   badgeRow: {
     flexDirection: "row",
@@ -471,10 +430,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: Tokens.colors.text,
-  },
-  courseCode: {
-    fontSize: 12,
-    color: Tokens.colors.textDim,
   },
   description: {
     fontSize: 13,
@@ -580,18 +535,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Tokens.colors.text,
   },
-  materialIdentityCard: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderRadius: Tokens.radius.sm,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.sm,
-    gap: 2,
-  },
-  materialIdentityText: {
-    fontSize: 11,
-    color: Tokens.colors.textMuted,
-  },
   videoPlaceholder: {
     backgroundColor: Tokens.colors.surfaceLo,
     borderRadius: Tokens.radius.md,
@@ -613,10 +556,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Tokens.colors.text,
   },
-  resourceUrlText: {
-    fontSize: 11,
-    color: Tokens.colors.textDim,
-  },
   readinessHintText: {
     fontSize: 12,
     lineHeight: 18,
@@ -634,10 +573,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: Tokens.colors.success,
-  },
-  activeSessionDetail: {
-    fontSize: 12,
-    color: Tokens.colors.text,
   },
   documentBody: {
     fontSize: 13,

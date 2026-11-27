@@ -9,9 +9,15 @@ import {
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
+  registerDriverDevice,
+  registerProtectedCacheClearHandler,
   revokeDriverDeviceBinding,
   sanitizeLogMessage,
 } from "../../lib/api-client";
+import {
+  getDriverSosLogoutGeneration,
+  hasUndeliveredSosKeptThroughSignOut,
+} from "../../lib/driver-sos-outbox";
 
 // Mock expo-secure-store in-memory store
 const mockStore = new Map<string, string>();
@@ -296,6 +302,144 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
 
       expect(isDriverIdentityProvisioned()).toBe(false);
       expect(mockStore.has("drts.driver.session")).toBe(false);
+    });
+  });
+
+  // DRIVER-SOS-CLEANUP-20261126: an expired or revoked session used to
+  // delete the stored SOS case even when it had not reached the server.
+  describe("Undelivered SOS across an automatic sign-out", () => {
+    const SOS_KEY = "drts.driver.sos.activeCase";
+    const AUTH_ERROR = new Error(
+      'API error 401: {"error":{"code":"DRIVER_DEVICE_REFRESH_INVALID","message":"Session revoked."}}',
+    );
+
+    function storeSosCase(overrides: Record<string, unknown>) {
+      mockStore.set(
+        SOS_KEY,
+        JSON.stringify({
+          clientEventId: "client-event-kept-1",
+          originalTriggeredAt: "2026-11-26T01:00:00.000Z",
+          syncState: "failed_retryable",
+          receipt: null,
+          ownerDriverId: "drv-owner-001",
+          ...overrides,
+        }),
+      );
+    }
+
+    async function signIn(driverId: string) {
+      const session = {
+        accessToken: `access-${driverId}`,
+        refreshToken: `refresh-${driverId}`,
+        tokenType: "Bearer",
+        expiresIn: 900,
+        refreshExpiresIn: 2592000,
+        driverId,
+        deviceId: "device-test-001",
+        bindingId: `binding-${driverId}`,
+        issuedAt: "2026-11-26T01:00:00.000Z",
+      };
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: session,
+            meta: {
+              requestId: "driver-register-test",
+              timestamp: "2026-11-26T01:00:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      try {
+        await registerDriverDevice("REG-CODE-0001");
+      } finally {
+        fetchMock.mockRestore();
+      }
+    }
+
+    it("keeps an undelivered SOS when the session ends on its own", async () => {
+      storeSosCase({});
+
+      expect(await recoverDriverSessionFromApiError(AUTH_ERROR)).toBe(true);
+
+      expect(mockStore.has("drts.driver.session")).toBe(false);
+      expect(mockStore.has(SOS_KEY)).toBe(true);
+    });
+
+    it("still clears a delivered SOS when the session ends on its own", async () => {
+      storeSosCase({
+        syncState: "submitted",
+        receipt: { sosEventId: "sos-1", eventNo: "SOS-1" },
+      });
+
+      await recoverDriverSessionFromApiError(AUTH_ERROR);
+
+      expect(mockStore.has(SOS_KEY)).toBe(false);
+    });
+
+    it("does not keep an SOS marked 誤觸 or 不用了 through a sign-out", async () => {
+      storeSosCase({
+        falseAlarm: { dismissed: true, dismissedAt: null, note: null },
+      });
+
+      await recoverDriverSessionFromApiError(AUTH_ERROR);
+
+      expect(mockStore.has(SOS_KEY)).toBe(false);
+      expect(hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+    });
+
+    it("clears even an undelivered SOS on an explicit logout", async () => {
+      storeSosCase({});
+
+      await revokeDriverDeviceBinding();
+
+      expect(mockStore.has(SOS_KEY)).toBe(false);
+    });
+
+    it("keeps the SOS for the same driver signing back in", async () => {
+      storeSosCase({});
+      await recoverDriverSessionFromApiError(AUTH_ERROR);
+
+      await signIn("drv-owner-001");
+
+      expect(isDriverIdentityProvisioned()).toBe(true);
+      expect(JSON.parse(mockStore.get(SOS_KEY)!).clientEventId).toBe(
+        "client-event-kept-1",
+      );
+    });
+
+    it("discards the SOS when a different driver signs in on this device", async () => {
+      storeSosCase({});
+      await recoverDriverSessionFromApiError(AUTH_ERROR);
+
+      await signIn("drv-someone-else");
+
+      expect(isDriverIdentityProvisioned()).toBe(true);
+      expect(mockStore.has(SOS_KEY)).toBe(false);
+    });
+
+    it("tells screens whether a sign-out was automatic or a logout, and counts logouts", async () => {
+      const events: Array<{ reason: string }> = [];
+      const unregister = registerProtectedCacheClearHandler((event) => {
+        events.push(event);
+      });
+      try {
+        storeSosCase({});
+        const logoutsBefore = getDriverSosLogoutGeneration();
+
+        await recoverDriverSessionFromApiError(AUTH_ERROR);
+        expect(events.at(-1)).toEqual({ reason: "session_ended" });
+        expect(getDriverSosLogoutGeneration()).toBe(logoutsBefore);
+        expect(hasUndeliveredSosKeptThroughSignOut()).toBe(true);
+
+        await revokeDriverDeviceBinding();
+        expect(events.at(-1)).toEqual({ reason: "logout" });
+        expect(getDriverSosLogoutGeneration()).toBe(logoutsBefore + 1);
+        expect(hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+      } finally {
+        unregister();
+      }
     });
   });
 });

@@ -565,7 +565,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       const { ModuleReader } = runtime.loadCurrentAcademyComponents();
       const course = buildMultiResourceCourse();
       const onStartQuiz = vi.fn();
-      const onBack = vi.fn();
       const openedSessions: Array<Record<string, unknown>> = [];
 
       boundary.openURL.mockImplementation(async (url: string) => {
@@ -588,7 +587,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz,
-          onBack,
           onMaterialOpened: (session: Record<string, unknown>) => {
             openedSessions.push(session);
           },
@@ -598,7 +596,11 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       // Verify course metadata and absence of canned generic text
       const initialText = allRenderedText(renderer);
       expect(initialText).toContain("平台安全防禦駕駛與應變實務");
-      expect(initialText).toContain("代碼：SAFE-2026 · 版本：v2");
+      // Course code/version, module IDs and resource URLs are internal; the
+      // driver sees titles and the open/play action only.
+      expect(initialText).not.toContain("SAFE-2026");
+      expect(initialText).not.toContain("mod_");
+      expect(initialText).not.toContain("https://");
       expect(initialText).not.toContain("【標準作業指引 SOP】");
       expect(initialText).not.toContain("【專業知識講義】");
       expect(
@@ -635,9 +637,14 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       });
       const videoOpenedText = allRenderedText(renderer);
       expect(videoOpenedText).toContain("已啟動教學影片播放");
-      expect(videoOpenedText).toContain(
-        "已開啟單元：防禦駕駛路口實務影片 (mod_video_defensive)",
-      );
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_video_defensive"),
+      ).not.toBeNull();
+      expect(
+        findByTestId(renderer, "academy-material-active-session"),
+      ).not.toBeNull();
+      expect(videoOpenedText).not.toContain("mod_video_defensive");
+      expect(videoOpenedText).not.toContain("https://");
       expect(videoOpenedText).toContain("重新播放教學影片");
 
       // 2. Switch to first SOP module -> previous session clears, no canned text
@@ -646,9 +653,10 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       );
       const sop1BeforeOpen = allRenderedText(renderer);
       expect(sop1BeforeOpen).toContain("出車前安全自檢 SOP");
-      expect(sop1BeforeOpen).toContain(
-        "教材資源位址：https://cdn.drts.internal/academy/sop/precheck-v2.pdf",
-      );
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_sop_precheck"),
+      ).not.toBeNull();
+      expect(sop1BeforeOpen).not.toContain("https://");
       expect(sop1BeforeOpen).not.toContain("已啟動教學影片播放");
       expect(sop1BeforeOpen).not.toContain("【標準作業指引 SOP】");
       expect(
@@ -663,9 +671,12 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       );
       const sop1AfterOpen = allRenderedText(renderer);
       expect(sop1AfterOpen).toContain("已開啟 SOP 指引教材");
-      expect(sop1AfterOpen).toContain(
-        "已開啟單元：出車前安全自檢 SOP (mod_sop_precheck)",
-      );
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_sop_precheck"),
+      ).not.toBeNull();
+      expect(
+        findByTestId(renderer, "academy-material-active-session"),
+      ).not.toBeNull();
       expect(sop1AfterOpen).toContain(
         "【出車前自檢實務】請逐項核對輪胎胎壓、煞車燈號、行照與強制險效期。",
       );
@@ -676,9 +687,10 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       );
       const sop2BeforeOpen = allRenderedText(renderer);
       expect(sop2BeforeOpen).toContain("行車事故與緊急通報 SOP");
-      expect(sop2BeforeOpen).toContain(
-        "教材資源位址：https://cdn.drts.internal/academy/sop/incident-v2.pdf",
-      );
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_sop_incident"),
+      ).not.toBeNull();
+      expect(sop2BeforeOpen).not.toContain("https://");
       expect(sop2BeforeOpen).not.toContain("【出車前自檢實務】");
       expect(sop2BeforeOpen).not.toContain("【標準作業指引 SOP】");
       expect(
@@ -692,9 +704,12 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         "https://cdn.drts.internal/academy/sop/incident-v2.pdf",
       );
       const sop2AfterOpen = allRenderedText(renderer);
-      expect(sop2AfterOpen).toContain(
-        "已開啟單元：行車事故與緊急通報 SOP (mod_sop_incident)",
-      );
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_sop_incident"),
+      ).not.toBeNull();
+      expect(
+        findByTestId(renderer, "academy-material-active-session"),
+      ).not.toBeNull();
       expect(sop2AfterOpen).toContain(
         "【事故應變實務】開啟雙黃警示燈、擺放三角故障標誌，並立即通報110與車行值班台。",
       );
@@ -729,9 +744,15 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         "【運輸法遵專章】執業登記證應置於車內指定插座，不得超收車資或無故拒載。",
       );
 
-      // Opening materials does not auto-start quiz or navigate back
+      // Opening materials does not auto-start the quiz, and the reader has no
+      // back control of its own (the screen header owns navigation).
       expect(onStartQuiz).not.toHaveBeenCalled();
-      expect(onBack).not.toHaveBeenCalled();
+      expect(
+        renderer.root.findAll(
+          (node) =>
+            node.type === "Pressable" && nodeText(node).includes("返回清單"),
+        ),
+      ).toHaveLength(0);
     });
   });
 
@@ -768,7 +789,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -841,7 +861,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -885,7 +904,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -930,7 +948,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
         runtime.React.createElement(ModuleReader, {
           course: courseV2,
           onStartQuiz: vi.fn(),
-          onBack: vi.fn(),
         }),
       );
 
@@ -969,7 +986,6 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
           runtime.React.createElement(ModuleReader, {
             course: courseV3,
             onStartQuiz: vi.fn(),
-            onBack: vi.fn(),
           }),
         );
       });
@@ -977,8 +993,13 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       expect(
         findByTestId(renderer, "academy-material-active-session"),
       ).toBeNull();
-      const v3Text = allRenderedText(renderer);
-      expect(v3Text).toContain("代碼：SAFE-2026 · 版本：v3");
+      // The version change resets the reader to the first module.
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_video_defensive"),
+      ).not.toBeNull();
+      expect(
+        findByTestId(renderer, "academy-material-viewer-mod_sop_precheck"),
+      ).toBeNull();
       expect(
         findByTestId(renderer, "academy-material-open-mod_video_defensive"),
       ).not.toBeNull();

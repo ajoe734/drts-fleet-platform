@@ -24,53 +24,47 @@ const JUSTIFIED_ABSOLUTE_POSITIONING: Record<
   "app/index.tsx": [
     {
       selector: "headerActionDot",
-      justification: "Interactive action button notification badge dot positioned in button corner.",
+      justification:
+        "Interactive action button notification badge dot positioned in button corner.",
     },
     {
       selector: "heroGlowLarge",
-      justification: "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
+      justification:
+        "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
     },
     {
       selector: "heroGlowSmall",
-      justification: "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
+      justification:
+        "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
     },
   ],
   "app/onboarding.tsx": [
     {
-      selector: "cockpitBellBadge",
-      justification: "Interactive action button notification badge dot positioned in bell button corner.",
-    },
-    {
       selector: "provisionHeroGlow",
-      justification: "Non-interactive decorative background ambient lighting glow.",
+      justification:
+        "Non-interactive decorative background ambient lighting glow.",
     },
     {
       selector: "heroGlow",
-      justification: "Non-interactive decorative background ambient lighting glow.",
-    },
-  ],
-  "app/safety-operator.tsx": [
-    {
-      selector: "frameGlowTop",
-      justification: "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
-    },
-    {
-      selector: "frameGlowBottom",
-      justification: "Non-interactive decorative background ambient lighting glow (pointerEvents none).",
+      justification:
+        "Non-interactive decorative background ambient lighting glow.",
     },
   ],
   "app/sos.tsx": [
     {
       selector: "holdButtonProgress",
-      justification: "Animated horizontal progress overlay inside interactive hold-to-activate button.",
+      justification:
+        "Animated horizontal progress overlay inside interactive hold-to-activate button.",
     },
     {
       selector: "falseAlarmFill",
-      justification: "Animated slider track fill background for slide-to-confirm gesture.",
+      justification:
+        "Animated slider track fill background for slide-to-confirm gesture.",
     },
     {
       selector: "falseAlarmThumb",
-      justification: "Interactive draggable slider thumb positioned along the slider track.",
+      justification:
+        "Interactive draggable slider thumb positioned along the slider track.",
     },
   ],
 };
@@ -118,7 +112,8 @@ describe("DRV-RWD-001: Responsive layout and sizing regression guards", () => {
         const absoluteMatches: string[] = [];
 
         // Match lines containing position: "absolute" or position: 'absolute'
-        const regex = /([a-zA-Z0-9_]+)\s*:\s*\{[^}]*position\s*:\s*["']absolute["']/g;
+        const regex =
+          /([a-zA-Z0-9_]+)\s*:\s*\{[^}]*position\s*:\s*["']absolute["']/g;
         let match: RegExpExecArray | null;
         while ((match = regex.exec(source)) !== null) {
           absoluteMatches.push(match[1]);
@@ -127,7 +122,9 @@ describe("DRV-RWD-001: Responsive layout and sizing regression guards", () => {
         const allowed = JUSTIFIED_ABSOLUTE_POSITIONING[relPath] ?? [];
         const allowedSelectors = new Set(allowed.map((a) => a.selector));
 
-        const unexpected = absoluteMatches.filter((s) => !allowedSelectors.has(s));
+        const unexpected = absoluteMatches.filter(
+          (s) => !allowedSelectors.has(s),
+        );
         expect(
           unexpected,
           `Found unapproved position: "absolute" in ${relPath}: ${unexpected.join(

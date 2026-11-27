@@ -28,6 +28,7 @@ import {
   integer,
   JourneyFailure,
   object,
+  OPS_EVENT_STREAM_PATH,
   records,
   requireFact,
   text,
@@ -1862,6 +1863,10 @@ type CapturedR10Exchange = CapturedR10Request &
     bytes: Buffer;
   }>;
 
+/** Ops `reports.ops.export.jsonDone`, in either locale. */
+export const R10_JSON_EXPORT_NOTICE =
+  /已將 \d+ 筆營運摘要匯出為 JSON|Exported \d+ summary row\(s\) as JSON/;
+
 async function waitForEnabled(locator: Locator, stage: string) {
   await locator.first().waitFor({ state: "visible", timeout: 15_000 });
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -2113,6 +2118,14 @@ export async function runR10OperationsDownloads(
     const method = request.method().toUpperCase();
     const requestBody = request.postData();
     const parsedUrl = new URL(url);
+    if (
+      method === "GET" &&
+      parsedUrl.origin === opsOrigin &&
+      parsedUrl.pathname === OPS_EVENT_STREAM_PATH
+    ) {
+      await route.fulfill({ status: 204 }).catch(() => undefined);
+      return;
+    }
     const requestIdentity: CapturedR10Request = {
       method,
       url,
@@ -2467,7 +2480,7 @@ export async function runR10OperationsDownloads(
       jsonPreviewExchange.bytes,
       "r10-operations-json-export-preview",
     );
-    const jsonNotice = page.getByText(/已匯出 .* JSON|Exported .* JSON/);
+    const jsonNotice = page.getByText(R10_JSON_EXPORT_NOTICE);
     await jsonNotice.first().waitFor({ state: "visible", timeout: 15_000 });
 
     const jsonBytes = await readDownloadBytes(jsonDownload, readFileFn);

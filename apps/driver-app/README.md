@@ -1,14 +1,14 @@
 # Driver App
 
 Expo Router + React Native driver surface for onboarding, jobs, trip
-lifecycle, incident handling, earnings, and settings.
+lifecycle, SOS, earnings, and settings.
 
 Implemented / materially wired screens include:
 
 - `/onboarding`
 - `/jobs`
 - `/trip`
-- `/incident`
+- `/sos`
 - `/earnings`
 - `/settings`
 

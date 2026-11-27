@@ -20,6 +20,13 @@ import type {
   ForwardedDriverActionResponse,
 } from "@drts/contracts";
 
+import {
+  hasUndeliveredSosKeptThroughSignOut,
+  markStoredDriverSosSessionLost,
+  noteDriverSosSessionCleared,
+  noteDriverSosSignedIn,
+} from "./driver-sos-outbox";
+
 type DriverExpoExtra = {
   apiBaseUrl?: string;
   driverActorId?: string;
@@ -57,6 +64,7 @@ const DEV_DRIVER_ID: string | undefined =
 const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
+const DRIVER_SOS_ACTIVE_CASE_KEY = "drts.driver.sos.activeCase";
 
 // Expo SecureStore has no web implementation. Keep device-bound credentials
 // in this browser tab; native retains its existing secure storage. Orders and
@@ -89,7 +97,14 @@ let refreshPromise: Promise<DriverDeviceProvisioningSession> | null = null;
 let provisionedSession: DriverDeviceProvisioningSession | null = null;
 let driverIdentityIssue: string | null = null;
 
-export type ProtectedCacheClearCallback = () => void | Promise<void>;
+/**
+ * `session_ended`: the session expired or was revoked (automatic sign-out);
+ * an undelivered SOS is kept. `logout`: the driver logged out on purpose.
+ */
+export type ProtectedCacheClearEvent = { reason: "session_ended" | "logout" };
+export type ProtectedCacheClearCallback = (
+  event: ProtectedCacheClearEvent,
+) => void | Promise<void>;
 const protectedCacheClearHandlers = new Set<ProtectedCacheClearCallback>();
 
 export type PendingDriverTaskCompletion = {
@@ -395,16 +410,191 @@ export function registerProtectedCacheClearHandler(
   };
 }
 
-async function clearProtectedCachedData(): Promise<void> {
+type StoredSosCaseOwnership = {
+  delivered: boolean;
+  /** Marked 誤觸 or 不用了: it will never be sent, so nothing to keep. */
+  dismissed: boolean;
+  ownerDriverId: string | null;
+  /** The SOS screen noted that the session ended while it was undelivered. */
+  sessionLost: boolean;
+  /** Has what the SOS screen needs to load and send it again. */
+  complete: boolean;
+};
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+// Reads only what session handling needs from the stored SOS case
+// (lib/driver-sos-outbox owns the format): whether the server has a receipt,
+// and which driver raised it.
+async function readStoredSosCaseOwnership(): Promise<StoredSosCaseOwnership | null> {
+  const raw = await driverStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      clientEventId?: unknown;
+      originalTriggeredAt?: unknown;
+      receipt?: unknown;
+      ownerDriverId?: unknown;
+      sessionLostAt?: unknown;
+      falseAlarm?: { dismissed?: unknown };
+    };
+    return {
+      delivered: Boolean(parsed?.receipt),
+      dismissed: parsed?.falseAlarm?.dismissed === true,
+      ownerDriverId:
+        typeof parsed?.ownerDriverId === "string" ? parsed.ownerDriverId : null,
+      sessionLost: isNonEmptyString(parsed?.sessionLostAt),
+      complete:
+        isNonEmptyString(parsed?.clientEventId) &&
+        isNonEmptyString(parsed?.originalTriggeredAt),
+    };
+  } catch {
+    return {
+      delivered: true,
+      dismissed: false,
+      ownerDriverId: null,
+      sessionLost: false,
+      complete: false,
+    };
+  }
+}
+
+/** An SOS the SOS screen would still send: no receipt, not 誤觸 / 不用了. */
+function isUndeliveredSosCase(
+  stored: StoredSosCaseOwnership | null,
+): stored is StoredSosCaseOwnership {
+  return Boolean(
+    stored && stored.complete && !stored.delivered && !stored.dismissed,
+  );
+}
+
+function signedInDriverId(): string | null {
+  return DEV_DRIVER_ID || provisionedSession?.driverId || null;
+}
+
+/**
+ * `undelivered`: this device holds an SOS raised by the signed-in driver that
+ * has not reached the server. `unknown`: the stored SOS could not be read.
+ */
+export type SignedInDriverSosState = "undelivered" | "none" | "unknown";
+
+/**
+ * For screens other than SOS while signed in (home, settings). Never another
+ * driver's SOS. One saved without an owner (an older app version) counts,
+ * because the SOS screen sends it under this sign-in. Read only and never
+ * throws: a storage error is `unknown`.
+ */
+export async function getSignedInDriverSosState(): Promise<SignedInDriverSosState> {
+  try {
+    const driverId = isDriverIdentityProvisioned() ? signedInDriverId() : null;
+    if (!driverId) {
+      return "none";
+    }
+    const stored = await readStoredSosCaseOwnership();
+    return isUndeliveredSosCase(stored) &&
+      (stored.ownerDriverId === null || stored.ownerDriverId === driverId)
+      ? "undelivered"
+      : "none";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** Home shows the SOS card only for a known unsent SOS, never for `unknown`. */
+export async function hasUndeliveredSosOfSignedInDriver(): Promise<boolean> {
+  return (await getSignedInDriverSosState()) === "undelivered";
+}
+
+function sosKeptThroughSignOutNoted(): boolean {
+  try {
+    return hasUndeliveredSosKeptThroughSignOut();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * For the sign-in screen while signed out: true when an SOS that has not
+ * reached the server was kept through an automatic sign-out (the session
+ * expired or was revoked). No one is signed in, so there is no driver to
+ * compare with; the next sign-in discards it if another driver signs in.
+ * Read only and never throws. If the stored SOS cannot be read, this errs
+ * toward warning: it relies on what the sign-out noted, and the sign-out also
+ * notes a kept SOS when it could not read the stored one (it keeps it then).
+ */
+export async function hasUndeliveredSosAfterSessionLost(): Promise<boolean> {
+  try {
+    if (isDriverIdentityProvisioned()) {
+      return false;
+    }
+    const stored = await readStoredSosCaseOwnership();
+    return (
+      isUndeliveredSosCase(stored) &&
+      (stored.sessionLost || sosKeptThroughSignOutNoted())
+    );
+  } catch {
+    return sosKeptThroughSignOutNoted();
+  }
+}
+
+async function shouldKeepUndeliveredSosCase(): Promise<boolean> {
+  try {
+    const stored = await readStoredSosCaseOwnership();
+    return stored !== null && !stored.delivered && !stored.dismissed;
+  } catch {
+    // Cannot tell: never risk deleting an SOS that has not reached the server.
+    return true;
+  }
+}
+
+// After a sign-in: an SOS kept through an automatic sign-out belongs to the
+// driver who raised it. Discard it when someone else signs in on this device.
+async function discardSosCaseOfOtherDriver(driverId: string): Promise<void> {
+  try {
+    const stored = await readStoredSosCaseOwnership();
+    if (stored && stored.ownerDriverId !== driverId) {
+      await driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    }
+  } catch {
+    // Best effort; the SOS screen only resends a case it can load.
+  }
+}
+
+/**
+ * `keepUndeliveredSos` is for automatic sign-outs (expired or revoked
+ * session): an SOS that has not reached the server stays on the device and
+ * is resent when the same driver signs back in. An explicit logout clears it.
+ */
+async function clearProtectedCachedData(
+  options: { keepUndeliveredSos?: boolean } = {},
+): Promise<void> {
+  const keepSosCase = options.keepUndeliveredSos
+    ? await shouldKeepUndeliveredSosCase()
+    : false;
+  noteDriverSosSessionCleared({
+    explicitLogout: !options.keepUndeliveredSos,
+    keptUndeliveredSos: keepSosCase,
+  });
   await Promise.allSettled([
-    driverStorage.deleteItemAsync("drts.driver.sos.activeCase"),
+    // A kept SOS is flagged on the device, so the sign-in screen still warns
+    // after the app restarts (the in-memory note does not survive that).
+    keepSosCase
+      ? markStoredDriverSosSessionLost()
+      : driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY),
     driverStorage.deleteItemAsync("drts.safetyOperator.queue"),
     driverStorage.deleteItemAsync("drts.driver.trackingSessionMarker"),
   ]);
 
+  const event: ProtectedCacheClearEvent = {
+    reason: options.keepUndeliveredSos ? "session_ended" : "logout",
+  };
   for (const handler of Array.from(protectedCacheClearHandlers)) {
     try {
-      await handler();
+      await handler(event);
     } catch {
       // Swallow error during cache invalidation
     }
@@ -456,7 +646,7 @@ export async function recoverDriverSessionFromApiError(
   }
 
   setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
-  await clearStoredSession();
+  await clearStoredSession({ keepUndeliveredSos: true });
   hydrated = true;
   return true;
 }
@@ -476,11 +666,13 @@ export async function getDriverDeviceId(): Promise<string> {
   return getOrCreateDeviceId();
 }
 
-async function clearStoredSession() {
+async function clearStoredSession(
+  options: { keepUndeliveredSos?: boolean } = {},
+) {
   provisionedSession = null;
   await driverStorage.deleteItemAsync(DRIVER_SESSION_KEY);
   applySession(null);
-  await clearProtectedCachedData();
+  await clearProtectedCachedData(options);
 }
 
 async function persistPendingDriverTaskCompletion(
@@ -564,7 +756,7 @@ export async function initializeDriverIdentity(): Promise<void> {
       ) as DriverDeviceProvisioningSession;
     } catch {
       setDriverIdentityIssue("裝置登入資料已失效，請重新註冊。");
-      await clearStoredSession();
+      await clearStoredSession({ keepUndeliveredSos: true });
       hydrated = true;
       return;
     }
@@ -608,7 +800,7 @@ export async function refreshDriverSessionSingleFlight(): Promise<DriverDevicePr
     } catch (error) {
       if (isDriverSessionAuthFailure(error)) {
         setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
-        await clearStoredSession();
+        await clearStoredSession({ keepUndeliveredSos: true });
       }
       throw error;
     }
@@ -637,6 +829,8 @@ async function registerDriverDeviceWithProof(
   });
   setDriverIdentityIssue(null);
   await persistSession(session);
+  await discardSosCaseOfOtherDriver(session.driverId);
+  noteDriverSosSignedIn();
   hydrated = true;
   return session;
 }
@@ -720,12 +914,14 @@ export async function getPendingDriverTaskCompletion(): Promise<PendingDriverTas
   return loadPendingDriverTaskCompletion();
 }
 
-export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
-  const pending = await loadPendingDriverTaskCompletion();
-  if (!pending) {
-    return null;
-  }
+let pendingCompletionInFlight: {
+  requestId: string;
+  promise: Promise<DriverTaskRecord>;
+} | null = null;
 
+async function postPendingDriverTaskCompletion(
+  pending: PendingDriverTaskCompletion,
+): Promise<DriverTaskRecord> {
   try {
     const task = await getDriverClient().completeTask(
       pending.taskId,
@@ -747,6 +943,34 @@ export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRec
 
     throw error;
   }
+}
+
+/**
+ * The driver's own submit and the background replay can reach the same stored
+ * completion at the same time. Both share one request instead of sending it
+ * twice.
+ */
+async function sendPendingDriverTaskCompletion(
+  pending: PendingDriverTaskCompletion,
+): Promise<DriverTaskRecord> {
+  if (pendingCompletionInFlight?.requestId === pending.requestId) {
+    return pendingCompletionInFlight.promise;
+  }
+
+  const promise = postPendingDriverTaskCompletion(pending);
+  pendingCompletionInFlight = { requestId: pending.requestId, promise };
+  try {
+    return await promise;
+  } finally {
+    if (pendingCompletionInFlight?.promise === promise) {
+      pendingCompletionInFlight = null;
+    }
+  }
+}
+
+export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
+  const pending = await loadPendingDriverTaskCompletion();
+  return pending ? sendPendingDriverTaskCompletion(pending) : null;
 }
 
 export async function acceptForwardedDriverOffer(
@@ -780,22 +1004,17 @@ export async function submitDriverTaskCompletion(
   command: DriverCompleteTaskCommand,
 ): Promise<DriverTaskRecord> {
   const now = new Date().toISOString();
-  await persistPendingDriverTaskCompletion({
+  const pending: PendingDriverTaskCompletion = {
     taskId,
     requestId: createLocalId("driver-task-complete"),
     command,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  await persistPendingDriverTaskCompletion(pending);
 
-  const task = await replayPendingDriverTaskCompletion();
-  if (!task) {
-    throw new Error(
-      "Pending driver task completion disappeared before replay.",
-    );
-  }
-
-  return task;
+  // Send what was just stored: a replay may already have sent and cleared it.
+  return sendPendingDriverTaskCompletion(pending);
 }
 
 function createDriverClientProxy(): ApiClient {
@@ -855,7 +1074,7 @@ function createDriverClientProxy(): ApiClient {
                 setDriverIdentityIssue(
                   getDriverIdentityIssueMessage(retryError),
                 );
-                await clearStoredSession();
+                await clearStoredSession({ keepUndeliveredSos: true });
               }
               throw retryError;
             }

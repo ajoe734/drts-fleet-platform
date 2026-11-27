@@ -151,6 +151,7 @@ Module._load = function (request, parent, isMain) {
     };
   if (request === "expo-router")
     return {
+      useFocusEffect: () => {},
       Redirect: (props) => {
         redirects.push({ href: props.href, identityReads });
         return React.createElement("Redirect", props);
@@ -442,6 +443,48 @@ const click = async (label) => {
   )
     await open("trip");
 };
+// Like Playwright's getByTestId: the rendered host element whose testID
+// (data-testid on web) equals the id. More than one match is a strict-mode
+// error, as in the real browser locator.
+const testIdNodes = (id) =>
+  renderer
+    ? renderer.root.findAll(
+        (node) => typeof node.type === "string" && node.props.testID === id,
+      )
+    : [];
+const testIdLocator = (id) => {
+  const single = () => {
+    const nodes = testIdNodes(id);
+    assert.ok(
+      nodes.length <= 1,
+      `Strict mode: testID ${id} matched ${nodes.length} elements`,
+    );
+    return nodes[0] ?? null;
+  };
+  const locator = {
+    visible: () => single() !== null,
+    click: async () => {
+      const node = single();
+      assert.ok(node, `Missing real Driver element: ${id}`);
+      assert.equal(
+        typeof node.props.onPress,
+        "function",
+        `Real Driver element is not pressable: ${id}`,
+      );
+      assert.ok(!node.props.disabled, `Real Driver control is disabled: ${id}`);
+      const before = new URL(route, "https://driver.invalid").pathname;
+      await act(async () => node.props.onPress());
+      // Router pushes are fixtures; mount the screen the real press opened.
+      if (
+        before !== "/trip" &&
+        new URL(route, "https://driver.invalid").pathname === "/trip"
+      )
+        await open("trip");
+    },
+    first: () => locator,
+  };
+  return locator;
+};
 const page = {
   goto: async (url) => {
     assert.equal(url, "https://driver.invalid/jobs");
@@ -455,6 +498,7 @@ const page = {
       click: () => click(label),
     }),
   }),
+  getByTestId: (id) => testIdLocator(id),
   getByRole: (role, options) => {
     assert.equal(role, "button");
     assert.equal(options.exact, true);

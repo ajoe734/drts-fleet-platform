@@ -116,12 +116,15 @@ pnpm 10.33.0, frozen workspace install and pinned `npx eas-cli@21.4.0`. It passe
 so the real dynamic config receives the same linkage on the hosted builder.
 It runs EAS `config`, then `build --non-interactive --wait --json` for the chosen
 platform/profile. The job waits up to its 90-minute Actions limit for remote
-native generation, linking, compilation and signing. The final build JSON,
-separate stderr log and exact CLI exit code are saved even when the CLI fails;
-the workflow returns that same nonzero CLI code. If the CLI returns zero, its
-final result must contain exactly one `FINISHED` build, a build ID and a nonempty
-build/archive artifact URL. Cancellation, an empty/null result or a missing
-artifact therefore cannot produce a successful CI result.
+native generation, linking, compilation and signing. The raw build JSON and CLI
+log stay on the runner: this repository's logs and artifacts are public, and
+they hold the build page and app download URLs. The uploaded receipt has the CLI
+exit code, platform, status, profile, distribution, version, commit, error and
+the app's size and SHA-256, with no build ID or URL. A nonzero CLI code fails
+the run with that code. If the CLI returns zero, its final result must contain
+exactly one `FINISHED` build with a nonempty build/archive artifact URL.
+Cancellation, an empty/null result or a missing artifact therefore cannot
+produce a successful CI result.
 
 This final-result check is necessary with the pinned implementation: the
 [v21.4.0 completion path](https://github.com/expo/eas-cli/blob/v21.4.0/packages/eas-cli/src/build/runBuildAndSubmit.ts#L298-L325)
@@ -139,8 +142,9 @@ pnpm 10.33.0 to the already used toolchain.
 A successful build step now establishes a completed remote native build with an
 artifact URL. It does not establish artifact download integrity, installation,
 cold launch, provider delivery or Store publication. Record the source SHA,
-profile/environment, resolved public mode, build ID/status, artifact URL,
-subsequent artifact size/hash and signing identity. Preserve failed receipts;
+profile/environment, resolved public mode, build status, artifact size/hash and
+signing identity. Read the build ID and download page in the Expo dashboard; do
+not copy either into a public log, artifact or issue. Preserve failed receipts;
 do not substitute JS bundle success. If Actions times out or is interrupted,
 there is no completed-build success claim; follow the recorded EAS job because
 cancelling the waiting runner does not by itself prove that remote work stopped.

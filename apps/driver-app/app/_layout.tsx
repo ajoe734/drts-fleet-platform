@@ -166,13 +166,6 @@ export default function RootLayout() {
           }}
         />
         <Tabs.Screen
-          name="leave"
-          options={{
-            title: driverRouteTitles.leave,
-            href: null,
-          }}
-        />
-        <Tabs.Screen
           name="academy"
           options={{
             title: driverRouteTitles.academy,
@@ -183,20 +176,6 @@ export default function RootLayout() {
           name="sos"
           options={{
             title: driverRouteTitles.sos,
-            href: null,
-          }}
-        />
-        <Tabs.Screen
-          name="incident"
-          options={{
-            title: driverRouteTitles.incident,
-            href: null,
-          }}
-        />
-        <Tabs.Screen
-          name="safety-operator"
-          options={{
-            title: driverRouteTitles.safetyOperator,
             href: null,
           }}
         />

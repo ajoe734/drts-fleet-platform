@@ -28,7 +28,7 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
       situationLabel,
       details: "在路口與機車發生擦撞，需立即派員處理",
       platformContext: {
-        platformLabel: "DRTS 自營",
+        platformLabel: "車隊派單",
         platformCode: "drts",
         mirrorOrderId: "order-101",
         externalOrderId: null,

@@ -254,7 +254,7 @@ test("Ops recovers after a real declined assignment and keeps the original backe
           .first()
           .click();
         await expect(
-          driver.getByText(orderId, { exact: false }).first(),
+          driver.getByTestId(`driver-trip-order-${orderId}`),
         ).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
         const rows = await recordOrderEvidence(
