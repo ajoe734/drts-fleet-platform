@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
 import {
+  DRIVER_FORWARDED_ROUTE_COPY,
+  DRIVER_MISSING_COORDINATE_COPY,
   buildDriverTripNavigationModel,
   buildGoogleMapsWebNavigationUrl,
   formatDriverCoordinate,
@@ -232,7 +234,11 @@ describe("driver navigation model", () => {
       linking: { openURL },
     });
 
-    expect(result.status).toBe("missing_coordinates");
+    expect(result).toEqual({
+      status: "missing_coordinates",
+      provider: "google",
+      message: "這個地點沒有座標，請聯絡派車台。",
+    });
     expect(openURL).not.toHaveBeenCalled();
   });
 
@@ -278,19 +284,50 @@ describe("driver route authority and degraded states", () => {
       } as Partial<DriverTaskRecord>),
     );
 
-    expect(owned.kind).toBe("drts_owned");
-    expect(owned.description).toContain("DRTS owns this route");
-    expect(owned.locked).toBe(false);
-    expect(forwarded.kind).toBe("forwarded_platform");
-    expect(forwarded.description).toContain("source platform route intent");
-    expect(forwarded.locked).toBe(true);
-    expect(forwarded.degradedHint).toContain("未提供完整路線 polyline");
+    expect(owned).toEqual({ kind: "drts_owned", locked: false, notice: null });
+    expect(forwarded).toEqual({
+      kind: "forwarded_platform",
+      locked: true,
+      notice: "此單路線由平台決定，要改路線請先聯絡派車台。",
+    });
+  });
+
+  it("keeps driver-facing map copy in plain Traditional Chinese", () => {
+    const fixStates = [
+      getDriverLocationFixState({ task: buildTask(), location: null }),
+      getDriverLocationFixState({
+        task: buildTask(),
+        location: {
+          latitude: 25.0478,
+          longitude: 121.517,
+          recordedAt: "2026-07-01T00:00:00.000Z",
+          accuracyM: 8,
+        },
+        now: Date.parse("2026-07-01T00:00:30.000Z"),
+      }),
+      getDriverLocationFixState({
+        task: buildTask({ status: "completed" }),
+        location: null,
+      }),
+    ];
+    for (const copy of [
+      DRIVER_FORWARDED_ROUTE_COPY,
+      DRIVER_MISSING_COORDINATE_COPY,
+      ...fixStates.flatMap((state) => [state.label, state.detail]),
+    ]) {
+      // "GPS" is the only Latin text drivers see in these lines.
+      expect(copy.replace(/GPS/g, "")).not.toMatch(/[A-Za-z]/);
+    }
   });
 
   it("documents missing and stale driver GPS fixes", () => {
     expect(
-      getDriverLocationFixState({ task: buildTask(), location: null }).state,
-    ).toBe("missing");
+      getDriverLocationFixState({ task: buildTask(), location: null }),
+    ).toEqual({
+      state: "missing",
+      label: "GPS 尚未回報",
+      detail: "還沒收到你的位置；開啟定位權限後會自動更新。",
+    });
 
     expect(
       getDriverLocationFixState({
@@ -303,9 +340,10 @@ describe("driver route authority and degraded states", () => {
         },
         now: Date.parse("2026-07-01T00:00:30.000Z"),
       }),
-    ).toMatchObject({
+    ).toEqual({
       state: "fresh",
-      coordinateLabel: "25.047800, 121.517000",
+      label: "GPS 即時回報",
+      detail: "最後定位 30 秒前；誤差約 8 公尺。",
     });
 
     expect(
@@ -335,24 +373,20 @@ describe("driver route authority and degraded states", () => {
         Date.parse("2026-07-01T00:00:30.000Z"),
         Date.parse("2026-07-01T00:02:30.000Z"),
       ]) {
-        expect(
-          getDriverLocationFixState({ task, location, now }),
-        ).toMatchObject({
+        expect(getDriverLocationFixState({ task, location, now })).toEqual({
           state: "stopped",
           label: "本任務定位已停止",
-          detail: expect.stringContaining("最後已知座標"),
-          coordinateLabel: "25.047800, 121.517000",
+          detail: "任務已結束，不再回報你的位置。",
         });
       }
 
       for (const missingLocation of [null, { ...location, latitude: 91 }]) {
         expect(
           getDriverLocationFixState({ task, location: missingLocation }),
-        ).toMatchObject({
+        ).toEqual({
           state: "stopped",
           label: "本任務定位已停止",
-          detail: "任務已結束，沒有可顯示的最後定位。",
-          coordinateLabel: null,
+          detail: "任務已結束，不再回報你的位置。",
         });
       }
     },
@@ -410,16 +444,12 @@ describe("driver root tab bar navigation", () => {
     expect(resolveActiveDriverTab("/settings")).toBe("settings");
 
     // Sub-screens
-    expect(resolveActiveDriverTab("incident")).toBe("trip");
-    expect(resolveActiveDriverTab("/incident")).toBe("trip");
     expect(resolveActiveDriverTab("sos")).toBe("trip");
     expect(resolveActiveDriverTab("/sos")).toBe("trip");
     expect(resolveActiveDriverTab("earnings")).toBe("settings");
     expect(resolveActiveDriverTab("/earnings")).toBe("settings");
     expect(resolveActiveDriverTab("shift")).toBe("workbench");
     expect(resolveActiveDriverTab("/shift")).toBe("workbench");
-    expect(resolveActiveDriverTab("safety-operator")).toBe("settings");
-    expect(resolveActiveDriverTab("/safety-operator")).toBe("settings");
     expect(resolveActiveDriverTab("onboarding")).toBe("workbench");
     expect(resolveActiveDriverTab("/onboarding")).toBe("workbench");
   });
@@ -429,7 +459,7 @@ describe("driver root tab bar navigation", () => {
       await import("../../lib/driver-navigation");
 
     expect(resolveActiveDriverTab("earnings", "workbench")).toBe("workbench");
-    expect(resolveActiveDriverTab("incident", "workbench")).toBe("workbench");
+    expect(resolveActiveDriverTab("sos", "workbench")).toBe("workbench");
   });
 
   it("identifies whether a route is a top-level tab route", async () => {
@@ -442,8 +472,6 @@ describe("driver root tab bar navigation", () => {
     expect(isDriverTabRoute("settings")).toBe(true);
 
     expect(isDriverTabRoute("earnings")).toBe(false);
-    expect(isDriverTabRoute("incident")).toBe(false);
     expect(isDriverTabRoute("sos")).toBe(false);
-    expect(isDriverTabRoute("safety-operator")).toBe(false);
   });
 });

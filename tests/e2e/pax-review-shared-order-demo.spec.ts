@@ -1038,7 +1038,7 @@ async function readAssignedTripAndAccept(
       (url) => url.pathname === new URL(`${base}/trip`).pathname,
     );
     await expect(
-      driver.getByText(orderId, { exact: false }).first(),
+      driver.getByTestId(`driver-trip-order-${orderId}`),
     ).toBeVisible();
   });
   await step(
@@ -1834,15 +1834,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await registerDriver(ops, driver, DRIVER, step);
         await driver.goto(`${DRIVER}/jobs`);
         await driver
-          .getByRole("button")
-          .filter({
-            has: driver.getByText(cancelledAssignment.taskId, { exact: true }),
-          })
+          .getByTestId(`driver-job-task-${cancelledAssignment.taskId}`)
           .click();
-        const cancellationHeader = `${cancelledAssignment.taskId} · ${cancelled}`;
-        await expect(
-          driver.getByText(cancellationHeader, { exact: true }),
-        ).toBeVisible();
+        // Trip no longer prints internal IDs; its route card carries them.
+        const cancellationTrip = [
+          driver.getByTestId(`driver-trip-task-${cancelledAssignment.taskId}`),
+          driver.getByTestId(`driver-trip-order-${cancelled}`),
+        ];
+        for (const hook of cancellationTrip) await expect(hook).toBeVisible();
         pax.on("dialog", (dialog) => void dialog.accept());
         // The real cancel action reloads the Passenger page after committing.
         // Observe that navigation before the independent reload/readback below.
@@ -1864,9 +1863,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         ).toBeVisible();
         await opsRead(ops, cancelled);
         await driver.reload();
-        await expect(
-          driver.getByText(cancellationHeader, { exact: true }),
-        ).toBeVisible();
+        for (const hook of cancellationTrip) await expect(hook).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
         for (const name of ["接受任務", "開始行程", "完成行程"]) {
           for (const button of await driver
@@ -1943,11 +1940,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
             .isVisible()
             .catch(() => null)
         : null;
-    const [loading, empty, openCurrentTrip] = await Promise.all([
-      visible("載入任務中…"),
-      visible("此篩選條件下沒有任務"),
-      visible("開啟目前行程"),
-    ]);
+    const [loading, noTasks, filteredEmpty, openCurrentTrip] =
+      await Promise.all([
+        visible("載入任務中…"),
+        visible("目前沒有任務"),
+        visible("此篩選條件下沒有任務"),
+        visible("開啟目前行程"),
+      ]);
+    const empty = noTasks || filteredEmpty;
     await info
       .attach("driver-failure-state", {
         body: JSON.stringify({
@@ -2094,7 +2094,10 @@ test("a wheelchair booking keeps its UUID and requirement through ordinary Ops a
       assigned.taskId,
     );
     await expect(
-      driver.getByText(`${assigned.taskId} · ${orderId}`, { exact: true }),
+      driver.getByTestId(`driver-trip-task-${assigned.taskId}`),
+    ).toBeVisible();
+    await expect(
+      driver.getByTestId(`driver-trip-order-${orderId}`),
     ).toBeVisible();
     await expect(
       driver

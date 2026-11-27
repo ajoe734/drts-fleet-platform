@@ -84,12 +84,12 @@ describe("settings-form helpers", () => {
   });
 
   describe("validateSettingsValues", () => {
-    it("requires language", () => {
+    it("does not block saving on language, which the screen no longer edits", () => {
       const errors = validateSettingsValues({
         ...DEFAULT_SETTINGS_VALUES,
         language: "  ",
       });
-      expect(errors.language).toBeDefined();
+      expect(errors.language).toBeUndefined();
     });
 
     it("rejects non-integer radius", () => {
@@ -200,6 +200,14 @@ describe("settings-form helpers", () => {
 
       const empty = buildSettingsCommand(DEFAULT_SETTINGS_VALUES);
       expect(empty.maxAcceptRadius).toBeNull();
+    });
+
+    it("leaves the stored language alone", () => {
+      const cmd = buildSettingsCommand({
+        ...DEFAULT_SETTINGS_VALUES,
+        language: "en",
+      });
+      expect(Object.hasOwn(cmd, "language")).toBe(false);
     });
   });
 

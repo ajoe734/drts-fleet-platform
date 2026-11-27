@@ -107,10 +107,6 @@ export function validateSettingsValues(
 ): SettingsFieldErrors {
   const errors: SettingsFieldErrors = {};
 
-  if (!values.language.trim()) {
-    errors.language = "請選擇介面語言。";
-  }
-
   const radius = values.maxAcceptRadius.trim();
   if (radius.length > 0) {
     if (!/^\d+$/.test(radius)) {
@@ -182,8 +178,8 @@ export function buildSettingsCommand(
   values: SettingsFormValues,
 ): UpdateDriverSettingsCommand {
   const radius = values.maxAcceptRadius.trim();
+  // language is not editable on screen; leave the stored value alone.
   return {
-    language: values.language.trim(),
     notificationsEnabled: values.notificationsEnabled,
     autoAcceptEnabled: values.autoAcceptEnabled,
     maxAcceptRadius: radius ? Number(radius) : null,

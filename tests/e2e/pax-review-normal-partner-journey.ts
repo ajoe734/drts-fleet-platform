@@ -1261,10 +1261,14 @@ export async function runNormalPartnerJourney(
         details.caseHandler,
       ])
         await expect(driverFulfillment).toContainText(value);
+      // The Driver app shows Taiwan local time (fixed UTC+8, no DST).
       for (const value of [details.replacementStart, details.replacementEnd])
         await expect(
           driverFulfillment.getByText(
-            new Date(value).toISOString().replace("T", " ").slice(0, 16),
+            new Date(Date.parse(value) + 8 * 60 * 60 * 1000)
+              .toISOString()
+              .replace("T", " ")
+              .slice(0, 16),
             { exact: true },
           ),
         ).toBeVisible();

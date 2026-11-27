@@ -279,6 +279,45 @@ def build_candidate_bundle(
     return metadata, run_detail, archive
 
 
+CURRENT_RUN = {"id": CURRENT_RUN_ID, "status": "in_progress", "conclusion": None}
+
+
+def job_listing(*conclusions: str) -> dict:
+    jobs = [{"name": "ci-integ", "conclusion": "failure"}] + [
+        {"name": reader.JOURNEY_JOB, "conclusion": conclusion}
+        for conclusion in conclusions
+    ]
+    return {"total_count": len(jobs), "jobs": jobs}
+
+
+def listing_map(*bundles: tuple[dict, dict], extra_runs: list[dict] | None = None) -> dict:
+    """The run and per-run artifact listings for the given (artifact, run) pairs."""
+    runs = [CURRENT_RUN, *(run for _, run in bundles), *(extra_runs or [])]
+    listings = {
+        reader.dispatched_runs_path(EVALUATED_DATE, 1): {
+            "total_count": len({run["id"] for run in runs}),
+            "workflow_runs": runs,
+        }
+    }
+    for metadata, run in bundles:
+        listings[reader.run_artifacts_path(run["id"])] = {
+            "total_count": 1,
+            "artifacts": [metadata],
+        }
+    return listings
+
+
+def discover(fetch_json, fetch_bytes=lambda _path, _limit: b"") -> dict:
+    return reader.discover_prior_owned_target(
+        expected_definition_sha=DEFINITION_SHA,
+        expected_runtime_sha=RUNTIME_SHA,
+        current_run_id=CURRENT_RUN_ID,
+        current_utc_date=EVALUATED_DATE,
+        fetch_json=fetch_json,
+        fetch_bytes=fetch_bytes,
+    )
+
+
 class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
     def test_zero_candidate_decides_stage_a(self):
         manifest = reader.discover_prior_owned_target(
@@ -286,7 +325,10 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
             expected_runtime_sha=RUNTIME_SHA,
             current_run_id=CURRENT_RUN_ID,
             current_utc_date=EVALUATED_DATE,
-            fetch_json=lambda _path: {"artifacts": []},
+            fetch_json=lambda _path: {
+                "total_count": 1,
+                "workflow_runs": [CURRENT_RUN],
+            },
             fetch_bytes=lambda _path, _limit: b"",
         )
         self.assertEqual(manifest["schema"], reader.MANIFEST_SCHEMA)
@@ -297,9 +339,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
     def test_one_uniquely_valid_candidate_decides_stage_b(self):
         metadata, run_detail, archive = build_candidate_bundle()
         json_map = {
-            f"repos/{reader.REPOSITORY}/actions/artifacts?per_page={reader.PER_PAGE}&page=1": {
-                "artifacts": [metadata]
-            },
+            **listing_map((metadata, run_detail)),
             f"repos/{reader.REPOSITORY}/actions/artifacts/{ARTIFACT_ID}": metadata,
             f"repos/{reader.REPOSITORY}/actions/runs/{STAGE_A_RUN_ID}": run_detail,
         }
@@ -328,9 +368,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
         meta1, run1, arch1 = build_candidate_bundle(run_id=45000000101, artifact_id=14000000101)
         meta2, run2, arch2 = build_candidate_bundle(run_id=45000000102, artifact_id=14000000102)
         json_map = {
-            f"repos/{reader.REPOSITORY}/actions/artifacts?per_page={reader.PER_PAGE}&page=1": {
-                "artifacts": [meta1, meta2]
-            },
+            **listing_map((meta1, run1), (meta2, run2)),
             f"repos/{reader.REPOSITORY}/actions/artifacts/14000000101": meta1,
             f"repos/{reader.REPOSITORY}/actions/runs/45000000101": run1,
             f"repos/{reader.REPOSITORY}/actions/artifacts/14000000102": meta2,
@@ -415,6 +453,213 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
                     expected_runtime_sha=RUNTIME_SHA,
                     current_utc_date=EVALUATED_DATE,
                 )
+
+    def test_discovery_reads_only_dispatched_runs_however_many_artifacts_exist(self):
+        metadata, run_detail, archive = build_candidate_bundle()
+        listings = listing_map((metadata, run_detail))
+        run_path = reader.run_artifacts_path(STAGE_A_RUN_ID)
+        listings[run_path] = {
+            "total_count": 80,
+            "artifacts": [metadata] + [{"name": f"other-{n}"} for n in range(79)],
+        }
+        listings[f"repos/{reader.REPOSITORY}/actions/artifacts/{ARTIFACT_ID}"] = metadata
+        listings[f"repos/{reader.REPOSITORY}/actions/runs/{STAGE_A_RUN_ID}"] = run_detail
+        requested: list[str] = []
+
+        def fetch_json(path):
+            requested.append(path)
+            return listings[path]
+
+        manifest = discover(fetch_json, lambda _path, _limit: archive)
+        self.assertEqual(manifest["decision"], "stageB")
+        # The repository-wide listing holds every workflow's artifacts; reading it
+        # can neither stay bounded nor reach a run from the day before.
+        self.assertFalse([p for p in requested if "/actions/artifacts?" in p])
+        self.assertIn("event=workflow_dispatch", requested[0])
+        self.assertIn("created=%3E%3D2026-10-24", requested[0])
+
+    def test_a_run_whose_journey_failed_and_a_repeated_listing_are_not_candidates(self):
+        failed_meta, failed_run, _ = build_candidate_bundle(
+            run_id=45000000103,
+            artifact_id=14000000103,
+            mutate_run=lambda run: run.update(conclusion="failure"),
+        )
+        listings = listing_map((failed_meta, failed_run))
+        listings[reader.journey_jobs_path(45000000103)] = job_listing("failure")
+        self.assertEqual(discover(lambda path: listings[path])["decision"], "stageA")
+
+        metadata, run_detail, archive = build_candidate_bundle()
+        listings = {
+            **listing_map((metadata, run_detail), extra_runs=[run_detail]),
+            f"repos/{reader.REPOSITORY}/actions/artifacts/{ARTIFACT_ID}": metadata,
+            f"repos/{reader.REPOSITORY}/actions/runs/{STAGE_A_RUN_ID}": run_detail,
+        }
+        manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
+        self.assertEqual(manifest["candidateCount"], 1)
+
+    def test_a_passed_journey_in_an_unsuccessful_run_fails_closed(self):
+        for conclusion in ("failure", "cancelled", "timed_out", "neutral", None):
+            metadata, run_detail, _ = build_candidate_bundle(
+                mutate_run=lambda run, value=conclusion: run.update(conclusion=value)
+            )
+            listings = listing_map((metadata, run_detail))
+            listings[reader.journey_jobs_path(STAGE_A_RUN_ID)] = job_listing(
+                "failure", "success"
+            )
+            with self.subTest(conclusion=conclusion), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-passed-journey-in-unsuccessful-run"
+            ):
+                discover(lambda path, listings=listings: listings[path])
+
+        for incomplete in (
+            {**job_listing("failure"), "total_count": 200},
+            job_listing(),
+            {"total_count": 0, "jobs": []},
+        ):
+            listings[reader.journey_jobs_path(STAGE_A_RUN_ID)] = incomplete
+            with self.subTest(jobs=incomplete), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-job-listing-incomplete"
+            ):
+                discover(lambda path: listings[path])
+
+    def test_the_newest_attempt_artifact_of_a_rerun_is_read(self):
+        metadata, run_detail, archive = build_candidate_bundle(artifact_id=14000000109)
+        metadata["created_at"] = "2026-11-22T11:00:00Z"
+        stale = copy.deepcopy(metadata)
+        # Artifact ids are not issued in time order.
+        stale.update(
+            id=14000000110,
+            digest=f"sha256:{'0' * 64}",
+            created_at="2026-11-22T10:00:00Z",
+        )
+        listings = listing_map((metadata, run_detail))
+        listings[reader.run_artifacts_path(STAGE_A_RUN_ID)] = {
+            "total_count": 2,
+            "artifacts": [metadata, stale],
+        }
+        base = f"repos/{reader.REPOSITORY}/actions"
+        listings[f"{base}/artifacts/14000000109"] = metadata
+        listings[f"{base}/runs/{STAGE_A_RUN_ID}"] = run_detail
+        manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
+        self.assertEqual(manifest["officialArtifact"]["artifactId"], 14000000109)
+
+    def test_an_incomplete_run_listing_fails_closed(self):
+        metadata, run_detail, _ = build_candidate_bundle()
+        first = reader.dispatched_runs_path(EVALUATED_DATE, 1)
+        for listing in (
+            {"total_count": 5, "workflow_runs": []},
+            {"total_count": 0, "workflow_runs": []},
+            {"total_count": 3, "workflow_runs": [CURRENT_RUN]},
+        ):
+            with self.subTest(listing=listing), self.assertRaisesRegex(
+                reader.R14TargetError, "r14-run-listing-incomplete"
+            ):
+                discover(lambda path, listing=listing: {first: listing}[path])
+
+    def test_the_target_is_found_on_a_later_page(self):
+        metadata, run_detail, archive = build_candidate_bundle()
+        others = [
+            {"id": 100 + n, "status": "completed", "conclusion": "failure"}
+            for n in range(reader.PER_PAGE - 1)
+        ]
+        total = len(others) + 2
+        base = f"repos/{reader.REPOSITORY}/actions"
+        listings = {
+            reader.dispatched_runs_path(EVALUATED_DATE, 1): {
+                "total_count": total,
+                "workflow_runs": [CURRENT_RUN, *others],
+            },
+            reader.dispatched_runs_path(EVALUATED_DATE, 2): {
+                "total_count": total,
+                "workflow_runs": [run_detail],
+            },
+            reader.run_artifacts_path(STAGE_A_RUN_ID): {
+                "total_count": 1,
+                "artifacts": [metadata],
+            },
+            f"{base}/artifacts/{ARTIFACT_ID}": metadata,
+            f"{base}/runs/{STAGE_A_RUN_ID}": run_detail,
+            **{
+                reader.run_artifacts_path(run["id"]): {"total_count": 0, "artifacts": []}
+                for run in others
+            },
+        }
+        manifest = discover(lambda path: listings[path], lambda _path, _limit: archive)
+        self.assertEqual(manifest["decision"], "stageB")
+
+    def test_unfinished_run_with_a_matching_artifact_fails_closed(self):
+        metadata, run_detail, archive = build_candidate_bundle(
+            mutate_run=lambda run: run.update(status="in_progress", conclusion=None)
+        )
+        listings = {
+            **listing_map((metadata, run_detail)),
+            f"repos/{reader.REPOSITORY}/actions/artifacts/{ARTIFACT_ID}": metadata,
+            f"repos/{reader.REPOSITORY}/actions/runs/{STAGE_A_RUN_ID}": run_detail,
+        }
+        with self.assertRaisesRegex(
+            reader.R14TargetError, "r14-run-identity-or-state-mismatch"
+        ):
+            discover(lambda path: listings[path], lambda _path, _limit: archive)
+
+    def test_listed_artifact_bindings_and_bounds_fail_closed(self):
+        cases = [
+            (
+                lambda m: m.update(
+                    name=f"owned-referral-business-{'c' * 40}-{STAGE_A_RUN_ID}"
+                ),
+                "r14-artifact-runtime-mismatch",
+            ),
+            (
+                lambda m: m["workflow_run"].update(head_sha="d" * 40),
+                "r14-artifact-head-sha-mismatch",
+            ),
+            (
+                lambda m: m.update(name=f"owned-referral-business-{RUNTIME_SHA}-9"),
+                "r14-artifact-run-or-sha-mismatch",
+            ),
+            (
+                lambda m: m.update(name="owned-referral-business-bad"),
+                "r14-artifact-name-malformed",
+            ),
+            (lambda m: m.update(expired=True), "r14-artifact-expired"),
+            (lambda m: m.update(id=0), "r14-artifact-id-invalid-or-duplicate"),
+        ]
+        for mutate, code in cases:
+            metadata, run_detail, _ = build_candidate_bundle(mutate_metadata=mutate)
+            listings = listing_map((metadata, run_detail))
+            with self.subTest(code=code), self.assertRaisesRegex(
+                reader.R14TargetError, code
+            ):
+                discover(lambda path, listings=listings: listings[path])
+
+        metadata, run_detail, _ = build_candidate_bundle()
+        listings = listing_map((metadata, run_detail))
+        listings[reader.run_artifacts_path(STAGE_A_RUN_ID)]["total_count"] = 101
+        with self.assertRaisesRegex(
+            reader.R14TargetError, "r14-artifact-inspection-bound-exceeded"
+        ):
+            discover(lambda path: listings[path])
+
+        def endless(path):
+            if "/artifacts?" in path:
+                return {"total_count": 0, "artifacts": []}
+            page = int(path.rsplit("page=", 1)[1])
+            return {
+                "total_count": 10_000,
+                "workflow_runs": [
+                    {
+                        "id": page * 1000 + n,
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                    for n in range(reader.PER_PAGE)
+                ]
+            }
+
+        with self.assertRaisesRegex(
+            reader.R14TargetError, "r14-run-listing-bound-exceeded"
+        ):
+            discover(endless)
 
     def test_archive_zip_slip_symlink_bomb_oversize_duplicate_and_digest_rejected(self):
         for label, extra, symlink, drop, expected in [
@@ -628,9 +873,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
     ):
         metadata, run_detail, archive = build_candidate_bundle()
         json_map = {
-            f"repos/{reader.REPOSITORY}/actions/artifacts?per_page={reader.PER_PAGE}&page=1": {
-                "artifacts": [metadata]
-            },
+            **listing_map((metadata, run_detail)),
             f"repos/{reader.REPOSITORY}/actions/artifacts/{ARTIFACT_ID}": metadata,
             f"repos/{reader.REPOSITORY}/actions/runs/{STAGE_A_RUN_ID}": run_detail,
         }
@@ -668,9 +911,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
             bad_meta = copy.deepcopy(metadata)
             bad_meta["expired"] = True
             bad_json_map = {
-                f"repos/{reader.REPOSITORY}/actions/artifacts?per_page={reader.PER_PAGE}&page=1": {
-                    "artifacts": [bad_meta]
-                }
+                **listing_map((bad_meta, run_detail)),
             }
             with patch.dict(
                 os.environ,
@@ -687,7 +928,7 @@ class R14PriorOwnedTargetDiscoveryTests(unittest.TestCase):
     def test_static_ci_integ_workflow_owned_job_controls(self):
         text = WORKFLOW.read_text("utf-8")
         # Extract workflow_dispatch inputs block and owned-referral-business-journey job block.
-        owned_start = text.index("  owned-referral-business-journey:")
+        owned_start = text.index(f"\n  {reader.JOURNEY_JOB}:") + 1
         shared_agency_start = text.index("  shared-agency-acceptance:", owned_start)
         owned_block = text[owned_start:shared_agency_start]
 

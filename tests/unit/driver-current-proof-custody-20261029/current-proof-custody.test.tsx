@@ -51,6 +51,7 @@ function nativeView(tag: string) {
         placeholder: ph,
         value,
         "data-icon": props.name,
+        "data-testid": props.testID,
       },
       children,
     );
@@ -594,8 +595,9 @@ function createHarness(initial: DriverTaskRecord[], requestedTaskId?: string) {
 }
 
 async function ready(taskId: string) {
+  // Trip no longer prints internal task IDs; it carries them as testIDs.
   await waitFor(() =>
-    expect(screen.getAllByText(taskId).length).toBeGreaterThan(0),
+    expect(screen.getByTestId(`driver-trip-task-${taskId}`)).toBeTruthy(),
   );
   await waitFor(() => expect(screen.getByLabelText("實際起步費")).toBeTruthy());
   await waitFor(() =>
@@ -852,7 +854,7 @@ describe("Driver current trip evidence and completion async custody", () => {
     expect(
       screen.getByTestId("driver-map-port").getAttribute("data-location"),
     ).toBe(map);
-    expect(screen.getAllByText("task-B").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("driver-trip-task-task-B")).toBeTruthy();
     expect(
       h.requests.filter((request) => request.method === "POST"),
     ).toHaveLength(1);

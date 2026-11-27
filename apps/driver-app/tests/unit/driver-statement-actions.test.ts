@@ -193,7 +193,7 @@ afterEach(async () => {
 });
 
 describe("Driver monthly statement detail and download", () => {
-  it("connects the actual Earnings screen row to current statement detail and its approved receipt/fee/line data", async () => {
+  it("connects the actual Earnings screen row to current statement detail and its receipt and line data", async () => {
     const renderer = await mount(React.createElement(EarningsScreen));
     expect(boundary.getList).toHaveBeenCalledWith(
       "/api/driver/profile/statements",
@@ -204,12 +204,19 @@ describe("Driver monthly statement detail and download", () => {
       "/api/driver/profile/statements/statement%20%2Fdriver-1",
     );
     expect(allText(renderer)).toContain("RECEIPT-FRESH");
-    expect(allText(renderer)).toContain("plan-fresh");
-    expect(allText(renderer)).toContain("order-detail");
-    expect(allText(renderer)).toContain(copy.reimbursement);
-    expect(allText(renderer)).toContain("已撥款");
-    await press(renderer, copy.close);
+    // Drivers see a short order reference, never the fee plan version or the
+    // full internal order ID.
+    expect(allText(renderer)).not.toContain("plan-fresh");
+    expect(allText(renderer)).toContain(`${copy.order} #detail`);
     expect(allText(renderer)).not.toContain("order-detail");
+    expect(allText(renderer)).toContain(copy.reimbursement);
+    const row = renderer.root.findAll(
+      (node) => node.type === DriverStatementRow,
+    )[0]!;
+    // The payout status is shown once per row, not repeated in the subtitle.
+    expect(text(row).split("已撥款")).toHaveLength(2);
+    await press(renderer, copy.close);
+    expect(allText(renderer)).not.toContain(`${copy.order} #detail`);
     expect(boundary.openURL).not.toHaveBeenCalled();
   });
 
@@ -250,13 +257,13 @@ describe("Driver monthly statement detail and download", () => {
       expect(rendered).not.toContain("待撥款");
       expect(rendered).toContain("RECEIPT-REFRESHED");
       expect(rendered).not.toContain("RECEIPT-OLD");
-      expect(rendered).toContain("plan-refreshed");
+      expect(rendered).not.toContain("plan-refreshed");
       expect(rendered).toContain("245.00");
       expect(
         button(renderer, collapsed ? copy.view : copy.close).props.disabled,
       ).toBe(false);
       if (collapsed) {
-        expect(rendered).not.toContain("order-refreshed");
+        expect(rendered).not.toContain("#reshed");
       } else {
         expect(rendered).toContain(
           `${copy.net}：${formatMoney(refreshed.netAmount)}`,
@@ -264,8 +271,9 @@ describe("Driver monthly statement detail and download", () => {
         expect(rendered).toContain("260.00");
         expect(rendered).toContain("20.00");
         expect(rendered).toContain("5.00");
-        expect(rendered).toContain("order-refreshed");
-        expect(rendered).not.toContain("order-detail");
+        expect(rendered).toContain(`${copy.order} #reshed`);
+        expect(rendered).not.toContain("order-refreshed");
+        expect(rendered).not.toContain("#detail");
         expect(rendered).not.toContain("140.00");
       }
     },
@@ -464,7 +472,7 @@ describe("Driver monthly statement detail and download", () => {
     expect(allText(renderer)).not.toContain(copy.opening);
     expect(button(renderer, copy.download).props.disabled).toBe(false);
     expect(allText(renderer)).toContain("RECEIPT-FRESH");
-    expect(allText(renderer)).toContain("order-detail");
+    expect(allText(renderer)).toContain(`${copy.order} #detail`);
   });
 
   it("does not open or republish a pending response after its row is removed", async () => {
@@ -507,17 +515,17 @@ describe("Driver monthly statement detail and download", () => {
 
       expect(boundary.getList).toHaveBeenCalledTimes(2);
       expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
-      expect(allText(renderer)).toContain("plan-refreshed");
+      expect(allText(renderer)).not.toContain("plan-refreshed");
       expect(allText(renderer)).toContain("已撥款");
       expect(allText(renderer)).toContain("240.00");
       expect(allText(renderer)).not.toContain("RECEIPT-OLD");
       expect(allText(renderer)).not.toContain("待撥款");
-      expect(allText(renderer)).not.toContain("order-detail");
+      expect(allText(renderer)).not.toContain("#detail");
       if (visibility === "expanded") {
-        expect(allText(renderer)).toContain("order-refreshed");
+        expect(allText(renderer)).toContain(`${copy.order} #reshed`);
         expect(allText(renderer)).toContain("250.00");
       } else {
-        expect(allText(renderer)).not.toContain("order-refreshed");
+        expect(allText(renderer)).not.toContain("#reshed");
         expect(button(renderer, copy.view).props.disabled).toBe(false);
       }
       expect(boundary.get).toHaveBeenCalledTimes(1);
@@ -547,7 +555,7 @@ describe("Driver monthly statement detail and download", () => {
     expect(boundary.get).toHaveBeenCalledTimes(2);
     expect(boundary.openURL).toHaveBeenCalledWith(refreshed.artifactUrl);
     expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
-    expect(allText(renderer)).toContain("order-refreshed");
+    expect(allText(renderer)).toContain(`${copy.order} #reshed`);
   });
 
   it.each(["detail", "download"] as const)(
@@ -642,11 +650,19 @@ describe("Driver monthly statement detail and download", () => {
     expect(allText(renderer)).not.toContain("Monthly statements unavailable");
   });
 
-  it("retains the honest empty monthly state after a successful zero-row read", async () => {
+  it("shows one empty message instead of zero totals and an empty statement card after a successful zero-row read", async () => {
     boundary.getList.mockResolvedValue([]);
     const renderer = await mount(React.createElement(EarningsScreen));
-    expect(allText(renderer)).toContain("尚無月結報表");
-    expect(allText(renderer)).not.toContain(copy.errorTitle);
+    const rendered = allText(renderer);
+    expect(rendered).toContain(driverStrings.earnings.emptyPeriod);
+    expect(rendered.split(driverStrings.earnings.emptyPeriod)).toHaveLength(2);
+    // No wall of zero amounts, no second empty card for statements.
+    expect(rendered).not.toContain("淨收入");
+    expect(rendered).not.toContain(driverStrings.earnings.metrics.gross);
+    expect(rendered).not.toContain(
+      driverStrings.earnings.sections.monthlyStatements,
+    );
+    expect(rendered).not.toContain(copy.errorTitle);
     expect(boundary.get).not.toHaveBeenCalled();
   });
 });

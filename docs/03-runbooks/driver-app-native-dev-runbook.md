@@ -311,6 +311,49 @@ For current dev UAT, the `api_url` is
 replace it deliberately with the approved production direct API origin; never
 use an IAP-protected control-plane URL.
 
+The same workflow builds Android: set `platform` to `android` (no
+`development-simulator`, no `submit`). Leave `api_url` empty to use the live
+environment variable for the profile; the URLs on this page are historical.
+It needs the `GOOGLE_MAPS_ANDROID_KEY` and `GOOGLE_MAPS_IOS_KEY` Actions
+secrets, and it bundles the app on the runner before using EAS capacity.
+
+The repository's logs are public and an internal build can be downloaded by
+anyone who knows its page, so a build prints only its status, version, commit,
+size and hash. Open the Expo dashboard for the build page. Keep "Unauthenticated
+access to internal builds" off in the EAS project settings. Until it is off, do
+not look a new build up with `lookup-existing`: the build id is a workflow input
+and the id is enough to reach the page. A cancelled or timed-out run does not
+stop the build on EAS, so check the dashboard before starting another.
+
+#### Apple signing for internal iOS builds
+
+Xcode refuses the build when the internal (ad hoc) profile lacks an entitlement
+of `DRTSDriverApp.entitlements`. It needs the Actions secrets `ASC_API_KEY_P8`
+(or `ASC_API_KEY_P8_BASE64`), `ASC_KEY_ID` and `ASC_ISSUER_ID`, and the variable
+`APPLE_TEAM_ID`. The two ids are secrets only so that the public log masks them.
+
+- `mode=apple-signing-check` reads the identifier's capabilities, the profile
+  states and the number of devices, and changes nothing.
+- `refresh_apple_signing=true` (iOS `development` or `preview` builds only) turns
+  Associated Domains on when it is off and lets EAS regenerate the internal
+  profile. Leave it `false` for ordinary builds.
+
+Know this before a refresh:
+
+- Turning a capability on invalidates every existing profile of this identifier,
+  including a store one, which this workflow does not regenerate. Installed apps
+  keep working.
+- The new profile holds the iPhones and iPads registered in EAS, not the ones
+  that only the old profile held. A device Apple does not know yet is registered
+  there and counts against the yearly limit. The run stops before any change
+  when EAS has none: register one with `eas device:create`.
+- EAS drops its record of a profile Expo did not create. At Apple that profile
+  stays, invalid.
+- A failure after the capability is on is safe to rerun with the flag.
+
+For another entitlement, turn its capability on in the Apple developer account,
+then run with `refresh_apple_signing=true`.
+
 The workflow verifies `/health` before consuming EAS capacity, injects the
 selected API origin and EAS project ID into an ephemeral checkout, validates
 the resolved EAS config, and then queues the paid build. With `submit=true`,

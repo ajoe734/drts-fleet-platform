@@ -392,7 +392,12 @@ async function press(r) {
     if (!scenarioArg || scenarioArg === "delayed-ack") {
       alerts.length = 0;
       settingsWriteMode = "manual";
-      await enter(field(r, "zh-TW"), "zh-TW");
+      // The app is Traditional Chinese only; the free-text locale field is gone.
+      assert.equal(
+        field(r, "zh-TW"),
+        undefined,
+        "settings.tsx must not offer a free-text interface-language field",
+      );
       await enter(field(r, "例如：10"), "18");
       // First Switch is "通知" (notificationsEnabled), second is "自動接單（全平台）" (autoAcceptEnabled)
       await toggleSwitch(switches(r)[0], false);
@@ -442,7 +447,8 @@ async function press(r) {
       );
       assert.equal(
         settingsService.getSettings("fixture-driver").language,
-        "zh-TW",
+        "en",
+        "Saving other preferences must leave the stored language untouched",
       );
       assert.equal(
         settingsService.getSettings("fixture-driver").notificationsEnabled,
@@ -552,9 +558,9 @@ async function press(r) {
         "Remounted SettingsScreen must hydrate committed maxAcceptRadius=25 from reconstructed service, not rejected 30",
       );
       assert.equal(
-        field(r, "zh-TW").props.value,
-        "zh-TW",
-        "Remounted SettingsScreen must preserve committed language=zh-TW",
+        settingsService.getSettings("fixture-driver").language,
+        "en",
+        "Reconstructed service must keep the stored language the screen no longer edits",
       );
       assert.equal(
         switches(r)[0].props.value,

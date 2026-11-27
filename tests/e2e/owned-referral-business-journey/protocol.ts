@@ -26,6 +26,12 @@ const originRole = (role: Role) =>
     ? "api"
     : role;
 
+/**
+ * The Ops shell holds this read-only event stream open on every page, so an
+ * intercepted fetch of it never completes. A 204 makes EventSource stop.
+ */
+export const OPS_EVENT_STREAM_PATH = "/control-plane-proxy/ops/dispatch-events";
+
 export class JourneyFailure extends Error {
   constructor(
     public readonly stage: string,

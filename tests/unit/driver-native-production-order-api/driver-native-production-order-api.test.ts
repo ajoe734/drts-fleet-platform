@@ -102,10 +102,40 @@ describe("DRIVER-NATIVE-PRODUCTION-ORDER-API-20261123", () => {
       path.join(DRIVER_APP_DIR, "lib", "api-client.ts"),
       "utf8",
     );
+    const driverClientOutput = ts.transpileModule(driverClientSource, {
+      compilerOptions,
+    }).outputText;
     fs.writeFileSync(
       path.join(sharedFixtureDir, "driver-client.cjs"),
-      ts.transpileModule(driverClientSource, { compilerOptions }).outputText,
+      driverClientOutput,
     );
+
+    // api-client's own relative imports (./driver-sos-outbox, which imports
+    // ./strings, …) are transpiled next to it by following the require graph,
+    // so adding a sibling import does not break this fixture. Type-only
+    // imports are erased by transpileModule and need nothing here.
+    const pendingOutputs = [driverClientOutput];
+    const writtenSiblings = new Set<string>();
+    while (pendingOutputs.length > 0) {
+      const output = pendingOutputs.pop()!;
+      for (const match of output.matchAll(/require\("\.\/([\w-]+)"\)/g)) {
+        const sibling = match[1]!;
+        if (writtenSiblings.has(sibling)) continue;
+        writtenSiblings.add(sibling);
+        const siblingOutput = ts.transpileModule(
+          fs.readFileSync(
+            path.join(DRIVER_APP_DIR, "lib", `${sibling}.ts`),
+            "utf8",
+          ),
+          { compilerOptions },
+        ).outputText;
+        fs.writeFileSync(
+          path.join(sharedFixtureDir, `${sibling}.js`),
+          siblingOutput,
+        );
+        pendingOutputs.push(siblingOutput);
+      }
+    }
 
     const apiClientDir = path.join(sharedFixtureDir, "api-client");
     fs.mkdirSync(apiClientDir, { recursive: true });

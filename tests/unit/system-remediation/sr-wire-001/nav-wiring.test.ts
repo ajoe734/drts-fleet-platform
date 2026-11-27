@@ -293,20 +293,28 @@ describe("SR-WIRE-001: active navigation and actor boundaries", () => {
     );
   });
 
-  it("real settings buttons invoke the leave and academy routes", () => {
+  it("real settings buttons invoke the academy route and never leave", () => {
     const { elements, push } = settingsHarness();
-    for (const [testID, path] of [
-      ["driver-settings-leave", "/leave"],
-      ["driver-settings-academy", "/academy"],
-    ]) {
-      const button = elements.find(
-        (element) => element.props.testID === testID,
-      );
-      expect(button?.type).toBe("Pressable");
-      expect(button?.props.accessibilityRole).toBe("button");
-      (button?.props.onPress as () => void)();
-      expect(push).toHaveBeenLastCalledWith(path);
+    const button = elements.find(
+      (element) => element.props.testID === "driver-settings-academy",
+    );
+    expect(button?.type).toBe("Pressable");
+    expect(button?.props.accessibilityRole).toBe("button");
+    (button?.props.onPress as () => void)();
+    expect(push).toHaveBeenLastCalledWith("/academy");
+
+    // Leave was removed from the driver app; no settings button reaches it.
+    push.mockClear();
+    for (const element of elements) {
+      const onPress = element.props.onPress;
+      if (typeof onPress === "function") (onPress as () => void)();
     }
+    expect(push).not.toHaveBeenCalledWith("/leave");
+    expect(
+      elements.some(
+        (element) => element.props.testID === "driver-settings-leave",
+      ),
+    ).toBe(false);
   });
 
   it("keeps workforce actions behind existing driver provisioning", () => {
@@ -319,7 +327,7 @@ describe("SR-WIRE-001: active navigation and actor boundaries", () => {
     });
     expect(
       elements.some(
-        (element) => element.props.testID === "driver-settings-leave",
+        (element) => element.props.testID === "driver-settings-academy",
       ),
     ).toBe(false);
     expect(push).not.toHaveBeenCalled();
@@ -339,13 +347,15 @@ describe("SR-WIRE-001: active navigation and actor boundaries", () => {
       "onboarding",
       "earnings",
       "shift",
-      "leave",
       "academy",
       "sos",
-      "incident",
-      "safety-operator",
     ]) {
       expect(source).toContain(`name="${name}"`);
+    }
+    // Removed 2026-11-26: drivers no longer file leave in the app, and the
+    // unreachable incident and safety-operator screens were deleted.
+    for (const name of ["leave", "incident", "safety-operator"]) {
+      expect(source).not.toContain(`name="${name}"`);
     }
   });
 });

@@ -2,8 +2,8 @@ import React from "react";
 import { AuthorityBanner, PlatformBadge } from "@/components/ui";
 
 const PLATFORM_LABELS: Record<string, string> = {
-  direct: "自營派單",
-  owned: "自營派單",
+  direct: "車隊派單",
+  owned: "車隊派單",
   uber: "Uber",
   lyft: "Lyft",
   grab: "Grab",
@@ -65,7 +65,7 @@ export function PlatformAuthorityBanner({
   if (isOwnedPlatformCode(code)) {
     return (
       <AuthorityBanner
-        title="自營派單 · DRTS"
+        title="車隊派單"
         authorityLabel="本地可操作"
         description={description}
         tone="owned"

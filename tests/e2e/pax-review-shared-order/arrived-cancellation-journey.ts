@@ -63,7 +63,8 @@ async function readDriverRoute(
       },
     )
     .toBe(true);
-  await expect(driver.getByText("座標缺失", { exact: true })).toHaveCount(0);
+  // Each stop card marks a stop without a coordinate as "缺少座標".
+  await expect(driver.getByText("缺少座標", { exact: true })).toHaveCount(0);
   return refreshes;
 }
 
@@ -209,7 +210,7 @@ export async function arrivedCancellationJourney(
         "arrived_pickup",
       );
       await expect(
-        driver.getByText(orderId, { exact: false }).first(),
+        driver.getByTestId(`driver-trip-order-${orderId}`),
       ).toBeVisible();
       await readDriverRoute(driver, view.order);
       await expect(
@@ -293,15 +294,17 @@ export async function arrivedCancellationJourney(
         );
         await driver.reload();
         await expect(
-          driver.getByText(orderId, { exact: false }).first(),
+          driver.getByTestId(`driver-trip-order-${orderId}`),
         ).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
-        const cancelledAction = driver.getByRole("button", {
-          name: "任務已取消",
-          exact: true,
-        });
-        await expect(cancelledAction).toBeVisible();
-        await expect(cancelledAction).toBeDisabled();
+        // The trip reads as cancelled (page title and status card) and offers
+        // no footer or lifecycle action, including the old dead button.
+        const cancelledStatus = driver.getByText("任務已取消", { exact: true });
+        await expect(cancelledStatus.first()).toBeVisible();
+        expect(await cancelledStatus.count()).toBeLessThanOrEqual(2);
+        await expect(
+          driver.getByRole("button", { name: "任務已取消", exact: true }),
+        ).toHaveCount(0);
         const driverRouteRefreshes = await readDriverRoute(
           driver,
           after.order,
@@ -313,12 +316,10 @@ export async function arrivedCancellationJourney(
           "抵達上車點",
           "開始行程",
           "完成行程",
-        ]) {
-          for (const action of await driver
-            .getByRole("button", { name, exact: true })
-            .all())
-            await expect(action).toBeDisabled();
-        }
+        ])
+          await expect(
+            driver.getByRole("button", { name, exact: true }),
+          ).toHaveCount(0);
         const rows = await recordOrderEvidence(
           orderId,
           "H-arrived-then-cancelled",

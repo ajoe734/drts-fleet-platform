@@ -123,11 +123,8 @@ describe("RootLayout navigator structure", () => {
       "driver-activate",
       "earnings",
       "shift",
-      "leave",
       "academy",
       "sos",
-      "incident",
-      "safety-operator",
     ]);
 
     // Check main 5 tabs have valid titles and no href: null
@@ -150,11 +147,8 @@ describe("RootLayout navigator structure", () => {
       "driver-activate",
       "earnings",
       "shift",
-      "leave",
       "academy",
       "sos",
-      "incident",
-      "safety-operator",
     ];
     for (const name of subScreenNames) {
       const reg = screenRegistrations.find((s) => s.name === name);
@@ -173,17 +167,15 @@ describe("RootLayout navigator structure", () => {
 
   it("renders the bottom tab bar when provided sub-screen navigation state", () => {
     expect(passedTabBar).toBeDefined();
-    const incidentIndex = screenRegistrations.findIndex(
-      (s) => s.name === "incident",
-    );
-    expect(incidentIndex).toBeGreaterThanOrEqual(0);
+    const sosIndex = screenRegistrations.findIndex((s) => s.name === "sos");
+    expect(sosIndex).toBeGreaterThanOrEqual(0);
 
     let tabRenderer: any;
     act(() => {
       tabRenderer = create(
         passedTabBar({
           state: {
-            index: incidentIndex,
+            index: sosIndex,
             routes: screenRegistrations.map((s) => ({
               key: `key-${s.name}`,
               name: s.name,
@@ -196,7 +188,7 @@ describe("RootLayout navigator structure", () => {
     const tabs = tabRenderer.root.findAllByProps({ accessibilityRole: "tab" });
     expect(tabs.length).toBe(5);
 
-    // The incident sub-screen belongs to the 行程 tab, regardless of route order.
+    // The SOS sub-screen belongs to the 行程 tab, regardless of route order.
     const activeTab = tabs.find(
       (t: any) => t.props.accessibilityState?.selected === true,
     );

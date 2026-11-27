@@ -924,7 +924,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       expect(errorText).toContain(
         "Platform earnings canonical read is currently unavailable.",
       );
-      expect(errorText).not.toContain("這段期間還沒有平台收益");
+      // A failed read must not be shown as the "no earnings" empty state.
+      expect(errorText).not.toContain("這段期間還沒有收入");
 
       // Recover DB and press retry ("重新整理")
       shouldReject = false;
@@ -1503,9 +1504,8 @@ describe("R3 USER full Asia/Taipei calendar week", () => {
     };
     await pressRefresh();
     expect(collectRenderedText(renderer)).toContain("收益資料同步失敗");
-    expect(collectRenderedText(renderer)).not.toContain(
-      "這段期間還沒有平台收益",
-    );
+    // A failed refresh must not be shown as the "no earnings" empty state.
+    expect(collectRenderedText(renderer)).not.toContain("這段期間還沒有收入");
     query.mockImplementation(successfulQuery);
     await pressRefresh();
     expect(collectRenderedText(renderer)).not.toContain("收益資料同步失敗");
