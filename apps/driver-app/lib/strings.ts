@@ -247,7 +247,6 @@ export const driverStrings = {
     subtitle: "檢查可接單平台狀態",
     managedByDrts: "車隊派單",
     external: "外部",
-    owned: "車隊派單",
     // Nothing in the product binds an external platform account yet.
     noInAppBinding:
       "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",

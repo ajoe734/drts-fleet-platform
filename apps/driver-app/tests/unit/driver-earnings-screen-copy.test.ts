@@ -194,9 +194,20 @@ describe("Driver earnings screen copy", () => {
     );
     expect(rendered).toContain(driverStrings.earnings.sections.referenceOnly);
     // Readable names, never codes or English descriptions.
-    expect(rendered).toContain("車隊派單");
     expect(rendered).toContain("Uber");
     expect(rendered).toContain("測試平台");
+    // The fleet's own dispatch is 車隊派單, named once on its row (no second
+    // pill repeating it), and the old name 自營 is gone.
+    expect(rendered).not.toContain("自營");
+    const ownedRows = renderer.root.findAll(
+      (node) =>
+        typeof node.type === "function" &&
+        (node.type as { name?: string }).name === "BreakdownRow" &&
+        String((node.props.item as PlatformEarningsItem).platformCode) ===
+          "drts",
+    );
+    expect(ownedRows).toHaveLength(1);
+    expect(text(ownedRows[0]!).split("車隊派單")).toHaveLength(2);
   });
 
   it("shows platforms the app does not know as other platforms, never as the fleet's own settlement", async () => {

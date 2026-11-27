@@ -80,11 +80,16 @@ const REVIEW_LEGACY_REGISTRATION =
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "";
 // Shown while signed out when the session ended before an SOS reached the
-// server. The SOS screen sends it again once the same driver signs back in.
+// server. Calling comes first. After signing back in the SOS screen can send
+// it again, but not always by itself (an SOS older than 30 minutes asks first,
+// a refused one needs 重新送出), so this promises no automatic sending.
 const SESSION_LOST_SOS_NOTICE =
-  "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面就會再送出。";
+  "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面可以再送出。";
 
-/** Read only; any failure counts as "no undelivered SOS". */
+/**
+ * Read only. The check itself errs toward warning when the stored SOS cannot
+ * be read (see lib/api-client); this only guards against it failing outright.
+ */
 async function checkSessionLostSos(): Promise<boolean> {
   try {
     return await hasUndeliveredSosAfterSessionLost();

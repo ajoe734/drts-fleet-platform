@@ -24,13 +24,14 @@ import {
   formatDriverError,
   getDriverClient,
   getDriverId,
-  hasUndeliveredSosOfSignedInDriver,
+  getSignedInDriverSosState,
   initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
   registerProtectedCacheClearHandler,
   revokeDriverDeviceBinding,
+  type SignedInDriverSosState,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
@@ -63,13 +64,43 @@ const LOGOUT_CONFIRM_MESSAGE = "登出後需要重新完成裝置配置，確定
 // lib/api-client), so the driver is told before confirming.
 const LOGOUT_UNDELIVERED_SOS_WARNING =
   "還有一筆 SOS 沒有送到派車台。登出後這筆 SOS 會被刪除。請先直接打電話聯絡派車台；有立即危險請撥 110 或 119。";
+// When the phone cannot tell in time, warn anyway rather than stay silent.
+const LOGOUT_UNKNOWN_SOS_WARNING =
+  "無法確認是否還有 SOS 沒有送到派車台。如果有，登出後會被刪除。請先直接打電話聯絡派車台；有立即危險請撥 110 或 119。";
+// The logout prompt waits for the stored SOS at most this long.
+const LOGOUT_SOS_CHECK_LIMIT_MS = 1_500;
 
-/** Read only; any failure counts as "no undelivered SOS". */
-async function checkUndeliveredSos(): Promise<boolean> {
+/** Read only and never throws; a slow or failed read is `unknown`. */
+async function checkSosBeforeLogout(): Promise<SignedInDriverSosState> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await hasUndeliveredSosOfSignedInDriver();
+    return await Promise.race([
+      getSignedInDriverSosState(),
+      new Promise<SignedInDriverSosState>((resolve) => {
+        timer = setTimeout(() => resolve("unknown"), LOGOUT_SOS_CHECK_LIMIT_MS);
+      }),
+    ]);
   } catch {
-    return false;
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function logoutPrompt(sos: SignedInDriverSosState) {
+  switch (sos) {
+    case "undelivered":
+      return {
+        title: "SOS 尚未送達",
+        message: `${LOGOUT_UNDELIVERED_SOS_WARNING}\n\n${LOGOUT_CONFIRM_MESSAGE}`,
+      };
+    case "unknown":
+      return {
+        title: "登出裝置",
+        message: `${LOGOUT_UNKNOWN_SOS_WARNING}\n\n${LOGOUT_CONFIRM_MESSAGE}`,
+      };
+    default:
+      return { title: "登出裝置", message: LOGOUT_CONFIRM_MESSAGE };
   }
 }
 
@@ -472,24 +503,18 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = async () => {
-    const undeliveredSos = await checkUndeliveredSos();
-    Alert.alert(
-      undeliveredSos ? "SOS 尚未送達" : "登出裝置",
-      undeliveredSos
-        ? `${LOGOUT_UNDELIVERED_SOS_WARNING}\n\n${LOGOUT_CONFIRM_MESSAGE}`
-        : LOGOUT_CONFIRM_MESSAGE,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "登出",
-          style: "destructive",
-          onPress: async () => {
-            await revokeDriverDeviceBinding();
-            router.replace("/onboarding");
-          },
+    const prompt = logoutPrompt(await checkSosBeforeLogout());
+    Alert.alert(prompt.title, prompt.message, [
+      { text: "取消", style: "cancel" },
+      {
+        text: "登出",
+        style: "destructive",
+        onPress: async () => {
+          await revokeDriverDeviceBinding();
+          router.replace("/onboarding");
         },
-      ],
-    );
+      },
+    ]);
   };
 
   if (identityReady && !isProvisioned) {

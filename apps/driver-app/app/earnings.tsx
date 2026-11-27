@@ -168,15 +168,11 @@ function BreakdownRow({
   const shadowOnly = isReferenceOnlyPlatformCode(item.platformCode);
   const forwarded = !owned;
   const empty = isEmptyBreakdown(item);
-  const typeLabel = owned
-    ? driverStrings.platformPresence.owned
-    : driverStrings.platformPresence.external;
   const settlementLabel = owned
     ? driverStrings.earnings.sections.ownedSettlement
     : shadowOnly
       ? driverStrings.earnings.sections.referenceOnly
       : driverStrings.earnings.sections.platformSettlement;
-  const typeTone = owned ? ("accent" as const) : ("warn" as const);
   const markColor = forwarded ? THEME.warn : THEME.accentHi;
   const markBg = forwarded ? THEME.warnBg : THEME.accentBg;
 
@@ -213,9 +209,12 @@ function BreakdownRow({
             >
               {displayName}
             </Text>
-            <Pill theme={THEME} tone={typeTone}>
-              {typeLabel}
-            </Pill>
+            {/* The fleet's own row is already named 車隊派單. */}
+            {forwarded ? (
+              <Pill theme={THEME} tone="warn">
+                {driverStrings.platformPresence.external}
+              </Pill>
+            ) : null}
           </View>
           <Text
             style={[

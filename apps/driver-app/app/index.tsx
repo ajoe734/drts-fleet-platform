@@ -1,7 +1,14 @@
 import { PlatformNoticeBanner } from "../components/platform-notice-banner";
 import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Redirect, useRouter } from "expo-router";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
@@ -784,14 +791,18 @@ async function checkUndeliveredSos(): Promise<boolean> {
   }
 }
 
-/** This driver's SOS is stored on the phone but has not reached the fleet. */
+/**
+ * This driver's SOS is stored on the phone but has not reached the fleet.
+ * Calling comes first; the SOS screen does not always resend by itself (an
+ * SOS older than 30 minutes asks first), so this promises no automatic send.
+ */
 function UndeliveredSosCard({ onOpen }: { onOpen: () => void }) {
   return (
     <Banner
       theme={THEME}
       tone="danger"
       title="SOS 尚未送達"
-      body="請直接打電話聯絡派車台；有立即危險請撥 110 或 119。打開 SOS 頁面會再送出。"
+      body="請直接打電話聯絡派車台；有立即危險請撥 110 或 119。打開 SOS 頁面可以再送出。"
       actions={
         <View style={styles.bannerActionRow}>
           <Btn theme={THEME} variant="primary" size="sm" onPress={onOpen}>
@@ -1486,6 +1497,14 @@ export default function WorkspaceIndex() {
   const [dismissedSosNotificationIds, setDismissedSosNotificationIds] =
     useState<string[]>([]);
   const [undeliveredSos, setUndeliveredSos] = useState(false);
+  // Bumped whenever home comes back into view (for example from the SOS
+  // tab), so the SOS card clears as soon as the SOS has been delivered.
+  const [focusSeed, setFocusSeed] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setFocusSeed((current) => current + 1);
+    }, []),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1586,8 +1605,8 @@ export default function WorkspaceIndex() {
     };
   }, [provisioned, ready, refreshSeed]);
 
-  // The SOS stored on this phone, read again with every refresh. Read only:
-  // the SOS screen alone sends it.
+  // The SOS stored on this phone, read again with every refresh and whenever
+  // home comes back into view. Read only: the SOS screen alone sends it.
   useEffect(() => {
     if (!ready || !provisioned) {
       setUndeliveredSos(false);
@@ -1604,7 +1623,7 @@ export default function WorkspaceIndex() {
     return () => {
       cancelled = true;
     };
-  }, [provisioned, ready, refreshSeed]);
+  }, [focusSeed, provisioned, ready, refreshSeed]);
 
   const navigate = (route: WorkspaceRoute) => () => router.push(route);
   const navigateTo = (route: WorkspaceRoute) => router.push(route);

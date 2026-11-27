@@ -49,6 +49,8 @@ vi.mock("react-native", () => ({
 
 vi.mock("expo-router", () => ({
   Redirect: (props: { href: string }) => React.createElement("Redirect", props),
+  useFocusEffect: (callback: () => void) =>
+    React.useEffect(callback, [callback]),
   useRouter: () => ({ push: state.push, replace: vi.fn() }),
 }));
 

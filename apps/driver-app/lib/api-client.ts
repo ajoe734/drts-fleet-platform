@@ -22,6 +22,7 @@ import type {
 
 import {
   hasUndeliveredSosKeptThroughSignOut,
+  markStoredDriverSosSessionLost,
   noteDriverSosSessionCleared,
   noteDriverSosSignedIn,
 } from "./driver-sos-outbox";
@@ -476,27 +477,36 @@ function signedInDriverId(): string | null {
 }
 
 /**
- * For screens other than SOS while signed in (home, settings): true when this
- * device holds an SOS raised by the signed-in driver that has not reached the
- * server. Never another driver's SOS. One saved without an owner (an older
- * app version) counts, because the SOS screen sends it under this sign-in.
- * Read only: never changes the stored SOS, and a storage error counts as
- * "no SOS" instead of throwing.
+ * `undelivered`: this device holds an SOS raised by the signed-in driver that
+ * has not reached the server. `unknown`: the stored SOS could not be read.
  */
-export async function hasUndeliveredSosOfSignedInDriver(): Promise<boolean> {
+export type SignedInDriverSosState = "undelivered" | "none" | "unknown";
+
+/**
+ * For screens other than SOS while signed in (home, settings). Never another
+ * driver's SOS. One saved without an owner (an older app version) counts,
+ * because the SOS screen sends it under this sign-in. Read only and never
+ * throws: a storage error is `unknown`.
+ */
+export async function getSignedInDriverSosState(): Promise<SignedInDriverSosState> {
   try {
     const driverId = isDriverIdentityProvisioned() ? signedInDriverId() : null;
     if (!driverId) {
-      return false;
+      return "none";
     }
     const stored = await readStoredSosCaseOwnership();
-    return (
-      isUndeliveredSosCase(stored) &&
+    return isUndeliveredSosCase(stored) &&
       (stored.ownerDriverId === null || stored.ownerDriverId === driverId)
-    );
+      ? "undelivered"
+      : "none";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+/** Home shows the SOS card only for a known unsent SOS, never for `unknown`. */
+export async function hasUndeliveredSosOfSignedInDriver(): Promise<boolean> {
+  return (await getSignedInDriverSosState()) === "undelivered";
 }
 
 function sosKeptThroughSignOutNoted(): boolean {
@@ -512,8 +522,9 @@ function sosKeptThroughSignOutNoted(): boolean {
  * reached the server was kept through an automatic sign-out (the session
  * expired or was revoked). No one is signed in, so there is no driver to
  * compare with; the next sign-in discards it if another driver signs in.
- * Read only and never throws; if the stored SOS cannot be read, this relies
- * on what the sign-out itself noted.
+ * Read only and never throws. If the stored SOS cannot be read, this errs
+ * toward warning: it relies on what the sign-out noted, and the sign-out also
+ * notes a kept SOS when it could not read the stored one (it keeps it then).
  */
 export async function hasUndeliveredSosAfterSessionLost(): Promise<boolean> {
   try {
@@ -569,9 +580,11 @@ async function clearProtectedCachedData(
     keptUndeliveredSos: keepSosCase,
   });
   await Promise.allSettled([
-    ...(keepSosCase
-      ? []
-      : [driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY)]),
+    // A kept SOS is flagged on the device, so the sign-in screen still warns
+    // after the app restarts (the in-memory note does not survive that).
+    keepSosCase
+      ? markStoredDriverSosSessionLost()
+      : driverStorage.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY),
     driverStorage.deleteItemAsync("drts.safetyOperator.queue"),
     driverStorage.deleteItemAsync("drts.driver.trackingSessionMarker"),
   ]);

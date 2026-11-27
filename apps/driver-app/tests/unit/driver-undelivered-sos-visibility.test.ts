@@ -13,6 +13,9 @@ vi.hoisted(() => {
  * the sign-in screen did not say it was still unsent, and home showed
  * nothing. These tests use the real stored-SOS checks in lib/api-client
  * (with an in-memory secure store) and mount the real screens.
+ *
+ * Storage errors never throw. Before logging out and on the sign-in screen
+ * they err toward warning; home, which states a fact, then shows nothing.
  */
 
 const SOS_KEY = "drts.driver.sos.activeCase";
@@ -20,8 +23,11 @@ const OWNER = "drv-owner-001";
 
 const h = vi.hoisted(() => ({
   store: new Map<string, string>(),
-  // Only reads of the stored SOS fail; the session still loads.
+  // Only reads of the stored SOS fail or hang; the session still loads.
   failSosReads: false,
+  hangSosReads: false,
+  // The latest useFocusEffect callback, to simulate home coming back into view.
+  focus: null as null | (() => void),
   push: vi.fn(),
   replace: vi.fn(),
   alert: vi.fn(),
@@ -29,8 +35,9 @@ const h = vi.hoisted(() => ({
 
 vi.mock("expo-secure-store", () => ({
   getItemAsync: vi.fn(async (key: string) => {
-    if (h.failSosReads && key === "drts.driver.sos.activeCase") {
-      throw new Error("keychain unavailable");
+    if (key === "drts.driver.sos.activeCase") {
+      if (h.failSosReads) throw new Error("keychain unavailable");
+      if (h.hangSosReads) return new Promise<string | null>(() => {});
     }
     return h.store.get(key) ?? null;
   }),
@@ -76,6 +83,10 @@ vi.mock("react-native", () => ({
 
 vi.mock("expo-router", () => ({
   Redirect: (props: { href: string }) => React.createElement("Redirect", props),
+  useFocusEffect: (callback: () => void) => {
+    h.focus = callback;
+    React.useEffect(callback, [callback]);
+  },
   useRouter: () => ({ push: h.push, replace: h.replace }),
 }));
 
@@ -135,14 +146,20 @@ vi.mock("@/lib/api-client", async (importOriginal) => ({
   getDriverClient: () => fakeClient,
 }));
 
+import * as SecureStore from "expo-secure-store";
+
 import {
   clearDriverProvisioning,
+  getSignedInDriverSosState,
   hasUndeliveredSosAfterSessionLost,
   hasUndeliveredSosOfSignedInDriver,
   recoverDriverSessionFromApiError,
   registerDriverDevice,
 } from "../../lib/api-client";
-import { hasUndeliveredSosKeptThroughSignOut } from "../../lib/driver-sos-outbox";
+import {
+  hasUndeliveredSosKeptThroughSignOut,
+  markStoredDriverSosSessionLost,
+} from "../../lib/driver-sos-outbox";
 import WorkspaceIndex from "../../app/index";
 import OnboardingScreen from "../../app/onboarding";
 import SettingsScreen from "../../app/settings";
@@ -173,6 +190,19 @@ const DELIVERED = {
 const DISMISSED = {
   falseAlarm: { dismissed: true, dismissedAt: null, note: null },
 };
+// Saved by an older app version: no owner. The SOS screen sends it under the
+// current sign-in, so it counts as this driver's.
+const OWNERLESS = { ownerDriverId: undefined };
+// Older than 30 minutes: the SOS screen asks 「仍要送出嗎？」 before sending.
+const STALE = {
+  originalTriggeredAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+};
+// Refused by the server: no automatic resend, only 重新送出.
+const REFUSED = { autoResendBlocked: true };
+
+function storedSos() {
+  return JSON.parse(h.store.get(SOS_KEY)!) as Record<string, unknown>;
+}
 
 async function signIn(driverId: string) {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -233,11 +263,14 @@ async function mount(element: React.ReactElement) {
 beforeEach(async () => {
   h.store.clear();
   h.failSosReads = false;
+  h.hangSosReads = false;
+  h.focus = null;
   vi.clearAllMocks();
   await clearDriverProvisioning();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => renderer?.unmount());
   renderer = null;
 });
@@ -250,6 +283,19 @@ describe("stored SOS checks (read only)", () => {
 
     expect(await hasUndeliveredSosOfSignedInDriver()).toBe(true);
     expect(h.store.get(SOS_KEY)).toBe(before);
+  });
+
+  it.each([
+    ["saved without an owner", OWNERLESS],
+    ["saved with a null owner", { ownerDriverId: null }],
+    ["older than 30 minutes", STALE],
+    ["refused by the server", REFUSED],
+  ])("reports an unsent SOS %s", async (_label, overrides) => {
+    await signIn(OWNER);
+    storeSos(overrides);
+
+    expect(await getSignedInDriverSosState()).toBe("undelivered");
+    expect(await hasUndeliveredSosOfSignedInDriver()).toBe(true);
   });
 
   it.each([
@@ -274,6 +320,7 @@ describe("stored SOS checks (read only)", () => {
 
     storeSos();
     h.failSosReads = true;
+    await expect(getSignedInDriverSosState()).resolves.toBe("unknown");
     await expect(hasUndeliveredSosOfSignedInDriver()).resolves.toBe(false);
     h.failSosReads = false;
 
@@ -287,6 +334,57 @@ describe("stored SOS checks (read only)", () => {
 
     expect(hasUndeliveredSosKeptThroughSignOut()).toBe(true);
     expect(await hasUndeliveredSosAfterSessionLost()).toBe(true);
+  });
+
+  it("flags the kept SOS on the device, so the warning survives an app restart", async () => {
+    // The session ends while home is open: the SOS screen is not there to
+    // flag the case itself.
+    await loseSessionWithSos();
+    expect(storedSos().sessionLostAt).toEqual(expect.any(String));
+    expect(storedSos().clientEventId).toBe("client-event-1");
+
+    // A restart: fresh modules, nothing in memory, the same device storage.
+    vi.resetModules();
+    const restarted = await import("../../lib/api-client");
+    const restartedOutbox = await import("../../lib/driver-sos-outbox");
+    expect(restartedOutbox.hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+    expect(restarted.isDriverIdentityProvisioned()).toBe(false);
+    expect(await restarted.hasUndeliveredSosAfterSessionLost()).toBe(true);
+  });
+
+  it("flags only an unsent, unflagged SOS and never throws", async () => {
+    storeSos({ sessionLostAt: "2026-11-26T01:00:00.000Z" });
+    await markStoredDriverSosSessionLost("2026-11-26T02:00:00.000Z");
+    expect(storedSos().sessionLostAt).toBe("2026-11-26T01:00:00.000Z");
+
+    for (const overrides of [DELIVERED, DISMISSED]) {
+      storeSos(overrides);
+      const before = h.store.get(SOS_KEY);
+      await markStoredDriverSosSessionLost();
+      expect(h.store.get(SOS_KEY)).toBe(before);
+    }
+
+    h.store.delete(SOS_KEY);
+    await markStoredDriverSosSessionLost();
+    expect(h.store.has(SOS_KEY)).toBe(false);
+
+    storeSos();
+    h.failSosReads = true;
+    await expect(markStoredDriverSosSessionLost()).resolves.toBeUndefined();
+  });
+
+  it("does not overwrite an SOS that was delivered while it was being flagged", async () => {
+    storeSos();
+    vi.mocked(SecureStore.getItemAsync).mockImplementationOnce(async () => {
+      const raw = h.store.get(SOS_KEY) ?? null;
+      storeSos(DELIVERED); // the send lands between the two reads
+      return raw;
+    });
+
+    await markStoredDriverSosSessionLost();
+
+    expect(storedSos().receipt).toEqual(DELIVERED.receipt);
+    expect(storedSos().sessionLostAt).toBeUndefined();
   });
 
   it("also trusts the flag the SOS screen stored, after the app restarted", async () => {
@@ -321,20 +419,37 @@ describe("stored SOS checks (read only)", () => {
     storeSos({ sessionLostAt: new Date().toISOString() });
     h.failSosReads = true;
 
+    // Nothing noted by a sign-out in this run: nothing to warn about.
     await expect(hasUndeliveredSosAfterSessionLost()).resolves.toBe(false);
+  });
+
+  it("errs toward warning when the sign-out could not read the stored SOS", async () => {
+    await signIn(OWNER);
+    storeSos();
+    h.failSosReads = true;
+
+    expect(await recoverDriverSessionFromApiError(AUTH_ERROR)).toBe(true);
+
+    // Kept, because it could not tell, and noted as kept.
+    expect(h.store.has(SOS_KEY)).toBe(true);
+    expect(hasUndeliveredSosKeptThroughSignOut()).toBe(true);
+    await expect(hasUndeliveredSosAfterSessionLost()).resolves.toBe(true);
   });
 });
 
 describe("settings: 登出並撤銷裝置", () => {
-  async function pressLogout() {
-    await mount(React.createElement(SettingsScreen));
-    const button = renderer.root.find(
+  function logoutButton() {
+    return renderer.root.find(
       (node: any) =>
         node.props.accessibilityLabel === "登出並撤銷裝置" &&
         typeof node.props.onPress === "function",
     );
+  }
+
+  async function pressLogout() {
+    await mount(React.createElement(SettingsScreen));
     await act(async () => {
-      await button.props.onPress();
+      await logoutButton().props.onPress();
     });
     expect(h.alert).toHaveBeenCalledTimes(1);
     const [title, message, buttons] = h.alert.mock.calls[0];
@@ -360,6 +475,16 @@ describe("settings: 登出並撤銷裝置", () => {
     expect(h.store.has(SOS_KEY)).toBe(false);
   });
 
+  it("also warns for an SOS saved without an owner", async () => {
+    await signIn(OWNER);
+    storeSos(OWNERLESS);
+
+    const { title, message } = await pressLogout();
+
+    expect(title).toBe("SOS 尚未送達");
+    expect(message).toContain("還有一筆 SOS 沒有送到派車台");
+  });
+
   it.each([
     ["delivered", DELIVERED],
     ["dismissed", DISMISSED],
@@ -374,17 +499,48 @@ describe("settings: 登出並撤銷裝置", () => {
     expect(message).not.toContain("SOS");
   });
 
-  it("keeps the plain confirmation when there is no SOS or it cannot be read", async () => {
+  it("keeps the plain confirmation when there is no SOS", async () => {
     await signIn(OWNER);
-    let result = await pressLogout();
-    expect(result.message).not.toContain("SOS");
 
-    act(() => renderer.unmount());
-    h.alert.mockClear();
+    const { title, message } = await pressLogout();
+
+    expect(title).toBe("登出裝置");
+    expect(message).not.toContain("SOS");
+  });
+
+  it("warns conservatively when the stored SOS cannot be read", async () => {
+    await signIn(OWNER);
     storeSos();
     h.failSosReads = true;
-    result = await pressLogout();
-    expect(result.title).toBe("登出裝置");
+
+    const { title, message } = await pressLogout();
+
+    expect(title).toBe("登出裝置");
+    expect(message).toContain("無法確認是否還有 SOS 沒有送到派車台");
+    expect(message).toContain("有立即危險請撥 110 或 119");
+  });
+
+  it("waits at most 1.5 s for the stored SOS, then warns conservatively", async () => {
+    await signIn(OWNER);
+    storeSos();
+    await mount(React.createElement(SettingsScreen));
+    h.hangSosReads = true;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    let pressed!: Promise<void>;
+    await act(async () => {
+      pressed = logoutButton().props.onPress();
+    });
+    expect(h.alert).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+      await pressed;
+    });
+
+    expect(h.alert).toHaveBeenCalledTimes(1);
+    expect(String(h.alert.mock.calls[0][1])).toContain(
+      "無法確認是否還有 SOS 沒有送到派車台",
+    );
   });
 });
 
@@ -395,8 +551,49 @@ describe("sign-in screen", () => {
     await mount(React.createElement(OnboardingScreen));
 
     expect(screenText()).toContain(
-      "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面就會再送出。",
+      "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面可以再送出。",
     );
+    // No promise that it is sent by itself.
+    expect(screenText()).not.toContain("就會再送出");
+  });
+
+  it.each([
+    ["older than 30 minutes", STALE],
+    ["refused by the server", REFUSED],
+  ])(
+    "keeps the notice true for an SOS %s, which is not resent by itself",
+    async (_label, overrides) => {
+      await loseSessionWithSos(overrides);
+
+      await mount(React.createElement(OnboardingScreen));
+
+      const shown = screenText();
+      expect(shown).toContain("SOS 尚未送達。請直接打電話聯絡派車台");
+      expect(shown).toContain("打開 SOS 頁面可以再送出");
+      expect(shown).not.toContain("就會再送出");
+    },
+  );
+
+  it("shows the notice after an app restart from the flag stored at sign-out", async () => {
+    await loseSessionWithSos();
+    // What a restart leaves: the stored case, nothing in memory.
+    const kept = h.store.get(SOS_KEY)!;
+    await clearDriverProvisioning(); // resets the in-memory note …
+    h.store.set(SOS_KEY, kept); // … and restores the device's stored case
+    expect(hasUndeliveredSosKeptThroughSignOut()).toBe(false);
+
+    await mount(React.createElement(OnboardingScreen));
+
+    expect(screenText()).toContain("SOS 尚未送達");
+  });
+
+  it("errs toward the notice when the stored SOS cannot be read after an automatic sign-out", async () => {
+    await loseSessionWithSos();
+    h.failSosReads = true;
+
+    await mount(React.createElement(OnboardingScreen));
+
+    expect(screenText()).toContain("SOS 尚未送達");
   });
 
   it.each([
@@ -446,6 +643,58 @@ describe("home", () => {
       .find((node: any) => node.props.children === "打開 SOS");
     await act(async () => open.props.onPress());
     expect(h.push).toHaveBeenCalledWith("/sos");
+    // Calling comes first; no promise that the SOS is sent by itself.
+    expect(collectText(card.children)).toContain(
+      "請直接打電話聯絡派車台；有立即危險請撥 110 或 119。打開 SOS 頁面可以再送出。",
+    );
+  });
+
+  it.each([
+    ["saved without an owner", OWNERLESS],
+    ["older than 30 minutes", STALE],
+  ])("shows the SOS card for an unsent SOS %s", async (_label, overrides) => {
+    await signIn(OWNER);
+    storeSos(overrides);
+
+    await mount(React.createElement(WorkspaceIndex));
+
+    expect(sosCard()).toBeTruthy();
+  });
+
+  it("clears the SOS card as soon as home comes back into view after delivery", async () => {
+    await signIn(OWNER);
+    storeSos();
+    await mount(React.createElement(WorkspaceIndex));
+    expect(sosCard()).toBeTruthy();
+
+    storeSos(DELIVERED); // sent from the SOS tab
+    await act(async () => {
+      h.focus?.();
+      for (let i = 0; i < 30; i += 1) await Promise.resolve();
+    });
+
+    expect(sosCard()).toBeUndefined();
+  });
+
+  it("also clears the SOS card on the next 15 s refresh", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    await signIn(OWNER);
+    storeSos();
+    await mount(React.createElement(WorkspaceIndex));
+    expect(sosCard()).toBeTruthy();
+
+    storeSos(DELIVERED);
+    await act(async () => {
+      vi.advanceTimersByTime(14_000);
+      for (let i = 0; i < 30; i += 1) await Promise.resolve();
+    });
+    expect(sosCard()).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+      for (let i = 0; i < 30; i += 1) await Promise.resolve();
+    });
+
+    expect(sosCard()).toBeUndefined();
   });
 
   it.each([

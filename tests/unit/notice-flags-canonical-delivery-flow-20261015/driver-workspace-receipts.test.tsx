@@ -80,7 +80,11 @@ function workspace(h: ReturnType<typeof wireHarness>) {
         ActivityIndicator: () => null,
         StyleSheet: { create: (v: unknown) => v },
       },
-      "expo-router": { useRouter: () => ({ push() {} }), Redirect: () => null },
+      "expo-router": {
+        useRouter: () => ({ push() {} }),
+        useFocusEffect: () => {},
+        Redirect: () => null,
+      },
       "@expo/vector-icons": { Ionicons: () => null },
       "@/components/canvas-primitives": {
         Shell: Container,
