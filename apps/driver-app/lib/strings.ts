@@ -247,7 +247,6 @@ export const driverStrings = {
     subtitle: "檢查可接單平台狀態",
     managedByDrts: "車隊派單",
     external: "外部",
-    owned: "車隊派單",
     // Nothing in the product binds an external platform account yet.
     noInAppBinding:
       "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",
@@ -346,17 +345,10 @@ export const driverStrings = {
       editRoute: "編輯路線",
     },
     platformTaskBadge: {
-      ownedTitle: "自營派單 · DRTS",
+      ownedTitle: "車隊派單",
       ownedAuthority: "本地可操作",
       forwardedTitlePrefix: "平台主導 · ",
       forwardedAuthority: "來源平台規則生效",
-    },
-    earningsByPlatform: {
-      emptyTitle: "這段期間還沒有平台收益",
-      emptyDescription: "切換到其他期間，或稍後再查看最新對帳彙整。",
-      gross: "毛收",
-      serviceFee: "抽成",
-      subsidy: "補助",
     },
   },
 } as const;

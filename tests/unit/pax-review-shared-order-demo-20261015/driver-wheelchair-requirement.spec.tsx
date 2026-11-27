@@ -787,7 +787,7 @@ it.each([
     expect(countStandalone(visible, label)).toBe(2);
     // No action-less footer: neither a repeated status nor filler text.
     expect(visible).not.toContain("目前沒有可執行動作");
-    expect(countStandalone(visible, "自營派單")).toBeGreaterThan(0);
+    expect(countStandalone(visible, "車隊派單")).toBeGreaterThan(0);
     expect(
       trip(mounted).findAll((node) => node.type === "NativeButton"),
     ).toEqual(

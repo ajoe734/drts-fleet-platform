@@ -957,6 +957,45 @@ async function readStoredCase(): Promise<DriverSosActiveCase | null> {
   }
 }
 
+/**
+ * Called by lib/api-client when an automatic sign-out keeps an unsent SOS
+ * while the SOS screen is not open to flag it itself: sets `sessionLostAt` on
+ * the stored case, so the sign-in screen still warns after the app restarts.
+ * Best effort and never throws. Leaves a delivered, dismissed or already
+ * flagged case alone, and skips the write if the case changed meanwhile (a
+ * send that just landed wins).
+ */
+export async function markStoredDriverSosSessionLost(
+  lostAt: string = new Date().toISOString(),
+): Promise<void> {
+  try {
+    const raw = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    if (!raw) {
+      return;
+    }
+    const stored = JSON.parse(raw) as Partial<DriverSosActiveCase> | null;
+    if (
+      !stored ||
+      typeof stored !== "object" ||
+      stored.receipt ||
+      stored.falseAlarm?.dismissed === true ||
+      stored.sessionLostAt
+    ) {
+      return;
+    }
+    const latest = await sosStorage.getItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
+    if (latest !== raw) {
+      return;
+    }
+    await sosStorage.setItemAsync(
+      DRIVER_SOS_ACTIVE_CASE_KEY,
+      JSON.stringify({ ...stored, sessionLostAt: lostAt }),
+    );
+  } catch {
+    // Best effort: the in-memory note still warns until the app restarts.
+  }
+}
+
 export async function saveDriverSosActiveCase(
   activeCase: DriverSosActiveCase | null,
 ): Promise<void> {

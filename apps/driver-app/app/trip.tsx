@@ -809,7 +809,7 @@ function getTripAuthorityBannerProps(
       const completed = task.status === "completed";
       // The header and status card already state the result.
       return {
-        title: "自營派單",
+        title: "車隊派單",
         authorityLabel: null,
         description: completed
           ? "行程已結束，保留原訂單與任務紀錄供查閱。"
@@ -819,7 +819,7 @@ function getTripAuthorityBannerProps(
       };
     }
     return {
-      title: "自營派單",
+      title: "車隊派單",
       authorityLabel: null,
       description: "請依步驟完成接單、接送與完單。",
       tone: "accent",
@@ -2312,7 +2312,7 @@ export default function TripScreen() {
                 theme={driverCanvasTheme}
                 tone={isForwardedTrip ? "info" : "accent"}
               >
-                {isForwardedTrip ? `平台 ${platformLabel}` : "自營派單"}
+                {isForwardedTrip ? `平台 ${platformLabel}` : "車隊派單"}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {serviceProductLabel}

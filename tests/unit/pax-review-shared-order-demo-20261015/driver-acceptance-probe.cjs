@@ -151,6 +151,7 @@ Module._load = function (request, parent, isMain) {
     };
   if (request === "expo-router")
     return {
+      useFocusEffect: () => {},
       Redirect: (props) => {
         redirects.push({ href: props.href, identityReads });
         return React.createElement("Redirect", props);

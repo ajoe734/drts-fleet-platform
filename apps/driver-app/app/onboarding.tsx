@@ -36,6 +36,7 @@ import {
   getDriverId,
   getDriverIdentityIssue,
   hasDriverDevOverride,
+  hasUndeliveredSosAfterSessionLost,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerDriverDevice,
@@ -78,6 +79,24 @@ const REVIEW_LEGACY_REGISTRATION =
 // the same made-up name.
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "";
+// Shown while signed out when the session ended before an SOS reached the
+// server. Calling comes first. After signing back in the SOS screen can send
+// it again, but not always by itself (an SOS older than 30 minutes asks first,
+// a refused one needs 重新送出), so this promises no automatic sending.
+const SESSION_LOST_SOS_NOTICE =
+  "SOS 尚未送達。請直接打電話聯絡派車台；有立即危險請撥 110 或 119。重新登入後，打開 SOS 頁面可以再送出。";
+
+/**
+ * Read only. The check itself errs toward warning when the stored SOS cannot
+ * be read (see lib/api-client); this only guards against it failing outright.
+ */
+async function checkSessionLostSos(): Promise<boolean> {
+  try {
+    return await hasUndeliveredSosAfterSessionLost();
+  } catch {
+    return false;
+  }
+}
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -531,6 +550,25 @@ export default function OnboardingScreen() {
   }, []);
 
   const provisioned = ready && isDriverIdentityProvisioned();
+  const [sessionLostSos, setSessionLostSos] = useState(false);
+
+  useEffect(() => {
+    if (!ready || provisioned) {
+      setSessionLostSos(false);
+      return;
+    }
+
+    let cancelled = false;
+    void checkSessionLostSos().then((kept) => {
+      if (!cancelled) {
+        setSessionLostSos(kept);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provisioned, ready]);
 
   useEffect(() => {
     if (!provisioned) {
@@ -1225,6 +1263,13 @@ export default function OnboardingScreen() {
 
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>
+        {sessionLostSos ? (
+          <WarningCallout
+            tone="danger"
+            iconName="warning"
+            message={SESSION_LOST_SOS_NOTICE}
+          />
+        ) : null}
         <View style={styles.provisionHero}>
           <View style={styles.provisionHeroGlow} />
           <View style={styles.provisionHeader}>
