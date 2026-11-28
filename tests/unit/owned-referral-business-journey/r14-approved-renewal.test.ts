@@ -1431,6 +1431,16 @@ describe("actual normal caller AST wiring (old RED -> new GREEN)", () => {
       )
     : readFileSync(specPath, "utf8");
 
+  it("defers the Stage B first heartbeat until the renewal helper restores Driver authority", async () => {
+    const flow = extractActualDriverFlow(currentSource)({
+      r14Manifest: { decision: "stageB" },
+      call: async () => {
+        throw new JourneyFailure("driver:request", 403, "DRIVER_CERT_INVALID");
+      },
+    });
+    await expect(flow.initialHeartbeat()).resolves.toBeUndefined();
+  });
+
   it("fails RED on old source without runExistingR14 and passes GREEN on new source for both Stage A and Stage B", async () => {
     const oldSourceSimulated = currentSource.replace(
       /const runExistingR14\b/g,
