@@ -1574,7 +1574,7 @@ test(journeyName, async ({ browser, request }) => {
                     method: "POST",
                     body: { registrationCode: firstSupply.invitation },
                   });
-                  firstSupply.invitation = undefined;
+                  delete firstSupply.invitation;
                 }
               } finally {
                 invitation = firstSupply.invitation;
