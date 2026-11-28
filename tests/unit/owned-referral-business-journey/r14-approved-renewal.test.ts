@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as ts from "typescript";
@@ -7,6 +8,14 @@ import { describe, expect, it } from "vitest";
 import {
   Evidence,
   JourneyFailure,
+  NativeTransport,
+  assertOwnPair,
+  object,
+  records,
+  requireFact,
+  text,
+  type CallOptions,
+  type Role,
 } from "../../e2e/owned-referral-business-journey/protocol";
 import {
   R14_ALL_STAGE_A_DOC_TYPES,
@@ -191,6 +200,23 @@ function makeReceipt(
   };
 }
 
+function expiredAuthRefusal() {
+  return {
+    status: 403,
+    headers: new Headers({ "x-drts-candidate-sha": runtimeSha }),
+    data: {
+      error: {
+        code: "DRIVER_CERT_INVALID",
+        details: {
+          driverId,
+          lifecycleStatus: "active",
+          eligibilityBlockedReasons: ["licenses_invalid"],
+        },
+      },
+    },
+  };
+}
+
 function createStageBPorts(): R14StageBPorts & {
   actions: string[];
   state: {
@@ -198,6 +224,8 @@ function createStageBPorts(): R14StageBPorts & {
     driverRenewed: boolean;
     contractRenewed: boolean;
     insuranceRenewed: boolean;
+    driverBound: boolean;
+    heartbeatSent: boolean;
     jobStatus: string;
     orderStatus: string;
     submissions: Map<
@@ -280,6 +308,8 @@ function createStageBPorts(): R14StageBPorts & {
     driverRenewed: false,
     contractRenewed: false,
     insuranceRenewed: false,
+    driverBound: false,
+    heartbeatSent: false,
     jobStatus: "reserved",
     orderStatus: "preassigned",
     submissions,
@@ -331,7 +361,30 @@ function createStageBPorts(): R14StageBPorts & {
     },
     rebindDriverSession: async (id) => {
       expect(id).toBe(driverId);
+      if (
+        !state.driverRenewed ||
+        !state.contractRenewed ||
+        !state.insuranceRenewed
+      )
+        throw new JourneyFailure(
+          "driver-auth-session",
+          403,
+          "DRIVER_CERT_INVALID",
+        );
+      state.driverBound = true;
       actions.push("rebind-driver");
+    },
+    probeExpiredDriverAuth: async (id) => {
+      expect(id).toBe(driverId);
+      expect(state.driverRenewed).toBe(false);
+      actions.push("expired-driver-auth-refusal");
+      return expiredAuthRefusal();
+    },
+    sendInitialDriverHeartbeat: async () => {
+      if (!state.driverBound)
+        throw new Error("heartbeat requires fresh Driver binding");
+      state.heartbeatSent = true;
+      actions.push("initial-driver-heartbeat");
     },
     readRegistryDriver: async (id) => ({
       driverId: id,
@@ -672,7 +725,10 @@ function createStageBPorts(): R14StageBPorts & {
       jobStatus: state.jobStatus,
     }),
     readPostRenewalCandidates: async () =>
-      state.driverRenewed && state.contractRenewed && state.insuranceRenewed
+      state.driverRenewed &&
+      state.contractRenewed &&
+      state.insuranceRenewed &&
+      state.heartbeatSent
         ? [
             {
               driverId,
@@ -787,6 +843,9 @@ describe("R14 Stage B controlled helper ports", () => {
     expect(result.preRenewalSetup.absentFromNormalDispatchCandidates).toBe(
       true,
     );
+    expect(result.preRenewalSetup.driverAuthRefusal).toBe(
+      "DRIVER_CERT_INVALID",
+    );
     expect(result.postRenewalVerification).toEqual({
       sameCanonicalDriverId: true,
       sameCanonicalVehicleId: true,
@@ -798,10 +857,12 @@ describe("R14 Stage B controlled helper ports", () => {
       vehicleDispatchEligible: true,
       dispatchJobStatusBeforeAssign: "reserved",
       presentInNormalDispatchCandidates: true,
+      driverSessionRestored: true,
+      initialHeartbeatAccepted: true,
     });
     expect(ports.actions).toEqual([
       "restore-available",
-      "rebind-driver",
+      "expired-driver-auth-refusal",
       `fleet-open-new:profile_correction:${driverId}`,
       "fleet-create:profile_correction:sub_renewal_profile_correction",
       "fleet-upload:profile_correction:professional_driver_license",
@@ -825,7 +886,113 @@ describe("R14 Stage B controlled helper ports", () => {
       "admin-open:sub_renewal_insurance_update",
       "admin-start:sub_renewal_insurance_update",
       "admin-approve:sub_renewal_insurance_update",
+      "rebind-driver",
+      "initial-driver-heartbeat",
     ]);
+  });
+
+  it("checks expiry and candidate absence before auth refusal, then all canonical/readiness reads before binding", async () => {
+    const ports = createStageBPorts();
+    const reads = new Set<string>();
+    const methods = [
+      "readRegistryDriver",
+      "readRegistryVehicle",
+      "readRegistryContracts",
+      "readRegistryPolicies",
+      "readDriverReadiness",
+      "readVehicleReadiness",
+    ] as const;
+    const trackRead =
+      <T>(method: string, read: (id: string) => Promise<T>) =>
+      async (id: string) => {
+        reads.add(
+          `${ports.state.insuranceRenewed ? "after" : "before"}:${method}`,
+        );
+        return read(id);
+      };
+    ports.readRegistryDriver = trackRead(
+      "readRegistryDriver",
+      ports.readRegistryDriver,
+    );
+    ports.readRegistryVehicle = trackRead(
+      "readRegistryVehicle",
+      ports.readRegistryVehicle,
+    );
+    ports.readRegistryContracts = trackRead(
+      "readRegistryContracts",
+      ports.readRegistryContracts,
+    );
+    ports.readRegistryPolicies = trackRead(
+      "readRegistryPolicies",
+      ports.readRegistryPolicies,
+    );
+    ports.readDriverReadiness = trackRead(
+      "readDriverReadiness",
+      ports.readDriverReadiness,
+    );
+    ports.readVehicleReadiness = trackRead(
+      "readVehicleReadiness",
+      ports.readVehicleReadiness,
+    );
+    const readPre = ports.readPreRenewalCandidates;
+    ports.readPreRenewalCandidates = async () => {
+      reads.add("pre-candidates");
+      return readPre();
+    };
+    const probe = ports.probeExpiredDriverAuth;
+    ports.probeExpiredDriverAuth = async (id) => {
+      expect([...reads]).toEqual([
+        ...methods.map((m) => `before:${m}`),
+        "pre-candidates",
+      ]);
+      return probe(id);
+    };
+    const rebind = ports.rebindDriverSession;
+    ports.rebindDriverSession = async (id) => {
+      for (const method of methods)
+        expect(reads.has(`after:${method}`)).toBe(true);
+      await rebind(id);
+    };
+    await runR14StageBRenewalLifecycle(ports);
+  });
+
+  it.each([
+    "wrong-code",
+    "wrong-subject",
+    "wrong-runtime",
+    "suspended",
+    "unrelated-hold",
+    "missing-details",
+    "wrong-status",
+    "transport",
+  ])("fails closed on %s auth refusal before any renewal", async (failure) => {
+    const ports = createStageBPorts();
+    const refusal = expiredAuthRefusal();
+    if (failure === "wrong-code") refusal.data.error.code = "FORBIDDEN";
+    if (failure === "wrong-subject")
+      refusal.data.error.details.driverId = "drv_foreign";
+    if (failure === "wrong-runtime")
+      refusal.headers.set("x-drts-candidate-sha", "c".repeat(40));
+    if (failure === "suspended")
+      refusal.data.error.details.lifecycleStatus = "suspended";
+    if (failure === "unrelated-hold")
+      refusal.data.error.details.eligibilityBlockedReasons.push("manual_hold");
+    if (failure === "missing-details")
+      refusal.data.error.details = {} as typeof refusal.data.error.details;
+    if (failure === "wrong-status") refusal.status = 200;
+    ports.probeExpiredDriverAuth = async () => {
+      if (failure === "transport")
+        throw new JourneyFailure("publicApi:transport");
+      return refusal;
+    };
+    await expect(runR14StageBRenewalLifecycle(ports)).rejects.toThrow(
+      failure === "transport"
+        ? /publicApi:transport/
+        : /expired-driver-auth-refusal-invalid/,
+    );
+    expect(ports.state.submissions.size).toBe(2);
+    expect(ports.state.driverBound).toBe(false);
+    expect(ports.state.heartbeatSent).toBe(false);
   });
 
   it("rejects wrong session/realm/scope, same actor, unrelated hold, foreign target, stale revision, unknown ACK, missing approval, remaining hold, and terminal job", async () => {
@@ -964,6 +1131,8 @@ describe("R14 Stage B controlled helper ports", () => {
       await expect(runR14StageBRenewalLifecycle(ports), label).rejects.toThrow(
         expected,
       );
+      expect(ports.state.driverBound).toBe(false);
+      expect(ports.state.heartbeatSent).toBe(false);
     }
   });
 });
@@ -1161,11 +1330,125 @@ function extractActualR14Caller(sourceText: string) {
   ) => Promise<Array<Record<string, unknown>>>;
 }
 
+// Execute the shipped binding, first-heartbeat gate, dispatch continuation and
+// cleanup with the caller. Only browser/network I/O is supplied by the fixture.
+function extractActualDriverFlow(sourceText: string) {
+  const source = ts.createSourceFile(
+    "owned-business.spec.ts",
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const arrows = new Map<string, string>();
+  let initialHeartbeat: ts.Statement | undefined;
+  let cleanup: ts.IfStatement | undefined;
+  let dispatchStatements: ts.Statement[] = [];
+  function visit(node: ts.Node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ["bindDriverDeviceSession", "heartbeat"].includes(
+        node.name.getText(source),
+      )
+    ) {
+      arrows.set(node.name.getText(source), node.initializer!.getText(source));
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.getText(source) === 'heartbeat(null, "available", 1)' &&
+      ts.isAwaitExpression(node.parent) &&
+      ts.isExpressionStatement(node.parent.parent)
+    ) {
+      const statement = node.parent.parent;
+      initialHeartbeat = ts.isIfStatement(statement.parent)
+        ? statement.parent
+        : statement;
+    }
+    if (
+      ts.isIfStatement(node) &&
+      node.expression.getText(source) === "bindingId && deviceId"
+    )
+      cleanup = node;
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === "effectiveCandidates"
+    ) {
+      const statement = node.parent.parent as ts.VariableStatement;
+      const block = statement.parent as ts.Block;
+      const start = block.statements.indexOf(statement);
+      const end = block.statements.findIndex(
+        (s, index) =>
+          index > start && s.getText(source).startsWith("const taskList ="),
+      );
+      dispatchStatements = [...block.statements.slice(start, end)];
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  expect(arrows.size).toBe(2);
+  expect(initialHeartbeat).toBeDefined();
+  expect(cleanup).toBeDefined();
+  expect(dispatchStatements.length).toBeGreaterThan(0);
+  const compiled = ts.transpileModule(
+    `
+    const bindDriverDeviceSession = ${arrows.get("bindDriverDeviceSession")};
+    const heartbeat = ${arrows.get("heartbeat")};
+    return {
+      bindDriverDeviceSession, heartbeat,
+      initialHeartbeat: async () => { ${initialHeartbeat!.getText(source)} },
+      dispatchAndAssign: async () => { ${dispatchStatements.map((s) => s.getText(source)).join("\n")} },
+      cleanup: async () => { ${cleanup!.getText(source)} },
+    };`,
+    {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.None,
+      },
+    },
+  ).outputText;
+  return new Function("bindings", `with (bindings) { ${compiled} }`) as (
+    bindings: Record<string, unknown>,
+  ) => {
+    bindDriverDeviceSession: (...args: unknown[]) => Promise<void>;
+    heartbeat: (...args: unknown[]) => Promise<void>;
+    initialHeartbeat: () => Promise<void>;
+    dispatchAndAssign: () => Promise<void>;
+    cleanup: () => Promise<void>;
+  };
+}
+
 describe("actual normal caller AST wiring (old RED -> new GREEN)", () => {
   const specPath = resolve(
     "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
   );
-  const currentSource = readFileSync(specPath, "utf8");
+  const currentSource = process.env.R14_TEST_CALLER_GIT_REF
+    ? execFileSync(
+        "git",
+        [
+          "show",
+          `${process.env.R14_TEST_CALLER_GIT_REF}:tests/e2e/owned-referral-business-journey/owned-business.spec.ts`,
+        ],
+        { encoding: "utf8" },
+      )
+    : readFileSync(specPath, "utf8");
+
+  it("defers the Stage B first heartbeat until the renewal helper restores Driver authority", async () => {
+    const flow = extractActualDriverFlow(currentSource)({
+      r14Manifest: { decision: "stageB" },
+      deviceId: undefined,
+      driverId,
+      vehicleId,
+      randomUUID: () => "event_before_renewal",
+      now: () => `${stageBDate}T02:15:00.000Z`,
+      pickup: { lat: 25, lng: 121 },
+      object,
+      records,
+      requireFact,
+      call: async () => {
+        throw new JourneyFailure("driver:request", 403, "DRIVER_CERT_INVALID");
+      },
+    });
+    await expect(flow.initialHeartbeat()).resolves.toBeUndefined();
+  });
 
   it("fails RED on old source without runExistingR14 and passes GREEN on new source for both Stage A and Stage B", async () => {
     const oldSourceSimulated = currentSource.replace(
@@ -1285,146 +1568,366 @@ describe("actual normal caller AST wiring (old RED -> new GREEN)", () => {
     expect(stageAEvidence.events.map((e) => e.stage)).toContain(
       "r14-stage-a-today-expiry-supply-approved",
     );
-
-    // 2. Stage B retained-target execution: skips provisionSupply(firstSupply), restores available, runs renewal lifecycle.
-    const stageBTrace: string[] = [];
-    const stageBEvidence = new Evidence();
-    const firstSupplyStageB: Record<string, unknown> = {};
-    const fakePage = {
-      url: () => "https://fleet.example/supply/submissions/sub_renewal_001",
-      goto: async () => ({
-        status: () => 200,
-        headers: () => ({ "x-drts-candidate-sha": runtimeSha }),
-      }),
-      close: async () => {
-        stageBTrace.push("page-close");
-      },
-      getByText: () => ({ count: async () => 0 }),
-      getByRole: () => ({
-        click: async () => {
-          stageBTrace.push("button-click");
-        },
-      }),
-      locator: () => ({
-        selectOption: async (val: string) => {
-          stageBTrace.push(`select:${val}`);
-        },
-        fill: async (val: string) => {
-          stageBTrace.push(`fill:${val}`);
-        },
-        setInputFiles: async () => {
-          stageBTrace.push("set-files");
-        },
-        click: async () => {
-          stageBTrace.push("locator-click");
-        },
-        value: plateNo,
-        visible: true,
-      }),
+    stageABindings.driverId = driverId;
+    stageABindings.vehicleId = vehicleId;
+    stageABindings.deviceId = "stage-a-device";
+    stageABindings.randomUUID = () => "event_stage_a";
+    stageABindings.now = () => `${stageADate}T12:00:00.000Z`;
+    stageABindings.pickup = { lat: 25, lng: 121 };
+    stageABindings.object = object;
+    stageABindings.call = async (
+      role: Role,
+      path: string,
+      options: CallOptions,
+    ) => {
+      expect(role).toBe("driver");
+      expect(path).toBe("/api/driver/location-heartbeats/batch");
+      expect(records(object(options.body).items)[0]).toMatchObject({
+        deviceId: "stage-a-device",
+        driverId,
+        vehicleId,
+        sequenceNo: 1,
+      });
+      stageATrace.push("initial-heartbeat");
+      return { items: [{ accepted: true, currentLocationUpdated: true }] };
     };
+    await extractActualDriverFlow(currentSource)(
+      stageABindings,
+    ).initialHeartbeat();
+    expect(stageATrace).toEqual([
+      `provision:${stageADate}`,
+      "initial-heartbeat",
+    ]);
 
-    const stageBBindings: Record<string, unknown> = {
-      ...stageABindings,
-      todayUtc: () => stageBDate,
-      r14ExpectedContext: undefined,
-      r14Manifest: undefined,
-      r14StageADraft: null,
-      r14StageB: undefined,
-      firstSupply: firstSupplyStageB,
-      evidence: stageBEvidence,
-      fleet: { metadata: { actorId: fleetRole.actorId } },
-      identity: {
-        membershipId: adminRole.membershipId,
-        scopes: adminRole.scopes,
-      },
-      principalId: adminRole.principalId,
-      adminSessionId: adminRole.sessionId,
-      uiMutationAttempts: [],
-      origins: {
+    // 2. Stage B exercises the actual caller, binding, heartbeat, assignment and
+    // cleanup. External auth refuses the exact expired subject until approval.
+    for (const failure of [
+      "none",
+      "wrong-code",
+      "wrong-subject",
+      "wrong-runtime",
+      "transport",
+      "probe-revoke",
+      "readiness",
+      "binding",
+      "heartbeat",
+    ] as const) {
+      const stageBTrace: string[] = [];
+      const simulated = createStageBPorts();
+      const readSimulatedCandidates = simulated.readPostRenewalCandidates;
+      const stageBEvidence = new Evidence();
+      const firstSupplyStageB: Record<string, unknown> = {};
+      const fakePage = {
+        url: () => "https://fleet.example/supply/submissions/sub_renewal_001",
+        goto: async () => ({
+          status: () => 200,
+          headers: () => ({ "x-drts-candidate-sha": runtimeSha }),
+        }),
+        close: async () => {
+          stageBTrace.push("page-close");
+        },
+        getByText: () => ({ count: async () => 0 }),
+        getByRole: () => ({
+          click: async () => {
+            stageBTrace.push("button-click");
+          },
+        }),
+        locator: () => ({
+          selectOption: async (val: string) => {
+            stageBTrace.push(`select:${val}`);
+          },
+          fill: async (val: string) => {
+            stageBTrace.push(`fill:${val}`);
+          },
+          setInputFiles: async () => {
+            stageBTrace.push("set-files");
+          },
+          click: async () => {
+            stageBTrace.push("locator-click");
+          },
+          value: plateNo,
+          visible: true,
+        }),
+      };
+
+      const stageBBindings: Record<string, unknown> = {
+        ...stageABindings,
+        todayUtc: () => stageBDate,
+        r14ExpectedContext: undefined,
+        r14Manifest: undefined,
+        r14StageADraft: null,
+        r14StageB: undefined,
+        firstSupply: firstSupplyStageB,
+        deviceId: undefined,
+        bindingId: undefined,
+        invitation: undefined,
+        driverId,
+        vehicleId,
+        orderId: "order_stage_b_001",
+        dispatchJobId: "job_stage_b_001",
+        dispatched: { status: "reserved" },
+        candidates: { items: [] },
+        object,
+        records,
+        text,
+        requireFact,
+        assertOwnPair,
+        mask: () => {},
+        randomUUID: () => "event_001",
+        now: () => `${stageBDate}T02:15:00.000Z`,
+        pickup: { lat: 25, lng: 121 },
+        evidence: stageBEvidence,
+        fleet: { metadata: { actorId: fleetRole.actorId } },
+        identity: {
+          membershipId: adminRole.membershipId,
+          scopes: adminRole.scopes,
+        },
+        principalId: adminRole.principalId,
+        adminSessionId: adminRole.sessionId,
+        uiMutationAttempts: [],
+        origins: {
+          fleet: "https://fleet.example",
+          admin: "https://admin.example",
+        },
+        context: { newPage: async () => fakePage },
+        installR14FleetPageRoute: async () => {
+          stageBTrace.push("install-fleet-route");
+        },
+        installVerifiedRoleRoute: async () => {
+          stageBTrace.push("install-admin-route");
+        },
+        captureR14UiPost,
+        readFile: async () =>
+          JSON.stringify({
+            schema: R14_PRIOR_TARGET_MANIFEST_SCHEMA,
+            decision: "stageB",
+            repository: R14_REPOSITORY,
+            definitionSha,
+            runtimeSha,
+            evaluatedUtcDate: stageBDate,
+            candidateCount: 1,
+            officialArtifact,
+            target: makeStageATarget(stageADate),
+          }),
+        provisionSupply: async () => {
+          throw new Error("Stage B must not provision fresh firstSupply");
+        },
+        adminControl: async (path: string) => {
+          stageBTrace.push(`adminControl:${path}`);
+          return {};
+        },
+        finalizer: {
+          checkpoint: async (phaseName: string) => {
+            stageBTrace.push(`checkpoint:${phaseName}`);
+          },
+          guardOperation: async <T>(
+            fn: (assertOpen: () => void) => Promise<T>,
+          ) => fn(() => {}),
+          checkpointOwned: async () => {},
+        },
+        runR14StageBRenewalLifecycle: async (ports: R14StageBPorts) => {
+          expect(ports.target.driverId).toBe(driverId);
+          expect(ports.target.vehicleId).toBe(vehicleId);
+          expect(ports.orderId).toBe("order_stage_b_001");
+          expect(ports.dispatchJobId).toBe("job_stage_b_001");
+          stageBTrace.push("runR14StageBRenewalLifecycle");
+          // UI submission/review and Registry are simulated externally. Keep
+          // production lifecycle decisions and actual caller's auth/heartbeat.
+          simulated.probeExpiredDriverAuth = ports.probeExpiredDriverAuth;
+          simulated.rebindDriverSession = ports.rebindDriverSession;
+          simulated.sendInitialDriverHeartbeat =
+            ports.sendInitialDriverHeartbeat;
+          simulated.readPostRenewalCandidates = ports.readPostRenewalCandidates;
+          if (failure === "readiness") {
+            const readReadiness = simulated.readVehicleReadiness;
+            simulated.readVehicleReadiness = async (id) =>
+              simulated.state.insuranceRenewed
+                ? {
+                    subjectId: id,
+                    state: "not_ready",
+                    reasonCodes: ["INSURANCE_EXPIRED"],
+                  }
+                : readReadiness(id);
+          }
+          return runR14StageBRenewalLifecycle(simulated);
+        },
+      };
+
+      const fetcher: typeof fetch = async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        let status = 200;
+        let payload: Record<string, unknown> = {};
+        let responseRuntime = runtimeSha;
+        if (path === "/api/auth/driver/device/invite") {
+          expect(body.driverId).toBe(driverId);
+          stageBTrace.push("invite");
+          payload = { registrationCode: "synthetic-invitation" };
+        } else if (path === "/api/auth/driver/device/invite/revoke") {
+          expect(body.registrationCode).toBe("synthetic-invitation");
+          stageBTrace.push("probe-invitation-revoked");
+          if (failure === "probe-revoke")
+            throw new Error("probe revoke transport failed");
+        } else if (path === "/api/auth/driver/device/register") {
+          if (!simulated.state.driverRenewed) {
+            stageBTrace.push("register-expired:403");
+            if (failure === "transport")
+              throw new Error("registration transport failed");
+            const refusal = expiredAuthRefusal();
+            if (failure === "wrong-code") refusal.data.error.code = "FORBIDDEN";
+            if (failure === "wrong-subject")
+              refusal.data.error.details.driverId = "drv_foreign";
+            if (failure === "wrong-runtime") responseRuntime = "c".repeat(40);
+            return new Response(JSON.stringify(refusal.data), {
+              status: 403,
+              headers: { "x-drts-candidate-sha": responseRuntime },
+            });
+          }
+          expect(simulated.state.contractRenewed).toBe(true);
+          expect(simulated.state.insuranceRenewed).toBe(true);
+          stageBTrace.push("register-renewed:200");
+          if (failure === "binding") status = 503;
+          else {
+            simulated.state.driverBound = true;
+            payload = {
+              driverId,
+              deviceId: body.deviceId,
+              bindingId: "rebound-binding",
+              accessToken: "synthetic-access",
+              refreshToken: "synthetic-refresh",
+            };
+          }
+        } else if (path === "/api/auth/session") {
+          expect(simulated.state.driverBound).toBe(true);
+          payload = {
+            active: true,
+            identity: { realm: "driver", actorId: driverId },
+          };
+          stageBTrace.push("fresh-driver-session");
+        } else if (path === "/api/driver/location-heartbeats/batch") {
+          expect(simulated.state.driverBound).toBe(true);
+          const event = body.items[0];
+          expect(event).toMatchObject({
+            deviceId: `${nonce}-r14-stage-b-device`,
+            driverId,
+            vehicleId,
+            sequenceNo: 1,
+            taskId: null,
+          });
+          stageBTrace.push("initial-heartbeat");
+          if (failure === "heartbeat") status = 503;
+          else simulated.state.heartbeatSent = true;
+          payload = {
+            items: [{ accepted: true, currentLocationUpdated: true }],
+          };
+        } else if (path === "/api/auth/driver/device/revoke") {
+          expect(body).toEqual({
+            bindingId: "rebound-binding",
+            deviceId: `${nonce}-r14-stage-b-device`,
+          });
+          stageBTrace.push("driver-binding-revoked");
+        } else throw new Error(`unexpected actual Driver I/O: ${path}`);
+        return new Response(JSON.stringify({ data: payload }), {
+          status,
+          headers: { "x-drts-candidate-sha": responseRuntime },
+        });
+      };
+      const origins = {
+        api: "https://api.example",
         fleet: "https://fleet.example",
         admin: "https://admin.example",
-      },
-      context: { newPage: async () => fakePage },
-      tx: {},
-      installR14FleetPageRoute: async () => {
-        stageBTrace.push("install-fleet-route");
-      },
-      installVerifiedRoleRoute: async () => {
-        stageBTrace.push("install-admin-route");
-      },
-      captureR14UiPost,
-      readFile: async () =>
-        JSON.stringify({
-          schema: R14_PRIOR_TARGET_MANIFEST_SCHEMA,
-          decision: "stageB",
-          repository: R14_REPOSITORY,
-          definitionSha,
-          runtimeSha,
-          evaluatedUtcDate: stageBDate,
-          candidateCount: 1,
-          officialArtifact,
-          target: makeStageATarget(stageADate),
-        }),
-      provisionSupply: async () => {
-        throw new Error("Stage B must not provision fresh firstSupply");
-      },
-      adminControl: async (path: string) => {
-        stageBTrace.push(`adminControl:${path}`);
-        return {};
-      },
-      bindDriverDeviceSession: async (
-        supply: Record<string, unknown>,
-        id: string,
+        ops: "https://ops.example",
+        referral: "https://referral.example",
+      };
+      const tx = new NativeTransport(origins, runtimeSha, {}, fetcher);
+      stageBBindings.tx = tx;
+      firstSupplyStageB.transport = tx;
+      stageBBindings.call = async (
+        role: Role,
+        path: string,
+        options?: CallOptions,
+      ) => object((await tx.call(role, path, options)).data);
+      stageBBindings.opsControl = async (path: string) => {
+        if (path.endsWith("/candidates?includeIneligible=true")) {
+          stageBTrace.push("post-renewal-candidates");
+          return { items: await readSimulatedCandidates() };
+        }
+        expect(path).toBe("/dispatch/assign");
+        expect(simulated.state.heartbeatSent).toBe(true);
+        stageBTrace.push("dispatch-assign");
+      };
+      stageBBindings.cleanup = async (
+        _label: string,
+        action: () => Promise<void>,
       ) => {
-        stageBTrace.push(`bindDriver:${id}`);
-        supply.deviceId = "rebound-device";
-        supply.bindingId = "rebound-binding";
-      },
-      finalizer: {
-        checkpoint: async (phaseName: string) => {
-          stageBTrace.push(`checkpoint:${phaseName}`);
-        },
-        guardOperation: async <T>(fn: (assertOpen: () => void) => Promise<T>) =>
-          fn(() => {}),
-        checkpointOwned: async () => {},
-      },
-      runR14StageBRenewalLifecycle: async (ports: R14StageBPorts) => {
-        expect(ports.target.driverId).toBe(driverId);
-        expect(ports.target.vehicleId).toBe(vehicleId);
-        expect(ports.orderId).toBe("order_stage_b_001");
-        expect(ports.dispatchJobId).toBe("job_stage_b_001");
-        stageBTrace.push("runR14StageBRenewalLifecycle");
-        const simulated = createStageBPorts();
-        return runR14StageBRenewalLifecycle(simulated);
-      },
-    };
+        try {
+          await action();
+        } catch {
+          stageBTrace.push("cleanup-failure-retained");
+        }
+      };
+      const flow = extractActualDriverFlow(currentSource)(stageBBindings);
+      stageBBindings.bindDriverDeviceSession = flow.bindDriverDeviceSession;
+      stageBBindings.heartbeat = flow.heartbeat;
 
-    const stageBCaller = compileCaller(stageBBindings);
-    await stageBCaller("provision");
-    expect(firstSupplyStageB.driverId).toBe(driverId);
-    expect(firstSupplyStageB.vehicleId).toBe(vehicleId);
-    expect(firstSupplyStageB.plateNo).toBe(plateNo);
+      const stageBCaller = compileCaller(stageBBindings);
+      stageBBindings.runExistingR14 = stageBCaller;
+      await stageBCaller("provision");
+      expect(firstSupplyStageB.driverId).toBe(driverId);
+      expect(firstSupplyStageB.vehicleId).toBe(vehicleId);
+      expect(firstSupplyStageB.plateNo).toBe(plateNo);
 
-    await stageBCaller("dispatch", {
-      orderId: "order_stage_b_001",
-      dispatchJobId: "job_stage_b_001",
-      initialJobStatus: "reserved",
-      preCandidates: [],
-    });
-    expect(stageBTrace).toEqual([
-      "checkpoint:r14-stage-b-retained-target-setup",
-      `adminControl:/regulatory-registry/drivers/${driverId}/work-state`,
-      `bindDriver:${driverId}`,
-      "checkpoint:r14-stage-b-expiry-denial-and-ui-renewal",
-      "install-fleet-route",
-      "install-admin-route",
-      "runR14StageBRenewalLifecycle",
-      "page-close",
-      "page-close",
-    ]);
-    expect(stageBEvidence.events.map((e) => e.stage)).toEqual([
-      "r14-stage-b-retained-target-available-setup",
-      "r14-stage-b-expiry-denial-and-renewal-dispatch-restored",
-    ]);
+      expect(stageBTrace).not.toContain("invite");
+      await flow.initialHeartbeat();
+      expect(stageBTrace).not.toContain("initial-heartbeat");
+      stageBTrace.push("main-booking");
+      if (failure === "none") {
+        await flow.dispatchAndAssign();
+        expect(stageBBindings.deviceId).toBe(`${nonce}-r14-stage-b-device`);
+        expect(stageBBindings.bindingId).toBe("rebound-binding");
+        expect(stageBBindings.invitation).toBe("synthetic-invitation");
+        expect(
+          stageBTrace.filter(
+            (s) =>
+              !s.startsWith("adminControl:") &&
+              !s.startsWith("checkpoint:") &&
+              !s.startsWith("install-") &&
+              s !== "page-close",
+          ),
+        ).toEqual([
+          "main-booking",
+          "runR14StageBRenewalLifecycle",
+          "invite",
+          "register-expired:403",
+          "probe-invitation-revoked",
+          "invite",
+          "register-renewed:200",
+          "fresh-driver-session",
+          "initial-heartbeat",
+          "post-renewal-candidates",
+          "dispatch-assign",
+        ]);
+        expect(stageBEvidence.events.map((e) => e.stage)).toEqual([
+          "r14-stage-b-retained-target-available-setup",
+          "r14-stage-b-expiry-denial-and-renewal-dispatch-restored",
+        ]);
+      } else {
+        await expect(flow.dispatchAndAssign(), failure).rejects.toThrow();
+        expect(stageBTrace).not.toContain("dispatch-assign");
+        expect(stageBTrace).not.toContain("post-renewal-candidates");
+        if (!["binding", "heartbeat"].includes(failure))
+          expect(simulated.state.driverBound).toBe(false);
+      }
+      expect(stageBTrace.filter((s) => s === "page-close")).toHaveLength(2);
+      await flow.cleanup();
+      if (failure === "none" || failure === "heartbeat")
+        expect(stageBTrace).toContain("driver-binding-revoked");
+      if (failure === "binding")
+        expect(
+          stageBTrace.filter((s) => s === "probe-invitation-revoked"),
+        ).toHaveLength(2);
+      if (failure === "probe-revoke")
+        expect(stageBBindings.invitation).toBe("synthetic-invitation");
+    }
   });
 });

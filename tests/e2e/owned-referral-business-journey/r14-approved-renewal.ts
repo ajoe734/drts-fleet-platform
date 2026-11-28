@@ -12,6 +12,7 @@ import {
   records as protocolRecords,
   requireFact,
   text,
+  type CallResult,
   type NativeTransport,
   type ObjectData,
 } from "./protocol";
@@ -272,6 +273,7 @@ export type R14StageBProjection = Readonly<{
     vehicleBlockedReasons: readonly string[];
     vehicleReadinessReasons: readonly string[];
     absentFromNormalDispatchCandidates: true;
+    driverAuthRefusal: "DRIVER_CERT_INVALID";
     dispatchJobId: string;
     orderId: string;
   }>;
@@ -291,6 +293,8 @@ export type R14StageBProjection = Readonly<{
     vehicleDispatchEligible: true;
     dispatchJobStatusBeforeAssign: string;
     presentInNormalDispatchCandidates: true;
+    driverSessionRestored: true;
+    initialHeartbeatAccepted: true;
   }>;
 }>;
 
@@ -948,7 +952,11 @@ export type R14StageBPorts = {
   readFleetSession(): Promise<ObjectData>;
   readAdminBrowserSession(): Promise<ObjectData>;
   restoreDriverAvailable(driverId: string): Promise<void>;
+  probeExpiredDriverAuth(
+    driverId: string,
+  ): Promise<Pick<CallResult, "status" | "headers" | "data">>;
   rebindDriverSession(driverId: string): Promise<void>;
+  sendInitialDriverHeartbeat(): Promise<void>;
   readRegistryDriver(driverId: string): Promise<ObjectData>;
   readRegistryVehicle(vehicleId: string): Promise<ObjectData>;
   readRegistryContracts(vehicleId: string): Promise<ObjectData[]>;
@@ -1037,9 +1045,8 @@ export async function runR14StageBRenewalLifecycle(
     fleetRole.actorId,
   );
 
-  // 2. Restore workState=available setup and re-bind fresh Driver session.
+  // 2. Restore administrative work state without authenticating the expired Driver.
   await ports.restoreDriverAvailable(target.driverId);
-  await ports.rebindDriverSession(target.driverId);
 
   // 3. Revalidate prior submissions, live renewal targets, Registry expiry, and Readiness holds.
   const [
@@ -1203,6 +1210,24 @@ export async function runR14StageBRenewalLifecycle(
   requireFact(
     expiredCandidateMatch === undefined,
     "r14-stage-b:expired-pair-present-in-pre-renewal-candidates",
+  );
+
+  // Registration is expected to refuse this exact expired subject. A generic
+  // 403 (or transport/runtime failure) cannot stand in for expiry evidence.
+  const authRefusal = await ports.probeExpiredDriverAuth(target.driverId);
+  const authError = object(object(authRefusal.data).error);
+  const authDetails = object(authError.details);
+  const authReasons = authDetails.eligibilityBlockedReasons;
+  requireFact(
+    authRefusal.status === 403 &&
+      authRefusal.headers.get("x-drts-candidate-sha") === expected.runtimeSha &&
+      authError.code === "DRIVER_CERT_INVALID" &&
+      authDetails.driverId === target.driverId &&
+      authDetails.lifecycleStatus === "active" &&
+      Array.isArray(authReasons) &&
+      authReasons.length === 1 &&
+      authReasons[0] === "licenses_invalid",
+    "r14-stage-b:expired-driver-auth-refusal-invalid",
   );
 
   // 5. Execute three distinct typed renewals via Fleet UI -> Platform Admin UI.
@@ -1614,6 +1639,11 @@ export async function runR14StageBRenewalLifecycle(
     "r14-stage-b:dispatch-job-or-order-terminal-before-assign",
   );
 
+  // Restore Driver authority and location only after all canonical renewals
+  // and readiness checks. Candidates and assignment need the fresh heartbeat.
+  await ports.rebindDriverSession(target.driverId);
+  await ports.sendInitialDriverHeartbeat();
+
   const postCandidates = await ports.readPostRenewalCandidates();
   const renewedOwnCandidate = postCandidates.find(
     (c) => c.driverId === target.driverId && c.vehicleId === target.vehicleId,
@@ -1663,6 +1693,7 @@ export async function runR14StageBRenewalLifecycle(
       vehicleBlockedReasons: vehicleBlockedBefore,
       vehicleReadinessReasons: vehicleReadinessReasonsBefore,
       absentFromNormalDispatchCandidates: true,
+      driverAuthRefusal: "DRIVER_CERT_INVALID",
       dispatchJobId: ports.dispatchJobId,
       orderId: ports.orderId,
     },
@@ -1682,6 +1713,8 @@ export async function runR14StageBRenewalLifecycle(
       vehicleDispatchEligible: true,
       dispatchJobStatusBeforeAssign: dispatchState.jobStatus,
       presentInNormalDispatchCandidates: true,
+      driverSessionRestored: true,
+      initialHeartbeatAccepted: true,
     },
   };
 }
