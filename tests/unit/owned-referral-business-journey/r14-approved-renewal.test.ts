@@ -1434,6 +1434,15 @@ describe("actual normal caller AST wiring (old RED -> new GREEN)", () => {
   it("defers the Stage B first heartbeat until the renewal helper restores Driver authority", async () => {
     const flow = extractActualDriverFlow(currentSource)({
       r14Manifest: { decision: "stageB" },
+      deviceId: undefined,
+      driverId,
+      vehicleId,
+      randomUUID: () => "event_before_renewal",
+      now: () => `${stageBDate}T02:15:00.000Z`,
+      pickup: { lat: 25, lng: 121 },
+      object,
+      records,
+      requireFact,
       call: async () => {
         throw new JourneyFailure("driver:request", 403, "DRIVER_CERT_INVALID");
       },
