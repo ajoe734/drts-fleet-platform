@@ -273,6 +273,7 @@ export type R14StageBProjection = Readonly<{
     vehicleBlockedReasons: readonly string[];
     vehicleReadinessReasons: readonly string[];
     absentFromNormalDispatchCandidates: true;
+    driverAuthRefusal: "DRIVER_CERT_INVALID";
     dispatchJobId: string;
     orderId: string;
   }>;
@@ -292,6 +293,8 @@ export type R14StageBProjection = Readonly<{
     vehicleDispatchEligible: true;
     dispatchJobStatusBeforeAssign: string;
     presentInNormalDispatchCandidates: true;
+    driverSessionRestored: true;
+    initialHeartbeatAccepted: true;
   }>;
 }>;
 
@@ -1625,11 +1628,6 @@ export async function runR14StageBRenewalLifecycle(
     "r14-stage-b:post-renewal-readiness-holds-remained",
   );
 
-  // Restore Driver authority and location only after all canonical renewals
-  // and readiness checks. Candidates and assignment need the fresh heartbeat.
-  await ports.rebindDriverSession(target.driverId);
-  await ports.sendInitialDriverHeartbeat();
-
   // 7. Verify dispatch job state before reuse (fail closed if terminal) and verify post-renewal candidate eligibility.
   const dispatchState = await ports.readDispatchJobState(
     ports.orderId,
@@ -1640,6 +1638,11 @@ export async function runR14StageBRenewalLifecycle(
       REUSABLE_ORDER_STATUSES.has(dispatchState.orderStatus),
     "r14-stage-b:dispatch-job-or-order-terminal-before-assign",
   );
+
+  // Restore Driver authority and location only after all canonical renewals
+  // and readiness checks. Candidates and assignment need the fresh heartbeat.
+  await ports.rebindDriverSession(target.driverId);
+  await ports.sendInitialDriverHeartbeat();
 
   const postCandidates = await ports.readPostRenewalCandidates();
   const renewedOwnCandidate = postCandidates.find(
@@ -1690,6 +1693,7 @@ export async function runR14StageBRenewalLifecycle(
       vehicleBlockedReasons: vehicleBlockedBefore,
       vehicleReadinessReasons: vehicleReadinessReasonsBefore,
       absentFromNormalDispatchCandidates: true,
+      driverAuthRefusal: "DRIVER_CERT_INVALID",
       dispatchJobId: ports.dispatchJobId,
       orderId: ports.orderId,
     },
@@ -1709,6 +1713,8 @@ export async function runR14StageBRenewalLifecycle(
       vehicleDispatchEligible: true,
       dispatchJobStatusBeforeAssign: dispatchState.jobStatus,
       presentInNormalDispatchCandidates: true,
+      driverSessionRestored: true,
+      initialHeartbeatAccepted: true,
     },
   };
 }
