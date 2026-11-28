@@ -20,9 +20,9 @@ import {
 } from "./totp.service";
 
 /**
- * Freshness window for the recovery-code regeneration action. Regenerating
- * hands the caller a brand-new set of 10 single-use codes that can each log
- * in past TOTP on their own, so -- like the privileged actions gated by
+ * Freshness window for recovery-code regeneration and for re-enrolling over a
+ * confirmed credential. Regenerating hands the caller a brand-new set of 10
+ * single-use codes that can each log in past TOTP on their own, so -- like the privileged actions gated by
  * StepUpProofService (common/auth/step-up.policy.ts) -- it requires the
  * session's own trusted-MFA assertion (`hasTrustedMfa`, the single source of
  * truth shared with the login and step-up gates) to be both genuinely
@@ -33,8 +33,8 @@ const RECOVERY_CODE_REGENERATE_FRESHNESS_MS = 15 * 60 * 1000;
 
 /**
  * Requires that this session's own authentication (never a request-body
- * claim) included a trusted MFA factor and that it happened recently. Used
- * only for the recovery-code regeneration action below.
+ * claim) included a trusted MFA factor and that it happened recently. Used by
+ * recovery-code regeneration and by enroll over a confirmed credential.
  */
 function requireFreshTrustedMfa(
   identity: BootstrapRequestIdentity | null,
@@ -112,6 +112,14 @@ export class TotpController {
     const realm = requireSupportedRealm(realmParam);
     const principalId = requireMatchingPrincipal(identity, realm);
     validateCsrfHeader(headers);
+
+    // Enrolling replaces the secret and clears its confirmation, so the next
+    // login would need the password alone. Over a confirmed credential that is
+    // a second-factor removal and needs the second factor itself. First-time
+    // setup and the lost-device path (a recovery-code login deletes the
+    // credential first) have nothing confirmed and stay open.
+    if (await this.totpService.hasConfirmedCredential(principalId))
+      requireFreshTrustedMfa(identity);
 
     const accountLabel = `${realm}:${identity?.subject ?? principalId}`;
     const enrollment = await this.totpService.enroll(principalId, accountLabel);

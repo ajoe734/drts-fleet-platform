@@ -739,6 +739,42 @@
         "Existing snapshots and ordinary quote inserts retain SQL NULL when no service selection was supplied; the migration does not fabricate an accessible requirement, backfill fares, change fare versions or rewrite stored quote facts.",
         "The nullable JSONB column stores the optional service selection bound to the owned snapshot; eligibility, dispatch and selection validation remain the existing production application responsibilities, not new constraints claimed by this allocation."
       ]
+    },
+    {
+      "task_id": "PAX-FIRST-PARTY-BOOKING-NOTIFICATION-DELIVERY-20261123",
+      "version": "V0143",
+      "migration_filename": "V0143__first_party_passenger_notification_delivery.sql",
+      "domain": "passenger_first_party_notification_delivery",
+      "target_schema": "mobility",
+      "primary_tables": [
+        "mobility.phase1_first_party_notification_sequences"
+      ],
+      "modifies_existing_tables": [
+        "mobility.phase1_first_party_notification_delivery_contexts"
+      ],
+      "referenced_tables": [
+        "mobility.phase1_order_first_party_notification_routes",
+        "iam.phase1_passenger_push_devices"
+      ],
+      "description": "Forward ALTER tenant_id DROP NOT NULL on the existing first-party notification delivery context so direct passenger bookings (no tenant) keep their frozen route snapshot, matching the nullable route tenant from V0116, and adds the per-order first-party event counter that V0104's partner-only sequence FK cannot hold.",
+      "table_invariants": [
+        "Existing delivery-context rows and columns are preserved; only the tenant_id NOT NULL constraint is relaxed, as V0116 already did for mobility.phase1_order_first_party_notification_routes.",
+        "mobility.phase1_first_party_notification_sequences has order_id as PK and FK to mobility.phase1_order_first_party_notification_routes, next_sequence >= 1; allocation is one atomic statement shared with the V0104 partner counter, and an order holding a partner counter never allocates here."
+      ]
+    },
+    {
+      "task_id": "PAX-RATING-CANONICAL-TRIP-LOOKUP-20261123",
+      "version": "V0144",
+      "migration_filename": "V0144__driver_task_order_lookup_index.sql",
+      "domain": "driver_task_order_lookup",
+      "target_schema": "ops",
+      "primary_tables": [],
+      "modifies_existing_tables": ["ops.phase1_driver_tasks"],
+      "referenced_tables": [],
+      "description": "Adds a non-unique (order_id, status) index to the existing V0011 driver task table so rating search, detail and readback resolve an order's completed task without scanning every task row.",
+      "table_invariants": [
+        "CREATE INDEX IF NOT EXISTS only; no column, constraint or row of ops.phase1_driver_tasks changes."
+      ]
     }
   ],
   "fleet_statement_decision_allocations": [

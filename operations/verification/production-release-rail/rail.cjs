@@ -595,13 +595,33 @@ function buildPlan(vars, sha, tag, deployer) {
   )
     reject("PROD_AUTH_ALLOWED_ORIGINS (all active browser origins)");
   apiEnv.AUTH_ALLOWED_ORIGINS = origins.join(",");
+  const tenantOrigin = services.find(
+    (service) => service.id === "tenant-console-web",
+  ).origin;
+  const fleetOrigin = services.find(
+    (service) => service.id === "fleet-partner-portal-web",
+  ).origin;
   const agencyOrigin = services.find(
     (service) => service.id === "agency-portal-web",
   ).origin;
+  apiEnv.TENANT_INVITATION_ACCEPT_URL_BASE = `${tenantOrigin}/invite`;
+  apiEnv.FLEET_INVITATION_ACCEPT_URL_BASE = `${fleetOrigin}/invite`;
   apiEnv.AGENCY_INVITATION_ACCEPT_URL_BASE = `${agencyOrigin}/invite`;
   const migrationJob = need("PROD_GCP_MIGRATION_JOB");
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(migrationJob))
     reject("PROD_GCP_MIGRATION_JOB");
+  if (
+    apiEnv.PSP_PROVIDER?.trim() === "ecpay" &&
+    apiEnv.PSP_SANDBOX?.trim() === "false"
+  ) {
+    const passengerOrigin = services.find(
+      (service) => service.id === "passenger-app-web",
+    ).origin;
+    if (!apiEnv.PSP_RETURN_URL?.trim())
+      apiEnv.PSP_RETURN_URL = `${passengerOrigin}/api/passenger-app/payment-methods/ecpay/callback`;
+    if (!apiEnv.PSP_ORDER_RESULT_URL?.trim())
+      apiEnv.PSP_ORDER_RESULT_URL = `${passengerOrigin}/api/passenger-app/payment-methods/ecpay/order-result`;
+  }
   return {
     schema: 1,
     sha,

@@ -11,6 +11,10 @@ import {
 } from "../../../../components/auth/ui";
 import { ConsentGate } from "../../../../components/auth/consent-gate";
 import { PassengerApiError } from "@drts/passenger-client";
+import {
+  buildNativePassengerOAuthReturnUrl,
+  redirectToNativePassengerApp,
+} from "../../native-oauth-return";
 
 function OAuthCallbackContent() {
   const router = useRouter();
@@ -22,10 +26,19 @@ function OAuthCallbackContent() {
   const [pending, setPending] = useState(true);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const nativeReturnUrl = buildNativePassengerOAuthReturnUrl(
+    params.provider,
+    search,
+  );
   const accepted = useCallback(() => router.push("/"), [router]);
   useEffect(() => {
     if (processed.current) return;
     processed.current = true;
+    if (nativeReturnUrl) {
+      redirectToNativePassengerApp(nativeReturnUrl);
+      setPending(false);
+      return;
+    }
     const provider = params.provider;
     const state = search.get("state");
     if (
@@ -65,7 +78,37 @@ function OAuthCallbackContent() {
         );
       })
       .finally(() => setPending(false));
-  }, [client, params.provider, router, search]);
+  }, [client, nativeReturnUrl, params.provider, router, search]);
+  if (nativeReturnUrl)
+    return (
+      <AuthScreen title={t("oauth")}>
+        <div
+          role="status"
+          data-testid="native-oauth-return-status"
+          style={{ color: P5.mut, margin: "auto 0", textAlign: "center" }}
+        >
+          {search.get("error") === "access_denied"
+            ? t("denied")
+            : t("oauthProcessing")}
+        </div>
+        <a
+          href={nativeReturnUrl}
+          data-testid="native-oauth-return-link"
+          style={{
+            display: "block",
+            textAlign: "center",
+            padding: "12px 16px",
+            borderRadius: 12,
+            background: P5.brand,
+            color: "#fff",
+            fontWeight: 700,
+            textDecoration: "none",
+          }}
+        >
+          {t("returnToPassengerApp")}
+        </a>
+      </AuthScreen>
+    );
   if (consent)
     return (
       <ConsentGate

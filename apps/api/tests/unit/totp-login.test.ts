@@ -215,6 +215,95 @@ describe("TotpService recovery codes", () => {
   });
 });
 
+describe("POST /api/auth/:realm/mfa/totp/enroll", () => {
+  const realms = ["tenant", "agency", "partner"] as const;
+
+  it.each(realms)(
+    "allows first-time setup and restart of an unfinished setup with a password-only %s session",
+    async (realm) => {
+      const controller = new TotpController(
+        new TotpService(new TotpCredentialRepository()),
+      );
+      const identity = buildIdentity(freshPrincipalId(), {
+        realm,
+        amr: ["pwd"],
+      });
+
+      const first = await controller.enroll(realm, identity, {});
+      const restarted = await controller.enroll(realm, identity, {});
+      expect(first.data.secret).not.toBe(restarted.data.secret);
+    },
+  );
+
+  it.each(realms)(
+    "keeps the confirmed second factor when a password-only or stale %s session tries to replace it",
+    async (realm) => {
+      const repository = new TotpCredentialRepository();
+      const svc = new TotpService(repository);
+      const controller = new TotpController(svc);
+      const principalId = freshPrincipalId();
+      const { recoveryCodes } = await enrollAndConfirm(svc, principalId);
+      const before = await repository.findCredential(principalId);
+
+      await expectApiError(
+        controller.enroll(
+          realm,
+          buildIdentity(principalId, { realm, amr: ["pwd"] }),
+          {},
+        ),
+        403,
+        "MFA_REQUIRED",
+      );
+      await expectApiError(
+        controller.enroll(
+          realm,
+          buildIdentity(principalId, {
+            realm,
+            authTime: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+          }),
+          {},
+        ),
+        403,
+        "STEP_UP_REQUIRED",
+      );
+
+      expect(await repository.findCredential(principalId)).toEqual(before);
+      await expect(
+        svc.verifyRecoveryCode(principalId, recoveryCodes[0]!),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it("replaces the confirmed second factor from a fresh trusted-MFA session", async () => {
+    const svc = new TotpService(new TotpCredentialRepository());
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    const { secret } = await enrollAndConfirm(svc, principalId);
+
+    const replaced = await controller.enroll(
+      "tenant",
+      buildIdentity(principalId),
+      {},
+    );
+    expect(replaced.data.secret).not.toBe(secret);
+  });
+
+  it("lets a lost-device user set up again after a recovery-code login", async () => {
+    const svc = new TotpService(new TotpCredentialRepository());
+    const controller = new TotpController(svc);
+    const principalId = freshPrincipalId();
+    const { recoveryCodes } = await enrollAndConfirm(svc, principalId);
+    await svc.verifyRecoveryCode(principalId, recoveryCodes[0]!);
+
+    const enrolled = await controller.enroll(
+      "tenant",
+      buildIdentity(principalId, { amr: ["pwd"] }),
+      {},
+    );
+    expect(enrolled.data.secret.length).toBeGreaterThan(0);
+  });
+});
+
 describe("POST /api/auth/:realm/mfa/totp/recovery-codes/regenerate", () => {
   it("returns a fresh set of 10 codes for a confirmed, freshly-MFA'd session and invalidates the old set", async () => {
     const repository = new TotpCredentialRepository();

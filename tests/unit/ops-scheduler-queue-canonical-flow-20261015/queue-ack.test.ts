@@ -405,6 +405,9 @@ describe("original OpsQueue canonical commands", () => {
         const records = await presence.listForDriver("driver-a");
         records[0]!.lastHeartbeatAt = "2020-01-01T00:00:00.000Z";
       }
+      // Only a bound platform account can report the driver offline or
+      // stale; nothing in the product writes one yet, so set it here.
+      (await presence.listForDriver("driver-a"))[0]!.accountId = "uber-a";
       expect(
         (await service.getQueueEntry(entry.queueEntryId)).eligibility,
       ).toMatchObject({

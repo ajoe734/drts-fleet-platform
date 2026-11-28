@@ -6,20 +6,16 @@ export const driverRouteTitles = {
   jobs: "任務收件匣",
   trip: "行程作業台",
   sos: "安全求援",
-  incident: "SOS 緊急通報",
   earnings: "收益儀表板",
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
-  leave: "請假",
   academy: "學院",
-  safetyOperator: "安全員模式",
 } as const;
 
 export const driverWorkforceStrings = {
   sectionTitle: "出勤與學習",
-  sectionDescription: "管理請假、課程與接單所需的訓練。",
-  leaveDetail: "申請請假、查看審核與撤回申請",
+  sectionDescription: "查看課程與接單所需的訓練。",
   academyDetail: "查看課程、完成學習與確認訓練資格",
 } as const;
 
@@ -82,20 +78,32 @@ export const driverIncidentSituations = [
 export const driverActivationSteps = [
   {
     title: "裝置註冊",
-    description: "產生車隊識別碼",
+    description: "輸入車隊給的註冊碼",
     state: "active",
   },
   {
-    title: "駕駛身份驗證",
-    description: "綁定駕駛帳號",
+    title: "身份確認",
+    description: "確認這支手機登入您的司機帳號",
     state: "pending",
   },
   {
-    title: "平台帳號連線",
-    description: "外部平台待綁定",
+    title: "上班打卡",
+    description: "打卡後就能接車隊派單",
     state: "pending",
   },
 ] as const;
+
+// Taiwan has no daylight saving time, so UTC+8 is always local time.
+export function getTaipeiGreeting(now: Date = new Date()): string {
+  const hour = (now.getUTCHours() + 8) % 24;
+  if (hour >= 4 && hour < 11) {
+    return "早安";
+  }
+  if (hour >= 11 && hour < 18) {
+    return "午安";
+  }
+  return "晚安";
+}
 
 export const driverSaveStatusLabels = {
   saving: { label: "儲存中…", variant: "info" },
@@ -121,12 +129,11 @@ export const driverStrings = {
     registrationCodeLabel: "註冊代碼",
     registrationCodePlaceholder: "請輸入註冊代碼",
     deviceNameLabel: "裝置名稱",
-    deviceNamePlaceholder: "例如：Driver Pixel 01",
+    deviceNamePlaceholder: "例如：我的手機",
     registerDevice: "註冊此裝置",
     registerDeviceLoading: "配置中…",
     provisioningWarning:
       "未啟用裝置無法接收派單。請使用車隊發放的代碼，避免使用個人帳號註冊。",
-    workspaceGreetingEyebrow: "早安，司機",
     workspaceGreetingTitle: "工作台",
     platformSectionEyebrow: "平台連線",
     platformSectionTitle: "平台就緒狀態",
@@ -142,7 +149,7 @@ export const driverStrings = {
     },
     quickLinkHelpers: {
       trip: "目前行程",
-      platform: "平台健康中心",
+      platform: "平台接單狀態",
       shift: "班次與出勤",
       earnings: "今日收益",
       settings: "帳號與綁定",
@@ -178,7 +185,7 @@ export const driverStrings = {
       in_progress: "進行中",
       blocked: "需派車台處理",
       completed: "已完成",
-      read_only: "唯讀鏡像",
+      read_only: "僅供查看",
     },
   },
   trip: {
@@ -202,8 +209,8 @@ export const driverStrings = {
       claimNumber: "理賠案件編號",
       claimantName: "代步使用人",
       replacementVehicleClass: "代步車型",
-      replacementStart: "代步起始（UTC）",
-      replacementEnd: "代步結束（UTC）",
+      replacementStart: "代步起始",
+      replacementEnd: "代步結束",
       caseHandler: "案件聯絡人",
     },
     actualFare: {
@@ -235,45 +242,26 @@ export const driverStrings = {
       completionProof: "完單佐證",
     },
   },
-  incident: {
-    title: "安全求援",
-    subtitle: "開啟頁面後長按 2 秒送出，會同步通知派車台與安全主管",
-    loadingTitle: "準備中",
-    disabledTitle: "未啟用",
-    urgentTitle: "高風險",
-    heroEyebrow: "司機安全",
-    heroTitle: "緊急求援",
-    sections: {
-      situation: "情況",
-      context: "當前訂單情境",
-      details: "補充說明",
-      review: "送出前確認",
-    },
-    orderContextForwarded: "外部訂單",
-    orderContextOwned: "一般安全事件",
-    primaryAction: "開啟 SOS 緊急通報",
-    cancelAction: "取消",
-    confirmAction: "長按 2 秒送出",
-  },
   platformPresence: {
     title: "平台連線",
     subtitle: "檢查可接單平台狀態",
-    managedByDrts: "自營派單",
+    managedByDrts: "車隊派單",
     external: "外部",
-    owned: "自營",
+    // Nothing in the product binds an external platform account yet.
+    noInAppBinding:
+      "目前無法在 App 內綁定外部平台。車隊派單不用綁定，上班打卡後就能接單。",
     kpis: {
       available: "可接單",
       online: "上線中",
       attention: "需動作",
     },
-    notesTitle: "同步說明",
     sectionTitle: "逐平台狀態",
-    bindAction: "管理綁定",
   },
   earnings: {
     title: "收入",
     loadingSubtitle: "載入收益資料中",
     periodEyebrow: "結算期間",
+    emptyPeriod: "這段期間還沒有收入。",
     metrics: {
       gross: "毛收",
       serviceFee: "平台抽成",
@@ -281,8 +269,10 @@ export const driverStrings = {
       pendingPayout: "待撥款",
     },
     sections: {
-      drtsRecon: "DRTS 對帳與撥款",
-      financeAuthority: "外部平台財務主導",
+      ownedSettlement: "車隊結算",
+      platformSettlement: "平台入帳",
+      referenceOnly: "僅供參考",
+      platformNote: "其他平台金額僅供參考，以該平台入帳為準。",
       platformBreakdown: "平台分項",
       monthlyStatements: "月結報表",
     },
@@ -298,7 +288,7 @@ export const driverStrings = {
       listError: "月結報表讀取失敗，其他收益資料仍可查看。",
       listRetry: "重新載入月結報表",
       receipt: "收據號碼",
-      feePlan: "費率方案版本",
+      order: "訂單",
       gross: "毛收",
       fee: "平台抽成",
       subsidy: "補貼",
@@ -315,9 +305,6 @@ export const driverStrings = {
   },
   shift: {
     title: "班次",
-    summaryTitle: "今日總結",
-    readinessTitle: "班次準備",
-    statusLabel: "班次狀態",
     punchIn: "上線打卡",
     punchOut: "下線打卡",
   },
@@ -358,17 +345,10 @@ export const driverStrings = {
       editRoute: "編輯路線",
     },
     platformTaskBadge: {
-      ownedTitle: "自營派單 · DRTS",
+      ownedTitle: "車隊派單",
       ownedAuthority: "本地可操作",
       forwardedTitlePrefix: "平台主導 · ",
       forwardedAuthority: "來源平台規則生效",
-    },
-    earningsByPlatform: {
-      emptyTitle: "這段期間還沒有平台收益",
-      emptyDescription: "切換到其他期間，或稍後再查看最新對帳彙整。",
-      gross: "毛收",
-      serviceFee: "抽成",
-      subsidy: "補助",
     },
   },
 } as const;
@@ -384,38 +364,33 @@ export const driverAuthStrings = {
     session_expired: {
       title: "裝置憑證已過期",
       badge: "憑證失效",
-      description:
-        "此裝置的司機連線授權已過期，請重新輸入註冊代碼進行重新綁定。",
+      description: "登入已過期。請向車隊拿新的註冊碼，重新綁定這支手機。",
       action: "重新綁定裝置",
     },
     device_revoked: {
       title: "裝置綁定已撤銷",
       badge: "憑證撤銷",
       description:
-        "此裝置的司機綁定已遭遠端撤銷或偵測到憑證重複使用。未同步的離線完單佐證已妥善保存，請重新註冊綁定。",
+        "這支手機已被登出。請向車隊拿新的註冊碼，未上傳的完單照片不會遺失。",
       action: "重新註冊裝置",
     },
     driver_suspended: {
       title: "司機帳號已被停權",
       badge: "帳號停權",
       description:
-        "此司機帳號目前處於停權或證件審查無效狀態，暫時無法接單與使用工作台。請聯絡平台管理員。",
+        "您的司機帳號目前停權或證件審核未通過，暫時無法接單。請聯絡車隊。",
       action: "聯絡車隊管理員",
     },
   },
   devices: {
     title: "裝置與身份綁定",
-    subtitle: "管理目前裝置的登入與綁定狀態",
-    activeDevice: "目前綁定裝置",
-    deviceIdLabel: "裝置識別碼",
-    bindingIdLabel: "綁定識別碼",
-    driverIdLabel: "司機帳號",
+    subtitle: "登出後，要用車隊給的新註冊碼才能再登入。",
     statusLabel: "綁定狀態",
     issuedAtLabel: "核發時間",
     rebindAction: "重新綁定裝置",
     revokeAction: "登出並撤銷裝置",
     rebindModalTitle: "重新綁定裝置",
     rebindModalDesc: "請輸入車隊發放的新註冊代碼，以更換裝置連線憑證。",
-    offlineProofNotice: "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。",
+    offlineProofNotice: "登出不會刪除還沒上傳的完單照片。",
   },
 } as const;

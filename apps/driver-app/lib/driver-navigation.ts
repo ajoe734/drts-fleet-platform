@@ -20,21 +20,24 @@ export type DriverNavigationStop = {
   address: string;
   coordinate: DriverNavigationCoordinate | null;
   coordinateLabel: string;
-  geocodeProvider: string | null;
-  coordinateSource: string | null;
-  coordinateAccuracyM: number | null;
 };
 
 export type DriverRouteAuthorityKind = "drts_owned" | "forwarded_platform";
 
 export type DriverRouteAuthorityCopy = {
   kind: DriverRouteAuthorityKind;
-  title: string;
-  badge: string;
-  description: string;
   locked: boolean;
-  degradedHint: string | null;
+  /** One plain line for the driver; null when there is nothing to say. */
+  notice: string | null;
 };
+
+/** Shown on a stop card and in the alert when a stop cannot be navigated. */
+export const DRIVER_MISSING_COORDINATE_COPY =
+  "這個地點沒有座標，請聯絡派車台。";
+
+/** Shown on forwarded trips: the source platform decides the route. */
+export const DRIVER_FORWARDED_ROUTE_COPY =
+  "此單路線由平台決定，要改路線請先聯絡派車台。";
 
 export type DriverTripNavigationModel = {
   stops: Record<DriverNavigationTarget, DriverNavigationStop>;
@@ -87,7 +90,6 @@ export type DriverLocationFixState = {
   state: "fresh" | "stale" | "missing" | "stopped";
   label: string;
   detail: string;
-  coordinateLabel: string | null;
 };
 
 const DEFAULT_STALE_FIX_MS = 60_000;
@@ -259,7 +261,10 @@ export function buildDriverNavigationCandidates({
       {
         provider,
         label: "Google Maps app",
-        url: buildGoogleMapsAppNavigationUrl(coordinate),
+        url:
+          platform === "android"
+            ? buildAndroidGoogleNavigationUrl(coordinate)
+            : buildGoogleMapsAppNavigationUrl(coordinate),
         requiresCanOpen: true,
         fallback: false,
       },
@@ -324,7 +329,7 @@ export async function openDriverNavigation({
     return {
       status: "missing_coordinates",
       provider,
-      message: `${stop.label} 缺少有效座標，已停用座標導航交接。`,
+      message: DRIVER_MISSING_COORDINATE_COPY,
     };
   }
 
@@ -357,7 +362,8 @@ export async function openDriverNavigation({
   return {
     status: "unavailable",
     provider,
-    message: "無法開啟外部導航。請手動輸入畫面座標，或聯絡派車台協助導航。",
+    message:
+      "無法開啟導航 App，請把畫面上的座標輸入地圖 App，或聯絡派車台協助。",
     attemptedUrls,
   };
 }
@@ -376,9 +382,6 @@ function buildStop(
       (target === "pickup" ? "待確認上車點" : "待確認下車點"),
     coordinate,
     coordinateLabel: formatDriverCoordinate(coordinate),
-    geocodeProvider: address?.geocodeProvider ?? null,
-    coordinateSource: address?.coordinateSource ?? null,
-    coordinateAccuracyM: address?.coordinateAccuracyM ?? null,
   };
 }
 
@@ -386,47 +389,19 @@ function readOptionalBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-function readOptionalString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
 export function getDriverRouteAuthorityCopy(
   task: DriverTaskRecord | null,
 ): DriverRouteAuthorityCopy {
   if (!task?.sourcePlatform) {
-    return {
-      kind: "drts_owned",
-      title: "DRTS-owned route",
-      badge: "DRTS 可派遣調整",
-      description:
-        "DRTS owns this route. Pickup/dropoff coordinates come from the DRTS order snapshot, and dispatch may update the route under DRTS rules.",
-      locked: false,
-      degradedHint: null,
-    };
+    return { kind: "drts_owned", locked: false, notice: null };
   }
-
-  const routeProvided = readOptionalBoolean(task.routeProvided);
-  const routeLocked =
-    readOptionalBoolean((task as { routeLocked?: unknown }).routeLocked) ??
-    true;
-  const routeIntent =
-    readOptionalString((task as { routeIntent?: unknown }).routeIntent) ??
-    readOptionalString(
-      (task as { platformRouteIntent?: unknown }).platformRouteIntent,
-    );
 
   return {
     kind: "forwarded_platform",
-    title: "Forwarded route - source platform authority",
-    badge: routeLocked ? "來源平台路線鎖定" : "來源平台路線",
-    description: routeIntent
-      ? `DRTS forwards this route from ${task.sourcePlatform}; source platform route intent: ${routeIntent}. Do not imply local route edit authority.`
-      : `DRTS forwards this route from ${task.sourcePlatform}. The source platform owns route authority; DRTS displays the last synced pickup/dropoff coordinates only.`,
-    locked: routeLocked,
-    degradedHint:
-      routeProvided === false
-        ? "來源平台未提供完整路線 polyline；司機端只顯示最後同步的上下車座標，改路線需聯絡派車台或來源平台。"
-        : null,
+    locked:
+      readOptionalBoolean((task as { routeLocked?: unknown }).routeLocked) ??
+      true,
+    notice: DRIVER_FORWARDED_ROUTE_COPY,
   };
 }
 
@@ -465,17 +440,10 @@ export function getDriverLocationFixState({
   staleAfterMs?: number;
 }): DriverLocationFixState {
   if (task && DRIVER_TASK_TRANSITIONS[task.status].length === 0) {
-    const coordinateLabel =
-      location && isValidDriverCoordinate(location)
-        ? formatDriverCoordinate(location)
-        : null;
     return {
       state: "stopped",
       label: "本任務定位已停止",
-      detail: coordinateLabel
-        ? "任務已結束；保留的最後已知座標僅供查閱，不代表目前位置。"
-        : "任務已結束，沒有可顯示的最後定位。",
-      coordinateLabel,
+      detail: "任務已結束，不再回報你的位置。",
     };
   }
 
@@ -483,8 +451,7 @@ export function getDriverLocationFixState({
     return {
       state: "missing",
       label: "GPS 尚未回報",
-      detail: "目前沒有可顯示的司機座標；heartbeat 仍會在權限允許時繼續嘗試。",
-      coordinateLabel: null,
+      detail: "還沒收到你的位置；開啟定位權限後會自動更新。",
     };
   }
 
@@ -498,7 +465,7 @@ export function getDriverLocationFixState({
     : null;
   const accuracy =
     typeof location.accuracyM === "number"
-      ? `；精度約 ${Math.round(location.accuracyM)}m`
+      ? `；誤差約 ${Math.round(location.accuracyM)} 公尺`
       : "";
 
   return {
@@ -506,9 +473,8 @@ export function getDriverLocationFixState({
     label: stale ? "GPS 可能過期" : "GPS 即時回報",
     detail:
       ageSeconds == null
-        ? `定位時間無法解析${accuracy}。`
+        ? `定位時間無法判讀${accuracy}。`
         : `最後定位 ${ageSeconds} 秒前${accuracy}。`,
-    coordinateLabel: formatDriverCoordinate(location),
   };
 }
 
@@ -595,8 +561,6 @@ export const DRIVER_ROUTE_TAB_MAP: Record<string, DriverTabKey> = {
   earnings: "settings",
   shift: "workbench",
   sos: "trip",
-  incident: "trip",
-  "safety-operator": "settings",
 };
 
 export function resolveActiveDriverTab(

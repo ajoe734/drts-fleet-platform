@@ -333,20 +333,43 @@ function prepareEphemeralEasProject(tempDir, config, repoRoot) {
   return projectDir;
 }
 
-function redactAndClassifyCliError(stderr, exitCode = 1) {
-  const text = typeof stderr === "string" ? stderr : String(stderr || "");
-  const stderrSha256 = sha256Hex(text);
+function redactAndClassifyCliError(stderr, exitCode = 1, stdout = "") {
+  const stderrText =
+    typeof stderr === "string"
+      ? stderr
+      : Buffer.isBuffer(stderr)
+        ? stderr.toString("utf8")
+        : String(stderr || "");
+  const stdoutText =
+    typeof stdout === "string"
+      ? stdout
+      : Buffer.isBuffer(stdout)
+        ? stdout.toString("utf8")
+        : String(stdout || "");
+  const stderrSha256 = sha256Hex(stderrText);
+  const combinedText = stdoutText ? `${stderrText}\n${stdoutText}` : stderrText;
   const markers = [];
-  if (/Entity Not Authorized|UNAUTHORIZED_ERROR|not authorized/i.test(text)) {
+  if (
+    /Entity Not Authorized|UNAUTHORIZED_ERROR|not authorized/i.test(
+      combinedText,
+    )
+  ) {
     markers.push("ENTITY_NOT_AUTHORIZED");
   }
-  if (/GraphQL request failed/i.test(text)) {
+  if (/GraphQL request failed/i.test(combinedText)) {
     markers.push("GRAPHQL_REQUEST_FAILED");
   }
-  if (/Invalid token|Authentication|not logged in|401|403/i.test(text)) {
+  if (
+    /Invalid token|Authentication|not logged in|401|403/i.test(combinedText) ||
+    /Either log in with .*eas login.* or set the .*EXPO_TOKEN.* environment variable/i.test(
+      combinedText,
+    )
+  ) {
     markers.push("AUTHENTICATION_ERROR");
   }
-  if (/Couldn't find any builds|Build not found|NOT_FOUND/i.test(text)) {
+  if (
+    /Couldn't find any builds|Build not found|NOT_FOUND/i.test(combinedText)
+  ) {
     markers.push("BUILD_NOT_FOUND");
   }
 
@@ -738,8 +761,36 @@ async function downloadAndInspectArtifact(
   }
 }
 
-function defaultEasBuildViewRunner(buildId, projectDir, env) {
-  const stdout = execFileSync(
+function parseEasBuildViewJsonStdout(stdout) {
+  const raw =
+    typeof stdout === "string"
+      ? stdout
+      : Buffer.isBuffer(stdout)
+        ? stdout.toString("utf8")
+        : String(stdout || "");
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    fail("EMPTY_EAS_BUILD_JSON", "eas build:view returned empty stdout");
+  }
+  if (trimmed.startsWith("{")) {
+    return JSON.parse(trimmed);
+  }
+  const lineStartIdx = trimmed.search(/^\s*\{/m);
+  if (lineStartIdx >= 0) {
+    const match = /^\s*\{/m.exec(trimmed.slice(lineStartIdx));
+    const braceOffset = match ? match[0].indexOf("{") : 0;
+    return JSON.parse(trimmed.slice(lineStartIdx + braceOffset));
+  }
+  const firstBraceIdx = trimmed.indexOf("{");
+  if (firstBraceIdx >= 0) {
+    return JSON.parse(trimmed.slice(firstBraceIdx));
+  }
+  return JSON.parse(trimmed);
+}
+
+function defaultEasBuildViewRunner(buildId, projectDir, env, options = {}) {
+  const execFn = options.execFileSync || execFileSync;
+  const stdout = execFn(
     "npx",
     ["--yes", `eas-cli@${LIMITS.cliVersion}`, "build:view", buildId, "--json"],
     {
@@ -747,6 +798,7 @@ function defaultEasBuildViewRunner(buildId, projectDir, env) {
       env: {
         ...env,
         EAS_NO_VCS: "1",
+        EAS_PROJECT_ROOT: projectDir,
         CI: "1",
         EXPO_NO_TELEMETRY: "1",
       },
@@ -755,7 +807,7 @@ function defaultEasBuildViewRunner(buildId, projectDir, env) {
       timeout: LIMITS.cliTimeoutMs,
     },
   );
-  return JSON.parse(stdout);
+  return parseEasBuildViewJsonStdout(stdout);
 }
 
 function assertRedactedReceipt(receipt, env = {}) {
@@ -832,8 +884,14 @@ async function lookupExistingBuilds(env, options = {}) {
             : Buffer.isBuffer(err?.stderr)
               ? err.stderr.toString("utf8")
               : err?.message || "";
+        const stdout =
+          typeof err?.stdout === "string"
+            ? err.stdout
+            : Buffer.isBuffer(err?.stdout)
+              ? err.stdout.toString("utf8")
+              : "";
         const exitCode = Number.isInteger(err?.status) ? err.status : 1;
-        const classified = redactAndClassifyCliError(stderr, exitCode);
+        const classified = redactAndClassifyCliError(stderr, exitCode, stdout);
         if (classified.isAuthorizationDenial) {
           authDenied = true;
         }
@@ -1079,6 +1137,8 @@ module.exports = {
   guardConfig,
   prepareEphemeralEasProject,
   redactAndClassifyCliError,
+  parseEasBuildViewJsonStdout,
+  defaultEasBuildViewRunner,
   sanitizeArtifactUrl,
   resolveGitSourceRelation,
   compareBuildViewMetadata,

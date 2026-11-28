@@ -22,6 +22,15 @@ export const PAY_T = {
   pending: "卡片綁定尚待確認，未收到完成結果；請勿重複綁定。",
   verify: "此卡片需要付款商的安全驗證，尚未完成綁定。",
   verifyLink: "前往付款商安全驗證",
+  returnToAppPaymentMethods: "返回 App 付款方式",
+  returnToAppToRetry:
+    "若使用手機 App，請點選「返回 App 付款方式」回到 App 確認或重試。",
+  returnToAppToRefresh:
+    "若使用手機 App，請點選「返回 App 付款方式」回到 App 重新查詢付款方式。",
+  verificationReturned:
+    "已收到綠界安全驗證回傳，請由下方信用卡清單確認此帳號的實際綁卡結果。",
+  verificationReturnedWithoutWebSession:
+    "已收到綠界安全驗證回傳；此瀏覽器無網頁登入狀態，請點選「返回 App 付款方式」回到 App 重新查詢同帳號的綁卡結果。",
   verifyUnavailable: "尚未設定核准的安全驗證網址，請聯絡客服。",
   fieldsUnavailable: "尚未設定可用的付款商刷卡元件，目前無法新增卡片。",
   fieldsPlaceholder: "PSP Hosted Fields 刷卡元件位置",

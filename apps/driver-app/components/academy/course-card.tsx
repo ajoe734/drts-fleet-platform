@@ -53,13 +53,10 @@ export function CourseCard({ course, onSelect }: CourseCardProps) {
 
   return (
     <Pressable
-      style={({ pressed }) => [
-        styles.card,
-        pressed && styles.cardPressed,
-      ]}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       onPress={() => onSelect(course)}
       accessibilityRole="button"
-      accessibilityLabel={`${course.title} ${course.courseCode}`}
+      accessibilityLabel={course.title}
     >
       <View style={styles.topRow}>
         <View style={styles.badgeRow}>
@@ -90,16 +87,11 @@ export function CourseCard({ course, onSelect }: CourseCardProps) {
       </View>
 
       <Text style={styles.title}>{course.title}</Text>
-      <Text style={styles.code}>代碼：{course.courseCode}</Text>
 
       <View style={styles.metaRow}>
-        <Text style={styles.metaText}>
-          {course.modulesCount} 單元教材
-        </Text>
+        <Text style={styles.metaText}>{course.modulesCount} 單元教材</Text>
         <Text style={styles.metaDot}>·</Text>
-        <Text style={styles.metaText}>
-          及格門檻：{course.passingScore} 分
-        </Text>
+        <Text style={styles.metaText}>及格門檻：{course.passingScore} 分</Text>
         {course.validityDays !== null && (
           <>
             <Text style={styles.metaDot}>·</Text>
@@ -176,10 +168,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: Tokens.colors.text,
-  },
-  code: {
-    fontSize: 12,
-    color: Tokens.colors.textDim,
   },
   metaRow: {
     flexDirection: "row",

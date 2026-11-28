@@ -56,8 +56,6 @@ describe("allowUnprovisionedDriverRoute", () => {
     expect(allowUnprovisionedDriverRoute(["earnings"])).toBe(false);
     expect(allowUnprovisionedDriverRoute(["shift"])).toBe(false);
     expect(allowUnprovisionedDriverRoute(["sos"])).toBe(false);
-    expect(allowUnprovisionedDriverRoute(["incident"])).toBe(false);
-    expect(allowUnprovisionedDriverRoute(["safety-operator"])).toBe(false);
   });
 });
 

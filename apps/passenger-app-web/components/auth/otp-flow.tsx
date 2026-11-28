@@ -14,7 +14,10 @@ import {
 } from "../../lib/auth/otp-state";
 import { t } from "../../lib/auth/translations";
 import { AuthScreen, AuthAlert, P5Btn, P5, inputStyle } from "./ui";
-import { useReviewDemo } from "../review-demo/review-context";
+import {
+  useReviewDemo,
+  useReviewDemoPending,
+} from "../review-demo/review-context";
 import { requestReviewLoginSms } from "../review-demo/login-sms";
 import { t as reviewText } from "../review-demo/translations";
 
@@ -36,6 +39,7 @@ export function OtpFlow({
   onSuccess: () => void;
 }) {
   const review = useReviewDemo();
+  const reviewPending = useReviewDemoPending();
   const key = otpKey(provider, purpose, subject);
   const [record, setRecord] = useState<OtpState | null>(() => readOtp(key));
   const [target, setTarget] = useState(
@@ -58,6 +62,12 @@ export function OtpFlow({
     };
   }, []);
   const normalized = normalizeTarget(provider, target);
+  const reviewTarget = normalized.replace(/^\+886/, "0");
+  const isRehearsalPhoneLogin =
+    provider === "phone" &&
+    purpose === "login" &&
+    /^09000000[0-9]{2}$/.test(reviewTarget);
+  const waitingForSmsRoute = isRehearsalPhoneLogin && reviewPending;
   const current =
     record?.target === normalized &&
     record.subject === subject &&
@@ -90,6 +100,7 @@ export function OtpFlow({
   const request = async () => {
     if (
       pendingRef.current ||
+      waitingForSmsRoute ||
       !validTarget ||
       (current && current.resendAt > Date.now())
     )
@@ -100,15 +111,10 @@ export function OtpFlow({
     setSimulatedCode(undefined);
     try {
       await checkSubject();
-      const reviewTarget = normalized.replace(/^\+886/, "0");
-      const simulated =
-        review &&
-        provider === "phone" &&
-        purpose === "login" &&
-        /^09000000[0-9]{2}$/.test(reviewTarget);
-      const result = simulated
-        ? await requestReviewLoginSms(reviewTarget)
-        : await client.requestOtp({ target: normalized, provider, purpose });
+      const result =
+        review && isRehearsalPhoneLogin
+          ? await requestReviewLoginSms(reviewTarget)
+          : await client.requestOtp({ target: normalized, provider, purpose });
       if (!live.current) return;
       if (!result.success || !result.challenge)
         throw new Error("Invalid challenge");
@@ -243,7 +249,9 @@ export function OtpFlow({
           {error && <AuthAlert>{error}</AuthAlert>}
           <P5Btn
             kind="primary"
-            disabled={pending || !validTarget || countdown > 0}
+            disabled={
+              pending || waitingForSmsRoute || !validTarget || countdown > 0
+            }
             onClick={request}
           >
             {countdown > 0 ? `${t("resend")} (${countdown}s)` : t("request")}
@@ -324,7 +332,7 @@ export function OtpFlow({
           </div>
           <P5Btn
             kind="ghost"
-            disabled={pending || countdown > 0}
+            disabled={pending || waitingForSmsRoute || countdown > 0}
             onClick={request}
           >
             {countdown > 0 ? `${t("resend")} (${countdown}s)` : t("resend")}

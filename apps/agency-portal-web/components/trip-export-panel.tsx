@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgencyTripExportScope } from "@drts/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { displayStatusCode } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
@@ -22,17 +22,22 @@ async function call<T>(
   path: string,
   init?: { method: "POST"; body: unknown },
 ): Promise<{ ok: boolean; status: number; body: ApiEnvelope<T> | null }> {
-  const response = await fetch(`/api/agency/${path}`, {
-    method: init?.method ?? "GET",
-    credentials: "same-origin",
-    headers: init
-      ? {
-          "Content-Type": "application/json",
-          "x-csrf-token": readCookie("drts_agency_csrf") ?? "",
-        }
-      : {},
-    ...(init ? { body: JSON.stringify(init.body) } : {}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api/agency/${path}`, {
+      method: init?.method ?? "GET",
+      credentials: "same-origin",
+      headers: init
+        ? {
+            "Content-Type": "application/json",
+            "x-csrf-token": readCookie("drts_agency_csrf") ?? "",
+          }
+        : {},
+      ...(init ? { body: JSON.stringify(init.body) } : {}),
+    });
+  } catch {
+    return { ok: false, status: 0, body: null };
+  }
   const body = (await response
     .json()
     .catch(() => null)) as ApiEnvelope<T> | null;
@@ -81,6 +86,49 @@ export function TripExportPanel({
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
+  const scopeVersionRef = useRef(0);
+  const previewReqVersionRef = useRef(0);
+  const jobVersionRef = useRef(0);
+  const statusReqVersionRef = useRef(0);
+  const downloadReqVersionRef = useRef(0);
+  const activeJobIdRef = useRef<string | null>(null);
+  // The page lists no jobs, so a create that fails must give the last shown
+  // job and its link back.
+  const lastJobRef = useRef<{
+    jobId: string;
+    jobStatus: string | null;
+    downloadUrl: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (jobId) lastJobRef.current = { jobId, jobStatus, downloadUrl };
+  }, [jobId, jobStatus, downloadUrl]);
+
+  const resetScopeDerivedState = () => {
+    scopeVersionRef.current += 1;
+    previewReqVersionRef.current += 1;
+    jobVersionRef.current += 1;
+    statusReqVersionRef.current += 1;
+    downloadReqVersionRef.current += 1;
+    activeJobIdRef.current = null;
+    lastJobRef.current = null;
+    setMessage(null);
+    setRecordCount(null);
+    setJobId(null);
+    setJobStatus(null);
+    setDownloadUrl(null);
+  };
+
+  const updateScopeField = (
+    currentValue: string,
+    setter: (value: string) => void,
+    nextValue: string,
+  ) => {
+    setter(nextValue);
+    if (nextValue.trim() !== currentValue.trim()) {
+      resetScopeDerivedState();
+    }
+  };
+
   const scope: AgencyTripExportScope = {
     ...(month.trim() ? { month: month.trim() } : {}),
     ...(reservedFrom.trim() ? { reservedFrom: reservedFrom.trim() } : {}),
@@ -118,7 +166,7 @@ export function TripExportPanel({
         {t("tripExports.month")}{" "}
         <input
           value={month}
-          onChange={(e) => setMonth(e.target.value)}
+          onChange={(e) => updateScopeField(month, setMonth, e.target.value)}
           placeholder="YYYY-MM"
         />
       </label>
@@ -127,7 +175,9 @@ export function TripExportPanel({
         <input
           type="date"
           value={reservedFrom}
-          onChange={(e) => setReservedFrom(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(reservedFrom, setReservedFrom, e.target.value)
+          }
         />
       </label>
       <label>
@@ -135,14 +185,18 @@ export function TripExportPanel({
         <input
           type="date"
           value={reservedTo}
-          onChange={(e) => setReservedTo(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(reservedTo, setReservedTo, e.target.value)
+          }
         />
       </label>
       <label>
         {t("tripRecords.filter.plateNo")}{" "}
         <input
           value={plateNo}
-          onChange={(e) => setPlateNo(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(plateNo, setPlateNo, e.target.value)
+          }
           placeholder={t("tripRecords.filter.plateNoPlaceholder")}
         />
       </label>
@@ -150,7 +204,9 @@ export function TripExportPanel({
         {t("tripRecords.filter.orderNo")}{" "}
         <input
           value={orderNo}
-          onChange={(e) => setOrderNo(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(orderNo, setOrderNo, e.target.value)
+          }
           placeholder={t("tripRecords.filter.orderNoPlaceholder")}
         />
       </label>
@@ -158,7 +214,9 @@ export function TripExportPanel({
         {t("tripRecords.filter.orderId")}{" "}
         <input
           value={orderId}
-          onChange={(e) => setOrderId(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(orderId, setOrderId, e.target.value)
+          }
           placeholder={t("tripRecords.filter.orderIdPlaceholder")}
         />
       </label>
@@ -166,7 +224,7 @@ export function TripExportPanel({
         {t("tripRecords.filter.tripId")}{" "}
         <input
           value={tripId}
-          onChange={(e) => setTripId(e.target.value)}
+          onChange={(e) => updateScopeField(tripId, setTripId, e.target.value)}
           placeholder={t("tripRecords.filter.tripIdPlaceholder")}
         />
       </label>
@@ -174,19 +232,36 @@ export function TripExportPanel({
         {t("tripRecords.filter.recordId")}{" "}
         <input
           value={recordId}
-          onChange={(e) => setRecordId(e.target.value)}
+          onChange={(e) =>
+            updateScopeField(recordId, setRecordId, e.target.value)
+          }
           placeholder="mtr-..."
         />
       </label>
       <button
         type="button"
         onClick={async () => {
+          const requestScopeVersion = scopeVersionRef.current;
+          const requestJobVersion = jobVersionRef.current;
+          const requestPreviewVersion = ++previewReqVersionRef.current;
           setMessage(null);
+          setRecordCount(null);
           const result = await call<{ record_count: number }>(
             "trip-records/export-jobs/preview",
             { method: "POST", body: { scope } },
           );
-          if (!result.ok) return fail(result.status, result.body);
+          if (
+            requestScopeVersion !== scopeVersionRef.current ||
+            requestPreviewVersion !== previewReqVersionRef.current
+          ) {
+            return;
+          }
+          if (!result.ok) {
+            // A preview error must not read as an error of a newer job.
+            if (requestJobVersion === jobVersionRef.current)
+              fail(result.status, result.body);
+            return;
+          }
           setRecordCount(result.body?.data?.record_count ?? null);
         }}
       >
@@ -208,7 +283,15 @@ export function TripExportPanel({
         type="button"
         disabled={!purpose.trim()}
         onClick={async () => {
+          const requestScopeVersion = scopeVersionRef.current;
+          const requestJobVersion = ++jobVersionRef.current;
+          statusReqVersionRef.current += 1;
+          downloadReqVersionRef.current += 1;
+          activeJobIdRef.current = null;
           setMessage(null);
+          setJobId(null);
+          setJobStatus(null);
+          setDownloadUrl(null);
           const result = await call<{ job_id: string; status: string }>(
             "trip-records/export-jobs",
             {
@@ -216,9 +299,25 @@ export function TripExportPanel({
               body: { scope, purpose, idempotencyKey: newIdempotencyKey() },
             },
           );
-          if (!result.ok) return fail(result.status, result.body);
-          setJobId(result.body?.data?.job_id ?? null);
-          setJobStatus(result.body?.data?.status ?? null);
+          if (
+            requestScopeVersion !== scopeVersionRef.current ||
+            requestJobVersion !== jobVersionRef.current
+          ) {
+            return;
+          }
+          if (!result.ok) {
+            const last = lastJobRef.current;
+            activeJobIdRef.current = last?.jobId ?? null;
+            setJobId(last?.jobId ?? null);
+            setJobStatus(last?.jobStatus ?? null);
+            setDownloadUrl(last?.downloadUrl ?? null);
+            return fail(result.status, result.body);
+          }
+          const nextJobId = result.body?.data?.job_id ?? null;
+          const nextJobStatus = result.body?.data?.status ?? null;
+          activeJobIdRef.current = nextJobId;
+          setJobId(nextJobId);
+          setJobStatus(nextJobStatus);
           setDownloadUrl(null);
         }}
       >
@@ -235,11 +334,29 @@ export function TripExportPanel({
           <button
             type="button"
             onClick={async () => {
+              const targetJobId = jobId;
+              const requestScopeVersion = scopeVersionRef.current;
+              const requestJobVersion = jobVersionRef.current;
+              const requestStatusVersion = ++statusReqVersionRef.current;
+              setMessage(null);
               const result = await call<{ status: string }>(
-                `trip-records/export-jobs/${encodeURIComponent(jobId)}`,
+                `trip-records/export-jobs/${encodeURIComponent(targetJobId)}`,
               );
+              if (
+                requestScopeVersion !== scopeVersionRef.current ||
+                requestJobVersion !== jobVersionRef.current ||
+                requestStatusVersion !== statusReqVersionRef.current ||
+                activeJobIdRef.current !== targetJobId
+              ) {
+                return;
+              }
               if (!result.ok) return fail(result.status, result.body);
-              setJobStatus(result.body?.data?.status ?? null);
+              const nextStatus = result.body?.data?.status ?? null;
+              setJobStatus(nextStatus);
+              if (nextStatus !== "completed") {
+                downloadReqVersionRef.current += 1;
+                setDownloadUrl(null);
+              }
             }}
           >
             {t("tripExports.refreshStatusBtn")}
@@ -248,12 +365,29 @@ export function TripExportPanel({
             type="button"
             disabled={jobStatus !== "completed"}
             onClick={async () => {
+              const targetJobId = jobId;
+              const requestScopeVersion = scopeVersionRef.current;
+              const requestJobVersion = jobVersionRef.current;
+              statusReqVersionRef.current += 1;
+              const requestDownloadVersion = ++downloadReqVersionRef.current;
+              setMessage(null);
               const result = await call<{
                 download: { download_url?: string };
               }>(
-                `trip-records/export-jobs/${encodeURIComponent(jobId)}/download`,
+                `trip-records/export-jobs/${encodeURIComponent(targetJobId)}/download`,
               );
-              if (!result.ok) return fail(result.status, result.body);
+              if (
+                requestScopeVersion !== scopeVersionRef.current ||
+                requestJobVersion !== jobVersionRef.current ||
+                requestDownloadVersion !== downloadReqVersionRef.current ||
+                activeJobIdRef.current !== targetJobId
+              ) {
+                return;
+              }
+              if (!result.ok) {
+                setDownloadUrl(null);
+                return fail(result.status, result.body);
+              }
               setDownloadUrl(result.body?.data?.download?.download_url ?? null);
             }}
           >

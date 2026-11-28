@@ -22,6 +22,12 @@ import { driverStrings } from "../../lib/strings";
 const theme = driverCanvasTheme;
 const copy = driverStrings.earnings.statement;
 
+// Drivers only need enough of an order reference to match a trip, never the
+// full internal ID.
+function formatOrderReference(orderId: string) {
+  return `${copy.order} #${orderId.slice(-6)}`;
+}
+
 export function DriverStatementRow({
   statement,
   last,
@@ -136,8 +142,7 @@ export function DriverStatementRow({
               { color: theme.textMuted, fontFamily: theme.fontFamily },
             ]}
           >
-            {current.lines.length} 趟 ·{" "}
-            {formatDriverPayoutStatusLabel(current.payoutStatus)}
+            {current.lines.length} 趟
           </Text>
           <Text
             style={[
@@ -145,8 +150,7 @@ export function DriverStatementRow({
               { color: theme.textDim, fontFamily: theme.fontFamily },
             ]}
           >
-            {copy.receipt}：{current.receiptNo} · {copy.feePlan}：
-            {current.feePlanVersion}
+            {copy.receipt}：{current.receiptNo}
           </Text>
         </View>
         <View style={styles.value}>
@@ -242,7 +246,7 @@ export function DriverStatementRow({
                         { color: theme.text, fontFamily: theme.monoFamily },
                       ]}
                     >
-                      {line.orderId}
+                      {formatOrderReference(line.orderId)}
                     </Text>
                     <Text style={styles.note}>
                       {copy.net}：{formatMoney(line.netAmount)}

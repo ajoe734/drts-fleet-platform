@@ -1,18 +1,12 @@
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
-import type {
-  AcademyCourseDetail,
-  QuizSubmissionAnswer,
-  QuizSubmissionCommand,
+import {
+  ACADEMY_NO_QUIZ_HINT,
+  type AcademyCourseDetail,
+  type QuizSubmissionAnswer,
+  type QuizSubmissionCommand,
 } from "./types";
 
 interface QuizRunnerProps {
@@ -59,9 +53,7 @@ export function QuizRunner({
 
   const handleSubmit = async () => {
     // Validate all questions are answered
-    const unansweredQuestions = questions.filter(
-      (q) => !answers[q.questionId],
-    );
+    const unansweredQuestions = questions.filter((q) => !answers[q.questionId]);
 
     if (unansweredQuestions.length > 0) {
       setValidationError(
@@ -84,7 +76,7 @@ export function QuizRunner({
   if (!currentQuestion) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>本課程目前無測驗題目</Text>
+        <Text style={styles.emptyText}>{ACADEMY_NO_QUIZ_HINT}</Text>
         <ActionButton title="返回" variant="secondary" onPress={onCancel} />
       </View>
     );
@@ -95,9 +87,6 @@ export function QuizRunner({
       {/* Quiz Header Card */}
       <View style={styles.headerCard}>
         <View style={styles.topRow}>
-          <Pressable onPress={onCancel} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>✕ 放棄測驗</Text>
-          </Pressable>
           <Text style={styles.progressText}>
             作答進度：{answeredCount} / {totalQuestions}
           </Text>
@@ -105,7 +94,7 @@ export function QuizRunner({
 
         <Text style={styles.courseTitle}>{course.title} · 結訓測驗</Text>
         <Text style={styles.passingRequirement}>
-          及格標準：{course.passingScore} 分 · 需答對相應題數以獲取完訓資格
+          及格分數：{course.passingScore} 分
         </Text>
 
         {/* Question jumper indicators */}
@@ -152,7 +141,6 @@ export function QuizRunner({
               第 {currentIndex + 1} 題
             </Text>
           </View>
-          <Text style={styles.questionIdText}>ID: {currentQuestion.questionId}</Text>
         </View>
 
         <Text style={styles.questionPrompt}>{currentQuestion.prompt}</Text>
@@ -220,15 +208,6 @@ export function QuizRunner({
           />
         )}
       </View>
-
-      {isSubmitting && (
-        <View style={styles.submittingIndicator}>
-          <ActivityIndicator color={Tokens.colors.brandHi} />
-          <Text style={styles.submittingText}>
-            正在將作答結果送交權威後端進行真實評分與記錄...
-          </Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -259,14 +238,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  cancelButton: {
-    paddingVertical: Tokens.spacing.xs,
-  },
-  cancelText: {
-    fontSize: 12,
-    color: Tokens.colors.danger,
-    fontWeight: "600",
   },
   progressText: {
     fontSize: 12,
@@ -356,11 +327,6 @@ const styles = StyleSheet.create({
     color: Tokens.colors.brandHi,
     fontWeight: "700",
   },
-  questionIdText: {
-    fontSize: 11,
-    fontFamily: Tokens.fonts.mono,
-    color: Tokens.colors.textDim,
-  },
   questionPrompt: {
     fontSize: 15,
     lineHeight: 22,
@@ -416,16 +382,5 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Tokens.spacing.md,
     marginTop: Tokens.spacing.sm,
-  },
-  submittingIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Tokens.spacing.sm,
-    padding: Tokens.spacing.md,
-  },
-  submittingText: {
-    fontSize: 12,
-    color: Tokens.colors.textMuted,
   },
 });

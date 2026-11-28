@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA452AD80000000000000001 /* DRTSDriverMapConfig.m in Sources */ = {isa = PBXBuildFile; fileRef = DA452AD80000000000000002 /* DRTSDriverMapConfig.m */; };
+		DA452AD80000000000000003 /* DRTSDriverGoogleMaps.txt in Resources */ = {isa = PBXBuildFile; fileRef = DA452AD80000000000000004 /* DRTSDriverGoogleMaps.txt */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
@@ -14,6 +16,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DA452AD80000000000000002 /* DRTSDriverMapConfig.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DRTSDriverMapConfig.m; path = DRTSDriverApp/DRTSDriverMapConfig.m; sourceTree = "<group>"; };
+		DA452AD80000000000000004 /* DRTSDriverGoogleMaps.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = DRTSDriverGoogleMaps.txt; path = Pods/DRTSDriverGoogleMaps.txt; sourceTree = SOURCE_ROOT; };
+		DA452AD80000000000000005 /* DRTSDriverMapConfig.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = DRTSDriverMapConfig.h; path = DRTSDriverApp/DRTSDriverMapConfig.h; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* DRTSDriverApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DRTSDriverApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DRTSDriverApp/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = DRTSDriverApp/Info.plist; sourceTree = "<group>"; };
@@ -39,6 +44,9 @@
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
+				DA452AD80000000000000002 /* DRTSDriverMapConfig.m */,
+				DA452AD80000000000000005 /* DRTSDriverMapConfig.h */,
+				DA452AD80000000000000004 /* DRTSDriverGoogleMaps.txt */,
 				F11748442D0722820044C1D9 /* DRTSDriverApp-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -153,6 +161,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
+				DA452AD80000000000000003 /* DRTSDriverGoogleMaps.txt in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 			);
@@ -230,6 +239,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
+				DA452AD80000000000000001 /* DRTSDriverMapConfig.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -130,44 +130,17 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
   });
 
   describe("Acceptance Criterion 2: DeviceId and BindingId overflow & user obtainability", () => {
-    it("verifies settings.tsx wraps device fields and marks DeviceId and BindingId selectable", () => {
+    // Superseded for Settings (DRIVER-PLATFORM-ONBOARDING-CLEANUP-20261126):
+    // drivers must not see internal identifiers, so the device, binding and
+    // driver ids that used to overflow there are no longer rendered at all.
+    it("verifies settings.tsx no longer shows device, binding or driver ids", () => {
       const source = readFileSync(join(APP_DIR, "app/settings.tsx"), "utf8");
 
-      // Verify style rules in settings.tsx
-      expect(source).toContain("deviceField: {");
-      expect(source).toMatch(/deviceField:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*flex:\s*1/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*minWidth:\s*160/);
-      expect(source).toMatch(/deviceFieldValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-
-      // Verify selectable prop on DeviceId, BindingId, and driverId
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{getProvisionedSession\(\)\?\.deviceId/,
-      );
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{getProvisionedSession\(\)\?\.bindingId/,
-      );
-      expect(source).toMatch(
-        /<Text style=\{styles\.deviceFieldValue\} selectable>\s*\{driverId \|\| "尚未綁定"\}/,
-      );
-    });
-
-    it("verifies safety-operator.tsx DetailRow wraps values and marks detailValue selectable", () => {
-      const source = readFileSync(
-        join(APP_DIR, "app/safety-operator.tsx"),
-        "utf8",
-      );
-
-      // Verify detailRow styles
-      expect(source).toMatch(/detailRow:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*flex:\s*1/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*minWidth:\s*160/);
-      expect(source).toMatch(/detailValue:\s*\{[^}]*flexWrap:\s*["']wrap["']/);
-
-      // Verify DetailRow component renders Text with selectable
-      expect(source).toMatch(
-        /<Text\s+style=\{\[styles\.detailValue[^\]]*\]\}\s+selectable\s*>\s*\{value\}\s*<\/Text>/,
-      );
+      expect(source).not.toContain("getProvisionedSession");
+      expect(source).not.toMatch(/\.deviceId\b/);
+      expect(source).not.toMatch(/\.bindingId\b/);
+      expect(source).not.toContain("ID ${driverId}");
+      expect(source).not.toContain("deviceFieldValue");
     });
   });
 
@@ -202,7 +175,9 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
         renderer = create(
           React.createElement(ListCard, {
             title: "非常長的班次任務名稱需要自動彈性換行",
-            statusElement: React.createElement("View", { testID: "status-chip" }),
+            statusElement: React.createElement("View", {
+              testID: "status-chip",
+            }),
           }),
         );
       });
@@ -330,6 +305,26 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
       const scrollView = root.findByType("ScrollView");
       const contentStyle = flattenStyle(scrollView.props.contentContainerStyle);
       expect(contentStyle.paddingBottom).toBe(34); // Math.max(34, 24)
+    });
+
+    it("Shell draws no clock or battery of its own; the phone shows the real status bar", () => {
+      mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+      let renderer: any;
+      act(() => {
+        renderer = create(
+          React.createElement(
+            Shell,
+            { theme: driverCanvasTheme },
+            React.createElement("Text", null, "Inner"),
+          ),
+        );
+      });
+
+      const texts = renderer.root
+        .findAllByType("Text")
+        .map((node: any) => String(node.props.children));
+      expect(texts).toEqual(["Inner"]);
+      expect(renderer.root.findAllByType("Ionicons")).toHaveLength(0);
     });
 
     it("Shell primitive enforces minimum padding floor when safe area insets are zero", () => {
@@ -476,7 +471,9 @@ describe("DRV-RWD-001: Responsive layout and overflow code-level verification", 
 
       const root = cardRenderer.root;
       const texts = root.findAllByType("Text");
-      const title = texts.find((t: any) => t.props.children === "目前尚無待處理任務");
+      const title = texts.find(
+        (t: any) => t.props.children === "目前尚無待處理任務",
+      );
       expect(title).toBeDefined();
     });
   });

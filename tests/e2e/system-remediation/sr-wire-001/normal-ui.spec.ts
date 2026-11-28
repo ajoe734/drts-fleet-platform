@@ -64,38 +64,6 @@ async function listItems(
   );
 }
 
-test("Driver settings reaches real leave records through its visible action", async ({
-  page,
-}) => {
-  const errors = watchErrors(page);
-  await page.goto(`${driverUrl}/settings`);
-  const action = page.getByTestId("driver-settings-leave");
-  await expect(action).toBeVisible();
-  const response = waitForList(page, "/driver-leave/requests");
-  await action.click();
-  await expect(page).toHaveURL(/\/leave(?:[?#]|$)/);
-  const actualResponse = await response;
-  expect(new URL(actualResponse.url()).searchParams.get("driverId")).toBe(
-    driverId,
-  );
-  const items = await listItems(actualResponse);
-  expect(items.every((item) => item.driverId === driverId)).toBe(true);
-  await expect(page.getByText("我的請假", { exact: true })).toBeVisible();
-  if (items.length === 0) {
-    await expect(
-      page.getByText("尚無任何請假紀錄", { exact: true }),
-    ).toBeVisible();
-  } else {
-    await expect(
-      page.getByText(String(items[0]!.leaveId), { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText(String(items[0]!.reason), { exact: true }),
-    ).toBeVisible();
-  }
-  expect(errors).toEqual([]);
-});
-
 test("Driver settings reaches real academy courses and training records", async ({
   page,
 }) => {

@@ -350,7 +350,12 @@ jobs:
           DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.admin_token.outputs.id_token }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ steps.runtime_before.outputs.fleet_origin }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.fleet_token.outputs.id_token }}
-        run: pnpm exec playwright test -c playwright.owned-referral-business-journey.config.ts
+        # The line reporter prefixes forwarded output with cursor escapes, which
+        # stops add-mask commands from registering in this public log.
+        run: |
+          set -o pipefail
+          pnpm exec playwright test -c playwright.owned-referral-business-journey.config.ts 2>&1 \
+            | python3 -u tests/e2e/owned-referral-business-journey/register-masks.py
       - name: Verify all five runtime revisions stayed unchanged
         if: always() && steps.runtime_before.outcome == 'success'
         run: python3 tests/e2e/owned-referral-business-journey/runtime-check.py --phase after
@@ -1909,6 +1914,8 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
+      - name: Verify four-portal password hosted journey fixture authenticator, redaction and boundary checks
+        run: pnpm exec vitest run tests/unit/agency-portal-business
       - name: Migrate and seed the disposable hosted database
         run: |
           PGPASSWORD=postgres psql \
@@ -1937,6 +1944,22 @@ jobs:
         run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
       - name: Run the Agency portal business journey using the completed Passenger trip
         run: pnpm exec playwright test -c playwright.agency-portal-business.config.ts
+      - name: Run the four-portal invitation, MFA and password-reset journey
+        env:
+          DRTS_FOUR_PORTAL_PASSWORD_JOURNEY: "true"
+        run: |
+          if ! pnpm exec playwright test -c playwright.agency-portal-business.config.ts > "$RUNNER_TEMP/four-portal-password.log" 2>&1; then
+            echo "::error::The four-portal password journey failed. See the last completed step in the redacted journey evidence."
+            # Source positions only; the log itself holds credentials.
+            grep -oE 'four-portal-password-journey\.spec\.ts:[0-9]+:[0-9]+' "$RUNNER_TEMP/four-portal-password.log" | sort -u | head -n 10 || true
+            # Redacted error headlines and server/browser crash lines only.
+            pnpm exec tsx tests/e2e/agency-portal-business/failure-summary-cli.ts \
+              "$RUNNER_TEMP/four-portal-password/report.json" \
+              "$RUNNER_TEMP/four-portal-password.log" || true
+            free -m || true
+            sudo -n dmesg 2>/dev/null | grep -iE 'out of memory|killed process' | tail -n 5 || true
+            exit 1
+          fi
       - name: Upload Agency portal business evidence
         if: always()
         uses: actions/upload-artifact@v4

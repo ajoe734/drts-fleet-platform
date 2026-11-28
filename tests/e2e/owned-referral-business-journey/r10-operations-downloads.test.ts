@@ -9,7 +9,7 @@ import type {
   Page,
   Route,
 } from "@playwright/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ComplaintCaseRecord,
   ComplaintTimelineEntry,
@@ -18,8 +18,14 @@ import type {
 } from "@drts/contracts";
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
 import { recordsToPdf } from "../../../apps/api/src/modules/reporting-filing/report-renderers";
-import { Evidence, hash, type ObjectData } from "./protocol";
 import {
+  Evidence,
+  hash,
+  OPS_EVENT_STREAM_PATH,
+  type ObjectData,
+} from "./protocol";
+import {
+  R10_JSON_EXPORT_NOTICE,
   R10_MONTHLY_CSV_COLUMNS,
   R10_SUMMARY_PDF_COLUMNS,
   assertR10VerifiedOpsRole,
@@ -1195,6 +1201,8 @@ function createSimulatedR10BrowserHarness(options?: {
     await handler({
       request: () => reqObj,
       fetch: async () => {
+        if (parsedUrl.pathname === OPS_EVENT_STREAM_PATH)
+          throw new Error("The event stream must not be fetched");
         const res = await computeResponse();
         return {
           status: () => res.status,
@@ -1238,6 +1246,12 @@ function createSimulatedR10BrowserHarness(options?: {
     goto: async (url: string) => {
       currentUrl = url;
       await dispatchHttp("page", "GET", `${OPS_ORIGIN}/reports`);
+      // The Ops shell opens its event stream on every page.
+      await dispatchHttp(
+        "page",
+        "GET",
+        `${OPS_ORIGIN}${OPS_EVENT_STREAM_PATH}`,
+      );
       await dispatchHttp(
         "page",
         "GET",
@@ -1528,6 +1542,18 @@ function createSimulatedR10BrowserHarness(options?: {
 }
 
 describe("runR10OperationsDownloads full UI orchestration", () => {
+  // The simulated job artifacts expire at 2026-11-24T02:10:2xZ, and the
+  // artifact check compares that against Date.now(). Pin only Date to the
+  // fixture run time (as the per-artifact tests pin nowMs), so the case does
+  // not start failing once the wall clock passes that fixture expiry.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T02:11:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("expands the already-open Ops reports page to 6 months, reruns fixed source, downloads JSON Blob + CSV/PDF job artifacts, and preserves pre-existing pages", async () => {
     const harness = createSimulatedR10BrowserHarness({
       crossMonthUtcBoundary: true,
@@ -1696,6 +1722,21 @@ function extractActualR04R09CallerFromSpec(sourceContent?: string) {
     }) => Record<string, unknown>;
   };
 }
+
+describe("R10 JSON export notice", () => {
+  it("matches the notice the Ops reports page shows in both locales", () => {
+    const source = readFileSync(
+      resolve("apps/ops-console-web/lib/translations.ts"),
+      "utf8",
+    );
+    const notices = [
+      ...source.matchAll(/"reports\.ops\.export\.jsonDone":\s*"([^"]+)"/g),
+    ].map((match) => match[1]!.replace("{count}", "3"));
+    expect(notices).toHaveLength(2);
+    for (const notice of notices)
+      expect(notice).toMatch(R10_JSON_EXPORT_NOTICE);
+  });
+});
 
 describe("owned-business.spec.ts AST wiring for R10 six-month downloads", () => {
   it("invokes runR10OperationsDownloads on the already-open opsPage after R09 and records sixMonthOperationsDownloads in journeyEvidence", async () => {

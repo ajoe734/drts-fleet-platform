@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
   StyleSheet,
   Text,
   View,
@@ -338,34 +337,36 @@ function toBannerTone(
   return "info";
 }
 
+// Taiwan has used UTC+8 without daylight saving since 1979, so a fixed offset
+// gives Taiwan local time on any device clock or time-zone setting.
+const TAIWAN_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** "YYYY-MM-DDTHH:mm…" in Taiwan local time, or null for a missing value. */
+function toTaiwanLocalIso(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Date(parsed.getTime() + TAIWAN_UTC_OFFSET_MS).toISOString();
+}
+
+/** "HH:mm" in Taiwan local time. */
 function formatShortTime(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toLocaleTimeString("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return toTaiwanLocalIso(value)?.slice(11, 16) ?? null;
 }
 
+/** "YYYY-MM-DD HH:mm" in Taiwan local time. */
 function formatTimestamp(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString().replace("T", " ").slice(0, 16);
+  return toTaiwanLocalIso(value)?.replace("T", " ").slice(0, 16) ?? null;
 }
+
+/** One fixed line; raw platform sync text is ops wording, not driver copy. */
+const PLATFORM_SYNC_PROBLEM_COPY = "平台同步有問題，請聯絡派車台。";
 
 // Fulfillment facts come from the selected task's existing owned-order read.
 // These are booking details, not a claim of external program verification.
@@ -465,7 +466,7 @@ function getTrackingDescriptor(
     return {
       label: "未啟用",
       tone: "neutral" as const,
-      detail: "來源平台任務不在此端啟用本地距離/時長追蹤。",
+      detail: "平台訂單不記錄里程。",
     };
   }
 
@@ -481,7 +482,7 @@ function getTrackingDescriptor(
     return {
       label: "已結束",
       tone: "neutral" as const,
-      detail: "行程已完成，追蹤已結束，不再更新里程與時長。",
+      detail: "追蹤已結束，不再更新里程與時長。",
     };
   }
 
@@ -517,7 +518,7 @@ function getTrackingDescriptor(
   return {
     label: "待開始",
     tone: "neutral" as const,
-    detail: "開始行程後會切換為錄製中並持續更新度量。",
+    detail: "開始行程後會開始記錄里程與時長。",
   };
 }
 
@@ -630,19 +631,19 @@ function getTripStatusPresentation(
       return {
         label: "平台已確認",
         tone: "success",
-        detail: "可依平台規則繼續本地行程流程。",
+        detail: "可以繼續這趟行程，請遵守平台規則。",
       };
     case "forwarded_completed":
       return {
         label: "平台已完成",
         tone: "neutral",
-        detail: "此筆平台訂單已完結，本地僅保留同步結果。",
+        detail: "這筆平台訂單已完成，不需要再操作。",
       };
     case "forwarded_lost":
       return {
         label: "其他司機已接",
         tone: "neutral",
-        detail: "此筆平台訂單已結束，不需本地後續操作。",
+        detail: "這筆平台訂單已結束，不需要再操作。",
       };
     case "forwarded_cancelled":
       return {
@@ -663,18 +664,18 @@ function getTripStatusPresentation(
           return {
             label: "待確認接單",
             tone: "warning",
-            detail: "請先確認任務，接著前往取貨點。",
+            detail: "請先確認任務，接著前往上車點。",
           };
         case "accepted":
         case "enroute_pickup":
           return {
-            label: "前往取貨點",
+            label: "前往上車點",
             tone: "success",
             detail: "請依路線前往乘客或指定接送地點。",
           };
         case "arrived_pickup":
           return {
-            label: "已抵達取貨點",
+            label: "已抵達上車點",
             tone: "success",
             detail: "確認乘客上車後即可開始行程。",
           };
@@ -724,7 +725,7 @@ function getTripStatusPresentation(
               String(task?.status ?? "") === "pending_acceptance"
                 ? "warning"
                 : "success",
-            detail: "請依行程階段完成本地操作與完單佐證。",
+            detail: "請依行程步驟完成操作與完單佐證。",
           };
       }
   }
@@ -746,13 +747,13 @@ function getTripLockBody(state: TripExperienceState | null): {
       return {
         icon: "checkmark-done-outline",
         title: "平台訂單已完成",
-        detail: "此頁僅保留完結同步結果，本地不再提供後續操作。",
+        detail: "這筆訂單已完成，不需要再操作。",
       };
     case "forwarded_lost":
       return {
         icon: "close-circle-outline",
         title: "未取得此訂單",
-        detail: "平台已將訂單分配給其他司機，此頁僅保留同步結果。",
+        detail: "平台已把訂單交給其他司機，不需要再操作。",
       };
     case "forwarded_cancelled":
       return {
@@ -771,15 +772,7 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
-function getIdleBottomActionLabel(
-  state: TripExperienceState | null,
-  task: DriverTaskRecord | null,
-) {
-  if (task && !isForwardedTask(task)) {
-    if (task.status === "cancelled") return "任務已取消";
-    if (task.status === "rejected") return "已婉拒任務";
-    if (task.status === "completed") return "行程已完成";
-  }
+function getIdleBottomActionLabel(state: TripExperienceState | null) {
   switch (state) {
     case "forwarded_pending":
       return "等待平台確認";
@@ -800,7 +793,8 @@ function getIdleBottomActionLabel(
 
 type TripAuthorityBannerDescriptor = {
   title: string;
-  authorityLabel: string;
+  /** Platform name pill for forwarded trips; owned trips show no pill. */
+  authorityLabel: string | null;
   description: string;
   tone: Exclude<CanvasTone, "neutral">;
   icon: keyof typeof Ionicons.glyphMap;
@@ -813,13 +807,10 @@ function getTripAuthorityBannerProps(
   if (!task || !isForwardedTask(task)) {
     if (task && ["cancelled", "rejected", "completed"].includes(task.status)) {
       const completed = task.status === "completed";
+      // The header and status card already state the result.
       return {
-        title: completed
-          ? "行程已完成"
-          : task.status === "rejected"
-            ? "已婉拒任務"
-            : "任務已取消",
-        authorityLabel: "DRTS 行程主控",
+        title: "車隊派單",
+        authorityLabel: null,
         description: completed
           ? "行程已結束，保留原訂單與任務紀錄供查閱。"
           : "此任務已結束，請勿繼續接送。原訂單與任務紀錄保留；後續派車請等候新任務。",
@@ -828,10 +819,9 @@ function getTripAuthorityBannerProps(
       };
     }
     return {
-      title: "自營派單",
-      authorityLabel: "DRTS 行程主控",
-      description:
-        "完整本機操作權限。請依行程節點完成接單、接送、追蹤與完單佐證。",
+      title: "車隊派單",
+      authorityLabel: null,
+      description: "請依步驟完成接單、接送與完單。",
       tone: "accent",
       icon: "shield-checkmark",
     };
@@ -851,8 +841,7 @@ function getTripAuthorityBannerProps(
       return {
         title: "等待來源平台確認",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description:
-          "已送出接單要求。平台回應前，司機端所有本地生命周期操作維持鎖定。",
+        description: "已送出接單要求。平台回覆前，暫時不能操作。",
         tone: "warn",
         icon: "time-outline",
       };
@@ -860,8 +849,7 @@ function getTripAuthorityBannerProps(
       return {
         title: "來源平台已確認",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description:
-          "平台已確認此單。本地畫面會保留可讀的行程鏡像與後續節點，但仍需遵守平台規則。",
+        description: "平台已確認此單，可以繼續行程，請遵守平台規則。",
         tone: "success",
         icon: "checkmark-circle-outline",
       };
@@ -869,8 +857,7 @@ function getTripAuthorityBannerProps(
       return {
         title: "來源平台已完成",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description:
-          "來源平台已完成此訂單。本地畫面只保留最終同步結果，不再開放操作。",
+        description: "來源平台已完成此訂單，不需要再操作。",
         tone: "info",
         icon: "checkmark-done-outline",
       };
@@ -878,7 +865,7 @@ function getTripAuthorityBannerProps(
       return {
         title: "平台已分配給其他司機",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
+        description: "這筆平台訂單已結束，不需要再操作。",
         tone: "warn",
         icon: "close-circle-outline",
       };
@@ -886,7 +873,7 @@ function getTripAuthorityBannerProps(
       return {
         title: "來源平台已取消",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description: "來源平台已取消訂單。本地不再提供任何後續行程操作。",
+        description: "來源平台已取消訂單，請勿繼續接送。",
         tone: "warn",
         icon: "ban-outline",
       };
@@ -894,16 +881,15 @@ function getTripAuthorityBannerProps(
       return {
         title: "平台同步異常",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description:
-          "同步異常時系統會保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
+        description: "暫時不能操作，請等派車台處理。",
         tone: "danger",
         icon: "alert-circle-outline",
       };
     default:
       return {
-        title: "平台鏡像任務",
+        title: "平台訂單",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
-        description: "來源平台仍是此任務的權限來源，本地只顯示安全同步資訊。",
+        description: "這是平台派來的訂單，請依平台規則操作。",
         tone: "info",
         icon: "swap-horizontal-outline",
       };
@@ -1076,11 +1062,8 @@ export default function TripScreen() {
     taskDetail,
     tripExperienceState,
   );
-  const headerSubtitle = taskDetail
-    ? taskDetail.orderId
-      ? `${taskDetail.taskId} · ${taskDetail.orderId}`
-      : taskDetail.taskId
-    : driverStrings.trip.subtitle;
+  // Task and order IDs are internal; tests find the trip by testID instead.
+  const headerSubtitle = taskDetail ? undefined : driverStrings.trip.subtitle;
   const forwardedOutcomeSummary = forwardedActionResult
     ? describeForwardedActionOutcome(
         forwardedActionResult.outcome,
@@ -1090,6 +1073,13 @@ export default function TripScreen() {
   const forwardedOutcomeTone = forwardedOutcomeSummary
     ? toBannerTone(forwardedOutcomeSummary.tone)
     : null;
+  // The source platform's own order number, which drivers can quote to the
+  // platform. DRTS mirror/reconciliation IDs are internal and never shown.
+  const externalPlatformOrderNo =
+    (
+      forwardedActionResult?.taskView?.externalOrderId ??
+      taskViewDetail?.externalOrderId
+    )?.trim() || null;
   const pickupAddress = orderDetail?.pickup.address ?? "待確認上車點";
   const dropoffAddress = orderDetail?.dropoff.address ?? "待確認下車點";
   const pickupTimeLabel = formatPickupStopTime(orderDetail);
@@ -1104,35 +1094,56 @@ export default function TripScreen() {
   const sourcePlatformOffline = activePresenceRecord?.status === "offline";
   const queuedCompletionForActiveTask =
     queuedCompletionTaskId === taskDetail?.taskId;
+  const isForwardedOffer = tripExperienceState === "forwarded_offered";
+  // The platform reported a sync problem or handed the order to dispatch.
+  const platformSyncIssue = Boolean(
+    taskViewDetail?.blockingReason?.trim() ||
+    taskViewDetail?.syncIssueSummary?.trim() ||
+    taskViewDetail?.requiresManualFallback,
+  );
+  // Live forwarded trips keep a visible warning; terminal and sync_failed
+  // states already explain themselves.
+  const showPlatformSyncWarning =
+    platformSyncIssue &&
+    (tripExperienceState === "forwarded_confirmed" ||
+      tripExperienceState === "forwarded_pending");
   const forwardedAcceptAllowed =
-    tripExperienceState === "forwarded_offered" &&
+    isForwardedOffer &&
     (taskViewDetail?.allowedActions.includes("accept") ?? true);
   const forwardedRejectAllowed =
-    tripExperienceState === "forwarded_offered" &&
+    isForwardedOffer &&
     (taskViewDetail?.allowedActions.includes("reject") ?? true);
   const ownedRejectAllowed =
     !isForwardedTrip &&
     taskDetail?.status === "pending_acceptance" &&
     (taskViewDetail?.allowedActions.includes("reject") ?? true);
   const forwardedOfferOfflineBlocked =
-    tripExperienceState === "forwarded_offered" && sourcePlatformOffline;
-  const disabledForwardedAcceptReason = forwardedOfferOfflineBlocked
-    ? "來源平台目前離線，無法在離線狀態下轉送接單。"
-    : !forwardedAcceptAllowed
-      ? taskViewDetail?.blockingReason?.trim() ||
-        taskViewDetail?.syncIssueSummary?.trim() ||
-        "此平台目前不支援離線轉送接單。"
-      : null;
-  const disabledForwardedRejectReason = forwardedOfferOfflineBlocked
-    ? "來源平台目前離線，無法在離線狀態下轉送婉拒。"
-    : !forwardedRejectAllowed
-      ? taskViewDetail?.blockingReason?.trim() ||
-        "此平台目前不支援離線轉送婉拒。"
-      : null;
+    isForwardedOffer && sourcePlatformOffline;
+  // These explain a blocked platform offer only. Other trips (including every
+  // owned trip) must fall through to their own next-step helper text.
+  const disabledForwardedAcceptReason = !isForwardedOffer
+    ? null
+    : forwardedOfferOfflineBlocked
+      ? "平台目前離線，暫時不能接這筆訂單。"
+      : !forwardedAcceptAllowed
+        ? platformSyncIssue
+          ? PLATFORM_SYNC_PROBLEM_COPY
+          : "這個平台不能在 App 接單。"
+        : null;
+  const disabledForwardedRejectReason = !isForwardedOffer
+    ? null
+    : forwardedOfferOfflineBlocked
+      ? "平台目前離線，暫時不能婉拒這筆訂單。"
+      : !forwardedRejectAllowed
+        ? platformSyncIssue
+          ? PLATFORM_SYNC_PROBLEM_COPY
+          : "這個平台不能在 App 婉拒。"
+        : null;
+  const queuedCompletionSavedAt = formatTimestamp(queuedCompletionUpdatedAt);
   const offlineBannerBody = queuedCompletionForActiveTask
-    ? `此行程的完單資料已暫存佇列，待恢復連線後會自動重送。最後排隊時間 ${formatTimestamp(queuedCompletionUpdatedAt) ?? "待同步"}。`
+    ? `完單資料已存在手機，連線後自動送出。${queuedCompletionSavedAt ? `（${queuedCompletionSavedAt} 存入）` : ""}`
     : sourcePlatformOffline
-      ? `${platformLabel} 目前為離線模式。來源平台的轉送動作已鎖定，請先回平台健康頁恢復上線。`
+      ? `${platformLabel} 目前離線，暫時不能接或婉拒這個平台的訂單。請先到平台頁重新上線。`
       : null;
   const isOwnedTaskTerminal =
     !isForwardedTrip &&
@@ -1263,9 +1274,9 @@ export default function TripScreen() {
       }
     : tripExperienceState === "forwarded_offered" &&
         forwardedActionResult === null &&
-        (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
+        forwardedRejectAllowed
       ? {
-          title: forwardedRejectAllowed ? "婉拒平台訂單" : "平台不支援婉拒",
+          title: "婉拒平台訂單",
           onPress: () => void handleForwardedReject(),
           variant: "secondary" as const,
           loading: submittingAction === "forwarded_reject",
@@ -1275,7 +1286,6 @@ export default function TripScreen() {
             !forwardedRejectAllowed,
         }
       : undefined;
-  const statusPillTone = toCanvasTone(tripStatusPresentation.tone);
   const trackingPillTone = toCanvasTone(trackingDescriptor.tone);
   const trackingLabel = isForwardedTrip
     ? "追蹤 · 未啟用"
@@ -1285,8 +1295,14 @@ export default function TripScreen() {
   const proofSummaryItems = [
     {
       label: "照片需求",
-      value: `${proofPhotos.length}/${Math.max(proofRequirements.minPhotoCount, 1)} 張`,
-      mono: true,
+      // The minimum comes from the order; until it loads it is unknown.
+      value: proofRequirementsUnavailable
+        ? "待載入"
+        : proofRequirements.minPhotoCount > 0
+          ? `${proofPhotos.length}/${proofRequirements.minPhotoCount} 張`
+          : "免附",
+      mono:
+        !proofRequirementsUnavailable && proofRequirements.minPhotoCount > 0,
     },
     {
       label: "簽收識別",
@@ -1809,7 +1825,7 @@ export default function TripScreen() {
 
           if (completionSubmitBlocker === "tracking_unavailable") {
             Alert.alert(
-              "行程度量暫時無法使用",
+              "暫時無法記錄里程",
               locationTrackingMessage ??
                 (locationTrackingState === "requesting_permission"
                   ? "定位追蹤仍在啟動中，請稍候再試。"
@@ -2011,43 +2027,40 @@ export default function TripScreen() {
       theme={driverCanvasTheme}
       contentContainerStyle={styles.shellContent}
       footer={
-        taskDetail ? (
+        taskDetail &&
+        !(
+          isOwnedTaskTerminal &&
+          !bottomPrimaryAction &&
+          !bottomSecondaryAction
+        ) ? (
           <View style={styles.footerBar}>
             <Text style={styles.footerNotice}>
               {bottomPrimaryAction || bottomSecondaryAction
                 ? footerNotice
-                : getIdleBottomActionLabel(tripExperienceState, taskDetail)}
+                : getIdleBottomActionLabel(tripExperienceState)}
             </Text>
-            <View style={styles.footerButtons}>
-              {bottomSecondaryAction ? (
-                <ActionButton
-                  label={bottomSecondaryAction.title}
-                  onPress={bottomSecondaryAction.onPress}
-                  disabled={bottomSecondaryAction.disabled}
-                  loading={bottomSecondaryAction.loading}
-                  variant="secondary"
-                />
-              ) : null}
-              {bottomPrimaryAction ? (
-                <ActionButton
-                  label={bottomPrimaryAction.title}
-                  onPress={bottomPrimaryAction.onPress}
-                  disabled={bottomPrimaryAction.disabled}
-                  loading={bottomPrimaryAction.loading}
-                  variant="primary"
-                />
-              ) : (
-                <ActionButton
-                  label={getIdleBottomActionLabel(
-                    tripExperienceState,
-                    taskDetail,
-                  )}
-                  onPress={() => undefined}
-                  disabled
-                  variant="secondary"
-                />
-              )}
-            </View>
+            {bottomPrimaryAction || bottomSecondaryAction ? (
+              <View style={styles.footerButtons}>
+                {bottomSecondaryAction ? (
+                  <ActionButton
+                    label={bottomSecondaryAction.title}
+                    onPress={bottomSecondaryAction.onPress}
+                    disabled={bottomSecondaryAction.disabled}
+                    loading={bottomSecondaryAction.loading}
+                    variant="secondary"
+                  />
+                ) : null}
+                {bottomPrimaryAction ? (
+                  <ActionButton
+                    label={bottomPrimaryAction.title}
+                    onPress={bottomPrimaryAction.onPress}
+                    disabled={bottomPrimaryAction.disabled}
+                    loading={bottomPrimaryAction.loading}
+                    variant="primary"
+                  />
+                ) : null}
+              </View>
+            ) : null}
           </View>
         ) : undefined
       }
@@ -2152,7 +2165,7 @@ export default function TripScreen() {
             />
           }
           title={
-            queuedCompletionForActiveTask ? "離線佇列待重送" : "目前為離線模式"
+            queuedCompletionForActiveTask ? "完單資料待送出" : "平台目前離線"
           }
           body={offlineBannerBody}
         />
@@ -2178,9 +2191,11 @@ export default function TripScreen() {
                 <Text style={styles.bannerTitleText}>
                   {tripAuthorityBanner.title}
                 </Text>
-                <Pill theme={driverCanvasTheme} tone="neutral">
-                  {tripAuthorityBanner.authorityLabel}
-                </Pill>
+                {tripAuthorityBanner.authorityLabel ? (
+                  <Pill theme={driverCanvasTheme} tone="neutral">
+                    {tripAuthorityBanner.authorityLabel}
+                  </Pill>
+                ) : null}
                 {(taskDetail.serviceSelection ?? orderDetail?.serviceSelection)
                   ?.accessible ? (
                   <Pill theme={driverCanvasTheme} tone="info">
@@ -2192,33 +2207,59 @@ export default function TripScreen() {
             body={tripAuthorityBanner.description}
           />
 
+          {showPlatformSyncWarning ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="warn"
+              icon={
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={16}
+                  color={driverCanvasTheme.warn}
+                />
+              }
+              title={PLATFORM_SYNC_PROBLEM_COPY}
+            />
+          ) : null}
+
           <DriverTripMap
             task={taskDetail}
             order={orderDetail}
             driverLocation={driverMapLocation}
             sourcePlatformOffline={sourcePlatformOffline}
-            nativeMapAvailable={Platform.OS !== "web"}
           />
 
           <Card theme={driverCanvasTheme} padding={14} style={styles.routeCard}>
-            <RouteStop
-              label="取貨點"
-              address={pickupAddress}
-              time={pickupTimeLabel}
-              tone="pickup"
-            />
-            <RouteStop
-              label="送達點"
-              address={dropoffAddress}
-              time={dropoffTimeLabel}
-              tone="dropoff"
-              last
-            />
+            {/* Non-visible hooks: tests identify the selected task and order
+                here now that the internal IDs are no longer shown. */}
+            <View testID={`driver-trip-task-${taskDetail.taskId}`}>
+              <View
+                testID={
+                  taskDetail.orderId
+                    ? `driver-trip-order-${taskDetail.orderId}`
+                    : undefined
+                }
+              >
+                <RouteStop
+                  label="上車點"
+                  address={pickupAddress}
+                  time={pickupTimeLabel}
+                  tone="pickup"
+                />
+                <RouteStop
+                  label="下車點"
+                  address={dropoffAddress}
+                  time={dropoffTimeLabel}
+                  tone="dropoff"
+                  last
+                />
+              </View>
 
-            <View style={styles.routeMetricRow}>
-              <RouteMetricChip label="距離" value={routeMetricDistance} />
-              <RouteMetricChip label="時長" value={routeMetricDuration} />
-              <RouteMetricChip label="車資" value={routeMetricFare} mono />
+              <View style={styles.routeMetricRow}>
+                <RouteMetricChip label="距離" value={routeMetricDistance} />
+                <RouteMetricChip label="時長" value={routeMetricDuration} />
+                <RouteMetricChip label="車資" value={routeMetricFare} mono />
+              </View>
             </View>
           </Card>
 
@@ -2267,23 +2308,14 @@ export default function TripScreen() {
               </Text>
             </View>
             <View style={styles.statusPillRow}>
-              <Pill theme={driverCanvasTheme} tone={statusPillTone} dot>
-                {tripStatusPresentation.label}
-              </Pill>
               <Pill
                 theme={driverCanvasTheme}
                 tone={isForwardedTrip ? "info" : "accent"}
               >
-                {isForwardedTrip ? `平台 ${platformLabel}` : "自營派單"}
-              </Pill>
-              <Pill theme={driverCanvasTheme} tone="neutral">
-                {formatDriverTaskStatusLabel(taskDetail.status)}
+                {isForwardedTrip ? `平台 ${platformLabel}` : "車隊派單"}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {serviceProductLabel}
-              </Pill>
-              <Pill theme={driverCanvasTheme} tone="neutral">
-                {taskDetail.taskId}
               </Pill>
               {isForwardedTrip ? <RouteLockedBadge /> : null}
               {recordingActive ? (
@@ -2349,17 +2381,11 @@ export default function TripScreen() {
                   <Text style={styles.bannerBodyText}>
                     {forwardedActionResult?.driverMessage}
                   </Text>
-                  <Text style={styles.bannerMetaText}>
-                    平台訂單編號：
-                    {
-                      forwardedActionResult?.managementCorrelationIds
-                        .mirrorOrderId
-                    }
-                    {forwardedActionResult?.managementCorrelationIds
-                      .reconciliationJobId
-                      ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
-                      : ""}
-                  </Text>
+                  {externalPlatformOrderNo ? (
+                    <Text selectable style={styles.bannerMetaText}>
+                      平台訂單編號：{externalPlatformOrderNo}
+                    </Text>
+                  ) : null}
                 </View>
               }
             />
@@ -2625,13 +2651,12 @@ export default function TripScreen() {
       ) : (
         <Card theme={driverCanvasTheme} padding={18}>
           <Text style={styles.emptyTitle}>目前沒有進行中的行程</Text>
-          <Text style={styles.emptyBody}>
-            重新整理後可再次檢查是否有新任務同步進來。
-          </Text>
+          <Text style={styles.emptyBody}>接了任務後，行程會顯示在這裡。</Text>
           <View style={styles.inlineActionRow}>
+            {/* Refresh already sits in the header; offer the next step instead. */}
             <ActionButton
-              label={driverStrings.common.refresh}
-              onPress={() => void loadTrip(true)}
+              label="查看任務"
+              onPress={() => router.push("/jobs")}
               disabled={submittingAction !== null}
             />
           </View>

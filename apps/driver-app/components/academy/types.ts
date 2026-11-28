@@ -59,3 +59,9 @@ export function formatTrainingStatusLabel(status: TrainingStatus): string {
       return status;
   }
 }
+
+// Completion is recorded only by passing the course quiz (the API rejects a
+// submission for a course without questions), so a course with no questions
+// cannot be completed in the app.
+export const ACADEMY_NO_QUIZ_HINT =
+  "這門課目前沒有測驗，無法在 App 內完訓，請聯絡車行。";
