@@ -12,6 +12,7 @@ import {
   records as protocolRecords,
   requireFact,
   text,
+  type CallResult,
   type NativeTransport,
   type ObjectData,
 } from "./protocol";
@@ -948,7 +949,11 @@ export type R14StageBPorts = {
   readFleetSession(): Promise<ObjectData>;
   readAdminBrowserSession(): Promise<ObjectData>;
   restoreDriverAvailable(driverId: string): Promise<void>;
+  probeExpiredDriverAuth(
+    driverId: string,
+  ): Promise<Pick<CallResult, "status" | "headers" | "data">>;
   rebindDriverSession(driverId: string): Promise<void>;
+  sendInitialDriverHeartbeat(): Promise<void>;
   readRegistryDriver(driverId: string): Promise<ObjectData>;
   readRegistryVehicle(vehicleId: string): Promise<ObjectData>;
   readRegistryContracts(vehicleId: string): Promise<ObjectData[]>;
@@ -1037,9 +1042,8 @@ export async function runR14StageBRenewalLifecycle(
     fleetRole.actorId,
   );
 
-  // 2. Restore workState=available setup and re-bind fresh Driver session.
+  // 2. Restore administrative work state without authenticating the expired Driver.
   await ports.restoreDriverAvailable(target.driverId);
-  await ports.rebindDriverSession(target.driverId);
 
   // 3. Revalidate prior submissions, live renewal targets, Registry expiry, and Readiness holds.
   const [
@@ -1203,6 +1207,24 @@ export async function runR14StageBRenewalLifecycle(
   requireFact(
     expiredCandidateMatch === undefined,
     "r14-stage-b:expired-pair-present-in-pre-renewal-candidates",
+  );
+
+  // Registration is expected to refuse this exact expired subject. A generic
+  // 403 (or transport/runtime failure) cannot stand in for expiry evidence.
+  const authRefusal = await ports.probeExpiredDriverAuth(target.driverId);
+  const authError = object(object(authRefusal.data).error);
+  const authDetails = object(authError.details);
+  const authReasons = authDetails.eligibilityBlockedReasons;
+  requireFact(
+    authRefusal.status === 403 &&
+      authRefusal.headers.get("x-drts-candidate-sha") === expected.runtimeSha &&
+      authError.code === "DRIVER_CERT_INVALID" &&
+      authDetails.driverId === target.driverId &&
+      authDetails.lifecycleStatus === "active" &&
+      Array.isArray(authReasons) &&
+      authReasons.length === 1 &&
+      authReasons[0] === "licenses_invalid",
+    "r14-stage-b:expired-driver-auth-refusal-invalid",
   );
 
   // 5. Execute three distinct typed renewals via Fleet UI -> Platform Admin UI.
@@ -1602,6 +1624,11 @@ export async function runR14StageBRenewalLifecycle(
       vehicleReadinessReasonsAfter.length === 0,
     "r14-stage-b:post-renewal-readiness-holds-remained",
   );
+
+  // Restore Driver authority and location only after all canonical renewals
+  // and readiness checks. Candidates and assignment need the fresh heartbeat.
+  await ports.rebindDriverSession(target.driverId);
+  await ports.sendInitialDriverHeartbeat();
 
   // 7. Verify dispatch job state before reuse (fail closed if terminal) and verify post-renewal candidate eligibility.
   const dispatchState = await ports.readDispatchJobState(

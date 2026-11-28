@@ -1450,11 +1450,6 @@ test(journeyName, async ({ browser, request }) => {
             `/regulatory-registry/drivers/${encodeURIComponent(target.driverId)}/work-state`,
             { method: "POST", body: { workState: "available" } },
           );
-          await bindDriverDeviceSession(
-            firstSupply,
-            target.driverId,
-            `${nonce}-r14-stage-b`,
-          );
           evidence.record({
             stage: "r14-stage-b-retained-target-available-setup",
             driverId: target.driverId,
@@ -1545,17 +1540,60 @@ test(journeyName, async ({ browser, request }) => {
                 { method: "POST", body: { workState: "available" } },
               );
             },
-            rebindDriverSession: async (targetDriverId) => {
-              const session = object(
-                (await tx.call("driver", "/api/auth/session")).data,
-              );
-              requireFact(
-                session.active === true &&
-                  object(session.identity).realm === "driver" &&
-                  object(session.identity).actorId === targetDriverId,
-                "R14 active bound Driver session",
-              );
+            probeExpiredDriverAuth: async (targetDriverId) => {
+              try {
+                const invite = await call(
+                  "api",
+                  "/api/auth/driver/device/invite",
+                  {
+                    method: "POST",
+                    body: { driverId: targetDriverId },
+                    headers: {
+                      "x-idempotency-key": `${nonce}-r14-expiry-invite`,
+                    },
+                  },
+                );
+                firstSupply.invitation = text(invite.registrationCode);
+                mask(firstSupply.invitation);
+                try {
+                  return await tx.call(
+                    "publicApi",
+                    "/api/auth/driver/device/register",
+                    {
+                      method: "POST",
+                      expected: [403],
+                      body: {
+                        registrationCode: firstSupply.invitation,
+                        deviceId: `${nonce}-r14-expiry-probe-device`,
+                        deviceLabel: "明示合成示範到期拒絕驗證",
+                      },
+                    },
+                  );
+                } finally {
+                  await call("api", "/api/auth/driver/device/invite/revoke", {
+                    method: "POST",
+                    body: { registrationCode: firstSupply.invitation },
+                  });
+                  firstSupply.invitation = undefined;
+                }
+              } finally {
+                invitation = firstSupply.invitation;
+              }
             },
+            rebindDriverSession: async (targetDriverId) => {
+              try {
+                await bindDriverDeviceSession(
+                  firstSupply,
+                  targetDriverId,
+                  `${nonce}-r14-stage-b`,
+                );
+              } finally {
+                deviceId = firstSupply.deviceId;
+                bindingId = firstSupply.bindingId;
+                invitation = firstSupply.invitation;
+              }
+            },
+            sendInitialDriverHeartbeat: () => heartbeat(null, "available", 1),
             readRegistryDriver: async (targetDriverId) => {
               const item = records(
                 (await adminControl("/regulatory-registry/drivers")).items,
@@ -2006,7 +2044,8 @@ test(journeyName, async ({ browser, request }) => {
           "normal simulation GPS observation accepted",
         );
       };
-      await heartbeat(null, "available", 1);
+      if (r14Manifest?.decision !== "stageB")
+        await heartbeat(null, "available", 1);
       let resolveOriginalResponse!: (response: BookingAckResponse) => void;
       let rejectOriginalResponse!: (error: unknown) => void;
       const originalResponse = new Promise<BookingAckResponse>(
